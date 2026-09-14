@@ -147,7 +147,7 @@ mnemo-desktop/
   .github/workflows/release.yml   on tag v*: build and attach binaries
 ```
 
-`mnemo init` runs in the repo before the first feature commit so the vault, dispatch and land work here from the start.
+mnemo is installed globally (hooks + MCP in `$HOME`), so the vault, dispatch and land already work in this repo; no per-repo `mnemo init` is needed.
 
 ## 11. Out of scope for sub-project 1
 
