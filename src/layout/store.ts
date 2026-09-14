@@ -40,14 +40,30 @@ export function createStore(pty: PtyClient): Store {
     const active = () => get().tabs.find((t) => t.id === get().activeTab)
     let synthetic = -1
 
+    /** Output that arrived before a TerminalPane attached its sink (the shell prompt
+     *  usually lands before `pty.spawn` even resolves). Flushed by attachSink. */
+    const pending = new Map<PaneId, Uint8Array[]>()
+
     async function spawnPane(cwd?: string): Promise<PaneId> {
       try {
+        let assigned: PaneId | null = null
+        const early: Uint8Array[] = []
         const id = await pty.spawn({
           cwd,
           cols: DEFAULT_COLS,
           rows: DEFAULT_ROWS,
-          onOutput: (b) => get().sinks[id]?.(b),
+          onOutput: (b) => {
+            if (assigned === null) {
+              early.push(b)
+              return
+            }
+            const sink = get().sinks[assigned]
+            if (sink) sink(b)
+            else pending.get(assigned)?.push(b) ?? pending.set(assigned, [b])
+          },
         })
+        assigned = id
+        if (early.length) pending.set(id, [...(pending.get(id) ?? []), ...early])
         set((s) => ({ panes: { ...s.panes, [id]: { id, cwd } } }))
         void pty.onExit(id, (code) => get().paneExited(id, code))
         return id
@@ -139,6 +155,8 @@ export function createStore(pty: PtyClient): Store {
       },
       attachSink(id, sink) {
         set((s) => ({ sinks: { ...s.sinks, [id]: sink } }))
+        for (const b of pending.get(id) ?? []) sink(b)
+        pending.delete(id)
       },
       setPalette(open) {
         set({ paletteOpen: open })

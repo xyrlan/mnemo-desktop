@@ -1,7 +1,7 @@
 import { createStore } from './store'
 import type { PtyClient } from '../pty/client'
 
-function fakePty(opts: { failSpawn?: boolean } = {}): PtyClient & { killed: number[]; outputs: Record<number, (b: Uint8Array) => void> } {
+function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean } = {}): PtyClient & { killed: number[]; outputs: Record<number, (b: Uint8Array) => void> } {
   let next = 1
   const killed: number[] = []
   const outputs: Record<number, (b: Uint8Array) => void> = {}
@@ -12,6 +12,7 @@ function fakePty(opts: { failSpawn?: boolean } = {}): PtyClient & { killed: numb
       if (opts.failSpawn) throw new Error('boom')
       const id = next++
       outputs[id] = onOutput
+      if (opts.promptBeforeResolve) onOutput(new Uint8Array([36, 32])) // "$ " before invoke resolves
       return id
     },
     write: async () => {},
@@ -123,4 +124,16 @@ test('spawn failure renders an error pane and never calls kill with a negative i
   expect(st.panes[-1].error).toContain('boom')
   await s.getState().closePane()
   expect(pty.killed).toEqual([])
+})
+
+test('output before the pane attaches is buffered, including bytes sent before spawn resolves', async () => {
+  const pty = fakePty({ promptBeforeResolve: true })
+  const s = createStore(pty)
+  await s.getState().newTab()
+  pty.outputs[1](new Uint8Array([104, 105]))
+  const got: number[] = []
+  s.getState().attachSink(1, (b) => got.push(...b))
+  expect(got).toEqual([36, 32, 104, 105])
+  pty.outputs[1](new Uint8Array([33]))
+  expect(got).toEqual([36, 32, 104, 105, 33])
 })
