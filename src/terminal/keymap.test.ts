@@ -9,8 +9,8 @@ test('⌘ arrows and backspace become readline bytes', () => {
   expect(macChord(ev('Enter'))).toEqual({ write: '\r' })
 })
 
-test('Shift+Enter becomes CSI-u so Claude Code inserts a newline', () => {
-  expect(macChord(ev('Enter', { metaKey: false, shiftKey: true }))).toEqual({ write: '\x1b[13;2u' })
+test('Shift+Enter becomes ESC CR so Claude Code inserts a newline', () => {
+  expect(macChord(ev('Enter', { metaKey: false, shiftKey: true }))).toEqual({ write: '\x1b\r' })
   expect(macChord(ev('Enter', { metaKey: false }))).toBeNull()
 })
 

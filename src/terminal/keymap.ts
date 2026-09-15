@@ -5,9 +5,11 @@ export type ChordResult = { write: string } | { clipboard: 'copy' | 'paste' } | 
 export type KeyLike = { key: string; metaKey: boolean; altKey: boolean; ctrlKey: boolean; shiftKey: boolean; type?: string }
 
 export function macChord(e: KeyLike): ChordResult {
-  // Shift+Enter: xterm would send a bare CR, indistinguishable from Enter. Claude Code
-  // (and anything using the kitty keyboard protocol) reads CSI-u `ESC[13;2u` as a newline.
-  if (e.key === 'Enter' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return { write: '\x1b[13;2u' }
+  // Shift+Enter: xterm would send a bare CR, indistinguishable from Enter. Claude Code only
+  // reads CSI-u (`ESC[13;2u`) after the terminal answers its kitty-keyboard probe, which
+  // xterm.js never does; `ESC CR` is the fallback its own `/terminal-setup` installs for
+  // VS Code and is read as a newline everywhere.
+  if (e.key === 'Enter' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return { write: '\x1b\r' }
   if (!e.metaKey || e.ctrlKey) return null
   const k = e.key
   if (e.altKey) return null
