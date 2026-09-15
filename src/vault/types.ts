@@ -73,7 +73,7 @@ export type VaultGraph = {
   /** The centre first. */
   nodes: GraphNode[]
   edges: GraphEdge[]
-  /** Neighbours found before the node limit. */
+  /** Linked and rare-topic neighbours found before the node limit; hub-only pages never count. */
   total: number
   error: string | null
 }

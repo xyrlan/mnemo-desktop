@@ -29,9 +29,47 @@ function sub(n: GraphNode, relation: string | null): string {
   return [n.type, n.confidence ?? 'no confidence', n.fires ? `${n.fires}× fired` : 'never fired'].join(' · ')
 }
 
+/** The header count: `11 vizinhos`, or `11 de 37` when the limit cut linked and rare-topic
+ *  neighbours. Pages sharing only hub topics never enter `total`, so it is never inflated. */
+export function countLabel(g: VaultGraph): string {
+  const shown = Math.max(0, g.nodes.length - 1)
+  return shown < g.total ? `${shown} de ${g.total}` : `${shown} vizinhos`
+}
+
+/** Id prefix of the invisible cards that balance the layout around the centre. */
+export const GHOST = 've-ghost:'
+
+/** Invisible cards mirroring the outermost cards through the centre, so the bounding box that
+ *  fitView frames is centred on the centre card: when the cards cannot all fit at the lowest
+ *  zoom, the edges get cut, never the centre. Each copies the card it mirrors so it measures
+ *  the same. */
+function ghosts(nodes: CardNode[], c: string): CardNode[] {
+  const centre = nodes.find((n) => n.id === c)
+  if (!centre || nodes.length < 2) return []
+  const { x: cx, y: cy } = centre.position
+  const far = (pick: (n: CardNode) => number) => nodes.reduce((a, b) => (pick(b) > pick(a) ? b : a))
+  const mirror = (n: CardNode, k: string): CardNode => ({
+    id: `${GHOST}${k}`,
+    type: 'card',
+    position: { x: 2 * cx - n.position.x, y: 2 * cy - n.position.y },
+    className: 've-ghost',
+    selectable: false,
+    draggable: false,
+    focusable: false,
+    data: n.data,
+  })
+  return [
+    mirror(far((n) => n.position.x), 'right'),
+    mirror(far((n) => -n.position.x), 'left'),
+    mirror(far((n) => n.position.y), 'bottom'),
+    mirror(far((n) => -n.position.y), 'top'),
+  ]
+}
+
 /** The React Flow cards and edges of an ego graph, laid out by dagre left to right: pages that
  *  only link to the centre on its left, the centre, then everything else in columns on its
- *  right. Layout-only edges chain each column to the next; the drawn edges are the graph's. */
+ *  right. Layout-only edges chain each column to the next; the drawn edges are the graph's.
+ *  `ghosts` follow the real cards so the canvas opens centred on the centre card. */
 export function egoFlow(g: VaultGraph): { nodes: CardNode[]; edges: Edge[] } {
   if (g.nodes.length === 0) return { nodes: [], edges: [] }
   const c = g.nodes[0].id
@@ -70,7 +108,8 @@ export function egoFlow(g: VaultGraph): { nodes: CardNode[]; edges: Edge[] } {
     className: n.id === c ? 've-centre' : undefined,
     data: { label: n.label, sub: sub(n, relation(n)), badge: n.fires ? `${n.fires}×` : undefined, tone: toneFor(n) },
   }))
-  const nodes = layoutDagre(cards, layout, { width: CARD.width, height: CARD.height, gap: 18 })
+  const laid = layoutDagre(cards, layout, { width: CARD.width, height: CARD.height, gap: 18 })
+  const nodes = [...laid, ...ghosts(laid, c)]
   const edges: Edge[] = g.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, className: `ve-edge-${e.kind}` }))
   return { nodes, edges }
 }

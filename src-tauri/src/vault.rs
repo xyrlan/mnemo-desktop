@@ -664,10 +664,12 @@ pub struct GraphEdge {
 pub struct VaultGraph {
     /// The centre's path, as asked.
     pub center: String,
-    /// The centre first, then its neighbours: linked pages, then those sharing the most topics.
+    /// The centre first, then its neighbours: linked pages, then those sharing rare topics, then
+    /// those sharing only hub topics.
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
-    /// Neighbours found before the node limit cut them.
+    /// Linked and rare-topic neighbours found before the node limit cut them; pages sharing only
+    /// hub topics never count, though they may fill spare room.
     pub total: usize,
     pub error: Option<String>,
 }
@@ -749,10 +751,17 @@ fn folded_topics(p: &PageInfo) -> Vec<String> {
     out
 }
 
-/// The neighbourhood of the page at `path` among `pages`: pages it links to or that link to
-/// it, then pages sharing its topics (most shared first, then hottest), `limit` nodes at most
-/// (0 or anything past `MAX_EGO_NODES` means `MAX_EGO_NODES`). Links between any two kept
-/// nodes are edges; each topic neighbour gets one `topic` edge from the centre.
+/// A topic carried by more pages than this is a hub (`#auto-promoted` sits on nearly every page):
+/// sharing it says nothing about two pages, so it never makes a page a counted neighbour.
+pub const HUB_PAGES: usize = 100;
+
+/// The neighbourhood of the page at `path` among `pages`, `limit` nodes at most (0 or anything
+/// past `MAX_EGO_NODES` means `MAX_EGO_NODES`), ranked in three tiers: pages it links to or
+/// that link to it; pages sharing a rare topic (one on at most `HUB_PAGES` pages), most rare
+/// topics shared first; then pages sharing only hub topics, to fill the room left. Ties go to
+/// the hottest. `total` counts the first two tiers only. Links between any two kept nodes are
+/// edges; each topic neighbour gets one `topic` edge from the centre, labelled with the topics
+/// that ranked it.
 pub fn ego_graph(path: &str, pages: &[PageInfo], fires: &Fires, limit: u32, now: u64) -> VaultGraph {
     let Some(c) = pages.iter().position(|p| p.path == path) else {
         return VaultGraph { center: path.to_string(), error: Some(format!("{path}: not a rule in the vault")), ..Default::default() };
@@ -790,20 +799,36 @@ pub fn ego_graph(path: &str, pages: &[PageInfo], fires: &Fires, limit: u32, now:
     linked.sort_by(by_heat);
 
     let own = folded_topics(centre);
-    let mut topical: Vec<(usize, Vec<String>)> = pages
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != c && !seen.contains(i))
-        .filter_map(|(i, p)| {
-            let shared: Vec<String> = folded_topics(p).into_iter().filter(|t| own.contains(t)).collect();
-            (!shared.is_empty()).then_some((i, shared))
-        })
-        .collect();
-    topical.sort_by(|(a, sa), (b, sb)| sb.len().cmp(&sa.len()).then(by_heat(a, b)).then(pages[*a].path.cmp(&pages[*b].path)));
+    let mut carriers: HashMap<&str, usize> = own.iter().map(|t| (t.as_str(), 0)).collect();
+    let topics: Vec<Vec<String>> = pages.iter().map(folded_topics).collect();
+    for t in topics.iter().flatten() {
+        if let Some(n) = carriers.get_mut(t.as_str()) {
+            *n += 1;
+        }
+    }
+    let is_hub = |t: &str| carriers.get(t).is_some_and(|n| *n > HUB_PAGES);
+    let mut rare: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut hubbed: Vec<(usize, Vec<String>)> = Vec::new();
+    for (i, ts) in topics.iter().enumerate() {
+        if i == c || seen.contains(&i) {
+            continue;
+        }
+        let (hubs, rares): (Vec<String>, Vec<String>) = ts.iter().filter(|t| own.contains(t)).cloned().partition(|t| is_hub(t));
+        match (rares.is_empty(), hubs.is_empty()) {
+            (false, _) => rare.push((i, rares)),
+            (true, false) => hubbed.push((i, hubs)),
+            (true, true) => {}
+        }
+    }
+    let by_path = |a: &usize, b: &usize| pages[*a].path.cmp(&pages[*b].path);
+    rare.sort_by(|(a, sa), (b, sb)| sb.len().cmp(&sa.len()).then(by_heat(a, b)).then(by_path(a, b)));
+    hubbed.sort_by(|(a, _), (b, _)| by_heat(a, b).then(by_path(a, b)));
 
-    let total = linked.len() + topical.len();
+    let total = linked.len() + rare.len();
     let room = limit - 1;
     linked.truncate(room);
+    let mut topical = rare;
+    topical.extend(hubbed);
     topical.truncate(room - linked.len());
 
     let kept: Vec<usize> = std::iter::once(c).chain(linked.iter().copied()).chain(topical.iter().map(|(i, _)| *i)).collect();
@@ -1757,6 +1782,33 @@ mod tests {
         assert_eq!((g.nodes.len(), g.total), (MAX_EGO_NODES, 63));
         assert!(!labels.contains(&"none"));
         assert_eq!(g.edges[0].label, "a, b");
+    }
+
+    #[test]
+    fn ego_ranks_links_then_rare_topics_then_hubs_and_counts_no_hub_page() {
+        let page = |slug: &str, topics: &[&str], body: &str| PageInfo { path: format!("/v/shared/feedback/{slug}.md"), slug: slug.into(), name: slug.into(), topics: strs(topics), body: body.into(), ..Default::default() };
+        let mut pages = vec![
+            page("centre", &["auto-promoted", "git", "worktrees"], "[[out]]"),
+            page("out", &["auto-promoted"], ""),
+            page("in", &[], "[[centre]]"),
+            page("git", &["git", "auto-promoted"], ""),
+            page("both", &["Git", "worktrees"], ""),
+        ];
+        // 150 pages carry the hub; the hottest of them still ranks after every rare-topic page.
+        pages.extend((0..150).map(|i| page(&format!("h{i:03}"), &["auto-promoted"], "")));
+        let fires: Fires = [("h149".to_string(), Fire { count: 9, last: Some(NOW), times: vec![NOW; 9] })].into();
+        let g = ego_graph("/v/shared/feedback/centre.md", &pages, &fires, 12, NOW);
+        let labels: Vec<&str> = g.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(&labels[..6], ["centre", "in", "out", "both", "git", "h149"]);
+        assert_eq!((g.nodes.len(), g.total), (12, 4));
+        let label_of = |slug: &str| g.edges.iter().find(|e| e.kind == "topic" && e.target.ends_with(&format!("/{slug}.md"))).map(|e| e.label.as_str());
+        // A rare neighbour is labelled by the rare topics that ranked it, a hub-only one by the hub.
+        assert_eq!((label_of("both"), label_of("git"), label_of("h149"), label_of("out")), (Some("git, worktrees"), Some("git"), Some("auto-promoted"), None));
+
+        // With exactly `HUB_PAGES` carriers the topic is rare again and every carrier counts.
+        let rare: Vec<PageInfo> = pages.iter().take(5 + HUB_PAGES - 3).cloned().collect();
+        let g = ego_graph("/v/shared/feedback/centre.md", &rare, &Fires::new(), 12, NOW);
+        assert_eq!(g.total, 2 + 2 + HUB_PAGES - 3);
     }
 
     #[test]

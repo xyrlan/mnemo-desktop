@@ -176,3 +176,6 @@
 .ve-canvas .react-flow__node.ve-glow { z-index: 10 !important; }
 .ve-canvas .react-flow__node.ve-glow .gr-card { border-color: var(--accent); animation: ve-glow 2s ease-out; }
 .ve-canvas .react-flow__edge.ve-edge-glow .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; opacity: 1; }
+/* React Flow sets an inline `visibility` on each node once measured: hide the card inside instead */
+.ve-canvas .react-flow__node.ve-ghost { pointer-events: none !important; }
+.ve-canvas .react-flow__node.ve-ghost > * { visibility: hidden; }
