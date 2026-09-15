@@ -67,6 +67,8 @@ export type Actions = {
    *  Focus stays on the pane it was on; panes in different tabs are left alone. */
   swapPanes(a: PaneId, b: PaneId): void
   setCwd(id: PaneId, cwd: string): void
+  /** Record (or clear) the Claude Code session a pane runs; Home and the workspace restore read it. */
+  setSessionId(id: PaneId, sessionId: string | undefined): void
   setTitle(id: PaneId, title: string): void
   paneExited(id: PaneId, code: number | null): void
   attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
@@ -278,6 +280,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             return root === t.root ? t : { ...t, root }
           }),
         }))
+      },
+
+      setSessionId(id, sessionId) {
+        set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], sessionId } } } : {}))
       },
 
       setCwd(id, cwd) {

@@ -348,3 +348,14 @@ test('swapPanes exchanges two panes of a tab, keeps focus on its pane and leaves
   expect(s.getState().tabs[0].root).toBe(t.root)
   expect(s.getState().tabs[1]).toBe(second)
 })
+
+test('setSessionId tags an existing pane and ignores unknown ids', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  s.getState().setSessionId(1, 'abc')
+  expect(s.getState().panes[1].sessionId).toBe('abc')
+  s.getState().setSessionId(1, undefined)
+  expect(s.getState().panes[1].sessionId).toBeUndefined()
+  s.getState().setSessionId(99, 'zzz')
+  expect(s.getState().panes[99]).toBeUndefined()
+})

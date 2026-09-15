@@ -27,3 +27,7 @@
 ## Out of scope
 
 Kanban board polish (#60 shipped a first board), multi-CLI (#5), native GitHub OAuth.
+
+## Addendum (2026-09-15, night): workspace column and resume — round 11
+
+User: tabs move into the right sidebar (too much empty space there), the top tab bar goes, the `this repo / all` toggle "has no reason to exist" (it silently fell back to *all* whenever the focused pane was not a terminal). Decisions: sidebar = vertical tabs with a Claude state dot + NEEDS YOU across all repos (toggle and `sidebarScope` removed; the cockpit groups by repo, focused first) + the live line; layout persisted to `~/.mnemo-desktop/workspace.json` and restored on boot, panes with a `sessionId` run `claude --resume` (the session died with the app, so no fork); a hand-typed `claude` gets its sessionId learnt from the PTY's process tree × `claude agents --json` pids. Issues #72 (workspace) and #73 (resume), contract `round11.md`.

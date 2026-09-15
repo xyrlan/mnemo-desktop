@@ -39,6 +39,8 @@ pub mod chrome;
 
 // -- vaultmap (src/vaultmap.rs) --
 
+// -- workspace (src/workspace.rs) --
+
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
@@ -137,6 +139,8 @@ pub fn run() {
             // -- chrome commands --
 
             // -- vaultmap commands --
+
+            // -- workspace commands --
             chrome::chrome_branch,
             chrome::chrome_repo,
 
