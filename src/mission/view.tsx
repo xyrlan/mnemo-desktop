@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
-import { register } from '../actions/registry'
+import { register, registerProvider } from '../actions/registry'
 import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
-import { allChildren, childWord, type ChildSession, type TimelineLine } from './types'
+import { allChildren, childWord, isRecent, type ChildSession, type TimelineLine } from './types'
+import { openMissionPane } from './Sidebar'
 import { estimateUsd, fmtUsd } from './cost'
 
 function findChild(id: string): ChildSession | undefined {
@@ -133,3 +134,13 @@ register({
     if (c) document.querySelector<HTMLTextAreaElement>('.m-blocked textarea')?.focus()
   },
 })
+
+registerProvider(() =>
+  allChildren(missionStore.getState().snapshot)
+    .filter((c) => isRecent(c))
+    .map((c) => ({
+      id: `mission.open.${c.id}`,
+      title: `Open mission: ${c.name ?? c.intent ?? c.id} (${childWord(c)})`,
+      run: () => openMissionPane(c),
+    })),
+)

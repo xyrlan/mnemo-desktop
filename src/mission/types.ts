@@ -41,10 +41,16 @@ export function delta(c: Pick<ChildSession, 'id' | 'timeline_len'>, looked: Reco
 }
 
 export function allChildren(snap: Snapshot): ChildSession[] {
+  const seen = new Set<string>()
   const out: ChildSession[] = []
+  const push = (c: ChildSession) => {
+    if (seen.has(c.id)) return
+    seen.add(c.id)
+    out.push(c)
+  }
   for (const r of snap.repos) {
-    for (const m of r.missions) for (const p of m.pieces) if (p.child) out.push(p.child)
-    out.push(...r.children)
+    for (const m of r.missions) for (const p of m.pieces) if (p.child) push(p.child)
+    r.children.forEach(push)
   }
   return out
 }

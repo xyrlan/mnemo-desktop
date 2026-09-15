@@ -1,4 +1,4 @@
-import { all, register, run, registerBuiltins } from './registry'
+import { all, register, run, registerBuiltins, registerProvider } from './registry'
 import { createStore } from '../layout/store'
 import type { PtyClient } from '../pty/client'
 
@@ -27,4 +27,15 @@ test('custom actions extend the registry', () => {
   run('x')
   run('missing')
   expect(hit).toBe(1)
+})
+
+test('providers contribute actions at read time and run() sees them', () => {
+  let n = 0
+  const items = [{ id: 'dyn.1', title: 'Dyn 1', run: () => { n++ } }]
+  registerProvider(() => items)
+  expect(all().map((a) => a.id)).toContain('dyn.1')
+  run('dyn.1')
+  expect(n).toBe(1)
+  items.length = 0
+  expect(all().map((a) => a.id)).not.toContain('dyn.1')
 })

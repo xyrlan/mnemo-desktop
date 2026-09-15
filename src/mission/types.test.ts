@@ -1,4 +1,4 @@
-import { childWord, delta, missionSummary, isRecent, pruneSnapshot, type Mission, type ChildSession, type Snapshot } from './types'
+import { childWord, delta, missionSummary, isRecent, pruneSnapshot, allChildren, type Mission, type ChildSession, type Snapshot } from './types'
 
 test('childWord folds state and tempo', () => {
   expect(childWord({ state: 'working', tempo: 'active', live: true })).toBe('active')
@@ -56,4 +56,15 @@ test('pruneSnapshot drops stale children and empty repos', () => {
   }
   const out = pruneSnapshot(snap, now)
   expect(out.repos.map((r) => r.name)).toEqual(['b', 'c'])
+})
+
+test('allChildren dedupes by id across repos', () => {
+  const snap: Snapshot = {
+    at: '', errors: [],
+    repos: [
+      { root: '/a', name: 'a', parents: [], missions: [], children: [child({ id: 'x' }), child({ id: 'x' })] },
+      { root: '/b', name: 'b', parents: [], missions: [], children: [child({ id: 'x' }), child({ id: 'y' })] },
+    ],
+  }
+  expect(allChildren(snap).map((c) => c.id)).toEqual(['x', 'y'])
 })
