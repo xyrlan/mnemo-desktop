@@ -10,7 +10,14 @@ vi.mock('@tauri-apps/api/core', () => ({
   ),
 }))
 
+const answered = vi.hoisted(() => [] as [string, string][])
+vi.mock('./approve', async (orig) => ({
+  ...(await orig<typeof import('./approve')>()),
+  answerPrompt: vi.fn(async (c: { id: string }, choice: string) => void answered.push([c.id, choice])),
+}))
+
 import { missionStore } from '../mission/app-store'
+import { answerStore } from './approve'
 import { store as appStore } from '../layout/app-store'
 import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
@@ -282,4 +289,37 @@ test('shows errors, and nada pendente when there is nothing at all', async () =>
   expect(host.textContent).toContain('gh missing on PATH')
   expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
   expect(host.querySelector('.ck-fold')).toBeNull()
+})
+
+test('a permission row: Aprovar / Negar instead of the reply, y / n on the selected row, detach once an answer opened its attach', async () => {
+  answered.length = 0
+  const m = desktop.missions[0]
+  const vault = m.pieces[1]
+  const asking = { ...vault.child!, needs: 'approve Bash: touch approve-probe.txt && ls -la', suggested_reply: null, waiting_for: 'permission prompt' }
+  missionStore.setState({ snapshot: { ...withPrs, repos: [{ ...desktop, missions: [{ ...m, pieces: [m.pieces[0], { ...vault, child: asking }] }] }, ...withPrs.repos.slice(1)] } })
+  await render()
+  const blocked = row('blocked:094c6a03')
+  expect(blocked.querySelector('textarea')).toBeNull()
+  expect(blocked.querySelector('.m-perm-cmd')?.textContent).toBe('touch approve-probe.txt && ls -la')
+  // The cockpit row has its own attach button; the box adds none.
+  expect([...blocked.querySelectorAll('button')].filter((b) => b.textContent === 'attach')).toHaveLength(1)
+  expect(host.querySelector('.ck-hint')?.textContent).toContain('y aprovar · n negar')
+
+  key('y')
+  key('n')
+  key('r')
+  expect(answered).toEqual([['094c6a03', 'yes'], ['094c6a03', 'no']])
+  key('ArrowDown')
+  key('y')
+  expect(answered).toHaveLength(2)
+  expect(host.querySelector('.ck-hint')?.textContent).toContain('r reply')
+
+  // An answer left its attach pane open here: the row offers to leave it.
+  act(() => {
+    appStore.setState({ tabs: [{ id: 'tab-8', root: { kind: 'leaf', pane: 8 }, focused: 8 }], panes: { 8: { id: 8, view: 'terminal', cwd: '/x' } } })
+    answerStore.setState({ answers: { '094c6a03': { choice: 'yes', phase: 'sent', pane: 8, at: Date.now() } } })
+  })
+  expect(button(row('blocked:094c6a03'), 'detach')).toBeDefined()
+  expect(button(row('blocked:094c6a03'), 'attach')).toBeUndefined()
+  expect(row('blocked:094c6a03').querySelector('.m-sent')?.textContent).toContain('aprovado ✓')
 })

@@ -42,7 +42,7 @@ export default function NeedsList({ needs, showRepo }: { needs: Need[]; showRepo
             <div className="nd-row" onClick={() => openNeed(n)} title={n.kind === 'blocked' ? n.child.cwd : n.repo.root}>
               <Head n={n} showRepo={showRepo} replied={replied} />
             </div>
-            {n.kind === 'blocked' && <ReplyBox c={n.child} />}
+            {n.kind === 'blocked' && <ReplyBox c={n.child} attach />}
             {n.kind === 'ci' && <div className="nd-sub">{n.pr.head}</div>}
             {SUB[n.kind] && <div className="nd-sub">{SUB[n.kind]}</div>}
           </div>

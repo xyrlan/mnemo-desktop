@@ -380,5 +380,16 @@
     "name": "panes browser implementation",
     "status": "busy",
     "state": "working"
+  },
+  {
+    "id": "987fb657",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-281",
+    "kind": "background",
+    "startedAt": 1789492931022,
+    "sessionId": "987fb657-a6c1-4319-8547-49167aa01a65",
+    "name": "approve probe",
+    "status": "waiting",
+    "waitingFor": "permission prompt",
+    "state": "blocked"
   }
 ]
