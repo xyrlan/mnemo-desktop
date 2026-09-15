@@ -33,6 +33,7 @@ pub mod home;
 pub mod home_commands;
 
 // -- chrome (src/chrome.rs) --
+pub mod chrome;
 
 // -- graph: no Rust --
 
@@ -122,6 +123,8 @@ pub fn run() {
             home_commands::home_register_repo,
 
             // -- chrome commands --
+            chrome::chrome_branch,
+            chrome::chrome_repo,
 
             // -- marketplace commands --
             marketplace::marketplace_list,

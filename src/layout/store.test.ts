@@ -328,3 +328,23 @@ test('closeOthers keeps the focused leaf and kills the rest', async () => {
   expect(pty.killed).toEqual([1])
   expect(Object.keys(s.getState().panes).map(Number)).toEqual([2])
 })
+
+test('swapPanes exchanges two panes of a tab, keeps focus on its pane and leaves other tabs alone', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().split('col')
+  await s.getState().newTab()
+  const [first, second] = s.getState().tabs
+  s.getState().swapPanes(1, 3)
+  const t = s.getState().tabs[0]
+  expect(t.root).toEqual({
+    kind: 'split', dir: 'row', ratio: 0.5,
+    children: [{ kind: 'leaf', pane: 3 }, { kind: 'split', dir: 'col', ratio: 0.5, children: [{ kind: 'leaf', pane: 2 }, { kind: 'leaf', pane: 1 }] }],
+  })
+  expect(t.focused).toBe(first.focused)
+  expect(s.getState().tabs[1]).toBe(second)
+  s.getState().swapPanes(1, 4) // different tabs
+  expect(s.getState().tabs[0].root).toBe(t.root)
+  expect(s.getState().tabs[1]).toBe(second)
+})

@@ -1,6 +1,6 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { closeLeaf, leaf, leaves, replaceRatio, splitAt, type Dir, type Node, type PaneId, type Path, type Rect } from './tree'
+import { closeLeaf, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect } from './tree'
 import { layoutRects, workspaceRect } from './rects'
 import { reuseHandler } from './reuse'
 import type { PtyClient } from '../pty/client'
@@ -62,6 +62,9 @@ export type Actions = {
   goToTab(index: number): void
   cycleTab(delta: 1 | -1): void
   setRatio(path: Path, ratio: number): void
+  /** Exchange the places of two panes of the same tab (drag a pane bar onto another).
+   *  Focus stays on the pane it was on; panes in different tabs are left alone. */
+  swapPanes(a: PaneId, b: PaneId): void
   setCwd(id: PaneId, cwd: string): void
   setTitle(id: PaneId, title: string): void
   paneExited(id: PaneId, code: number | null): void
@@ -264,6 +267,15 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       setRatio(path, ratio) {
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === s.activeTab ? { ...t, root: replaceRatio(t.root, path, ratio) } : t)),
+        }))
+      },
+
+      swapPanes(a, b) {
+        set((s) => ({
+          tabs: s.tabs.map((t) => {
+            const root = swapLeaves(t.root, a, b)
+            return root === t.root ? t : { ...t, root }
+          }),
         }))
       },
 

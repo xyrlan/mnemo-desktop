@@ -32,6 +32,18 @@ export function closeLeaf(n: Node, target: PaneId): Node | null {
   return { ...n, children: [a2, b2] }
 }
 
+/** Exchanges the places of two panes; ratios and shape stay. The same tree when either is absent or a === b. */
+export function swapLeaves(n: Node, a: PaneId, b: PaneId): Node {
+  if (a === b) return n
+  const ids = leaves(n)
+  if (!ids.includes(a) || !ids.includes(b)) return n
+  const walk = (m: Node): Node => {
+    if (m.kind === 'leaf') return m.pane === a ? leaf(b) : m.pane === b ? leaf(a) : m
+    return { ...m, children: [walk(m.children[0]), walk(m.children[1])] }
+  }
+  return walk(n)
+}
+
 export function replaceRatio(n: Node, path: Path, ratio: number): Node {
   if (n.kind === 'leaf') return n
   if (path.length === 0) return { ...n, ratio: Math.min(0.9, Math.max(0.1, ratio)) }
