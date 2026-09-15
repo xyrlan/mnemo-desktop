@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "icons": "node scripts/make-app-icon.mjs && tauri icon app-icon.png"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
@@ -26,6 +27,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

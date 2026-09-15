@@ -24,6 +24,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "Copyright © 2026 xyrlan",
+    "shortDescription": "Terminal-first desktop shell for agentic development",
+    "longDescription": "Desktop shell for the mnemo agentic development environment: a terminal with tabs, splits and a command palette, enough to replace your daily terminal so the mission cockpit can live on screen.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

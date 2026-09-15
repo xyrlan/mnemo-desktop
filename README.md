@@ -1,3 +1,5 @@
+<img src="src/brand/mark.svg" width="96" height="96" alt="" />
+
 # mnemo-desktop
 
 Desktop shell for the mnemo agentic development environment. Sub-project 1: a terminal with tabs, splits and a command palette, enough to replace your daily terminal so the mission cockpit (sub-project 2) can live on screen.
