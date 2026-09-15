@@ -1944,6 +1944,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "objc2",
  "portable-pty",
  "serde",
  "serde_json",

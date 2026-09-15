@@ -7,6 +7,7 @@ pub mod pty;
 // -- editor (src/fs.rs) --
 
 // -- browser (src/browser.rs) --
+pub mod browser;
 
 // -- mission (src/mission.rs) --
 
@@ -56,6 +57,14 @@ pub fn run() {
             // -- editor commands --
 
             // -- browser commands --
+            browser::browser_create,
+            browser::browser_navigate,
+            browser::browser_set_bounds,
+            browser::browser_destroy,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_pr_url,
 
             // -- mission commands --
         ])
