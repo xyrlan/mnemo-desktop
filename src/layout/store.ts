@@ -33,6 +33,8 @@ export type Actions = {
   /** Open a non-terminal view (editor, browser, mission…) as a new tab or a split of the focused pane. */
   openView(view: string, props: Record<string, unknown>, place: Place, title?: string): void
   closePane(): Promise<void>
+  /** Close every pane of a tab (kills their PTYs) and the tab itself. */
+  closeTab(id: string): Promise<void>
   focusPane(id: PaneId): void
   goToTab(index: number): void
   cycleTab(delta: 1 | -1): void
@@ -154,6 +156,26 @@ export function createStore(pty: PtyClient): Store {
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root: splitAt(t.root, tab.focused, id, dir), focused: id } : t)),
         }))
+      },
+
+      async closeTab(id) {
+        const tab = get().tabs.find((t) => t.id === id)
+        if (!tab) return
+        const ids = leaves(tab.root)
+        for (const p of ids) if (p > 0) await pty.kill(p)
+        set((s) => {
+          const panes = { ...s.panes }
+          const sinks = { ...s.sinks }
+          for (const p of ids) {
+            delete panes[p]
+            delete sinks[p]
+          }
+          const idx = s.tabs.findIndex((t) => t.id === id)
+          const tabs = s.tabs.filter((t) => t.id !== id)
+          const next = s.activeTab === id ? tabs[Math.max(0, idx - 1)]?.id ?? '' : s.activeTab
+          return { tabs, activeTab: next, panes, sinks }
+        })
+        if (get().tabs.length === 0) await get().newTab()
       },
 
       focusPane(id) {
