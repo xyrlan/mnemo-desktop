@@ -28,6 +28,10 @@ pub mod vault;
 
 // -- cockpit: no Rust --
 
+// -- home (src/home.rs) --
+pub mod home;
+pub mod home_commands;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -107,6 +111,10 @@ pub fn run() {
             vault::vault_tree,
             vault::vault_page,
             vault::vault_run,
+
+            // -- home commands --
+            home_commands::home_snapshot,
+            home_commands::home_register_repo,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
