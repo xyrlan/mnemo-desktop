@@ -333,6 +333,33 @@
     "status": "idle"
   },
   {
+    "pid": 9101,
+    "cwd": "/Users/xyrlan/github/mnemo-desktop",
+    "kind": "interactive",
+    "startedAt": 1789420000000,
+    "sessionId": "2f8a61c0-4d3b-4e7a-b1c9-5d0e7f3a2b14",
+    "name": "mnemo-desktop-older",
+    "status": "idle"
+  },
+  {
+    "pid": 9102,
+    "cwd": "/Users/xyrlan/github/mnemo-desktop",
+    "kind": "interactive",
+    "startedAt": 1789431000000,
+    "sessionId": "7c3e9d41-2b6a-4f0e-8d15-a9c4e2f7b603",
+    "name": "mnemo-desktop-dispatcher",
+    "status": "busy"
+  },
+  {
+    "pid": 9103,
+    "cwd": "/Users/xyrlan/github/mnemo-desktop",
+    "kind": "interactive",
+    "startedAt": 1789433000000,
+    "sessionId": "c41e0b7d-8a25-4f63-9e0d-3b7a6c5f1e28",
+    "name": "mnemo-desktop-later",
+    "status": "idle"
+  },
+  {
     "pid": 20147,
     "id": "a43d3832",
     "cwd": "/Users/xyrlan/github/mnemo-desktop-wt-c-editor",
