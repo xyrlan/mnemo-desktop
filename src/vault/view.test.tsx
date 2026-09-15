@@ -28,7 +28,8 @@ vi.mock('@tauri-apps/api/core', () => ({
     calls.push([cmd, args])
     if (cmd === 'vault_tree') return tree
     if (cmd === 'vault_page') return page
-    if (cmd === 'vault_run') return { stdout: 'disabled', stderr: '', code: 0 } satisfies RunResult
+    if (cmd === 'vault_run') return { stdout: args?.action === 'stale' ? '' : 'disabled', stderr: '', code: 0 } satisfies RunResult
+    if (cmd === 'vault_rules') return []
     return undefined
   },
 }))
@@ -38,19 +39,25 @@ const flush = () => act(async () => void (await new Promise((r) => setTimeout(r,
 const click = (el: Element | null | undefined) => act(() => void (el as HTMLElement).click())
 const buttons = (root: HTMLElement, text: string) => [...root.querySelectorAll('button')].filter((b) => b.textContent === text)
 
-test('the pane lists the tree, renders a page with its action bar, and confirms a destructive action', async () => {
+test('the pages mode lists the tree, renders a page with its action bar, and confirms a destructive action', async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   Element.prototype.scrollIntoView ??= () => {} // jsdom has none
   await import('./view')
   const { paneView } = await import('../panes/registry')
   const { all } = await import('../actions/registry')
-  expect(all().some((a) => a.id === 'vault.open')).toBe(true)
+  expect(['vault.open', 'vault.health', 'vault.pages'].every((id) => all().some((a) => a.id === id))).toBe(true)
+  expect(all().some((a) => a.id === 'vault.graph')).toBe(false)
   const Pane = paneView('vault')!
 
   const host = document.createElement('div')
   document.body.appendChild(host)
   const root = createRoot(host)
   await act(async () => root.render(<Pane id={-1} props={{}} />))
+  await flush()
+  // Health is the main screen; the tree is read only once Pages is opened.
+  expect(host.querySelector('.vr')).toBeTruthy()
+  expect(calls.some(([c]) => c === 'vault_tree')).toBe(false)
+  await click(buttons(host, 'Pages')[0])
   await flush()
 
   // Noise folds under `other`, shared (empty here) and repos stay out of it.
@@ -77,10 +84,10 @@ test('the pane lists the tree, renders a page with its action bar, and confirms 
   ])
 
   await click(buttons(host, 'Disable rule')[0])
-  expect(calls.some(([c]) => c === 'vault_run')).toBe(false)
+  expect(calls.some(([c, a]) => c === 'vault_run' && a?.action === 'disable-rule')).toBe(false)
   await click(buttons(host, 'really disable rule?')[0])
   await flush()
-  expect(calls.filter(([c]) => c === 'vault_run')).toEqual([['vault_run', { action: 'disable-rule', args: ['shared-target-dir'], cwd: '' }]])
+  expect(calls.filter(([c, a]) => c === 'vault_run' && a?.action !== 'stale')).toEqual([['vault_run', { action: 'disable-rule', args: ['shared-target-dir'], cwd: '' }]])
   expect(host.querySelector('.vt-log')?.textContent).toContain('$ mnemo disable-rule shared-target-dir')
   expect(host.querySelector('.vt-log pre')?.textContent).toBe('disabled')
 

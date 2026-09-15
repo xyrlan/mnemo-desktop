@@ -1,8 +1,9 @@
 import vaultRs from '../../src-tauri/src/vault.rs?raw'
+import libRs from '../../src-tauri/src/lib.rs?raw'
 import { createVaultStore, MAX_LOG } from './store'
 import { makeVaultClient, type VaultClient } from './client'
 import { ACTIONS } from './actions'
-import type { Agent, Health, Page, PageInfo, RunResult, VaultGraph } from './types'
+import type { Agent, Health, Page, PageInfo, RuleRow, RunResult, VaultGraph } from './types'
 
 const info = (slug: string): PageInfo => ({
   path: `/v/shared/feedback/${slug}.md`,
@@ -18,7 +19,22 @@ const info = (slug: string): PageInfo => ({
 const tree = (): Agent[] => [{ name: 'shared', kind: 'shared', dir: '/v/shared', groups: [{ type: 'feedback', pages: [info('a'), info('b')] }] }]
 const page = (p: PageInfo): Page => ({ ...p, runtime: null, frontmatter: [], error: null })
 const ok = (stdout = 'done'): RunResult => ({ stdout, stderr: '', code: 0 })
-const graphOf = (scope: string): VaultGraph => ({ scope, nodes: [], edges: [], total: 0, error: null })
+const egoOf = (center: string): VaultGraph => ({ center, nodes: [], edges: [], total: 0, error: null })
+const row = (slug: string, agent = 'shared'): RuleRow => ({
+  path: `/v/shared/feedback/${slug}.md`,
+  slug,
+  name: slug,
+  description: '',
+  type: 'feedback',
+  agent,
+  confidence: null,
+  topics: [],
+  fires: 0,
+  last_fired: null,
+  heat: 0,
+  badges: [],
+  reasons: [],
+})
 const health = (over: Partial<Health> = {}): Health => ({
   root: '/v',
   status: ok('Vault: /v'),
@@ -44,7 +60,8 @@ function fake(over: Partial<VaultClient> = {}): VaultClient {
     tree: async () => tree(),
     page: async (path) => page(tree()[0].groups[0].pages.find((p) => p.path === path)!),
     run: async () => ok(),
-    graph: async (scope) => graphOf(scope),
+    rules: async () => [row('a'), row('b')],
+    ego: async (path) => egoOf(path),
     health: async () => health(),
     ...over,
   }
@@ -137,31 +154,75 @@ test('the log keeps the last entries only', async () => {
   expect(s.getState().log[0].id).toBe(4)
 })
 
-test('the latest scope wins over a slow graph read, and a failing read is an error graph', async () => {
-  const slow = deferred<VaultGraph>()
-  const s = createVaultStore(fake({ graph: (scope) => (scope === 'agent:shared' ? slow.promise : Promise.resolve(graphOf(scope))) }))
-  const first = s.getState().loadGraph('agent:shared')
-  expect(s.getState()).toMatchObject({ scope: 'agent:shared', graphLoading: true, graph: null })
-  await s.getState().loadGraph('topic:testing')
-  slow.resolve(graphOf('agent:shared'))
+test('the table reads scope and filter, the latest read wins, and agents accumulate', async () => {
+  const slow = deferred<RuleRow[]>()
+  const asked: [string, string][] = []
+  const s = createVaultStore(
+    fake({ rules: (scope, filter) => (asked.push([scope, filter]), scope === '' ? slow.promise : Promise.resolve([row('x', 'mnemo-desktop')])) }),
+  )
+  expect(s.getState()).toMatchObject({ mode: 'health', scope: '', filter: '', rules: [], rulesLoaded: false })
+  s.getState().setFilter('cargo')
+  const first = s.getState().loadRules()
+  await s.getState().setScope('agent:mnemo-desktop')
+  slow.resolve([row('a'), row('b')])
   await first
-  expect(s.getState()).toMatchObject({ scope: 'topic:testing', graphLoading: false, graph: { scope: 'topic:testing' } })
+  expect(asked).toEqual([
+    ['', 'cargo'],
+    ['agent:mnemo-desktop', 'cargo'],
+  ])
+  expect(s.getState()).toMatchObject({ rulesLoaded: true, rulesLoading: false, agents: ['mnemo-desktop'] })
+  expect(s.getState().rules.map((r) => r.slug)).toEqual(['x'])
+  await s.getState().setScope('')
+  expect(s.getState().agents).toEqual(['mnemo-desktop', 'shared'])
 
-  const broken = createVaultStore(fake({ graph: async () => Promise.reject('no vault') }))
-  await broken.getState().loadGraph('agent:x')
-  expect(broken.getState().graph).toEqual({ scope: 'agent:x', nodes: [], edges: [], total: 0, error: 'no vault' })
+  s.getState().setChips({ problems: true })
+  s.getState().setChips({ type: 'feedback' })
+  expect(s.getState().chips).toEqual({ type: 'feedback', topic: null, problems: true })
+
+  const broken = createVaultStore(fake({ rules: async () => Promise.reject('no vault') }))
+  await broken.getState().loadRules()
+  expect(broken.getState()).toMatchObject({ rules: [], rulesLoaded: true, rulesLoading: false })
+})
+
+test('a row the tree never read can be disabled, and a success re-reads the table only', async () => {
+  let trees = 0
+  let tables = 0
+  const calls: string[][] = []
+  const s = createVaultStore(
+    fake({ tree: async () => (trees++, tree()), rules: async () => (tables++, [row('only-in-table')]), run: async (a, args) => (calls.push([a, ...args]), ok()) }),
+  )
+  await s.getState().loadRules()
+  await s.getState().select('/v/shared/feedback/only-in-table.md')
+  await s.getState().run('disable', '/repo')
+  expect(calls).toEqual([['disable-rule', 'only-in-table']])
+  expect([trees, tables]).toEqual([0, 2])
+})
+
+test('the latest ego read wins over a slow one, and a failing read is an error graph', async () => {
+  const slow = deferred<VaultGraph>()
+  const s = createVaultStore(fake({ ego: (path, limit) => (expect(limit).toBe(12), path === '/a.md' ? slow.promise : Promise.resolve(egoOf(path))) }))
+  const first = s.getState().loadEgo('/a.md')
+  expect(s.getState()).toMatchObject({ egoLoading: true, ego: null })
+  await s.getState().loadEgo('/b.md')
+  slow.resolve(egoOf('/a.md'))
+  await first
+  expect(s.getState()).toMatchObject({ egoLoading: false, ego: { center: '/b.md' } })
+
+  const broken = createVaultStore(fake({ ego: async () => Promise.reject('no vault') }))
+  await broken.getState().loadEgo('/x.md')
+  expect(broken.getState().ego).toEqual({ center: '/x.md', nodes: [], edges: [], total: 0, error: 'no vault' })
 })
 
 test('health reads vault_health and runs stale --json in the cwd, once at a time', async () => {
   const runs: [string, string[], string][] = []
   let reads = 0
   const s = createVaultStore(fake({ health: async () => (reads++, health()), run: async (a, args, cwd) => (runs.push([a, args, cwd]), ok('[]')) }))
-  expect(s.getState().mode).toBe('pages')
-  s.getState().setMode('graph')
+  expect(s.getState().mode).toBe('health')
+  s.getState().setMode('pages')
   await Promise.all([s.getState().loadHealth('/repo'), s.getState().loadHealth('/repo')])
   expect(reads).toBe(1)
   expect(runs).toEqual([['stale', ['--json'], '/repo']])
-  expect(s.getState()).toMatchObject({ mode: 'graph', healthLoading: false, health: { never_fired: 1 }, stale: ok('[]') })
+  expect(s.getState()).toMatchObject({ mode: 'pages', healthLoading: false, health: { never_fired: 1 }, stale: ok('[]') })
 
   const broken = createVaultStore(fake({ health: async () => Promise.reject('boom'), run: async () => Promise.reject('no mnemo') }))
   await broken.getState().loadHealth('')
@@ -175,13 +236,15 @@ test('client maps to the Tauri commands', async () => {
   await c.tree()
   await c.page('/v/x.md')
   await c.run('status', [], '/repo')
-  await c.graph('topic:testing')
+  await c.rules('agent:shared', 'cargo')
+  await c.ego('/v/x.md', 12)
   await c.health()
   expect(seen).toEqual([
     ['vault_tree', undefined],
     ['vault_page', { path: '/v/x.md' }],
     ['vault_run', { action: 'status', args: [], cwd: '/repo' }],
-    ['vault_graph', { scope: 'topic:testing' }],
+    ['vault_rules', { scope: 'agent:shared', filter: 'cargo' }],
+    ['vault_ego', { path: '/v/x.md', limit: 12 }],
     ['vault_health', undefined],
   ])
 })
@@ -191,4 +254,21 @@ test('every button runs a subcommand the Rust allowlist has, and the allowlist h
   // `stale` has no button: the health panel runs it (`loadHealth`).
   expect(new Set([...ACTIONS.map((a) => a.command), 'stale'])).toEqual(new Set(allow))
   expect(ACTIONS.filter((a) => a.destructive).map((a) => a.id)).toEqual(['disable', 'rewrites-apply'])
+})
+
+test('graph, the old name of the health screen, opens health', () => {
+  const s = createVaultStore(fake())
+  s.getState().setMode('pages')
+  s.getState().setMode('graph')
+  expect(s.getState().mode).toBe('health')
+})
+
+test('every command the client invokes is registered in the vault block of lib.rs', () => {
+  const block = /\/\/ -- vault commands --([^/]*)/.exec(libRs)![1]
+  const registered = [...block.matchAll(/vault::(\w+)/g)].map((m) => m[1])
+  const invoked: string[] = []
+  const c = makeVaultClient(async <T,>(cmd: string) => (invoked.push(cmd), undefined as T))
+  void Promise.all([c.tree(), c.page(''), c.run('', [], ''), c.rules('', ''), c.ego('', 1), c.health()])
+  expect(registered.sort()).toEqual(invoked.sort())
+  for (const cmd of invoked) expect(vaultRs).toContain(`pub async fn ${cmd}(`)
 })

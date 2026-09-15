@@ -40,11 +40,13 @@ export type GraphProps = {
    *  changes between polls update in place, so a node appearing or vanishing never
    *  re-lays the whole canvas under the user. */
   fitKey?: string
+  /** Lowest zoom fitView may pick; below it the canvas pans instead of shrinking the cards. */
+  fitMinZoom?: number
 }
 
 /** Themed React Flow canvas with the `card` node type. Layout is the caller's job
  *  (see `layoutDagre`); this only renders and reports clicks. */
-export default function Graph({ nodes, edges, onNodeClick, onNodeDoubleClick, fitKey }: GraphProps) {
+export default function Graph({ nodes, edges, onNodeClick, onNodeDoubleClick, fitKey, fitMinZoom = 0.2 }: GraphProps) {
   const key = useMemo(() => fitKey ?? 'graph', [fitKey])
   return (
     <div className="gr-canvas">
@@ -54,8 +56,8 @@ export default function Graph({ nodes, edges, onNodeClick, onNodeDoubleClick, fi
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
-        minZoom={0.2}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1.2, minZoom: fitMinZoom }}
+        minZoom={Math.min(0.2, fitMinZoom)}
         nodesDraggable
         nodesConnectable={false}
         elementsSelectable

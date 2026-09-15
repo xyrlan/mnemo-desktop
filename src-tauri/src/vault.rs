@@ -1,5 +1,6 @@
-//! Vault pane: the mnemo vault on disk, read-only, plus seven `mnemo` subcommands, a rule
-//! graph with fire counts (`vault_graph`) and a health report (`vault_health`).
+//! Vault pane: the mnemo vault on disk, read-only, plus seven `mnemo` subcommands, the rules
+//! of the health table with their heat and badges (`vault_rules`), the neighbourhood of one
+//! rule (`vault_ego`) and a health report (`vault_health`).
 //!
 //! The vault root is whatever `mnemo status` names (`Vault: <path>`). Inside it,
 //! pages are Markdown files with YAML frontmatter: an agent's own under
@@ -7,12 +8,12 @@
 //! with `_` (`_inbox`, `_archive`) hold staged or retired pages and are skipped.
 //!
 //! Reading is pure (`parse_frontmatter`, `parse_page`, `read_tree`, `page_at`, `count_fires`,
-//! `build_graph`, `parse_tiles`, `review`), `mnemo` is confined to `// -- io --`, and
+//! `rule_rows`, `ego_graph`, `parse_tiles`, `review`), `mnemo` is confined to `// -- io --`, and
 //! `vault_run` only ever runs an allowlisted subcommand with checked arguments (`check_run`).
 //! `vault_health` runs `status` and `doctor` itself, with no argument from the front-end.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -419,11 +420,13 @@ pub fn page_at(root: &Path, path: &str) -> Page {
 
 // ---------------------------------------------------------------- fires --
 
-/// How often a rule fired and when it last did (ms since the epoch).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// How often a rule fired, when it last did, and when each dated fire was (ms since the epoch).
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Fire {
     pub count: u32,
     pub last: Option<u64>,
+    /// One per fire whose row carried a timestamp, in log order: what `heat` decays.
+    pub times: Vec<u64>,
 }
 
 /// Rule key (a slug, or the page name an MCP read asked for) → its fires.
@@ -458,6 +461,7 @@ fn bump(fires: &mut Fires, key: &str, ts: Option<&str>) {
     f.count += 1;
     let at = ts.and_then(crate::mission::iso_ms);
     f.last = f.last.max(at);
+    f.times.extend(at);
 }
 
 /// Fires from the reflex log (each `emitted` id) and the MCP access log (each
@@ -489,33 +493,156 @@ pub fn read_fires(root: &Path) -> Fires {
 
 /// A page's fires, by slug and, when an MCP read named it that way, by name.
 pub fn fire_of(fires: &Fires, page: &PageInfo) -> Fire {
-    let by_slug = fires.get(&page.slug).copied().unwrap_or_default();
+    let by_slug = fires.get(&page.slug).cloned().unwrap_or_default();
     match fires.get(&page.name) {
-        Some(n) if page.name != page.slug => Fire { count: by_slug.count + n.count, last: by_slug.last.max(n.last) },
+        Some(n) if page.name != page.slug => Fire {
+            count: by_slug.count + n.count,
+            last: by_slug.last.max(n.last),
+            times: by_slug.times.iter().chain(&n.times).copied().collect(),
+        },
         _ => by_slug,
     }
 }
 
-// ---------------------------------------------------------------- graph --
+/// A fire this many days old counts half as much as one now.
+pub const HEAT_HALF_LIFE_DAYS: f64 = 30.0;
 
-/// The most rule nodes a graph holds; the hottest are kept. The vault has thousands of
-/// shared pages, and a canvas past a few hundred cards reads as noise.
-pub const MAX_GRAPH_NODES: usize = 200;
+/// Fires with a 30-day half-life as of `now`: a fire today is 1, a month ago 0.5. A fire in
+/// the future (another machine's clock) counts as now; an undated one counts nothing.
+pub fn heat(fire: &Fire, now: u64) -> f64 {
+    let half_life = HEAT_HALF_LIFE_DAYS * DAY_MS as f64;
+    fire.times.iter().map(|t| 0.5f64.powf(now.saturating_sub(*t) as f64 / half_life)).sum()
+}
+
+// ---------------------------------------------------------------- rules --
+
+/// A shared or project page and the agent it belongs to: what the table and the ego graph read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePage {
+    /// `shared`, or the repo agent's name.
+    pub agent: String,
+    pub page: Page,
+}
+
+/// One row of the health table.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct RuleRow {
+    pub path: String,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "type")]
+    pub page_type: String,
+    /// `shared`, or the repo agent the page belongs to.
+    pub agent: String,
+    pub confidence: Option<String>,
+    pub topics: Vec<String>,
+    /// Reflex emissions plus MCP reads, all time.
+    pub fires: u32,
+    /// ms since the epoch.
+    pub last_fired: Option<u64>,
+    /// Fires decayed with a `HEAT_HALF_LIFE_DAYS` half-life; the rows come sorted by it.
+    pub heat: f64,
+    /// `never` (no fire on record), `review` (see `reasons`), `inbox` (a proposal with this
+    /// slug is staged in an `_inbox`). `stale` is the front-end's to add: `mnemo stale` checks
+    /// a repo, and this command has none.
+    pub badges: Vec<String>,
+    /// Why `review`: `verified without evidence`, `has activates_on, never fired`, …
+    pub reasons: Vec<String>,
+}
+
+/// Every term (case-folded, split on whitespace) appears in the name, slug, description,
+/// topics or body.
+pub fn page_matches(page: &PageInfo, filter: &str) -> bool {
+    let terms: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
+    if terms.is_empty() {
+        return true;
+    }
+    let hay = format!("{}\n{}\n{}\n{}\n{}", page.name, page.slug, page.description, page.topics.join(" "), page.body).to_lowercase();
+    terms.iter().all(|t| hay.contains(t.as_str()))
+}
+
+/// Does `page` fall in `scope`: empty or `all` is every live page, else `agent:<name>` or
+/// `topic:<name>` as `parse_scope` reads them.
+fn in_scope(scope: &Option<Scope>, p: &LivePage) -> bool {
+    match scope {
+        None => true,
+        Some(Scope::Agent(a)) => p.agent == *a,
+        Some(Scope::Topic(t)) => p.page.info.topics.iter().any(|x| x.trim().eq_ignore_ascii_case(t)),
+    }
+}
+
+fn read_scope(scope: &str) -> Result<Option<Scope>, String> {
+    match scope.trim() {
+        "" | "all" => Ok(None),
+        s => parse_scope(s).map(Some),
+    }
+}
+
+/// The table's rows: the pages in `scope` matching `filter`, hottest first, then by fires and name.
+pub fn rule_rows(pages: &[LivePage], scope: &str, filter: &str, fires: &Fires, inbox: &HashSet<String>, now: u64) -> Result<Vec<RuleRow>, String> {
+    let scope = read_scope(scope)?;
+    let mut rows: Vec<RuleRow> = pages
+        .iter()
+        .filter(|p| in_scope(&scope, p) && page_matches(&p.page.info, filter))
+        .map(|lp| {
+            let (p, info) = (&lp.page, &lp.page.info);
+            let fire = fire_of(fires, info);
+            let reasons = review_reasons(p, &fire, now);
+            let mut badges = Vec::new();
+            if fire.count == 0 {
+                badges.push("never".to_string());
+            }
+            if !reasons.is_empty() {
+                badges.push("review".to_string());
+            }
+            if inbox.contains(&info.slug) {
+                badges.push("inbox".to_string());
+            }
+            RuleRow {
+                path: info.path.clone(),
+                slug: info.slug.clone(),
+                name: info.name.clone(),
+                description: info.description.clone(),
+                page_type: info.page_type.clone(),
+                agent: lp.agent.clone(),
+                confidence: info.confidence.clone(),
+                topics: info.topics.clone(),
+                fires: fire.count,
+                last_fired: fire.last,
+                heat: heat(&fire, now),
+                badges,
+                reasons,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.heat
+            .total_cmp(&a.heat)
+            .then(b.fires.cmp(&a.fires))
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then(a.path.cmp(&b.path))
+    });
+    Ok(rows)
+}
+
+// ------------------------------------------------------------------ ego --
+
+/// The most nodes an ego graph holds, its centre included: past that a neighbourhood stops
+/// reading at a glance.
+pub const MAX_EGO_NODES: usize = 30;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct GraphNode {
-    /// The page path, or `topic:<name>` for a topic hub.
+    /// The page path.
     pub id: String,
-    /// `rule` or `topic`.
-    pub kind: String,
     pub label: String,
-    /// Empty for a topic hub.
     pub slug: String,
     #[serde(rename = "type")]
     pub page_type: String,
     pub confidence: Option<String>,
     pub topics: Vec<String>,
-    /// Reflex emissions plus MCP reads; for a hub, how many of the graph's rules carry the topic.
+    /// Reflex emissions plus MCP reads.
     pub fires: u32,
     /// ms since the epoch.
     pub last_fired: Option<u64>,
@@ -526,17 +653,21 @@ pub struct GraphEdge {
     pub id: String,
     pub source: String,
     pub target: String,
-    /// `link` (a `[[wikilink]]` from source to target) or `topic` (rule → its topic hub).
+    /// `link` (a `[[wikilink]]` from source to target) or `topic` (the centre and a neighbour
+    /// share topics, named in `label`).
     pub kind: String,
+    /// The shared topics of a `topic` edge, `, `-joined; empty for a link.
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct VaultGraph {
-    /// The scope as asked.
-    pub scope: String,
+    /// The centre's path, as asked.
+    pub center: String,
+    /// The centre first, then its neighbours: linked pages, then those sharing the most topics.
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
-    /// Rule pages in scope before `MAX_GRAPH_NODES` cut them.
+    /// Neighbours found before the node limit cut them.
     pub total: usize,
     pub error: Option<String>,
 }
@@ -590,90 +721,125 @@ pub fn wikilinks(body: &str) -> Vec<String> {
     out
 }
 
-/// The graph of `pages`: rules keyed by path, edges from wikilinks that land on another page
-/// of the graph, and a hub per topic two or more of them share (the scope's own topic, which
-/// every page has, excepted). Keeps the `MAX_GRAPH_NODES` hottest.
-pub fn build_graph(scope: &str, pages: Vec<PageInfo>, fires: &Fires, scope_topic: Option<&str>) -> VaultGraph {
-    let total = pages.len();
-    let mut rules: Vec<(PageInfo, Fire)> = pages.into_iter().map(|p| (fire_of(fires, &p), p)).map(|(fire, page)| (page, fire)).collect();
-    rules.sort_by(|(a, fa), (b, fb)| fb.count.cmp(&fa.count).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())).then(a.path.cmp(&b.path)));
-    rules.truncate(MAX_GRAPH_NODES);
-
-    let stems: Vec<String> = rules.iter().map(|(p, _)| Path::new(&p.path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()).collect();
-    let mut edges = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for (p, _) in &rules {
-        for target in wikilinks(&p.body) {
-            let last = target.rsplit('/').next().unwrap_or(&target);
-            let hit = rules.iter().zip(&stems).find(|((q, _), stem)| q.path != p.path && (q.slug == last || *stem == last));
-            if let Some(((q, _), _)) = hit {
-                if seen.insert((p.path.clone(), q.path.clone())) {
-                    edges.push(GraphEdge { id: format!("link:{}->{}", p.path, q.path), source: p.path.clone(), target: q.path.clone(), kind: "link".into() });
-                }
-            }
-        }
-    }
-
-    // Topic → the rules carrying it, in node order; case-folded so `Testing` and `testing` meet.
-    let mut topics: Vec<(String, Vec<&str>)> = Vec::new();
-    let skip = scope_topic.map(str::to_lowercase);
-    for (p, _) in &rules {
-        let own: Vec<String> = p.topics.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty() && Some(t) != skip.as_ref()).collect();
-        for t in own {
-            match topics.iter_mut().find(|(name, _)| *name == t) {
-                Some((_, ids)) if !ids.contains(&p.path.as_str()) => ids.push(&p.path),
-                Some(_) => {}
-                None => topics.push((t, vec![&p.path])),
-            }
-        }
-    }
-    topics.retain(|(_, ids)| ids.len() >= 2);
-    topics.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut nodes: Vec<GraphNode> = rules
-        .iter()
-        .map(|(p, f)| GraphNode {
-            id: p.path.clone(),
-            kind: "rule".into(),
-            label: p.name.clone(),
-            slug: p.slug.clone(),
-            page_type: p.page_type.clone(),
-            confidence: p.confidence.clone(),
-            topics: p.topics.clone(),
-            fires: f.count,
-            last_fired: f.last,
-        })
-        .collect();
-    for (t, ids) in &topics {
-        let hub = format!("topic:{t}");
-        for id in ids {
-            edges.push(GraphEdge { id: format!("topic:{id}->{t}"), source: id.to_string(), target: hub.clone(), kind: "topic".into() });
-        }
-        nodes.push(GraphNode { id: hub, kind: "topic".into(), label: format!("#{t}"), fires: ids.len() as u32, ..Default::default() });
-    }
-    VaultGraph { scope: scope.to_string(), nodes, edges, total, error: None }
+fn stem(path: &str) -> &str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.strip_suffix(".md").unwrap_or(file)
 }
 
-/// The graph a scope names, read from the vault at `root`.
-pub fn graph_at(root: &Path, scope: &str, fires: &Fires) -> VaultGraph {
-    let fail = |e: String| VaultGraph { scope: scope.to_string(), error: Some(e), ..Default::default() };
-    let infos = |dir: &Path| page_files(dir).iter().filter_map(|f| read_page(f)).map(|p| p.info).collect::<Vec<_>>();
-    match parse_scope(scope) {
-        Err(e) => fail(e),
-        Ok(Scope::Agent(name)) => match agent_dirs(root).into_iter().find(|(n, _, _)| *n == name) {
-            Some((_, _, dir)) => build_graph(scope, infos(&dir), fires, None),
-            None => fail(format!("{name}: no such agent in the vault")),
-        },
-        Ok(Scope::Topic(topic)) => {
-            let pages = agent_dirs(root)
-                .into_iter()
-                .filter(|(_, kind, _)| *kind != "other")
-                .flat_map(|(_, _, dir)| infos(&dir))
-                .filter(|p| p.topics.iter().any(|t| t.trim().eq_ignore_ascii_case(&topic)))
-                .collect();
-            build_graph(scope, pages, fires, Some(&topic))
+fn parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(d, _)| d)
+}
+
+/// The page a wikilink in `from` lands on: for `dir/target`, a path ending in it; else a slug
+/// or file stem equal to its last segment, a page in `from`'s own folder first.
+fn resolve(target: &str, from: &PageInfo, pages: &[PageInfo]) -> Option<usize> {
+    let last = target.rsplit('/').next().unwrap_or(target);
+    let suffix = format!("/{target}.md");
+    let hit = |p: &PageInfo| p.path != from.path && (p.path.ends_with(&suffix) || p.slug == last || stem(&p.path) == last);
+    let by_path = || if target.contains('/') { pages.iter().position(|p| p.path != from.path && p.path.ends_with(&suffix)) } else { None };
+    by_path()
+        .or_else(|| pages.iter().position(|p| hit(p) && parent(&p.path) == parent(&from.path)))
+        .or_else(|| pages.iter().position(hit))
+}
+
+fn folded_topics(p: &PageInfo) -> Vec<String> {
+    let mut out: Vec<String> = p.topics.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The neighbourhood of the page at `path` among `pages`: pages it links to or that link to
+/// it, then pages sharing its topics (most shared first, then hottest), `limit` nodes at most
+/// (0 or anything past `MAX_EGO_NODES` means `MAX_EGO_NODES`). Links between any two kept
+/// nodes are edges; each topic neighbour gets one `topic` edge from the centre.
+pub fn ego_graph(path: &str, pages: &[PageInfo], fires: &Fires, limit: u32, now: u64) -> VaultGraph {
+    let Some(c) = pages.iter().position(|p| p.path == path) else {
+        return VaultGraph { center: path.to_string(), error: Some(format!("{path}: not a rule in the vault")), ..Default::default() };
+    };
+    let limit = match limit as usize {
+        0 => MAX_EGO_NODES,
+        n => n.min(MAX_EGO_NODES),
+    };
+    let centre = &pages[c];
+
+    let mut linked: Vec<usize> = Vec::new();
+    for t in wikilinks(&centre.body) {
+        if let Some(i) = resolve(&t, centre, pages) {
+            linked.push(i);
         }
     }
+    let (centre_slug, centre_stem) = (centre.slug.as_str(), stem(&centre.path));
+    for (i, p) in pages.iter().enumerate() {
+        if i == c {
+            continue;
+        }
+        // Cheap test on the last segment first; `resolve` confirms it lands on the centre.
+        let names_centre = |t: &String| {
+            let last = t.rsplit('/').next().unwrap_or(t);
+            (last == centre_slug || last == centre_stem) && resolve(t, p, pages) == Some(c)
+        };
+        if wikilinks(&p.body).iter().any(names_centre) {
+            linked.push(i);
+        }
+    }
+    let mut seen = HashSet::new();
+    linked.retain(|i| *i != c && seen.insert(*i));
+    let hot = |i: usize| heat(&fire_of(fires, &pages[i]), now);
+    let by_heat = |a: &usize, b: &usize| hot(*b).total_cmp(&hot(*a)).then(pages[*a].name.to_lowercase().cmp(&pages[*b].name.to_lowercase()));
+    linked.sort_by(by_heat);
+
+    let own = folded_topics(centre);
+    let mut topical: Vec<(usize, Vec<String>)> = pages
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != c && !seen.contains(i))
+        .filter_map(|(i, p)| {
+            let shared: Vec<String> = folded_topics(p).into_iter().filter(|t| own.contains(t)).collect();
+            (!shared.is_empty()).then_some((i, shared))
+        })
+        .collect();
+    topical.sort_by(|(a, sa), (b, sb)| sb.len().cmp(&sa.len()).then(by_heat(a, b)).then(pages[*a].path.cmp(&pages[*b].path)));
+
+    let total = linked.len() + topical.len();
+    let room = limit - 1;
+    linked.truncate(room);
+    topical.truncate(room - linked.len());
+
+    let kept: Vec<usize> = std::iter::once(c).chain(linked.iter().copied()).chain(topical.iter().map(|(i, _)| *i)).collect();
+    let nodes = kept
+        .iter()
+        .map(|&i| {
+            let (p, f) = (&pages[i], fire_of(fires, &pages[i]));
+            GraphNode {
+                id: p.path.clone(),
+                label: p.name.clone(),
+                slug: p.slug.clone(),
+                page_type: p.page_type.clone(),
+                confidence: p.confidence.clone(),
+                topics: p.topics.clone(),
+                fires: f.count,
+                last_fired: f.last,
+            }
+        })
+        .collect();
+
+    let mut edges = Vec::new();
+    let mut pairs = HashSet::new();
+    for &i in &kept {
+        for t in wikilinks(&pages[i].body) {
+            let Some(j) = resolve(&t, &pages[i], pages) else { continue };
+            if j != i && kept.contains(&j) && pairs.insert((i, j)) {
+                let (s, d) = (&pages[i].path, &pages[j].path);
+                edges.push(GraphEdge { id: format!("link:{s}->{d}"), source: s.clone(), target: d.clone(), kind: "link".into(), label: String::new() });
+            }
+        }
+    }
+    for (i, shared) in &topical {
+        let (s, d) = (&centre.path, &pages[*i].path);
+        edges.push(GraphEdge { id: format!("topic:{s}->{d}"), source: s.clone(), target: d.clone(), kind: "topic".into(), label: shared.join(", ") });
+    }
+    VaultGraph { center: path.to_string(), nodes, edges, total, error: None }
 }
 
 // --------------------------------------------------------------- health --
@@ -776,6 +942,25 @@ fn is_label_only(page: &Page) -> bool {
 
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
+/// `activates_on` set, yet not fired in `DORMANT_DAYS` as of `now`: why, else None.
+fn dormant_reason(page: &Page, fire: &Fire, now: u64) -> Option<String> {
+    let cutoff = now.saturating_sub(DORMANT_DAYS * DAY_MS);
+    if !has_key(page, "activates_on") || fire.last.is_some_and(|t| t >= cutoff) {
+        return None;
+    }
+    Some(match fire.last {
+        None => "has activates_on, never fired".to_string(),
+        Some(t) => format!("has activates_on, last fired {} days ago", now.saturating_sub(t) / DAY_MS),
+    })
+}
+
+const LABEL_ONLY: &str = "verified without evidence";
+
+/// Why `page` needs review as of `now`: verified without evidence, a dormant activation.
+pub fn review_reasons(page: &Page, fire: &Fire, now: u64) -> Vec<String> {
+    is_label_only(page).then(|| LABEL_ONLY.to_string()).into_iter().chain(dormant_reason(page, fire, now)).collect()
+}
+
 /// The needs-review lists and counts over `pages`, as of `now` (ms since the epoch).
 pub fn review(pages: &[Page], fires: &Fires, now: u64) -> (Vec<Review>, Vec<Review>, usize) {
     let item = |p: &Page, reason: String| Review { path: p.info.path.clone(), slug: p.info.slug.clone(), name: p.info.name.clone(), reason };
@@ -788,14 +973,9 @@ pub fn review(pages: &[Page], fires: &Fires, now: u64) -> (Vec<Review>, Vec<Revi
             never += 1;
         }
         if is_label_only(p) {
-            label_only.push(item(p, "verified without evidence".into()));
+            label_only.push(item(p, LABEL_ONLY.into()));
         }
-        let cutoff = now.saturating_sub(DORMANT_DAYS * DAY_MS);
-        if has_key(p, "activates_on") && fire.last.is_none_or(|t| t < cutoff) {
-            let reason = match fire.last {
-                None => "has activates_on, never fired".to_string(),
-                Some(t) => format!("has activates_on, last fired {} days ago", now.saturating_sub(t) / DAY_MS),
-            };
+        if let Some(reason) = dormant_reason(p, &fire, now) {
             dormant.push(item(p, reason));
         }
     }
@@ -806,34 +986,53 @@ pub fn review(pages: &[Page], fires: &Fires, now: u64) -> (Vec<Review>, Vec<Revi
 }
 
 /// `.md` files under `shared/_inbox` and each agent's `memory/_inbox`, `rejected-*` folders skipped.
-pub fn count_inbox(root: &Path) -> usize {
-    fn walk(dir: &Path, depth: usize) -> usize {
-        let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
-        rd.flatten()
-            .map(|e| e.path())
-            .map(|p| {
-                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if name.starts_with('.') || name.starts_with("rejected") {
-                    0
-                } else if p.is_dir() {
-                    if depth > 1 { walk(&p, depth - 1) } else { 0 }
-                } else {
-                    usize::from(name.ends_with(".md"))
+pub fn inbox_files(root: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for p in entries {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            if name.starts_with('.') || name.starts_with("rejected") {
+                continue;
+            }
+            if p.is_dir() {
+                if depth > 1 {
+                    walk(&p, depth - 1, out);
                 }
-            })
-            .sum()
+            } else if name.ends_with(".md") {
+                out.push(p);
+            }
+        }
     }
-    agent_dirs(root).iter().map(|(_, _, dir)| walk(&dir.join("_inbox"), 3)).sum()
+    let mut out = Vec::new();
+    for (_, _, dir) in agent_dirs(root) {
+        walk(&dir.join("_inbox"), 3, &mut out);
+    }
+    out
+}
+
+pub fn count_inbox(root: &Path) -> usize {
+    inbox_files(root).len()
+}
+
+/// The slugs the staged proposals would write: a live page with one of them has a rewrite waiting.
+pub fn inbox_slugs(root: &Path) -> HashSet<String> {
+    inbox_files(root).iter().filter_map(|f| read_page(f)).map(|p| p.info.slug).collect()
+}
+
+/// Every shared and project page, noise agents left out, in `agent_dirs` order.
+pub fn live_pages(root: &Path) -> Vec<LivePage> {
+    agent_dirs(root)
+        .into_iter()
+        .filter(|(_, kind, _)| *kind != "other")
+        .flat_map(|(agent, _, dir)| page_files(&dir).into_iter().filter_map(|f| read_page(&f)).map(move |page| LivePage { agent: agent.clone(), page }))
+        .collect()
 }
 
 /// Everything in `Health` that reads the disk only: shared and project pages, noise left out.
 pub fn health_at(root: &Path, fires: &Fires, now: u64) -> Health {
-    let pages: Vec<Page> = agent_dirs(root)
-        .into_iter()
-        .filter(|(_, kind, _)| *kind != "other")
-        .flat_map(|(_, _, dir)| page_files(&dir))
-        .filter_map(|f| read_page(&f))
-        .collect();
+    let pages: Vec<Page> = live_pages(root).into_iter().map(|p| p.page).collect();
     let (label_only, dormant, never_fired) = review(&pages, fires, now);
     Health {
         root: Some(root.to_string_lossy().replace('\\', "/")),
@@ -1008,11 +1207,72 @@ pub async fn vault_run(action: String, args: Vec<String>, cwd: String) -> RunRes
         .unwrap_or_else(|e| RunResult { stderr: e.to_string(), ..Default::default() })
 }
 
+/// What the table and the ego graph read, kept `PAGES_TTL` so typing in the filter or clicking
+/// through neighbours does not re-read a few thousand files each time.
+struct PagesCache {
+    root: PathBuf,
+    at: std::time::Instant,
+    pages: std::sync::Arc<Vec<LivePage>>,
+    inbox: std::sync::Arc<HashSet<String>>,
+    fires: std::sync::Arc<Fires>,
+}
+
+const PAGES_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+static PAGES: std::sync::Mutex<Option<PagesCache>> = std::sync::Mutex::new(None);
+
+type Snapshot = (std::sync::Arc<Vec<LivePage>>, std::sync::Arc<HashSet<String>>, std::sync::Arc<Fires>);
+
+/// The live pages, inbox slugs and fires of the vault at `root`, from the cache when fresh.
+fn snapshot(root: &Path) -> Snapshot {
+    if let Ok(guard) = PAGES.lock() {
+        if let Some(c) = guard.as_ref().filter(|c| c.root == root && c.at.elapsed() < PAGES_TTL) {
+            return (c.pages.clone(), c.inbox.clone(), c.fires.clone());
+        }
+    }
+    let fresh = PagesCache {
+        root: root.to_path_buf(),
+        at: std::time::Instant::now(),
+        pages: std::sync::Arc::new(live_pages(root)),
+        inbox: std::sync::Arc::new(inbox_slugs(root)),
+        fires: std::sync::Arc::new(read_fires(root)),
+    };
+    let out = (fresh.pages.clone(), fresh.inbox.clone(), fresh.fires.clone());
+    if let Ok(mut guard) = PAGES.lock() {
+        *guard = Some(fresh);
+    }
+    out
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+const NO_VAULT: &str = "no mnemo vault found (`mnemo status` names none)";
+
+/// The health table: rules in `scope` (empty, `agent:<name>` or `topic:<name>`) matching
+/// `filter`, hottest first. No vault or a bad scope is no rows.
 #[tauri::command]
-pub async fn vault_graph(scope: String) -> VaultGraph {
+pub async fn vault_rules(scope: String, filter: String) -> Vec<RuleRow> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(root) = vault_root() else { return vec![] };
+        let (pages, inbox, fires) = snapshot(&root);
+        rule_rows(&pages, &scope, &filter, &fires, &inbox, now_ms()).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The page at `path` and at most `limit` (≤ `MAX_EGO_NODES`) nodes of its neighbourhood.
+#[tauri::command]
+pub async fn vault_ego(path: String, limit: u32) -> VaultGraph {
     tauri::async_runtime::spawn_blocking(move || match vault_root() {
-        Some(root) => graph_at(&root, &scope, &read_fires(&root)),
-        None => VaultGraph { scope: scope.clone(), error: Some("no mnemo vault found (`mnemo status` names none)".into()), ..Default::default() },
+        Some(root) => {
+            let (pages, _, fires) = snapshot(&root);
+            let infos: Vec<PageInfo> = pages.iter().map(|p| p.page.info.clone()).collect();
+            ego_graph(&path, &infos, &fires, limit, now_ms())
+        }
+        None => VaultGraph { center: path.clone(), error: Some(NO_VAULT.into()), ..Default::default() },
     })
     .await
     .unwrap_or_else(|e| VaultGraph { error: Some(e.to_string()), ..Default::default() })
@@ -1026,10 +1286,9 @@ pub async fn vault_health() -> Health {
             let doctor = s.spawn(|| exec("mnemo", &path, "doctor", &[], ""));
             (exec("mnemo", &path, "status", &[], ""), doctor.join().unwrap_or_default())
         });
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         let mut health = match vault_root() {
-            Some(root) => health_at(&root, &read_fires(&root), now),
-            None => Health { error: Some("no mnemo vault found (`mnemo status` names none)".into()), ..Default::default() },
+            Some(root) => health_at(&root, &read_fires(&root), now_ms()),
+            None => Health { error: Some(NO_VAULT.into()), ..Default::default() },
         };
         health.tiles = parse_tiles(&status.stdout);
         health.status = status;
@@ -1296,6 +1555,12 @@ mod tests {
         read_fires(Path::new(FIXTURE))
     }
 
+    /// The fire of rows dated `times`, in log order.
+    fn fire(times: &[&str]) -> Fire {
+        let times: Vec<u64> = times.iter().map(|t| crate::mission::iso_ms(t).unwrap()).collect();
+        Fire { count: times.len() as u32, last: times.iter().max().copied(), times }
+    }
+
     #[test]
     fn rule_ids_name_their_slug() {
         assert_eq!(rule_slug("mnemo-desktop__shared-target-dir"), "shared-target-dir");
@@ -1306,10 +1571,10 @@ mod tests {
     #[test]
     fn fires_count_reflex_emissions_and_mcp_reads_not_candidates_or_other_tools() {
         let fires = fixture_fires();
-        let at = |s: &str| crate::mission::iso_ms(s);
-        assert_eq!(fires.get("run-tests-before-commit"), Some(&Fire { count: 2, last: at("2026-09-15T11:00:00Z") }));
-        assert_eq!(fires.get("Run the full test suite before committing"), Some(&Fire { count: 1, last: at("2026-09-12T10:00:00Z") }));
-        assert_eq!(fires.get("shared-target-dir"), Some(&Fire { count: 2, last: at("2026-09-15T11:00:00Z") }));
+        assert_eq!(fires.get("run-tests-before-commit"), Some(&fire(&["2026-09-14T08:00:00Z", "2026-09-15T11:00:00Z"])));
+        assert_eq!(fires.get("Run the full test suite before committing"), Some(&fire(&["2026-09-12T10:00:00Z"])));
+        // The rotated log is read first.
+        assert_eq!(fires.get("shared-target-dir"), Some(&fire(&["2026-09-01T10:00:00Z", "2026-09-15T11:00:00Z"])));
         assert_eq!(fires.get("no-silent-contract-changes").map(|f| f.count), Some(1));
         assert_eq!(fires.get("dormant-activation").map(|f| f.count), Some(1));
         // A candidate that did not fire, and a `list_rules_by_topic` hit, are not fires.
@@ -1322,21 +1587,111 @@ mod tests {
     fn a_page_fires_by_slug_and_by_name() {
         let fires = fixture_fires();
         let page = page_at(Path::new(FIXTURE), &format!("{FIXTURE}/shared/feedback/run-tests-before-commit.md")).info;
-        assert_eq!(fire_of(&fires, &page), Fire { count: 3, last: crate::mission::iso_ms("2026-09-15T11:00:00Z") });
+        assert_eq!(fire_of(&fires, &page), fire(&["2026-09-14T08:00:00Z", "2026-09-15T11:00:00Z", "2026-09-12T10:00:00Z"]));
     }
 
-    // ---- graph
+    // ---- rules
 
     fn fixture() -> String {
         FIXTURE.replace('\\', "/")
+    }
+
+    fn rows_of(scope: &str, filter: &str) -> Result<Vec<RuleRow>, String> {
+        let root = Path::new(FIXTURE);
+        rule_rows(&live_pages(root), scope, filter, &fixture_fires(), &inbox_slugs(root), NOW)
+    }
+
+    fn slugs(rows: &[RuleRow]) -> Vec<&str> {
+        rows.iter().map(|r| r.slug.as_str()).collect()
+    }
+
+    #[test]
+    fn heat_halves_every_thirty_days_and_ignores_undated_fires() {
+        let day = |d: u64| NOW - d * DAY_MS;
+        let fire = |times: Vec<u64>| Fire { count: times.len() as u32 + 1, last: times.iter().max().copied(), times };
+        assert_eq!(heat(&fire(vec![NOW]), NOW), 1.0);
+        assert!((heat(&fire(vec![day(30)]), NOW) - 0.5).abs() < 1e-9);
+        assert!((heat(&fire(vec![day(60), day(30), NOW]), NOW) - 1.75).abs() < 1e-9);
+        // Another machine's clock ahead of ours: counts as now, never more.
+        assert_eq!(heat(&fire(vec![NOW + DAY_MS]), NOW), 1.0);
+        assert_eq!(heat(&Fire { count: 4, last: None, times: vec![] }, NOW), 0.0);
+    }
+
+    #[test]
+    fn rows_are_every_live_rule_hottest_first_with_their_badges_and_reasons() {
+        let rows = rows_of("", "").unwrap();
+        // Heat, not count: shared-target-dir (2 fires, one a fortnight old) passes
+        // no-silent-contract-changes (1), and dormant-activation's July fire has cooled to almost nothing.
+        assert_eq!(slugs(&rows), ["run-tests-before-commit", "shared-target-dir", "no-silent-contract-changes", "dormant-activation", "verified-without-evidence"]);
+        let view: Vec<(&str, &str, u32, Vec<&str>, Vec<&str>)> = rows
+            .iter()
+            .map(|r| (r.slug.as_str(), r.agent.as_str(), r.fires, r.badges.iter().map(String::as_str).collect(), r.reasons.iter().map(String::as_str).collect()))
+            .collect();
+        assert_eq!(
+            view,
+            [
+                ("run-tests-before-commit", "shared", 3, vec!["inbox"], vec![]),
+                ("shared-target-dir", "mnemo-desktop", 2, vec![], vec![]),
+                ("no-silent-contract-changes", "mnemo-desktop", 1, vec![], vec![]),
+                ("dormant-activation", "shared", 1, vec!["review"], vec!["has activates_on, last fired 76 days ago"]),
+                ("verified-without-evidence", "shared", 0, vec!["never", "review"], vec!["verified without evidence", "has activates_on, never fired"]),
+            ]
+        );
+        let run = &rows[0];
+        assert!((run.heat - 2.9037).abs() < 1e-3, "{}", run.heat);
+        assert_eq!((run.name.as_str(), run.page_type.as_str(), run.confidence.as_deref()), ("Run the full test suite before committing", "feedback", Some("verified")));
+        assert_eq!(run.last_fired, crate::mission::iso_ms("2026-09-15T11:00:00Z"));
+        assert_eq!(run.path, format!("{}/shared/feedback/run-tests-before-commit.md", fixture()));
+        assert_eq!(rows[4].heat, 0.0);
+        assert_eq!(rows[4].last_fired, None);
+    }
+
+    #[test]
+    fn rows_narrow_to_a_scope_and_to_every_filter_term() {
+        assert_eq!(slugs(&rows_of("agent:mnemo-desktop", "").unwrap()), ["shared-target-dir", "no-silent-contract-changes"]);
+        assert_eq!(slugs(&rows_of("all", "").unwrap()).len(), 5);
+        assert_eq!(slugs(&rows_of("topic:BUILD", "").unwrap()), ["shared-target-dir", "dormant-activation"]);
+        // Terms match name, description, topics and body, case-folded, all of them.
+        assert_eq!(slugs(&rows_of("", "cargo TARGET").unwrap()), ["shared-target-dir"]);
+        assert_eq!(slugs(&rows_of("", "workflow").unwrap()), ["run-tests-before-commit", "dormant-activation"]);
+        assert_eq!(slugs(&rows_of("shared", "diff claiming").unwrap()), ["verified-without-evidence"]);
+        assert!(rows_of("", "cargo nothing-matches").unwrap().is_empty());
+        // Noise agents are not rules of the table.
+        assert!(rows_of("agent:bg-T-pytest-of-user-pytest-12-test-lean-child0-lean", "").unwrap().is_empty());
+        assert!(rows_of("agent:../x", "").is_err());
+    }
+
+    #[test]
+    fn inbox_slugs_are_the_staged_proposals_not_the_rejected_ones() {
+        assert_eq!(inbox_slugs(Path::new(FIXTURE)), HashSet::from(["run-tests-before-commit".to_string()]));
+        assert_eq!(count_inbox(Path::new(FIXTURE)), 1);
+    }
+
+    #[test]
+    fn rows_serialize_with_type_and_snake_case_keys() {
+        let v = serde_json::to_value(&rows_of("", "").unwrap()[0]).unwrap();
+        assert_eq!(v["type"], "feedback");
+        assert_eq!(v["badges"][0], "inbox");
+        assert!(v["heat"].is_f64() && v["last_fired"].is_u64());
+    }
+
+    // ---- ego
+
+    fn ego_of(path: &str, limit: u32) -> VaultGraph {
+        let infos: Vec<PageInfo> = live_pages(Path::new(FIXTURE)).into_iter().map(|p| p.page.info).collect();
+        ego_graph(&format!("{}{path}", fixture()), &infos, &fixture_fires(), limit, NOW)
     }
 
     fn ids(g: &VaultGraph) -> Vec<String> {
         g.nodes.iter().map(|n| n.id.replace(&fixture(), "")).collect()
     }
 
-    fn edges(g: &VaultGraph) -> Vec<(String, String, String)> {
-        g.edges.iter().map(|e| (e.source.replace(&fixture(), ""), e.target.replace(&fixture(), ""), e.kind.clone())).collect()
+    fn edges(g: &VaultGraph) -> Vec<(String, String, String, String)> {
+        g.edges.iter().map(|e| (e.source.replace(&fixture(), ""), e.target.replace(&fixture(), ""), e.kind.clone(), e.label.clone())).collect()
+    }
+
+    fn e(s: &str, t: &str, kind: &str, label: &str) -> (String, String, String, String) {
+        (s.into(), t.into(), kind.into(), label.into())
     }
 
     #[test]
@@ -1356,76 +1711,95 @@ mod tests {
     }
 
     #[test]
-    fn agent_graph_holds_its_rules_hottest_first_with_links_and_shared_topic_hubs() {
-        let g = graph_at(Path::new(FIXTURE), "agent:shared", &fixture_fires());
+    fn ego_holds_the_centre_then_pages_it_links_to_and_from_across_agents() {
+        let g = ego_of("/bots/mnemo-desktop/memory/shared-target-dir.md", 30);
         assert_eq!(g.error, None);
-        assert_eq!(g.total, 3);
-        assert_eq!(
-            ids(&g),
-            ["/shared/feedback/run-tests-before-commit.md", "/shared/project/dormant-activation.md", "/shared/feedback/verified-without-evidence.md", "topic:testing", "topic:workflow"]
-        );
-        let run = &g.nodes[0];
-        assert_eq!((run.kind.as_str(), run.label.as_str(), run.slug.as_str(), run.fires), ("rule", "Run the full test suite before committing", "run-tests-before-commit", 3));
-        assert_eq!(run.confidence.as_deref(), Some("verified"));
-        assert_eq!(g.nodes[2].fires, 0);
-        assert_eq!(g.nodes[2].last_fired, None);
-        assert_eq!((g.nodes[3].kind.as_str(), g.nodes[3].label.as_str(), g.nodes[3].fires), ("topic", "#testing", 2));
-        // The link to a page outside the graph (`shared-target-dir`) and the briefing link are dropped.
+        // Out-link and in-link, hottest first; dormant-activation shares `build` but a link outranks that.
+        assert_eq!(ids(&g), ["/bots/mnemo-desktop/memory/shared-target-dir.md", "/bots/mnemo-desktop/memory/no-silent-contract-changes.md", "/shared/project/dormant-activation.md"]);
+        assert_eq!(g.total, 2);
         assert_eq!(
             edges(&g),
             [
-                ("/shared/feedback/verified-without-evidence.md".into(), "/shared/feedback/run-tests-before-commit.md".into(), "link".into()),
-                ("/shared/feedback/run-tests-before-commit.md".into(), "topic:testing".into(), "topic".into()),
-                ("/shared/feedback/verified-without-evidence.md".into(), "topic:testing".into(), "topic".into()),
-                ("/shared/feedback/run-tests-before-commit.md".into(), "topic:workflow".into(), "topic".into()),
-                ("/shared/project/dormant-activation.md".into(), "topic:workflow".into(), "topic".into()),
+                e("/bots/mnemo-desktop/memory/shared-target-dir.md", "/bots/mnemo-desktop/memory/no-silent-contract-changes.md", "link", ""),
+                e("/shared/project/dormant-activation.md", "/bots/mnemo-desktop/memory/shared-target-dir.md", "link", ""),
             ]
         );
-        let repo = graph_at(Path::new(FIXTURE), "mnemo-desktop", &fixture_fires());
-        assert_eq!(edges(&repo), [("/bots/mnemo-desktop/memory/shared-target-dir.md".into(), "/bots/mnemo-desktop/memory/no-silent-contract-changes.md".into(), "link".into())]);
+        let centre = &g.nodes[0];
+        assert_eq!((centre.label.as_str(), centre.slug.as_str(), centre.page_type.as_str(), centre.fires), ("shared-target-dir", "shared-target-dir", "project", 2));
     }
 
     #[test]
-    fn topic_graph_crosses_agents_skips_noise_and_has_no_hub_for_its_own_topic() {
-        let g = graph_at(Path::new(FIXTURE), "topic:BUILD", &fixture_fires());
-        assert_eq!(ids(&g), ["/bots/mnemo-desktop/memory/shared-target-dir.md", "/shared/project/dormant-activation.md"]);
-        assert_eq!(edges(&g), [("/shared/project/dormant-activation.md".into(), "/bots/mnemo-desktop/memory/shared-target-dir.md".into(), "link".into())]);
-        let user = graph_at(Path::new(FIXTURE), "topic:user", &fixture_fires());
-        assert!(user.nodes.is_empty() && user.error.is_none(), "{user:?}");
+    fn ego_adds_topic_neighbours_after_links_and_cuts_at_the_limit() {
+        let g = ego_of("/shared/feedback/run-tests-before-commit.md", 0);
+        assert_eq!(ids(&g), ["/shared/feedback/run-tests-before-commit.md", "/shared/feedback/verified-without-evidence.md", "/shared/project/dormant-activation.md"]);
+        // The briefing link lands on no page and is dropped.
+        assert_eq!(
+            edges(&g),
+            [
+                e("/shared/feedback/verified-without-evidence.md", "/shared/feedback/run-tests-before-commit.md", "link", ""),
+                e("/shared/feedback/run-tests-before-commit.md", "/shared/project/dormant-activation.md", "topic", "workflow"),
+            ]
+        );
+        let cut = ego_of("/shared/feedback/run-tests-before-commit.md", 2);
+        assert_eq!((ids(&cut).len(), cut.total, cut.edges.len()), (2, 2, 1));
+        assert_eq!(ego_of("/shared/feedback/run-tests-before-commit.md", 1).nodes.len(), 1);
     }
 
     #[test]
-    fn graph_refuses_unknown_agents_and_bad_scopes() {
-        let root = Path::new(FIXTURE);
-        assert!(graph_at(root, "agent:nope", &Fires::new()).error.unwrap().contains("no such agent"));
-        let bad = graph_at(root, "agent:../../etc", &Fires::new());
-        assert!(bad.error.is_some() && bad.nodes.is_empty());
-        assert_eq!(bad.scope, "agent:../../etc");
+    fn ego_ranks_topic_neighbours_by_topics_shared_then_heat_and_never_passes_thirty_nodes() {
+        let page = |slug: &str, topics: &[&str]| PageInfo { path: format!("/v/shared/feedback/{slug}.md"), slug: slug.into(), name: slug.into(), topics: strs(topics), ..Default::default() };
+        let mut pages = vec![page("centre", &["a", "B"]), page("one", &["a"]), page("hot", &["a"]), page("both", &["b", "A", "c"]), page("none", &["c"])];
+        pages.extend((0..60).map(|i| page(&format!("n{i:02}"), &["a"])));
+        let fires: Fires = [("hot".to_string(), Fire { count: 1, last: Some(NOW), times: vec![NOW] })].into();
+        let g = ego_graph("/v/shared/feedback/centre.md", &pages, &fires, 500, NOW);
+        let labels: Vec<&str> = g.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(&labels[..4], ["centre", "both", "hot", "n00"]);
+        assert_eq!((g.nodes.len(), g.total), (MAX_EGO_NODES, 63));
+        assert!(!labels.contains(&"none"));
+        assert_eq!(g.edges[0].label, "a, b");
     }
 
     #[test]
-    fn graph_keeps_the_hottest_rules_when_a_scope_is_too_big() {
-        let pages: Vec<PageInfo> = (0..MAX_GRAPH_NODES + 50)
-            .map(|i| PageInfo { path: format!("/v/p{i:03}.md"), slug: format!("p{i:03}"), name: format!("p{i:03}"), body: "[[p000]]".into(), ..Default::default() })
-            .collect();
-        let fires: Fires = [("p249".to_string(), Fire { count: 4, last: None })].into();
-        let g = build_graph("agent:big", pages, &fires, None);
-        assert_eq!((g.total, g.nodes.len()), (250, MAX_GRAPH_NODES));
-        assert_eq!(g.nodes[0].id, "/v/p249.md");
-        assert!(!g.nodes.iter().any(|n| n.id == "/v/p200.md"));
-        // Every kept page links to p000, but p000 does not link to itself.
-        assert_eq!(g.edges.len(), MAX_GRAPH_NODES - 1);
+    fn ego_links_resolve_to_the_page_in_the_same_folder_first() {
+        let page = |path: &str, body: &str| PageInfo { path: path.into(), slug: stem(path).into(), name: path.into(), body: body.into(), ..Default::default() };
+        let pages = vec![page("/v/bots/a/memory/x.md", ""), page("/v/bots/b/memory/centre.md", "[[x]] [[bots/a/memory/x]]"), page("/v/bots/b/memory/x.md", "")];
+        let g = ego_graph("/v/bots/b/memory/centre.md", &pages, &Fires::new(), 30, NOW);
+        let targets: Vec<&str> = g.edges.iter().map(|e| e.target.as_str()).collect();
+        assert_eq!(targets, ["/v/bots/b/memory/x.md", "/v/bots/a/memory/x.md"]);
     }
 
     #[test]
-    fn graph_serializes_with_type_and_camel_free_keys() {
-        let g = graph_at(Path::new(FIXTURE), "agent:mnemo-desktop", &fixture_fires());
-        let v = serde_json::to_value(&g).unwrap();
-        assert_eq!(v["nodes"][0]["type"], "project");
-        assert_eq!(v["nodes"][0]["fires"], 2);
-        assert!(v["nodes"][0]["last_fired"].is_u64());
-        assert_eq!(v["edges"][0]["kind"], "link");
+    fn ego_of_a_path_that_is_no_rule_is_an_error() {
+        let g = ego_of("/shared/_inbox/run-tests-before-commit.md", 30);
+        assert!(g.error.unwrap().contains("not a rule in the vault"));
+        assert!(g.nodes.is_empty());
+        let v = serde_json::to_value(&ego_of("/shared/feedback/run-tests-before-commit.md", 30)).unwrap();
+        assert_eq!(v["nodes"][0]["type"], "feedback");
+        assert_eq!(v["edges"][1]["label"], "workflow");
+        assert!(v["center"].as_str().unwrap().ends_with("run-tests-before-commit.md"));
         assert!(v["error"].is_null());
+    }
+
+    /// Against the real vault: `cargo test --lib vault_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn vault_live() {
+        let root = vault_root().expect("a mnemo vault");
+        let t = std::time::Instant::now();
+        let (pages, inbox, fires) = snapshot(&root);
+        let read = t.elapsed();
+        let t = std::time::Instant::now();
+        let rows = rule_rows(&pages, "", "", &fires, &inbox, now_ms()).unwrap();
+        let filtered = rule_rows(&pages, "", "test", &fires, &inbox, now_ms()).unwrap();
+        let ranked = t.elapsed();
+        let infos: Vec<PageInfo> = pages.iter().map(|p| p.page.info.clone()).collect();
+        let t = std::time::Instant::now();
+        let g = ego_graph(&rows[0].path, &infos, &fires, 30, now_ms());
+        println!("read {} pages in {read:?}; {} rows, {} filtered in {ranked:?}; ego of {} in {:?}: {} nodes of {}, {} edges", pages.len(), rows.len(), filtered.len(), rows[0].slug, t.elapsed(), g.nodes.len(), g.total, g.edges.len());
+        for r in rows.iter().take(5) {
+            println!("  {:.2} {} {} {:?}", r.heat, r.fires, r.slug, r.badges);
+        }
+        assert!(snapshot(&root).0.len() == pages.len());
     }
 
     // ---- health
