@@ -1,8 +1,7 @@
 import { createStore, type Pane, type State } from '../layout/store'
 import type { PtyClient } from '../pty/client'
-import { focusedCwd, paneCwd, repoOfCwd, scopeRepos } from './scope'
+import { focusedCwd, focusedFirst, paneCwd, repoOfCwd } from './scope'
 import { snapshot } from './fixtures'
-import { pruneSnapshot } from './types'
 
 const pty: PtyClient = { spawn: async () => 1, write: async () => {}, resize: async () => {}, kill: async () => {}, onExit: async () => () => {} }
 
@@ -35,16 +34,12 @@ test('repoOfCwd prefers the deepest match', () => {
   expect(repoOfCwd(nested, '/Users/me/github/mnemo/vendor')?.name).toBe('mnemo')
 })
 
-test('scopeRepos narrows to the focused repo and falls back to all when none resolved', () => {
-  expect(scopeRepos(snapshot, 'repo', '/Users/me/github/mnemo')).toEqual({ repos: [snapshot.repos[1]], effective: 'repo' })
-  expect(scopeRepos(snapshot, 'repo', undefined)).toEqual({ repos: snapshot.repos, effective: 'all' })
-  expect(scopeRepos(snapshot, 'all', '/Users/me/github/mnemo')).toEqual({ repos: snapshot.repos, effective: 'all' })
-})
-
-test('scopeRepos on a pruned snapshot: the focused repo with nothing recent shows empty, not all', () => {
-  const stale = { ...snapshot, repos: snapshot.repos.map((r) => (r.name === 'notes' ? { ...r, parents: [] } : r)) }
-  const pruned = pruneSnapshot(stale)
-  expect(scopeRepos(pruned, 'repo', '/Users/me/notes')).toEqual({ repos: [], effective: 'repo' })
+test('focusedFirst keeps every repo and moves the focused one to the front', () => {
+  const [desktop, mnemo, notes] = snapshot.repos
+  expect(focusedFirst(snapshot, '/Users/me/github/mnemo')).toEqual([mnemo, desktop, notes])
+  expect(focusedFirst(snapshot, desktop.root)).toBe(snapshot.repos)
+  expect(focusedFirst(snapshot, undefined)).toBe(snapshot.repos)
+  expect(focusedFirst(snapshot, '/nowhere')).toBe(snapshot.repos)
 })
 
 function withPanes(panes: Pane[], focused: number): Pick<State, 'tabs' | 'activeTab' | 'panes'> {

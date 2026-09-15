@@ -2,8 +2,6 @@ import type { Pane, State } from '../layout/store'
 import { leaves } from '../layout/tree'
 import { allChildren, type RepoGroup, type Snapshot } from './types'
 
-export type Scope = 'repo' | 'all'
-
 const dirname = (p: string) => p.replace(/\/+[^/]*$/, '') || '/'
 const under = (path: string, dir: string) => path === dir || path.startsWith(dir.endsWith('/') ? dir : dir + '/')
 
@@ -57,10 +55,8 @@ export function repoOfCwd(snap: Snapshot, cwd: string | undefined): RepoGroup | 
   return best?.repo
 }
 
-/** The repos a surface shows. `repo` narrows to the focused repo (possibly to nothing, when
- *  that repo has no recent sessions) and falls back to `all` when no repo resolved;
- *  `effective` says which one applied. */
-export function scopeRepos(snap: Snapshot, scope: Scope, focusedRoot: string | undefined): { repos: RepoGroup[]; effective: Scope } {
-  if (scope === 'repo' && focusedRoot) return { repos: snap.repos.filter((r) => r.root === focusedRoot), effective: 'repo' }
-  return { repos: snap.repos, effective: 'all' }
+/** Every repo, the focused one first: the sidebar and the cockpit group by repo, not by a scope. */
+export function focusedFirst(snap: Snapshot, focusedRoot: string | undefined): RepoGroup[] {
+  const i = focusedRoot ? snap.repos.findIndex((r) => r.root === focusedRoot) : -1
+  return i <= 0 ? snap.repos : [snap.repos[i], ...snap.repos.slice(0, i), ...snap.repos.slice(i + 1)]
 }

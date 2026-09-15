@@ -3,9 +3,11 @@ import { useStore } from 'zustand'
 import { closeLeaf, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect } from './tree'
 import { layoutRects, workspaceRect } from './rects'
 import { reuseHandler } from './reuse'
+import { mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved } from './saved'
 import type { PtyClient } from '../pty/client'
 
-export type Tab = { id: string; root: Node; focused: PaneId }
+/** `name`: what the user renamed the tab to; it wins over the name its focused pane gives it. */
+export type Tab = { id: string; root: Node; focused: PaneId; name?: string }
 /** `view` names the registered renderer (see panes/registry). Terminal panes have a
  *  positive id issued by the Rust core; every other view gets a negative synthetic id
  *  and never crosses the PTY boundary. */
@@ -61,6 +63,10 @@ export type Actions = {
   closeTab(id: string): Promise<void>
   focusPane(id: PaneId): void
   goToTab(index: number): void
+  /** Show the tab holding `id` with that pane focused; nothing when no tab holds it. */
+  goToPane(id: PaneId): void
+  /** Set (or, with an empty or missing name, clear) a tab's own name. */
+  renameTab(id: string, name: string | undefined): void
   cycleTab(delta: 1 | -1): void
   setRatio(path: Path, ratio: number): void
   /** Exchange the places of two panes of the same tab (drag a pane bar onto another).
@@ -73,6 +79,15 @@ export type Actions = {
   paneExited(id: PaneId, code: number | null): void
   attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
   setPalette(open: boolean): void
+  /** The layout as `~/.mnemo-desktop/workspace.json` keeps it: tabs, trees with ratios, focus,
+   *  and each pane's view, props, cwd, title and session. Transient views are left out. */
+  snapshotForSave(): Saved
+  /** Recreate the tabs of a saved workspace (what `workspace_read` returned) after the open ones:
+   *  a terminal spawns a shell in its saved cwd (the core falls back to home when it is gone) and,
+   *  when it ran a Claude session, types `claude --resume <id>` after the prompt; other views
+   *  reopen with their props. Resolves once every pane exists; rejects when the file holds tabs
+   *  but none could be read. A missing or empty workspace restores nothing. */
+  restore(saved: unknown): Promise<void>
 }
 
 export type Store = StoreApi<State & Actions>
@@ -255,6 +270,23 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         set((s) => ({ tabs: s.tabs.map((t) => (t.id === s.activeTab ? { ...t, focused: id } : t)) }))
       },
 
+      goToPane(id) {
+        const tab = get().tabs.find((t) => leaves(t.root).includes(id))
+        if (!tab) return
+        set((s) => ({ activeTab: tab.id, tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, focused: id } : t)) }))
+      },
+
+      renameTab(id, name) {
+        const clean = name?.trim()
+        set((s) => ({
+          tabs: s.tabs.map((t) => {
+            if (t.id !== id) return t
+            const { name: _old, ...rest } = t
+            return clean ? { ...rest, name: clean } : rest
+          }),
+        }))
+      },
+
       goToTab(index) {
         const t = get().tabs[index]
         if (t) set({ activeTab: t.id })
@@ -302,6 +334,63 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
       setPalette(open) {
         set({ paletteOpen: open })
+      },
+
+      snapshotForSave() {
+        const { tabs, panes, activeTab } = get()
+        const out: Saved = { version: SAVED_VERSION, tabs: [], panes: {}, activeTab }
+        for (const t of tabs) {
+          let root: Node | null = t.root
+          for (const id of leaves(t.root)) {
+            const p = panes[id]
+            if (!p || TRANSIENT_VIEWS.has(p.view)) root = root && closeLeaf(root, id)
+          }
+          if (!root) continue
+          const ids = leaves(root)
+          for (const id of ids) {
+            const { view, props, cwd, title, sessionId } = panes[id]
+            out.panes[String(id)] = {
+              view,
+              ...(props === undefined ? {} : { props }),
+              ...(cwd ? { cwd } : {}),
+              ...(title ? { title } : {}),
+              ...(sessionId ? { sessionId } : {}),
+            }
+          }
+          out.tabs.push({ id: t.id, root, focused: ids.includes(t.focused) ? t.focused : ids[0], ...(t.name ? { name: t.name } : {}) })
+        }
+        return out
+      },
+
+      async restore(saved) {
+        const parsed = parseSaved(saved)
+        if (!parsed) return
+        const made: Tab[] = []
+        let active: string | undefined
+        for (const t of parsed.tabs) {
+          const ids = new Map<PaneId, PaneId>()
+          for (const old of leaves(t.root)) {
+            const p = parsed.panes[String(old)]
+            if (p.view === 'terminal') {
+              const id = await spawnPane(p.cwd)
+              ids.set(old, id)
+              if (p.sessionId) {
+                get().setSessionId(id, p.sessionId)
+                // The session died with the app: resuming it never forks.
+                if (id > 0) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+              }
+            } else {
+              const id = synthetic--
+              ids.set(old, id)
+              set((s) => ({ panes: { ...s.panes, [id]: { id, view: p.view, props: p.props ?? {}, title: p.title } } }))
+            }
+          }
+          const root = mapLeaves(t.root, ids)
+          const tab: Tab = { id: `tab-${leaves(root)[0]}`, root, focused: ids.get(t.focused) ?? leaves(root)[0], ...(t.name ? { name: t.name } : {}) }
+          made.push(tab)
+          if (t.id === parsed.activeTab) active = tab.id
+        }
+        set((s) => ({ tabs: [...s.tabs, ...made], activeTab: active ?? made[0]?.id ?? s.activeTab }))
       },
     }
   })

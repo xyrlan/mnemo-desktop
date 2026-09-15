@@ -2,12 +2,10 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 
 /** Outgoing text (replies to children, voice dictation) is rewritten in English
  *  before it leaves when `outgoing` is 'en'; `replyLanguage` asks a child to answer
- *  in that language. `sidebarScope` narrows the mission sidebar to the focused repo or shows
- *  every repo. Persisted whole to ~/.mnemo-desktop/settings.json. */
+ *  in that language. Persisted whole to ~/.mnemo-desktop/settings.json. */
 export type Settings = {
   outgoing: 'en' | 'as-typed'
   replyLanguage: 'pt' | 'en' | 'unchanged'
-  sidebarScope: 'repo' | 'all'
   /** Home screen: repo roots pinned to the top / hidden, and where `gh repo clone` lands. */
   homePinned: string[]
   homeHidden: string[]
@@ -16,7 +14,7 @@ export type Settings = {
   issueLabels: Record<string, string[]>
 }
 
-export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {} }
+export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {} }
 
 export interface SettingsClient {
   read(): Promise<Partial<Settings>>
@@ -58,7 +56,6 @@ function pick(v: Partial<Settings>): Partial<Settings> {
   const out: Partial<Settings> = {}
   if (v.outgoing === 'en' || v.outgoing === 'as-typed') out.outgoing = v.outgoing
   if (v.replyLanguage === 'pt' || v.replyLanguage === 'en' || v.replyLanguage === 'unchanged') out.replyLanguage = v.replyLanguage
-  if (v.sidebarScope === 'repo' || v.sidebarScope === 'all') out.sidebarScope = v.sidebarScope
   const strs = (x: unknown): string[] | null => (Array.isArray(x) && x.every((s) => typeof s === 'string') ? (x as string[]) : null)
   const pinned = strs(v.homePinned)
   if (pinned) out.homePinned = pinned

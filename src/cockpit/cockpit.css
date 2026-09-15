@@ -3,7 +3,6 @@
 .ck-title { color: var(--fg); font-weight: 700; }
 .ck-where { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ck-spacer { flex: 1; }
-.ck-head .ck-scope { border: 0; padding: 0; }
 .ck-errors { flex: 0 0 auto; padding: 0 4px; }
 .ck-quiet { color: var(--fg-muted); }
 .ck-empty { color: var(--fg-muted); padding: 12px 4px; }
@@ -23,6 +22,9 @@
 .ck-detail { color: var(--fg-muted); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ck-tokens { color: var(--ansi-cyan); font-size: 11px; flex: 0 0 auto; }
 .ck-row .nd-repo { flex: 0 0 auto; }
+.ck-here .ck-label { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent); text-underline-offset: 2px; }
+.ck-tab-link { color: var(--accent); font-size: 11px; flex: 0 0 auto; }
+.ck-mapped .ck-row .ck-tab-link { display: none; }
 .ck-row .m-reply { margin: 2px 0 4px 0; }
 .ck-act { flex: 0 0 auto; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); font: inherit; font-size: 11px; padding: 0 7px; border-radius: 4px; cursor: pointer; }
 .ck-act:hover { border-color: var(--accent); }
