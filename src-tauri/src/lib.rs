@@ -14,6 +14,9 @@ pub mod browser;
 pub mod mission;
 pub mod mission_commands;
 
+// -- marketplace (src/marketplace.rs) --
+pub mod marketplace;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -78,6 +81,13 @@ pub fn run() {
             mission_commands::mission_reply,
             mission_commands::mission_mark_looked,
             mission_commands::mission_looked,
+
+            // -- marketplace commands --
+            marketplace::marketplace_list,
+            marketplace::marketplace_refresh,
+            marketplace::marketplace_add_source,
+            marketplace::marketplace_remove_source,
+            marketplace::marketplace_import,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
