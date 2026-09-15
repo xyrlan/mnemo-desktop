@@ -46,24 +46,44 @@ body { font-family: var(--font-mono); font-size: var(--font-size); font-variant-
 .tab-close, .pane-close { background: transparent; border: 0; color: var(--fg-muted); font: inherit; font-size: 14px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 3px; }
 .tab-close { opacity: 0; }
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
-.tab-close:hover, .pane-close:hover { color: var(--fg); background: var(--bg-elev); }
-.pane-close { position: absolute; top: 2px; right: 4px; z-index: 2; opacity: 0; }
-.pane:hover .pane-close { opacity: 1; }
+.tab-close:hover { color: var(--fg); background: var(--bg-elev); }
 .tab-home { padding: 0 12px; display: flex; align-items: center; color: var(--fg-muted); border-right: 1px solid var(--border); cursor: default; font-size: 15px; }
 .tab-home.active { color: var(--fg); background: var(--bg); }
 .tab-new { padding: 0 12px; display: flex; align-items: center; color: var(--fg-muted); cursor: default; }
 .workspace { flex: 1; min-height: 0; position: relative; }
 
-.split { display: flex; width: 100%; height: 100%; }
-.split.row { flex-direction: row; }
-.split.col { flex-direction: column; }
-.divider { background: var(--border); flex: 0 0 4px; }
-.split.row > .divider { cursor: col-resize; }
-.split.col > .divider { cursor: row-resize; }
+/* ---- panes: placed by src/chrome/geometry.ts, dividers in the gaps between them ---- */
+.split-root { position: relative; width: 100%; height: 100%; }
+.divider { position: absolute; background: var(--border); z-index: 3; transition: background-color .12s; }
+.divider.row { cursor: col-resize; }
+.divider.col { cursor: row-resize; }
+.divider:hover, .divider.dragging { background: var(--accent); }
+body.resizing-row, body.resizing-row * { cursor: col-resize !important; user-select: none; }
+body.resizing-col, body.resizing-col * { cursor: row-resize !important; user-select: none; }
 
-.pane { position: relative; width: 100%; height: 100%; border: 1px solid var(--border); padding: 4px; background: var(--bg); outline: none; }
+.pane { position: absolute; display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--bg); outline: none; min-width: 0; min-height: 0; }
 .pane.focused { border-color: var(--border-focus); }
+.pane-content { position: relative; flex: 1 1 0; min-height: 0; padding: 4px; }
 .pane-body { height: 100%; outline: none; position: relative; }
+
+/* ---- pane bar: drag handle, repo · branch, tokens, close ---- */
+.pane-bar { --pane-bar-h: 24px; flex: 0 0 var(--pane-bar-h); height: var(--pane-bar-h); display: flex; align-items: center; gap: 8px; padding: 0 2px 0 6px; background: var(--bg-elev); border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: 11px; white-space: nowrap; overflow: hidden; user-select: none; cursor: grab; }
+.pane.focused .pane-bar { color: var(--fg); }
+.pane-bar-grip { flex: 0 0 auto; color: var(--fg-muted); font-size: 12px; letter-spacing: -1px; }
+.pane.focused .pane-bar-grip { color: var(--accent); }
+.pane-bar-repo { flex: 0 1 auto; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar-branch { flex: 0 1 auto; color: var(--ansi-magenta); overflow: hidden; text-overflow: ellipsis; }
+.pane-bar-branch::before { content: '⎇ '; color: var(--fg-muted); }
+.pane-bar-title { flex: 1 1 0; min-width: 0; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; }
+.pane-bar-tokens { flex: 0 0 auto; color: var(--ansi-cyan); }
+.pane-bar .pane-close { flex: 0 0 auto; }
+.pane-bar .pane-close:hover { color: var(--fg); background: var(--bg); }
+body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-select: none; }
+.pane.drag-source { opacity: .6; }
+.pane.drop-target { border-color: var(--accent); }
+.pane.drop-target .pane-bar { background: var(--accent); color: var(--bg); }
+.pane.drop-target .pane-bar > * { color: inherit; }
+.pane.drop-target::after { content: ''; position: absolute; inset: 0; background: rgba(122, 162, 247, .12); pointer-events: none; z-index: 4; }
 .pane .xterm { height: 100%; }
 .pane-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); background: rgba(15,17,22,.85); text-align: center; padding: 16px; }
 .pane-message button { margin-left: 8px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); padding: 4px 10px; font: inherit; }

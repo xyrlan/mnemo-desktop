@@ -1,4 +1,4 @@
-import { splitAt, closeLeaf, leaves, replaceRatio, neighbour, type Node, type Rect } from './tree'
+import { splitAt, closeLeaf, leaves, replaceRatio, neighbour, swapLeaves, type Node, type Rect } from './tree'
 
 const L = (p: number): Node => ({ kind: 'leaf', pane: p })
 
@@ -56,4 +56,21 @@ test('neighbour picks the nearest pane in a direction by rect', () => {
   expect(neighbour(3, 'up', rects)).toBe(1)
   expect(neighbour(1, 'up', rects)).toBeNull()
   expect(neighbour(9, 'up', rects)).toBeNull()
+})
+
+test('swapLeaves exchanges two panes across subtrees and keeps shape and ratios', () => {
+  const t = replaceRatio(splitAt(splitAt(L(1), 1, 2, 'row'), 2, 3, 'col'), [1], 0.7)
+  const s = swapLeaves(t, 1, 3)
+  expect(leaves(s)).toEqual([3, 2, 1])
+  expect(s).toEqual({
+    kind: 'split', dir: 'row', ratio: 0.5,
+    children: [L(3), { kind: 'split', dir: 'col', ratio: 0.7, children: [L(2), L(1)] }],
+  })
+  expect(swapLeaves(s, 3, 1)).toEqual(t)
+})
+
+test('swapLeaves is a no-op for the same pane or an absent one', () => {
+  const t = splitAt(L(1), 1, 2, 'row')
+  expect(swapLeaves(t, 1, 1)).toBe(t)
+  expect(swapLeaves(t, 1, 9)).toBe(t)
 })
