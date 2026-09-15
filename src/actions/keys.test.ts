@@ -147,7 +147,7 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(new Set(ids).size).toBe(ids.length)
   expect(ids.sort()).toEqual(
     [
-      'tab.new', 'tab.prev', 'tab.next', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
+      'tab.new', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
       'mission.toggle-sidebar', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `tab.go.${n}`),
     ].sort(),

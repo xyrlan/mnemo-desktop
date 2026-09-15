@@ -38,7 +38,7 @@ test('editor.open resolves relative to the focused terminal cwd and splits besid
   expect(editor.title).toBe('main.ts')
   // 'split-row' from the prompt becomes 'auto'; with no pane sizes (jsdom) auto opens a tab.
   expect(st.tabs.some((t) => JSON.stringify(t.root).includes(`"pane":${editor.id}`))).toBe(true)
-  expect(st.tabs[0].focused).toBe(editor.id)
+  expect(st.tabs.find((t) => t.id === st.activeTab)!.focused).toBe(editor.id)
 })
 
 test('editor.open without a terminal cwd roots at home and honours the tab place', async () => {
