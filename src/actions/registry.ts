@@ -1,5 +1,6 @@
 import type { Store } from '../layout/store'
-import { neighbour, type Rect, type Side } from '../layout/tree'
+import { neighbour, type Side } from '../layout/tree'
+import { paneRects } from '../layout/rects'
 
 export type Action = { id: string; title: string; shortcut?: string; run: () => void | Promise<void> }
 
@@ -20,15 +21,6 @@ export function run(id: string) {
   if (a) void a.run()
 }
 
-export function paneRects(root: ParentNode = document): Map<number, Rect> {
-  const m = new Map<number, Rect>()
-  root.querySelectorAll<HTMLElement>('.pane[data-pane]').forEach((el) => {
-    const r = el.getBoundingClientRect()
-    m.set(Number(el.dataset.pane), { x: r.left, y: r.top, w: r.width, h: r.height })
-  })
-  return m
-}
-
 /** Registers the built-in actions against a store. Called once by the app. */
 export function registerBuiltins(store: Store) {
   const s = () => store.getState()
@@ -43,6 +35,8 @@ export function registerBuiltins(store: Store) {
   register({ id: 'pane.split.row', title: 'Split right', shortcut: '⌘D', run: () => s().split('row') })
   register({ id: 'pane.split.col', title: 'Split down', shortcut: '⌘⇧D', run: () => s().split('col') })
   register({ id: 'pane.close', title: 'Close pane', shortcut: '⌘W', run: () => s().closePane() })
+  register({ id: 'pane.close-others', title: 'Close other panes', run: () => s().closeOthers() })
+  register({ id: 'tab.close', title: 'Close tab', shortcut: '⌘⇧W', run: () => s().closeTab(s().activeTab) })
   register({
     id: 'pane.new.samecwd',
     title: 'New tab in same directory',

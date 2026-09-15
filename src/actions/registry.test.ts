@@ -39,3 +39,18 @@ test('providers contribute actions at read time and run() sees them', () => {
   items.length = 0
   expect(all().map((a) => a.id)).not.toContain('dyn.1')
 })
+
+test('tab.close closes the active tab and pane.close-others collapses it to the focused pane', async () => {
+  let next = 1
+  const store = createStore({ ...fake, spawn: async () => next++ })
+  registerBuiltins(store)
+  // The registry is module-global and an earlier test registered builtins too: take ours.
+  const latest = (id: string) => all().filter((a) => a.id === id).at(-1)!.run()
+  await store.getState().newTab()
+  await store.getState().split('row')
+  await store.getState().newTab()
+  await latest('tab.close')
+  expect(store.getState().tabs).toHaveLength(1)
+  await latest('pane.close-others')
+  expect(store.getState().tabs[0].root).toEqual({ kind: 'leaf', pane: 2 })
+})
