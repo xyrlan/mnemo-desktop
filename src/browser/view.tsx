@@ -1,0 +1,139 @@
+import { useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { store, useApp } from '../layout/app-store'
+import { registerPaneView, type PaneViewProps } from '../panes/registry'
+import { register } from '../actions/registry'
+import { makeBrowserClient, pageBounds, sameBounds, type Bounds } from './client'
+import { barReducer, initialBar } from './address'
+import { makeWebviews } from './lifecycle'
+import { BLANK, normalizeUrl } from './url'
+import { terminalCwd } from './pr'
+import './browser.css'
+
+export const browser = makeBrowserClient(invoke, <T,>(event: string, cb: (payload: T) => void) =>
+  listen<T>(event, (e) => cb(e.payload)),
+)
+const webviews = makeWebviews(browser)
+
+/** The page is a native child webview drawn over `.browser-page`, outside the DOM. It
+ *  follows that element's rectangle every frame (splits, divider drags, window resizes)
+ *  and hides whenever the element is not on screen or the palette would sit under it. */
+export default function BrowserPane({ id, props }: PaneViewProps) {
+  // A remount (the tree was split around this pane) resumes where the page is.
+  const [known] = useState(() => webviews.url(id))
+  const [start] = useState(() => known ?? normalizeUrl(String(props.url ?? '')) ?? BLANK)
+  const [bar, dispatch] = useReducer(barReducer, start, (url) => ({ ...initialBar(url), loading: !known && url !== BLANK }))
+  const [error, setError] = useState<string | null>(null)
+  const page = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
+
+  useEffect(() => {
+    const el = page.current!
+    let alive = true
+    const measure = () => pageBounds(el.getBoundingClientRect(), !store.getState().paletteOpen)
+    const unlisten = [
+      browser.onState(id, (s) => {
+        webviews.remember(id, s.url)
+        dispatch({ type: 'page', ...s })
+      }),
+      browser.onTitle(id, (title) => {
+        if (title) store.getState().setTitle(id, title)
+      }),
+    ]
+
+    let last: Bounds | null = measure()
+    webviews.acquire(id, start, last).then(
+      () => alive && setError(null),
+      (e) => alive && setError(String(e)),
+    )
+    let frame = 0
+    const follow = () => {
+      const next = measure()
+      if (!sameBounds(last, next)) {
+        last = next
+        browser.setBounds(id, next).catch(() => {})
+      }
+      frame = requestAnimationFrame(follow)
+    }
+    frame = requestAnimationFrame(follow)
+
+    return () => {
+      alive = false
+      cancelAnimationFrame(frame)
+      for (const u of unlisten) void u.then((off) => off())
+      webviews.release(id)
+    }
+  }, [id, start])
+
+  // "Open URL…" lands on a blank page: put the caret where the URL goes.
+  useEffect(() => {
+    if (focused && bar.url === BLANK) input.current?.focus()
+  }, [focused])
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const next = barReducer(bar, { type: 'submit' })
+    if (next === bar) return
+    dispatch({ type: 'submit' })
+    setError(null)
+    webviews.remember(id, next.url)
+    browser.navigate(id, next.url).catch((err) => setError(String(err)))
+    input.current?.blur()
+  }
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return
+    dispatch({ type: 'cancel' })
+    input.current?.blur()
+  }
+  const fail = (err: unknown) => setError(String(err))
+
+  return (
+    <div className={`pane-body browser${bar.loading ? ' loading' : ''}`}>
+      <form className="browser-bar" onSubmit={submit}>
+        <button type="button" title="Back" onClick={() => browser.back(id).catch(fail)}>
+          ←
+        </button>
+        <button type="button" title="Forward" onClick={() => browser.forward(id).catch(fail)}>
+          →
+        </button>
+        <button type="button" title="Reload" onClick={() => browser.reload(id).catch(fail)}>
+          ↻
+        </button>
+        <input
+          ref={input}
+          value={bar.input}
+          placeholder="Enter a URL or search"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          onChange={(e) => dispatch({ type: 'edit', input: e.target.value })}
+          onBlur={() => dispatch({ type: 'blur' })}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={onKey}
+        />
+      </form>
+      <div ref={page} className="browser-page">
+        {error && <div className="pane-message">{error}</div>}
+      </div>
+    </div>
+  )
+}
+
+registerPaneView('browser', BrowserPane)
+
+register({
+  id: 'browser.open',
+  title: 'Open URL…',
+  run: () => store.getState().openView('browser', { url: '' }, 'split-row', 'browser'),
+})
+
+register({
+  id: 'browser.open-pr',
+  title: 'Open pull request for this branch',
+  run: async () => {
+    const url = await browser.prUrl(terminalCwd(store.getState())).catch(() => null)
+    if (url) store.getState().openView('browser', { url }, 'split-row', 'pull request')
+  },
+})
