@@ -51,6 +51,12 @@ pub fn pty_resize(state: State<'_, PtyState>, id: PaneId, cols: u16, rows: u16) 
     state.0.resize(id, cols, rows)
 }
 
+/// The shell's pid, for walking the process tree under a pane (see `chrome_session`).
+#[tauri::command]
+pub fn pty_pid(state: State<'_, PtyState>, id: PaneId) -> Option<u32> {
+    state.0.pid(id)
+}
+
 #[tauri::command]
 pub fn pty_kill(state: State<'_, PtyState>, id: PaneId) {
     state.0.kill(id)

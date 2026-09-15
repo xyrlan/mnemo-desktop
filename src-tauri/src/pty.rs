@@ -55,6 +55,22 @@ const ZSH_RC: [(&str, &str); 4] = [
 ];
 const BASH_RC: &str = include_str!("../shell/bash/mnemo.bashrc");
 
+/// What a Claude Code session exports to the processes it runs. An app started from one (a
+/// `tauri dev` an agent launched) would hand them to every pane, and a `claude` typed there
+/// would take itself for that session's child: no transcript, no `claude agents` row, nothing
+/// to resume.
+const CLAUDE_SESSION_ENV: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+    "CLAUDE_JOB_DIR",
+];
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
@@ -172,6 +188,9 @@ impl PtyManager {
         if let Some(cwd) = opts.cwd.map(PathBuf::from).filter(|p| p.is_dir()).or_else(home_dir) {
             cmd.cwd(cwd);
         }
+        for var in CLAUDE_SESSION_ENV {
+            cmd.env_remove(var);
+        }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "mnemo");
@@ -239,6 +258,12 @@ impl PtyManager {
         h.master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("resize: {e}"))
+    }
+
+    /// The pid of the program a pane runs (the shell for a terminal pane); None once it has
+    /// exited or for an unknown id.
+    pub fn pid(&self, id: PaneId) -> Option<u32> {
+        self.handles.lock().unwrap().get(&id)?.child.process_id()
     }
 
     /// Idempotent. Unknown ids are a no-op. The reader thread emits `Exit` when the PTY closes.
@@ -365,6 +390,19 @@ mod tests {
     }
 
     #[test]
+    fn pid_is_the_spawned_child_until_it_exits() {
+        let m = PtyManager::new();
+        let (id, rx) = sh(&m, "read x");
+        let pid = m.pid(id).expect("a live pane has a pid");
+        let ppid = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&ppid.stdout).trim(), std::process::id().to_string());
+        m.write(id, b"\n").unwrap();
+        let _ = collect(&rx);
+        assert_eq!(m.pid(id), None);
+        assert_eq!(m.pid(999_999), None);
+    }
+
+    #[test]
     fn write_after_exit_is_error() {
         let m = PtyManager::new();
         let (id, rx) = sh(&m, "true");
@@ -464,6 +502,13 @@ mod tests {
         let off = PtyManager::with_shell_dir(None).command(default_shell_opts(&dir), "/bin/zsh".into());
         assert_eq!(off.get_argv()[1..], ["-l"]);
         assert_eq!(off.get_env("TERM_PROGRAM"), Some("mnemo".as_ref()));
+
+        // A Claude Code session that launched the app does not leak into its panes.
+        for (i, cmd) in [&zsh, &bash, &explicit, &off].into_iter().enumerate() {
+            for var in CLAUDE_SESSION_ENV {
+                assert_eq!(cmd.get_env(var), None, "{var} in command {i}");
+            }
+        }
     }
 
     #[test]
