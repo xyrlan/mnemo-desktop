@@ -8,6 +8,7 @@ import { ACTIONS, type VaultAction } from './actions'
 import { agentForCwd, filterTree, orderAgents, pageCount, resolveWikilink, terms } from './search'
 import { decisionsFor, parseWhy } from './why'
 import { Markdown } from './Markdown'
+import { GraphView } from './GraphView'
 import type { LogEntry } from './store'
 import type { Agent, Page } from './types'
 import './vault.css'
@@ -264,6 +265,7 @@ function VaultPane(_: PaneViewProps) {
   const treeError = useVault((s) => s.treeError)
   const tree = useVault((s) => s.tree)
   const query = useVault((s) => s.query)
+  const mode = useVault((s) => s.mode)
   const cwd = useApp(importCwd)
   const current = agentForCwd(cwd, tree)
 
@@ -273,6 +275,16 @@ function VaultPane(_: PaneViewProps) {
 
   return (
     <div className="pane-body vault">
+      <div className="vt-modes">
+        {(['pages', 'graph'] as const).map((m) => (
+          <button key={m} className={mode === m ? 'vt-mode-on' : ''} onClick={() => vault.getState().setMode(m)}>
+            {m === 'pages' ? 'Pages' : 'Graph'}
+          </button>
+        ))}
+      </div>
+      {mode === 'graph' ? (
+        <GraphView cwd={cwd} current={current} page={<PageView cwd={cwd} />} />
+      ) : (
       <div className="vt-main">
         <aside className="vt-side">
           <div className="vt-bar">
@@ -298,6 +310,7 @@ function VaultPane(_: PaneViewProps) {
         </aside>
         <PageView cwd={cwd} />
       </div>
+      )}
       <Log />
     </div>
   )
@@ -306,3 +319,12 @@ function VaultPane(_: PaneViewProps) {
 registerPaneView('vault', VaultPane)
 
 register({ id: 'vault.open', title: 'Open vault', run: () => store.getState().openView('vault', {}, 'auto', 'vault') })
+
+register({
+  id: 'vault.graph',
+  title: 'Open vault graph and health',
+  run: () => {
+    vault.getState().setMode('graph')
+    store.getState().openView('vault', {}, 'auto', 'vault')
+  },
+})
