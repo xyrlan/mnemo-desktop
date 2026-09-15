@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Graph } from '../graph'
 import { useVault, vault } from './app-store'
-import { egoFlow, firedIds, withGlow } from './ego'
+import { countLabel, egoFlow, firedIds, GHOST, withGlow } from './ego'
 import { pulseStore } from '../pulse/app-store'
 import type { PulseStore } from '../pulse/store'
 import type { VaultGraph } from './types'
@@ -75,7 +75,7 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
       <div className="ve-bar">
         <span className="ve-title">Neighbourhood</span>
         {shown && !shown.error && (
-          <span className="vt-count">{neighbours < shown.total ? `${neighbours} of ${shown.total} neighbours` : `${neighbours} neighbours`}</span>
+          <span className="vt-count">{countLabel(shown)}</span>
         )}
         <span className="vg-legend" title="Card colour is confidence; solid edges are links, dashed ones shared topics">
           {LEGEND.map(([tone, text]) => (
@@ -90,7 +90,7 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
         {shown?.error && <pre className="vt-error ve-msg">{shown.error}</pre>}
         {!shown && <div className="vt-empty ve-msg">{loading ? 'reading the neighbourhood…' : ''}</div>}
         {shown && !shown.error && neighbours === 0 && <div className="vt-empty ve-msg">No links and no shared topics.</div>}
-        {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} fitMinZoom={0.85} onNodeClick={(id) => id !== path && void vault.getState().select(id)} />}
+        {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} fitMinZoom={0.85} onNodeClick={(id) => id !== path && !id.startsWith(GHOST) && void vault.getState().select(id)} />}
       </div>
     </section>
   )

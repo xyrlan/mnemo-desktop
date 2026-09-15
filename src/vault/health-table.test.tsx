@@ -171,11 +171,15 @@ test('a row opens its page and ego graph; a neighbour selects; disable asks twic
   await flush()
   expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('Run the tests')
   expect(calls.filter(([c]) => c === 'vault_ego').pop()).toEqual(['vault_ego', { path: `${dir}/run-tests.md`, limit: 12 }])
-  expect([...host.querySelectorAll('.stub-node')].map((b) => [b.textContent, b.className])).toEqual([
+  expect([...host.querySelectorAll('.stub-node:not(.ve-ghost)')].map((b) => [b.textContent, b.className])).toEqual([
     ['run-tests', 'stub-node ve-centre'],
     ['bare', 'stub-node'],
   ])
-  expect(host.querySelector('.ve-bar')?.textContent).toContain('1 of 3 neighbours')
+  expect(host.querySelector('.ve-bar')?.textContent).toContain('1 de 3')
+  // A ghost card only frames the canvas: clicking one selects nothing.
+  await click(host.querySelector('.stub-node.ve-ghost'))
+  await flush()
+  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('Run the tests')
   expect(host.querySelector('.vr-selected .vr-name-main')?.textContent).toBe('Run the tests')
 
   await click(byText(host, '.stub-node', 'bare'))

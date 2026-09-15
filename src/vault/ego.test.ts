@@ -1,4 +1,4 @@
-import { columns, egoFlow, firedIds, rowsFor, toneFor, withGlow } from './ego'
+import { columns, countLabel, egoFlow, firedIds, GHOST, rowsFor, toneFor, withGlow } from './ego'
 import type { GraphEdge, GraphNode, VaultGraph } from './types'
 
 const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
@@ -34,7 +34,9 @@ test('linkers sit left of the centre, everything else right, with relation and f
     nodes: [node('c', { fires: 3 }), node('in'), node('out', { fires: 0, confidence: null }), node('both'), node('t')],
     edges: [link('in', 'c'), link('c', 'out'), link('c', 'both'), link('both', 'c'), topic('t', 'testing, git'), link('t', 'out')],
   }
-  const { nodes, edges } = egoFlow(g)
+  const flow = egoFlow(g)
+  const { edges } = flow
+  const nodes = flow.nodes.filter((n) => !n.id.startsWith(GHOST))
   const by = Object.fromEntries(nodes.map((n) => [n.id, n]))
   expect(by.in.position.x).toBeLessThan(by.c.position.x)
   for (const id of ['out', 'both', 't']) expect(by[id].position.x).toBeGreaterThan(by.c.position.x)
@@ -53,12 +55,39 @@ test('linkers sit left of the centre, everything else right, with relation and f
 test('a full neighbourhood lays out as a block of columns, not one tall line', () => {
   const rest = Array.from({ length: 29 }, (_, i) => node(`n${i}`))
   const g: VaultGraph = { center: 'c', total: 60, error: null, nodes: [node('c'), ...rest], edges: rest.map((n) => topic(n.id, 'a')) }
-  const { nodes } = egoFlow(g)
+  const nodes = egoFlow(g).nodes.filter((n) => !n.id.startsWith(GHOST))
   const xs = new Set(nodes.slice(1).map((n) => Math.round(n.position.x)))
   const ys = new Set(nodes.slice(1).map((n) => Math.round(n.position.y)))
   expect(xs.size).toBe(5)
   expect(ys.size).toBeLessThanOrEqual(8)
   for (const n of nodes) expect(Number.isFinite(n.position.x) && Number.isFinite(n.position.y)).toBe(true)
+})
+
+test('ghost cards frame the canvas on the centre, even when every neighbour is on its right', () => {
+  const rest = Array.from({ length: 11 }, (_, i) => node(`n${i}`))
+  const g: VaultGraph = { center: 'c', total: 11, error: null, nodes: [node('c'), ...rest], edges: rest.map((n) => topic(n.id, 'a')) }
+  const { nodes } = egoFlow(g)
+  const centre = nodes.find((n) => n.id === 'c')!.position
+  const real = nodes.filter((n) => !n.id.startsWith(GHOST))
+  expect(real.every((n) => n.position.x >= centre.x)).toBe(true)
+  const ghosts = nodes.filter((n) => n.id.startsWith(GHOST))
+  expect(ghosts.length).toBeGreaterThan(0)
+  for (const n of ghosts) expect([n.className, n.selectable, n.draggable]).toEqual(['ve-ghost', false, false])
+  // Every card's box, ghosts included, is centred on the centre card on both axes.
+  const xs = nodes.map((n) => n.position.x)
+  const ys = nodes.map((n) => n.position.y)
+  expect(Math.min(...xs) + Math.max(...xs)).toBeCloseTo(2 * centre.x)
+  expect(Math.min(...ys) + Math.max(...ys)).toBeCloseTo(2 * centre.y)
+  expect(egoFlow({ ...g, nodes: [node('c')], edges: [] }).nodes.map((n) => n.id)).toEqual(['c'])
+})
+
+test('the count says how many are shown, and of how many only when the limit cut some', () => {
+  const g = (shown: number, total: number): VaultGraph => ({ center: 'c', total, error: null, nodes: Array.from({ length: shown + 1 }, (_, i) => node(`n${i}`)), edges: [] })
+  expect(countLabel(g(11, 37))).toBe('11 de 37')
+  expect(countLabel(g(11, 11))).toBe('11 vizinhos')
+  // Hub-only pages fill the room but are not in `total`.
+  expect(countLabel(g(11, 4))).toBe('11 vizinhos')
+  expect(countLabel({ ...g(0, 0), nodes: [] })).toBe('0 vizinhos')
 })
 
 test('firedIds finds the nodes a pulse names, by slug or name', () => {
