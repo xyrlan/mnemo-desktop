@@ -4,8 +4,16 @@ Desktop shell for the mnemo agentic development environment. Sub-project 1: a te
 
 ## Dev
 
+    brew install cmake        # whisper-rs (voice) builds against it
     pnpm install
     pnpm tauri dev
+
+Release build + install on macOS:
+
+    pnpm tauri build --bundles app
+    rm -rf /Applications/mnemo.app && cp -R ../.mnemo-desktop-target/release/bundle/macos/mnemo.app /Applications/
+
+Run your parent Claude Code session inside the app from the repo whose project memory you want (`cd ~/github/mnemo && claude --continue`); dispatch children then appear in the mission sidebar.
 
 ## Test
 
@@ -15,6 +23,8 @@ Desktop shell for the mnemo agentic development environment. Sub-project 1: a te
 
 ## Shortcuts
 
-⌘T new tab · ⌘W close pane · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette (Ctrl on Linux/Windows)
+⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌥Space hold to dictate (Ctrl on Linux/Windows)
+
+Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), marketplace (shared rule sets). Open them from ⌘K.
 
 Specs and plans: `docs/superpowers/`.
