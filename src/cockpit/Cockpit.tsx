@@ -13,6 +13,7 @@ import { pruneGone } from './needs'
 import { buildInbox, rowChild, type Row } from './inbox'
 import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
 import MissionMap from './MissionMap'
+import { lastCwd } from './where'
 import './cockpit.css'
 
 /** Branch checked out in `cwd`, re-asked every few seconds while the cockpit is open. */
@@ -54,10 +55,12 @@ function openRow(r: Row) {
   else openMissionPane(r.child)
 }
 
-function InboxRow({ row, selected, showRepo, armed, fire, onSelect, onMap }: {
+function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMap }: {
   row: Row
   selected: boolean
   showRepo: boolean
+  /** The map is open beside the list: the row is its title, the map button just `⤢`. */
+  narrow: boolean
   armed: string | null
   fire: (key: string) => boolean
   onSelect: () => void
@@ -108,7 +111,7 @@ function InboxRow({ row, selected, showRepo, armed, fire, onSelect, onMap }: {
         {showRepo && <span className="nd-repo">{row.repo.name}</span>}
         {d > 0 && <span className="m-delta">+{d}</span>}
         {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
-        {row.mission && btn(`⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', 'Open the mission map')}
+        {row.mission && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
         {row.kind === 'ci' && btn('abrir job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
         {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
         {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
@@ -134,7 +137,8 @@ export default function Cockpit() {
   const panes = useApp((s) => s.panes)
   const scope = useSettings((s) => s.sidebarScope)
   const logged = useGithub((s) => s.auth?.logged)
-  const cwd = focusedCwd({ tabs, activeTab, panes }, raw)
+  // A tab with nothing that has a cwd (the cockpit alone, a browser) is still about the last repo you were in.
+  const cwd = focusedCwd({ tabs, activeTab, panes }, raw) ?? lastCwd()
   // Resolve against the unpruned snapshot: a finished child's worktree still names its repo.
   const focused = repoOfCwd(raw, cwd)
   const branch = useBranch(cwd)
@@ -229,6 +233,7 @@ export default function Cockpit() {
         row={r}
         selected={rows[sel]?.key === r.key}
         showRepo={showRepo}
+        narrow={!!mapAt}
         armed={armed}
         fire={fire}
         onSelect={() => setSelKey(r.key)}
@@ -266,7 +271,7 @@ export default function Cockpit() {
           ))}
         </div>
       )}
-      <div className="ck-body">
+      <div className={`ck-body${mapAt ? ' ck-mapped' : ''}`}>
         <div className="ck-inbox" ref={body}>
           {inbox.needs.length > 0 ? (
             <div className="ck-needs">{renderRows(inbox.needs)}</div>

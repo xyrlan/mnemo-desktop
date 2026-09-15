@@ -17,7 +17,8 @@ export type MapAction =
   | { kind: 'issue'; issue: Issue }
 
 export type MapCard = CardData & { actions: MapAction[] }
-export type MissionMap = { nodes: Node<MapCard>[]; edges: Edge[] }
+/** `width`/`height`: the box the laid-out cards span, at 100%. */
+export type MissionMap = { nodes: Node<MapCard>[]; edges: Edge[]; width: number; height: number }
 
 type Tone = NonNullable<CardData['tone']>
 
@@ -78,12 +79,14 @@ export function buildMissionMap(repo: RepoGroup, m: Mission, looked: Record<stri
     if (!p.pr) continue
     const pr = p.pr
     const prId = mapId.pr(repo, pr)
-    const ready = pr.state === 'OPEN' && pr.ci === 'pass' && !m.landable
+    // Only an open PR's CI is news; a merged or closed one keeps its last rollup as history.
+    const open = pr.state === 'OPEN'
+    const ready = open && pr.ci === 'pass' && !m.landable
     add(prId, {
       label: `PR #${pr.number}`,
       sub: `${pr.state.toLowerCase()} · CI ${CI_MARK[pr.ci]}${pr.ci === 'none' ? '' : ` ${pr.ci}`}`,
-      tone: CI_TONE[pr.ci],
-      actions: [{ kind: 'pr', pr }, ...(pr.ci === 'fail' ? [{ kind: 'job', pr } as const] : ready ? [{ kind: 'merge', pr } as const] : [])],
+      tone: open ? CI_TONE[pr.ci] : pr.state === 'MERGED' ? 'ok' : 'muted',
+      actions: [{ kind: 'pr', pr }, ...(open && pr.ci === 'fail' ? [{ kind: 'job', pr } as const] : ready ? [{ kind: 'merge', pr } as const] : [])],
     })
     link(id, prId)
     prIds.push(prId)
@@ -103,5 +106,7 @@ export function buildMissionMap(repo: RepoGroup, m: Mission, looked: Record<stri
     for (const pr of l.prs) if (!l.pieces.some((x) => x.piece.pr?.number === pr.number)) link(id, mapId.pr(repo, pr))
   }
 
-  return { nodes: layoutDagre(nodes, edges, { width: CARD_W, height: CARD_H, gap: 24 }), edges }
+  const laid = layoutDagre(nodes, edges, { width: CARD_W, height: CARD_H, gap: 24 })
+  const span = (at: (n: Node) => number, size: number) => (laid.length ? Math.max(...laid.map(at)) - Math.min(...laid.map(at)) + size : 0)
+  return { nodes: laid, edges, width: span((n) => n.position.x, CARD_W), height: span((n) => n.position.y, CARD_H) }
 }

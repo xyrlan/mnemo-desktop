@@ -34,8 +34,9 @@ export function pruneGone(snap: Snapshot): Snapshot {
 }
 
 /** Blocked children first (they stall work), then red CI, then PRs ready to merge, then
- *  landable contracts; snapshot order within each. A landable contract's green PRs are one
- *  `land`, not one merge each. Pass a pruned snapshot: stale children never need you. */
+ *  landable contracts; snapshot order within each. Only open PRs are red CI or ready to
+ *  merge. A landable contract's green PRs are one `land`, not one merge each. Pass a pruned
+ *  snapshot: stale children never need you. */
 export function needsYou(snap: Snapshot): Need[] {
   const blocked: Need[] = []
   const ci: Need[] = []
@@ -51,10 +52,11 @@ export function needsYou(snap: Snapshot): Need[] {
     for (const m of repo.missions) {
       for (const p of m.pieces) {
         if (p.child) block(repo, p.child, childLabel(p.child, p.name), m)
-        if (!p.pr) continue
+        // A merged or closed PR is history: whatever its last rollup said, it needs nobody.
+        if (p.pr?.state !== 'OPEN') continue
         const key = `${repo.root}#${p.pr.number}`
         if (p.pr.ci === 'fail') ci.push({ kind: 'ci', key: `ci:${key}`, repo, mission: m, piece: p.name, pr: p.pr })
-        else if (!m.landable && p.pr.state === 'OPEN' && p.pr.ci === 'pass') ready.push({ kind: 'ready', key: `ready:${key}`, repo, mission: m, piece: p.name, pr: p.pr })
+        else if (!m.landable && p.pr.ci === 'pass') ready.push({ kind: 'ready', key: `ready:${key}`, repo, mission: m, piece: p.name, pr: p.pr })
       }
       if (m.landable) land.push({ kind: 'land', key: `land:${m.contract_path}`, repo, mission: m })
     }
