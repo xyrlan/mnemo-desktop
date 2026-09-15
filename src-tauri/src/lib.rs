@@ -37,6 +37,8 @@ pub mod chrome;
 
 // -- graph: no Rust --
 
+// -- vaultmap (src/vaultmap.rs) --
+
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
@@ -133,6 +135,8 @@ pub fn run() {
             home_commands::home_resolve_repo,
 
             // -- chrome commands --
+
+            // -- vaultmap commands --
             chrome::chrome_branch,
             chrome::chrome_repo,
 
