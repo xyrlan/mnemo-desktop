@@ -282,7 +282,9 @@ pub fn parse_page(path: &Path, text: &str, modified: Option<u64>) -> Page {
     flatten(&fm, "", &mut frontmatter);
     Page {
         info: PageInfo {
-            path: path.to_string_lossy().to_string(),
+            // Forward slashes everywhere: graph ids and health rows are compared as strings
+            // across platforms, and Windows file APIs accept them.
+            path: path.to_string_lossy().replace('\\', "/"),
             name: scalar(&fm, &["name", "metadata.name"]).unwrap_or_else(|| slug.clone()),
             slug,
             description: scalar(&fm, &["description", "metadata.description"]).unwrap_or_default(),
@@ -1325,12 +1327,16 @@ mod tests {
 
     // ---- graph
 
+    fn fixture() -> String {
+        FIXTURE.replace('\\', "/")
+    }
+
     fn ids(g: &VaultGraph) -> Vec<String> {
-        g.nodes.iter().map(|n| n.id.replace(FIXTURE, "")).collect()
+        g.nodes.iter().map(|n| n.id.replace(&fixture(), "")).collect()
     }
 
     fn edges(g: &VaultGraph) -> Vec<(String, String, String)> {
-        g.edges.iter().map(|e| (e.source.replace(FIXTURE, ""), e.target.replace(FIXTURE, ""), e.kind.clone())).collect()
+        g.edges.iter().map(|e| (e.source.replace(&fixture(), ""), e.target.replace(&fixture(), ""), e.kind.clone())).collect()
     }
 
     #[test]
@@ -1456,7 +1462,7 @@ mod tests {
                 ("verified-without-evidence".to_string(), "has activates_on, never fired".to_string()),
             ]
         );
-        assert_eq!(h.dormant[0].path, format!("{FIXTURE}/shared/project/dormant-activation.md"));
+        assert_eq!(h.dormant[0].path, format!("{}/shared/project/dormant-activation.md", fixture()));
         // Noise agents are not counted; `rejected-*` proposals are not inbox.
         assert_eq!((h.pages, h.never_fired, h.inbox), (5, 1, 1));
         assert_eq!(h.root.as_deref(), Some(FIXTURE.replace('\\', "/").as_str()));
