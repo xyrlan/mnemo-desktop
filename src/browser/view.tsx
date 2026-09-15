@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { emit, listen } from '@tauri-apps/api/event'
+import { cursorPosition, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
 import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
@@ -9,12 +10,52 @@ import { barReducer, initialBar } from './address'
 import { makeWebviews } from './lifecycle'
 import { BLANK, normalizeUrl } from './url'
 import { terminalCwd } from './pr'
+import { focusedEvent, toViewport, watchPageFocus, type FocusHost } from './focus'
 import './browser.css'
 
 export const browser = makeBrowserClient(invoke, <T,>(event: string, cb: (payload: T) => void) =>
   listen<T>(event, (e) => cb(e.payload)),
 )
 const webviews = makeWebviews(browser)
+
+const focusHost: FocusHost = {
+  windowFocused: () => getCurrentWindow().isFocused(),
+  cursor: async () => {
+    const win = getCurrentWindow()
+    const [cursor, monitor, inner, size, scale] = await Promise.all([
+      cursorPosition(),
+      primaryMonitor(),
+      win.innerPosition(),
+      win.innerSize(),
+      win.scaleFactor(),
+    ])
+    const cursorScale = monitor?.scaleFactor ?? scale
+    return toViewport({ cursor, cursorScale, inner, innerHeight: size.height, scale, viewportHeight: window.innerHeight })
+  },
+  documentFocused: () => document.hasFocus(),
+  onBlur: (cb) => {
+    window.addEventListener('blur', cb)
+    return () => window.removeEventListener('blur', cb)
+  },
+  onWindowFocus: (cb) => getCurrentWindow().onFocusChanged(({ payload }) => payload && cb()),
+  emit: (event) => void emit(event).catch(() => {}),
+}
+
+/** Where each mounted pane's page is on screen, for telling which one a click focused.
+ *  The watcher runs while at least one browser pane is mounted. */
+const pages = new Map<number, () => Bounds>()
+let unwatch: (() => void) | null = null
+function trackPage(id: number, bounds: () => Bounds) {
+  pages.set(id, bounds)
+  unwatch ??= watchPageFocus(focusHost, () => [...pages].map(([pane, b]) => [pane, b()] as [number, Bounds]))
+  return () => {
+    if (pages.get(id) === bounds) pages.delete(id)
+    if (pages.size === 0) {
+      unwatch?.()
+      unwatch = null
+    }
+  }
+}
 
 /** The page is a native child webview drawn over `.browser-page`, outside the DOM. It
  *  follows that element's rectangle every frame (splits, divider drags, window resizes)
@@ -41,9 +82,12 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
       browser.onTitle(id, (title) => {
         if (title) store.getState().setTitle(id, title)
       }),
+      // Clicking into the page moves keyboard focus there: the pane follows.
+      listen(focusedEvent(id), () => store.getState().focusPane(id)),
     ]
 
-    let last: Bounds | null = measure()
+    let last: Bounds = measure()
+    const untrack = trackPage(id, () => last)
     webviews.acquire(id, start, last).then(
       () => alive && setError(null),
       (e) => alive && setError(String(e)),
@@ -62,6 +106,7 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
     return () => {
       alive = false
       cancelAnimationFrame(frame)
+      untrack()
       for (const u of unlisten) void u.then((off) => off())
       webviews.release(id)
     }
