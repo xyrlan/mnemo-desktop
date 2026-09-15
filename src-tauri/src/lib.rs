@@ -117,6 +117,8 @@ pub fn run() {
             vault::vault_tree,
             vault::vault_page,
             vault::vault_run,
+            vault::vault_graph,
+            vault::vault_health,
 
             // -- home commands --
             home_commands::home_snapshot,

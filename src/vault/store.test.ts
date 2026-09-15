@@ -2,7 +2,7 @@ import vaultRs from '../../src-tauri/src/vault.rs?raw'
 import { createVaultStore, MAX_LOG } from './store'
 import { makeVaultClient, type VaultClient } from './client'
 import { ACTIONS } from './actions'
-import type { Agent, Page, PageInfo, RunResult } from './types'
+import type { Agent, Health, Page, PageInfo, RunResult, VaultGraph } from './types'
 
 const info = (slug: string): PageInfo => ({
   path: `/v/shared/feedback/${slug}.md`,
@@ -18,6 +18,20 @@ const info = (slug: string): PageInfo => ({
 const tree = (): Agent[] => [{ name: 'shared', kind: 'shared', dir: '/v/shared', groups: [{ type: 'feedback', pages: [info('a'), info('b')] }] }]
 const page = (p: PageInfo): Page => ({ ...p, runtime: null, frontmatter: [], error: null })
 const ok = (stdout = 'done'): RunResult => ({ stdout, stderr: '', code: 0 })
+const graphOf = (scope: string): VaultGraph => ({ scope, nodes: [], edges: [], total: 0, error: null })
+const health = (over: Partial<Health> = {}): Health => ({
+  root: '/v',
+  status: ok('Vault: /v'),
+  doctor: ok('all good'),
+  tiles: [],
+  label_only: [],
+  dormant: [],
+  pages: 2,
+  never_fired: 1,
+  inbox: 0,
+  error: null,
+  ...over,
+})
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -30,6 +44,8 @@ function fake(over: Partial<VaultClient> = {}): VaultClient {
     tree: async () => tree(),
     page: async (path) => page(tree()[0].groups[0].pages.find((p) => p.path === path)!),
     run: async () => ok(),
+    graph: async (scope) => graphOf(scope),
+    health: async () => health(),
     ...over,
   }
 }
@@ -121,21 +137,58 @@ test('the log keeps the last entries only', async () => {
   expect(s.getState().log[0].id).toBe(4)
 })
 
-test('client maps to the three Tauri commands', async () => {
+test('the latest scope wins over a slow graph read, and a failing read is an error graph', async () => {
+  const slow = deferred<VaultGraph>()
+  const s = createVaultStore(fake({ graph: (scope) => (scope === 'agent:shared' ? slow.promise : Promise.resolve(graphOf(scope))) }))
+  const first = s.getState().loadGraph('agent:shared')
+  expect(s.getState()).toMatchObject({ scope: 'agent:shared', graphLoading: true, graph: null })
+  await s.getState().loadGraph('topic:testing')
+  slow.resolve(graphOf('agent:shared'))
+  await first
+  expect(s.getState()).toMatchObject({ scope: 'topic:testing', graphLoading: false, graph: { scope: 'topic:testing' } })
+
+  const broken = createVaultStore(fake({ graph: async () => Promise.reject('no vault') }))
+  await broken.getState().loadGraph('agent:x')
+  expect(broken.getState().graph).toEqual({ scope: 'agent:x', nodes: [], edges: [], total: 0, error: 'no vault' })
+})
+
+test('health reads vault_health and runs stale --json in the cwd, once at a time', async () => {
+  const runs: [string, string[], string][] = []
+  let reads = 0
+  const s = createVaultStore(fake({ health: async () => (reads++, health()), run: async (a, args, cwd) => (runs.push([a, args, cwd]), ok('[]')) }))
+  expect(s.getState().mode).toBe('pages')
+  s.getState().setMode('graph')
+  await Promise.all([s.getState().loadHealth('/repo'), s.getState().loadHealth('/repo')])
+  expect(reads).toBe(1)
+  expect(runs).toEqual([['stale', ['--json'], '/repo']])
+  expect(s.getState()).toMatchObject({ mode: 'graph', healthLoading: false, health: { never_fired: 1 }, stale: ok('[]') })
+
+  const broken = createVaultStore(fake({ health: async () => Promise.reject('boom'), run: async () => Promise.reject('no mnemo') }))
+  await broken.getState().loadHealth('')
+  expect(broken.getState().health).toMatchObject({ error: 'boom', tiles: [], label_only: [] })
+  expect(broken.getState().stale).toEqual({ stdout: '', stderr: 'no mnemo', code: null })
+})
+
+test('client maps to the Tauri commands', async () => {
   const seen: [string, unknown][] = []
   const c = makeVaultClient(async <T,>(cmd: string, args?: Record<string, unknown>) => (seen.push([cmd, args]), undefined as T))
   await c.tree()
   await c.page('/v/x.md')
   await c.run('status', [], '/repo')
+  await c.graph('topic:testing')
+  await c.health()
   expect(seen).toEqual([
     ['vault_tree', undefined],
     ['vault_page', { path: '/v/x.md' }],
     ['vault_run', { action: 'status', args: [], cwd: '/repo' }],
+    ['vault_graph', { scope: 'topic:testing' }],
+    ['vault_health', undefined],
   ])
 })
 
-test('every button runs a subcommand the Rust allowlist has, and only those six exist', () => {
+test('every button runs a subcommand the Rust allowlist has, and the allowlist holds only those and stale', () => {
   const allow = /pub const ACTIONS: &\[&str\] = &\[([^\]]*)\]/.exec(vaultRs)![1].match(/"([^"]+)"/g)!.map((s) => s.slice(1, -1))
-  expect(new Set(ACTIONS.map((a) => a.command))).toEqual(new Set(allow))
+  // `stale` has no button: the health panel runs it (`loadHealth`).
+  expect(new Set([...ACTIONS.map((a) => a.command), 'stale'])).toEqual(new Set(allow))
   expect(ACTIONS.filter((a) => a.destructive).map((a) => a.id)).toEqual(['disable', 'rewrites-apply'])
 })

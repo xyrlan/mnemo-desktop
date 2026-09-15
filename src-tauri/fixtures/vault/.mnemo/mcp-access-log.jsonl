@@ -1,0 +1,4 @@
+{"timestamp": "2026-09-10T16:40:57Z", "tool": "read_mnemo_rule", "args": {"slug": "no-silent-contract-changes", "scope": "project"}, "project": "mnemo-desktop", "result_count": 1, "hit_slugs": ["no-silent-contract-changes"], "elapsed_ms": 0.4}
+{"timestamp": "2026-09-11T10:00:00Z", "tool": "list_rules_by_topic", "args": {"topic": "testing"}, "project": "mnemo-desktop", "result_count": 1, "hit_slugs": ["run-tests-before-commit"], "elapsed_ms": 170.0}
+{"timestamp": "2026-09-12T10:00:00Z", "tool": "read_mnemo_rule", "args": {"slug": "Run the full test suite before committing", "scope": "vault"}, "project": "mnemo", "result_count": 1, "hit_slugs": ["Run the full test suite before committing"], "elapsed_ms": 3.9}
+{"timestamp": "2026-09-13T10:00:00Z", "tool": "read_mnemo_rule", "args": {"slug": "gone", "scope": "vault"}, "project": "mnemo", "result_count": 0, "hit_slugs": [], "elapsed_ms": 0.2}

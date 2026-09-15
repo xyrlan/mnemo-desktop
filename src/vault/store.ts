@@ -2,7 +2,7 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { VaultClient } from './client'
 import { actionById } from './actions'
 import { findPage } from './search'
-import type { Agent, Page, PageInfo, RunResult } from './types'
+import type { Agent, Health, Page, PageInfo, RunResult, VaultGraph } from './types'
 
 export type LogEntry = {
   id: number
@@ -27,7 +27,19 @@ export type VaultState = {
   /** Agent name → expanded; unset falls back to the view's default. */
   expanded: Record<string, boolean>
   log: LogEntry[]
+  /** Pages (tree + page) or graph (graph + health). */
+  mode: VaultMode
+  /** The graph's `agent:<name>` / `topic:<name>`; null until the graph is first shown. */
+  scope: string | null
+  graph: VaultGraph | null
+  graphLoading: boolean
+  health: Health | null
+  healthLoading: boolean
+  /** `mnemo stale --json`, run in the current repo beside `vault_health`. */
+  stale: RunResult | null
 }
+
+export type VaultMode = 'pages' | 'graph'
 
 export type VaultActions = {
   load(): Promise<void>
@@ -38,6 +50,11 @@ export type VaultActions = {
   run(actionId: string, cwd: string): Promise<void>
   running(actionId: string): boolean
   dismiss(id: number): void
+  setMode(mode: VaultMode): void
+  /** Reads the graph of `scope`; a later scope wins over a slow read. */
+  loadGraph(scope: string): Promise<void>
+  /** Reads health and runs `mnemo stale --json` in `cwd`, once at a time. */
+  loadHealth(cwd: string): Promise<void>
 }
 
 export type VaultStore = StoreApi<VaultState & VaultActions>
@@ -68,6 +85,13 @@ export function createVaultStore(client: VaultClient): VaultStore {
       page: null,
       expanded: {},
       log: [],
+      mode: 'pages',
+      scope: null,
+      graph: null,
+      graphLoading: false,
+      health: null,
+      healthLoading: false,
+      stale: null,
 
       async load() {
         if (get().loading) return
@@ -121,8 +145,39 @@ export function createVaultStore(client: VaultClient): VaultStore {
       dismiss(id) {
         set((s) => ({ log: s.log.filter((x) => x.id !== id) }))
       },
+
+      setMode(mode) {
+        set({ mode })
+      },
+
+      async loadGraph(scope) {
+        set({ scope, graphLoading: true, graph: get().graph?.scope === scope ? get().graph : null })
+        let graph: VaultGraph
+        try {
+          graph = await client.graph(scope)
+        } catch (e) {
+          graph = { scope, nodes: [], edges: [], total: 0, error: String(e) }
+        }
+        if (get().scope === scope) set({ graph, graphLoading: false })
+      },
+
+      async loadHealth(cwd) {
+        if (get().healthLoading) return
+        set({ healthLoading: true })
+        const failed = (e: unknown): RunResult => ({ stdout: '', stderr: String(e), code: null })
+        const [health, stale] = await Promise.all([
+          client.health().catch((e): Health => ({ ...emptyHealth(), error: String(e) })),
+          client.run('stale', ['--json'], cwd).catch(failed),
+        ])
+        set({ health, stale, healthLoading: false })
+      },
     }
   })
+}
+
+function emptyHealth(): Health {
+  const none: RunResult = { stdout: '', stderr: '', code: null }
+  return { root: null, status: none, doctor: none, tiles: [], label_only: [], dormant: [], pages: 0, never_fired: 0, inbox: 0, error: null }
 }
 
 function blank(path: string): PageInfo {

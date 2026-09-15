@@ -1,0 +1,5 @@
+{"session_id": "s3", "project": "mnemo-desktop", "emitted": ["run-tests-before-commit"], "scores": [7.5], "silence_reason": null, "candidates": [["run-tests-before-commit", 7.5]], "ts": "2026-09-14T08:00:00Z"}
+{"session_id": "s4", "project": "mnemo-desktop", "emitted": [], "scores": [], "silence_reason": "relative_gap_fail", "candidates": [["verified-without-evidence", 3.1]], "ts": "2026-09-14T09:00:00Z"}
+not a json row
+{"session_id": "s5", "project": "mnemo-desktop", "emitted": null, "ts": "2026-09-14T10:00:00Z"}
+{"session_id": "s6", "project": "mnemo-desktop", "emitted": ["mnemo-desktop__shared-target-dir", "shared/run-tests-before-commit"], "scores": [8.0, 6.2], "silence_reason": null, "candidates": [], "ts": "2026-09-15T11:00:00Z"}
