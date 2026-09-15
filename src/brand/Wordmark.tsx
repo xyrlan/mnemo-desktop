@@ -1,5 +1,11 @@
-// Seam for the brand piece (#41): it replaces this stub with the mark + wordmark.
-// Home renders it; nothing else should import from src/brand yet.
+import markUrl from './mark.svg'
+import './wordmark.css'
+
 export function Wordmark() {
-  return <span className="hm-title">mnemo</span>
+  return (
+    <span className="brand-wordmark">
+      <img className="brand-wordmark-mark" src={markUrl} alt="" width={18} height={18} />
+      mnemo
+    </span>
+  )
 }
