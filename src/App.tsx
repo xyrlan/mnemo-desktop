@@ -8,6 +8,8 @@ import { registerBuiltins } from './actions/registry'
 // Every `src/<view>/view.tsx` registers its pane view on import. A new pane kind
 // (editor, browser, mission) therefore needs no edit here.
 import.meta.glob('./*/view.tsx', { eager: true })
+import './terminal/cmd-view'
+import Sidebar from './mission/Sidebar'
 
 registerBuiltins(store)
 
@@ -29,6 +31,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <div className="app-main">
       <div className="tabbar">
         {tabs.map((t, i) => (
           <div
@@ -53,6 +56,8 @@ export default function App() {
           </div>
         ))}
       </div>
+      </div>
+      <Sidebar />
       <Palette />
     </div>
   )

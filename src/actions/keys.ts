@@ -21,7 +21,7 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `tab.go.${k}`
-  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open' }
+  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open', b: 'mission.toggle-sidebar' }
   return m[k] ?? null
 }
 
