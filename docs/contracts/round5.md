@@ -28,18 +28,20 @@ On this Mac `/usr/bin/git` and `cc` are blocked by the Xcode licence: use
 
 - **files:** src/layout/SplitView.tsx, src/layout/store.ts, src/layout/store.test.ts, src/layout/tree.ts, src/layout/tree.test.ts, src/terminal/view.tsx, src/chrome/, src-tauri/src/chrome.rs, src/theme.css
 - **exposes:** `swapPanes(a: PaneId, b: PaneId)` on the layout store, `chrome_branch(cwd: String) -> Option<String>`, CSS class `.pane-bar`
-- **consumes:** `ParentSession { tokens, children_tokens, cwd }` from the mission snapshot (read-only, `?? 0`)
+- **consumes:** nothing
 
-Issue #35. Only the `// -- chrome` anchor blocks of `lib.rs`. Do not touch
-`src/mission/` or `src/cockpit/`.
+Issue #35. Reads `ParentSession { tokens, children_tokens, cwd }` from the
+mission snapshot already on main (read-only, `?? 0`). Only the `// -- chrome`
+anchor blocks of `lib.rs`. Do not touch `src/mission/` or `src/cockpit/`.
 
 ## cockpit-graph
 
 - **files:** src/cockpit/, src/mission/Sidebar.tsx, src/mission/Sidebar.test.tsx, src/mission/rows.tsx, src/mission/view.tsx, src/mission/mission.css
 - **exposes:** `openView('cockpit', {}, place)` (unchanged id), palette `cockpit.open` (unchanged)
-- **consumes:** `Graph`, `layoutDagre`, `CardData` from `src/graph`; `Snapshot` and helpers from `src/mission/types.ts` (read-only)
+- **consumes:** nothing
 
-Issue #36. No Rust. `src/mission/types.ts`, `scope.ts`, `tokens.ts`,
+Issue #36. Uses `Graph`, `layoutDagre`, `CardData` from `src/graph` and
+`Snapshot` + helpers from `src/mission/types.ts`, all already on main. No Rust. `src/mission/types.ts`, `scope.ts`, `tokens.ts`,
 `store.ts` are shared with the chrome piece's reads — do not change their
 exports.
 
@@ -47,7 +49,7 @@ exports.
 
 - **files:** src/vault/, src-tauri/src/vault.rs, src-tauri/fixtures/vault/
 - **exposes:** `vault_graph(scope: String) -> VaultGraph { nodes, edges }`, `vault_health() -> Health`
-- **consumes:** `Graph`, `layoutDagre`, `CardData` from `src/graph`
+- **consumes:** nothing
 
-Issue #37. Only the `// -- vault` anchor blocks of `lib.rs` (already
+Issue #37. Uses `Graph`, `layoutDagre`, `CardData` from `src/graph` (on main). Only the `// -- vault` anchor blocks of `lib.rs` (already
 present; add the two commands there).
