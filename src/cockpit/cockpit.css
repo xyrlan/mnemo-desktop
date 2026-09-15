@@ -1,0 +1,9 @@
+.cockpit { display: flex; flex-direction: column; font-size: 12px; line-height: 1.5; }
+.ck-head { display: flex; align-items: baseline; gap: 12px; padding: 2px 4px 6px; color: var(--fg-muted); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.ck-title { color: var(--fg); font-weight: 700; }
+.ck-errors { flex: 0 0 auto; padding: 0 4px; }
+.ck-columns { flex: 1; min-height: 0; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-top: 8px; }
+.ck-column { flex: 0 0 380px; min-width: 0; overflow-y: auto; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
+.ck-column.focused { border-color: var(--accent); }
+.ck-column .m-repo { margin-bottom: 0; border-left: 0; padding-left: 0; }
+.ck-empty { color: var(--fg-muted); padding: 12px 4px; }

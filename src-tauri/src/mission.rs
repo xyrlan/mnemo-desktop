@@ -18,6 +18,15 @@ pub struct ParentSession {
     pub name: Option<String>,
     pub status: String,
     pub cwd: String,
+    /// Input + output tokens from the session transcript; cache reads are kept apart
+    /// because they are billed differently and dwarf everything else.
+    #[serde(default)]
+    pub tokens: u64,
+    #[serde(default)]
+    pub cache_read: u64,
+    /// Sum of `tokens` over the children whose `parent_session` is this session.
+    #[serde(default)]
+    pub children_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -40,6 +49,9 @@ pub struct ChildSession {
     pub branch: Option<String>,
     /// Timeline lines the child has now; the front-end diffs against its looked marker.
     pub timeline_len: usize,
+    /// `session_id` of the parent that dispatched this child: recorded by `mnemo
+    /// dispatch` when it can, otherwise guessed by `link_children`.
+    pub parent_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -115,6 +127,9 @@ pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
                 name: r.get("name").and_then(|n| n.as_str()).map(str::to_string),
                 status: r.get("status").and_then(|s| s.as_str()).unwrap_or("unknown").to_string(),
                 cwd: r.get("cwd")?.as_str()?.to_string(),
+                tokens: 0,
+                cache_read: 0,
+                children_tokens: 0,
             })
         })
         .collect())
@@ -143,9 +158,18 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 intent: s(r.get("intent")).map(|i| i.lines().next().unwrap_or("").to_string()),
                 branch: None,
                 timeline_len: 0,
+                parent_session: s(r.get("parent_session")),
             })
         })
         .collect())
+}
+
+/// `sessionId` → `startedAt` (epoch ms) for every row of `claude agents --json --all`.
+pub fn parse_agent_starts(json: &str) -> HashMap<String, u64> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
+    rows.iter()
+        .filter_map(|r| Some((r.get("sessionId")?.as_str()?.to_string(), r.get("startedAt")?.as_u64()?)))
+        .collect()
 }
 
 /// A contract file: `feature:` from the frontmatter and one `## <slug>` per piece.
@@ -227,6 +251,134 @@ pub fn parse_timeline(text: &str, from_line: usize) -> Timeline {
     Timeline { lines, total }
 }
 
+// -------------------------------------------------------------- tokens --
+
+/// Usage totals over one session transcript, kept between polls so each poll reads
+/// only what was appended since the last one.
+#[derive(Debug, Default)]
+pub struct Tally {
+    pub tokens: u64,
+    pub cache_read: u64,
+    /// Epoch ms of the first line that carries a `timestamp`.
+    pub first_at: Option<u64>,
+    /// Lines parsed by the last `feed` or `refresh`.
+    pub lines_read: usize,
+    offset: u64,
+    len: u64,
+    mtime: Option<std::time::SystemTime>,
+    /// message id → its (tokens, cache_read). Claude Code writes one line per content
+    /// block of an assistant message, each repeating the message's usage, so the
+    /// last line of a message replaces what the earlier ones contributed.
+    by_message: HashMap<String, (u64, u64)>,
+}
+
+impl Tally {
+    /// Add complete transcript lines.
+    pub fn feed(&mut self, text: &str) {
+        self.lines_read = 0;
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            self.lines_read += 1;
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            if self.first_at.is_none() {
+                self.first_at = v.get("timestamp").and_then(|t| t.as_str()).and_then(iso_ms);
+            }
+            let Some(u) = v.get("message").and_then(|m| m.get("usage")) else { continue };
+            let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            let add = (n("input_tokens") + n("output_tokens"), n("cache_read_input_tokens"));
+            let id = v.get("message").and_then(|m| m.get("id")).and_then(|x| x.as_str());
+            if let Some((t, c)) = id.and_then(|id| self.by_message.insert(id.to_string(), add)) {
+                self.tokens -= t;
+                self.cache_read -= c;
+            }
+            self.tokens += add.0;
+            self.cache_read += add.1;
+        }
+    }
+
+    /// Read what was appended to `path` since the last call. An unchanged size and
+    /// mtime reads nothing; a file that shrank is re-read from the start; a trailing
+    /// line still being written waits for its newline.
+    pub fn refresh(&mut self, path: &Path) -> Result<(), String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (len, mtime) = (meta.len(), meta.modified().ok());
+        if len == self.len && mtime == self.mtime {
+            self.lines_read = 0;
+            return Ok(());
+        }
+        if len < self.offset {
+            *self = Tally::default();
+        }
+        let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        f.seek(SeekFrom::Start(self.offset)).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        f.take(len - self.offset).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        match buf.iter().rposition(|b| *b == b'\n') {
+            Some(end) => {
+                self.feed(&String::from_utf8_lossy(&buf[..=end]));
+                self.offset += end as u64 + 1;
+            }
+            None => self.lines_read = 0,
+        }
+        self.len = len;
+        self.mtime = mtime;
+        Ok(())
+    }
+}
+
+/// `2026-09-15T00:41:39.813Z` → epoch ms. Transcripts and `state.json` write UTC.
+pub fn iso_ms(s: &str) -> Option<u64> {
+    let s = s.strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.splitn(3, '-').map(|x| x.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    let (hms, frac) = time.split_once('.').unwrap_or((time, "0"));
+    let mut t = hms.splitn(3, ':').map(|x| x.parse::<i64>().ok());
+    let (hh, mm, ss) = (t.next()??, t.next()??, t.next()??);
+    let ms: i64 = format!("{:0<3}", frac).get(..3)?.parse().ok()?;
+    // Days from civil (Howard Hinnant).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    u64::try_from(((days * 24 + hh) * 60 + mm) * 60 * 1000 + ss * 1000 + ms).ok()
+}
+
+/// Claude Code's project dir for a cwd: every non-alphanumeric character becomes `-`
+/// (`/Users/x/.claude` → `-Users-x--claude`, as seen in `~/.claude/projects/`).
+pub fn project_dir_name(cwd: &str) -> String {
+    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+/// Point every child at its parent and sum the children's tokens onto the parents.
+/// A child that already names its parent keeps it. Otherwise it belongs to the
+/// parent in the same repo that started before it did, the youngest of those when
+/// several did. `parent_starts` is keyed by session id, `child_starts` by short id.
+pub fn link_children(
+    parents: &mut [ParentSession],
+    children: &mut [ChildSession],
+    roots: &HashMap<String, String>,
+    parent_starts: &HashMap<String, u64>,
+    child_starts: &HashMap<String, u64>,
+) {
+    for c in children.iter_mut().filter(|c| c.parent_session.is_none()) {
+        let Some(born) = child_starts.get(&c.id) else { continue };
+        let root = root_of(&c.cwd, roots);
+        c.parent_session = parents
+            .iter()
+            .filter(|p| root_of(&p.cwd, roots) == root)
+            .filter_map(|p| parent_starts.get(&p.session_id).filter(|s| *s < born).map(|s| (s, p)))
+            .max_by_key(|(s, _)| **s)
+            .map(|(_, p)| p.session_id.clone());
+    }
+    for p in parents.iter_mut() {
+        p.children_tokens =
+            children.iter().filter(|c| c.parent_session.as_deref() == Some(p.session_id.as_str())).map(|c| c.tokens).sum();
+    }
+}
+
 // ---------------------------------------------------------------- join --
 
 pub struct JoinInput<'a> {
@@ -242,13 +394,18 @@ pub struct JoinInput<'a> {
     /// root → PRs.
     pub prs: &'a HashMap<String, Vec<Pr>>,
     pub focused_root: Option<&'a str>,
+    /// Parent session id → epoch ms it started, for `link_children`.
+    pub parent_starts: &'a HashMap<String, u64>,
+    /// Child short id → epoch ms it was created, for `link_children`.
+    pub child_starts: &'a HashMap<String, u64>,
 }
 
 fn root_of(cwd: &str, roots: &HashMap<String, String>) -> String {
     roots.get(cwd).cloned().unwrap_or_else(|| cwd.to_string())
 }
 
-pub fn join(input: JoinInput) -> Vec<RepoGroup> {
+pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
+    link_children(&mut input.parents, &mut input.children, input.roots, input.parent_starts, input.child_starts);
     let mut groups: BTreeMap<String, RepoGroup> = BTreeMap::new();
     let ensure = |groups: &mut BTreeMap<String, RepoGroup>, root: &str| {
         groups.entry(root.to_string()).or_insert_with(|| RepoGroup {
@@ -458,7 +615,9 @@ pub fn read_timeline(id: &str, from_line: usize) -> Timeline {
 /// One poll. Every failure is recorded in `errors` and never aborts the snapshot.
 pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut errors = Vec::new();
-    let parents = match run("claude", &["agents", "--json", "--all"], None).and_then(|j| parse_agents(&j)) {
+    let agents = run("claude", &["agents", "--json", "--all"], None);
+    let agent_starts = agents.as_deref().map(parse_agent_starts).unwrap_or_default();
+    let mut parents = match agents.and_then(|j| parse_agents(&j)) {
         Ok(p) => p,
         Err(e) => {
             errors.push(e);
@@ -472,9 +631,18 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
             vec![]
         }
     };
+    let mut child_starts = HashMap::new();
     for c in &mut children {
         c.timeline_len = timeline_len(&c.id);
+        if c.parent_session.is_none() {
+            c.parent_session = declared_parent(&c.cwd);
+        }
+        // Creation time survives a respawn; the process start does not.
+        if let Some(t) = job_created_at(&c.id).or_else(|| c.session_id.as_ref().and_then(|s| agent_starts.get(s).copied())) {
+            child_starts.insert(c.id.clone(), t);
+        }
     }
+    let parent_starts = tally_parents(&mut parents, &agent_starts);
 
     let mut roots: HashMap<String, String> = HashMap::new();
     let cwds: Vec<String> = parents
@@ -528,8 +696,69 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         contracts: &contracts,
         prs: &prs,
         focused_root: focused_root.as_deref(),
+        parent_starts: &parent_starts,
+        child_starts: &child_starts,
     });
     Snapshot { repos, errors, at: chrono_now() }
+}
+
+fn projects_dir() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("projects")
+}
+
+/// `~/.claude/projects/<escaped cwd>/<session>.jsonl`, or wherever else under
+/// `projects/` that file is when the escaping guess misses (very long cwds).
+pub fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
+    let file = format!("{session_id}.jsonl");
+    let guess = projects_dir().join(project_dir_name(cwd)).join(&file);
+    if guess.is_file() {
+        return Some(guess);
+    }
+    std::fs::read_dir(projects_dir()).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+}
+
+/// Fill each parent's `tokens` and `cache_read` from its transcript, reading only the
+/// bytes appended since the previous poll. Returns session id → start (epoch ms):
+/// the transcript's first line when there is one, since a resumed session's process
+/// is younger than the children it dispatched before the resume.
+fn tally_parents(parents: &mut [ParentSession], agent_starts: &HashMap<String, u64>) -> HashMap<String, u64> {
+    static TALLIES: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Tally>>> = std::sync::OnceLock::new();
+    let mut tallies = TALLIES.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    tallies.retain(|id, _| parents.iter().any(|p| &p.session_id == id));
+    let mut starts = HashMap::new();
+    for p in parents.iter_mut() {
+        let tally = tallies.entry(p.session_id.clone()).or_default();
+        if let Some(path) = transcript_path(&p.cwd, &p.session_id) {
+            if tally.refresh(&path).is_err() {
+                *tally = Tally::default();
+            }
+        }
+        p.tokens = tally.tokens;
+        p.cache_read = tally.cache_read;
+        if let Some(t) = tally.first_at.or_else(|| agent_starts.get(&p.session_id).copied()) {
+            starts.insert(p.session_id.clone(), t);
+        }
+    }
+    starts
+}
+
+/// `<worktree>/.mnemo-child-profile/dispatch.json`'s `parent_session`, written by
+/// `mnemo dispatch` once xyrlan/mnemo#288 lands.
+pub fn declared_parent(cwd: &str) -> Option<String> {
+    let text = std::fs::read_to_string(Path::new(cwd).join(".mnemo-child-profile").join("dispatch.json")).ok()?;
+    parse_declared_parent(&text)
+}
+
+pub fn parse_declared_parent(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v.get("parent_session")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// `createdAt` of a child's `~/.claude/jobs/<id>/state.json`, in epoch ms.
+fn job_created_at(id: &str) -> Option<u64> {
+    let text = std::fs::read_to_string(jobs_dir().join(id).join("state.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    iso_ms(v.get("createdAt")?.as_str()?)
 }
 
 fn chrono_now() -> String {
@@ -570,6 +799,7 @@ mod tests {
     const PRS: &str = include_str!("../fixtures/prs.json");
     const CONTRACT: &str = include_str!("../fixtures/contract.md");
     const TIMELINE: &str = include_str!("../fixtures/timeline.jsonl");
+    const TRANSCRIPT: &str = include_str!("../fixtures/transcript.jsonl");
 
     #[test]
     fn agents_keeps_interactive_rows_with_pid_and_status() {
@@ -645,7 +875,22 @@ mod tests {
         let mut list = parse_prs(PRS).unwrap();
         list.push(Pr { number: 9, url: "u".into(), state: "OPEN".into(), head: "feat/panes/editor".into(), ci: "pass".into() });
         prs.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), list);
-        join(JoinInput { parents, children, roots: &roots, branches: &branches, contracts: &contracts, prs: &prs, focused_root: focused })
+        roots.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
+        roots.insert("/Users/xyrlan/github/mnemo-wt-244".to_string(), "/Users/xyrlan/github/mnemo".to_string());
+        // Children are created from their jobs; the fixture has only process starts.
+        let starts = parse_agent_starts(AGENTS);
+        let child_starts = children.iter().filter_map(|c| Some((c.id.clone(), *starts.get(c.session_id.as_ref()?)?))).collect();
+        join(JoinInput {
+            parents,
+            children,
+            roots: &roots,
+            branches: &branches,
+            contracts: &contracts,
+            prs: &prs,
+            focused_root: focused,
+            parent_starts: &starts,
+            child_starts: &child_starts,
+        })
     }
 
     #[test]
@@ -681,13 +926,137 @@ mod tests {
         let children = vec![ChildSession {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
-            updated_at: None, intent: None, branch: None, timeline_len: 0,
+            updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None,
         }];
         let empty = HashMap::new();
-        let groups = join(JoinInput { parents: vec![], children, roots: &empty, branches: &empty, contracts: &HashMap::new(), prs: &HashMap::new(), focused_root: None });
+        let groups = join(JoinInput {
+            parents: vec![], children, roots: &empty, branches: &empty, contracts: &HashMap::new(), prs: &HashMap::new(),
+            focused_root: None, parent_starts: &HashMap::new(), child_starts: &HashMap::new(),
+        });
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "elsewhere");
         assert_eq!(groups[0].children.len(), 1);
+    }
+
+    #[test]
+    fn join_links_children_to_the_youngest_older_parent_in_their_repo() {
+        let groups = fixture_join(None);
+        let g = groups.iter().find(|g| g.name == "mnemo-desktop").unwrap();
+        let dispatcher = "7c3e9d41-2b6a-4f0e-8d15-a9c4e2f7b603";
+        let pieces: Vec<&ChildSession> = g.missions[0].pieces.iter().filter_map(|p| p.child.as_ref()).collect();
+        assert_eq!(pieces.len(), 2);
+        assert!(pieces.iter().all(|c| c.parent_session.as_deref() == Some(dispatcher)), "{pieces:?}");
+        let tokens = |sid: &str| g.parents.iter().find(|p| p.session_id == sid).unwrap().children_tokens;
+        assert_eq!(tokens(dispatcher), 34698 + 37338);
+        assert_eq!(tokens("2f8a61c0-4d3b-4e7a-b1c9-5d0e7f3a2b14"), 0, "an older parent loses to a younger one");
+        assert_eq!(tokens("c41e0b7d-8a25-4f63-9e0d-3b7a6c5f1e28"), 0, "a parent started after the child cannot own it");
+        // mnemo-wt-244 started days before the only mnemo parent.
+        let m = groups.iter().find(|g| g.name == "mnemo").unwrap();
+        assert!(m.children.iter().find(|c| c.id == "04082ea7").unwrap().parent_session.is_none());
+        assert_eq!(m.parents[0].children_tokens, 0);
+    }
+
+    #[test]
+    fn a_declared_parent_wins_over_the_heuristic() {
+        let parent = |sid: &str, cwd: &str| ParentSession {
+            session_id: sid.into(), pid: None, name: None, status: "idle".into(), cwd: cwd.into(), tokens: 0, cache_read: 0, children_tokens: 0,
+        };
+        let mut parents = vec![parent("old", "/r"), parent("young", "/r")];
+        let mut children = parse_sessions(SESSIONS).unwrap().into_iter().take(2).collect::<Vec<_>>();
+        for c in &mut children {
+            c.cwd = "/r".into();
+        }
+        children[0].parent_session = parse_declared_parent(r#"{"parent_session":"old","parent_pid":1,"contract":null}"#);
+        assert_eq!(parse_declared_parent(r#"{"parent_session":""}"#), None);
+        assert_eq!(parse_declared_parent("not json"), None);
+        let parent_starts = HashMap::from([("old".to_string(), 1), ("young".to_string(), 2)]);
+        let child_starts = children.iter().map(|c| (c.id.clone(), 3)).collect();
+        link_children(&mut parents, &mut children, &HashMap::new(), &parent_starts, &child_starts);
+        assert_eq!(children[0].parent_session.as_deref(), Some("old"));
+        assert_eq!(children[1].parent_session.as_deref(), Some("young"));
+        assert_eq!(parents[0].children_tokens, children[0].tokens);
+        assert_eq!(parents[1].children_tokens, children[1].tokens);
+    }
+
+    #[test]
+    fn transcript_sums_usage_once_per_message() {
+        let mut t = Tally::default();
+        t.feed(TRANSCRIPT);
+        // msg …0001 is written twice (thinking, then tool_use); its last line counts.
+        assert_eq!(t.tokens, (3 + 120) + (10 + 450));
+        assert_eq!(t.cache_read, 12000 + 17000);
+        assert_eq!(t.first_at, Some(1789431000000), "the snapshot line has no top-level timestamp");
+        assert_eq!(t.lines_read, 7);
+    }
+
+    #[test]
+    fn transcript_refresh_reads_only_appended_lines() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("mnemo-desktop-tally-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        std::fs::write(&path, TRANSCRIPT).unwrap();
+        let mut t = Tally::default();
+        t.refresh(&path).unwrap();
+        assert_eq!((t.tokens, t.cache_read, t.lines_read), (583, 29000, 7));
+        t.refresh(&path).unwrap();
+        assert_eq!(t.lines_read, 0, "unchanged file is not read again");
+
+        let line = |id: &str, out: u64| {
+            format!(r#"{{"type":"assistant","message":{{"id":"{id}","usage":{{"input_tokens":5,"cache_read_input_tokens":100,"output_tokens":{out}}}}},"timestamp":"2026-09-15T00:30:00.000Z"}}"#)
+        };
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(f, "{}
+{}", line("msg_a", 20), line("msg_b", 30)).unwrap();
+        t.refresh(&path).unwrap();
+        assert_eq!(t.lines_read, 2);
+        assert_eq!((t.tokens, t.cache_read), (583 + 25 + 35, 29000 + 200));
+        assert_eq!(t.first_at, Some(1789431000000));
+
+        // A line still being written waits for its newline.
+        let half = line("msg_c", 40);
+        write!(f, "{}", &half[..20]).unwrap();
+        t.refresh(&path).unwrap();
+        assert_eq!((t.lines_read, t.tokens), (0, 643));
+        writeln!(f, "{}", &half[20..]).unwrap();
+        t.refresh(&path).unwrap();
+        assert_eq!((t.lines_read, t.tokens), (1, 643 + 45));
+
+        // A rewritten, shorter file starts over.
+        std::fs::write(&path, format!("{}\n", line("msg_z", 1))).unwrap();
+        t.refresh(&path).unwrap();
+        assert_eq!((t.lines_read, t.tokens, t.cache_read), (1, 6, 100));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn iso_timestamps_and_project_dirs() {
+        assert_eq!(iso_ms("2026-09-15T00:41:39.813Z"), Some(1789432899813));
+        assert_eq!(iso_ms("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(iso_ms("2024-02-29T12:00:00.5Z"), Some(1709208000500));
+        assert_eq!(iso_ms("yesterday"), None);
+        assert_eq!(project_dir_name("/Users/xyrlan/github/mnemo-desktop"), "-Users-xyrlan-github-mnemo-desktop");
+        assert_eq!(project_dir_name("/Users/xyrlan/.claude/jobs/1f87be87/tmp"), "-Users-xyrlan--claude-jobs-1f87be87-tmp");
+    }
+
+    /// Against this machine's real `claude agents` and transcripts:
+    /// `cargo test live_snapshot -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_snapshot_counts_parent_tokens() {
+        let snap = collect_snapshot(None, false);
+        let parents: Vec<&ParentSession> = snap.repos.iter().flat_map(|g| &g.parents).collect();
+        let linked = snap.repos.iter().flat_map(|g| g.children.iter().chain(g.missions.iter().flat_map(|m| m.pieces.iter().filter_map(|p| p.child.as_ref()))));
+        println!("errors: {}", snap.errors.len());
+        for p in &parents {
+            println!("parent {} tokens={} cache_read={} children_tokens={}", p.session_id, p.tokens, p.cache_read, p.children_tokens);
+        }
+        println!("children linked: {}", linked.filter(|c| c.parent_session.is_some()).count());
+        assert!(parents.iter().any(|p| p.tokens > 0), "no parent has tokens");
+        // The second poll only reads what was appended in between.
+        let again = collect_snapshot(None, false);
+        assert!(again.repos.iter().flat_map(|g| &g.parents).any(|p| p.tokens > 0));
     }
 
     #[test]
@@ -915,7 +1284,8 @@ mod translate_tests {
         let dir = std::env::temp_dir().join(format!("mnemo-desktop-tr-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("claude");
-        std::fs::write(&fake, "#!/bin/sh\nprintf '  EN:%s  \\n' \"${@: -1}\"\n").unwrap();
+        // POSIX sh (dash on Ubuntu) has no `${@: -1}`; walk to the last argument instead.
+        std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\nprintf '  EN:%s  \\n' \"$last\"\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let out = translate_with(fake.to_str().unwrap(), "pode seguir").unwrap();
         assert!(out.starts_with("EN:Rewrite the following"), "{out}");
