@@ -8,6 +8,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('t', { metaKey: true }), 'mac')).toBe('tab.new')
   expect(actionForKey(ev('d', { metaKey: true }), 'mac')).toBe('pane.split.row')
   expect(actionForKey(ev('D', { metaKey: true, shiftKey: true }), 'mac')).toBe('pane.split.col')
+  expect(actionForKey(ev('W', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.close')
   expect(actionForKey(ev('w', { metaKey: true }), 'mac')).toBe('pane.close')
   expect(actionForKey(ev('ArrowLeft', { metaKey: true, altKey: true }), 'mac')).toBe('focus.left')
   expect(actionForKey(ev('3', { metaKey: true }), 'mac')).toBe('tab.go.3')

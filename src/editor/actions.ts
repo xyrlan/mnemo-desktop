@@ -17,7 +17,9 @@ export type Deps = {
 
 /** Opens `path` as an editor pane. Split panes inherit the opener's tree root. */
 export function openEditor(app: Store, path: string, root: string | undefined, place: Place) {
-  app.getState().openView('editor', root === undefined ? { path } : { path, root }, place, basename(path))
+  // A plain split becomes 'auto': reuse a clean editor, else place by size.
+  const where: Place = place === 'split-row' ? 'auto' : place
+  app.getState().openView('editor', root === undefined ? { path } : { path, root }, where, basename(path))
 }
 
 export function registerEditorActions({ app, sessions, fs, prompt, register }: Deps) {

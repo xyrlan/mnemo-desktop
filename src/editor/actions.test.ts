@@ -36,8 +36,8 @@ test('editor.open resolves relative to the focused terminal cwd and splits besid
   const editor = Object.values(st.panes).find((p) => p.view === 'editor')!
   expect(editor.props).toEqual({ path: '/Users/me/proj/src/main.ts', root: '/Users/me/proj' })
   expect(editor.title).toBe('main.ts')
-  expect(st.tabs).toHaveLength(1)
-  expect(st.tabs[0].root.kind).toBe('split')
+  // 'split-row' from the prompt becomes 'auto'; with no pane sizes (jsdom) auto opens a tab.
+  expect(st.tabs.some((t) => JSON.stringify(t.root).includes(`"pane":${editor.id}`))).toBe(true)
   expect(st.tabs[0].focused).toBe(editor.id)
 })
 

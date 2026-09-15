@@ -11,6 +11,7 @@ import { makeWebviews } from './lifecycle'
 import { BLANK, normalizeUrl } from './url'
 import { terminalCwd } from './pr'
 import { focusedEvent, toViewport, watchPageFocus, type FocusHost } from './focus'
+import { registerReuse } from '../layout/reuse'
 import './browser.css'
 
 export const browser = makeBrowserClient(invoke, <T,>(event: string, cb: (payload: T) => void) =>
@@ -168,10 +169,21 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
 
 registerPaneView('browser', BrowserPane)
 
+// `openView('browser', { url }, 'auto')` navigates an open browser pane; an empty url
+// (the "Open URL…" action) declines so a fresh pane appears with the bar focused.
+registerReuse('browser', (id, p) => {
+  const url = typeof p.url === 'string' ? p.url : ''
+  if (!url) return false
+  const target = normalizeUrl(url)
+  if (!target) return false
+  browser.navigate(id, target).catch(() => {})
+  return true
+})
+
 register({
   id: 'browser.open',
   title: 'Open URL…',
-  run: () => store.getState().openView('browser', { url: '' }, 'split-row', 'browser'),
+  run: () => store.getState().openView('browser', { url: '' }, 'auto', 'browser'),
 })
 
 register({
@@ -179,6 +191,6 @@ register({
   title: 'Open pull request for this branch',
   run: async () => {
     const url = await browser.prUrl(terminalCwd(store.getState())).catch(() => null)
-    if (url) store.getState().openView('browser', { url }, 'split-row', 'pull request')
+    if (url) store.getState().openView('browser', { url }, 'auto', 'pull request')
   },
 })
