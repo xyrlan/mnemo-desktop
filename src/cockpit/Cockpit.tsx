@@ -13,6 +13,7 @@ import { pruneGone } from './needs'
 import { buildInbox, rowChild, type Row } from './inbox'
 import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
 import MissionMap from './MissionMap'
+import { lastCwd } from './where'
 import './cockpit.css'
 
 /** Branch checked out in `cwd`, re-asked every few seconds while the cockpit is open. */
@@ -134,7 +135,8 @@ export default function Cockpit() {
   const panes = useApp((s) => s.panes)
   const scope = useSettings((s) => s.sidebarScope)
   const logged = useGithub((s) => s.auth?.logged)
-  const cwd = focusedCwd({ tabs, activeTab, panes }, raw)
+  // A tab with nothing that has a cwd (the cockpit alone, a browser) is still about the last repo you were in.
+  const cwd = focusedCwd({ tabs, activeTab, panes }, raw) ?? lastCwd()
   // Resolve against the unpruned snapshot: a finished child's worktree still names its repo.
   const focused = repoOfCwd(raw, cwd)
   const branch = useBranch(cwd)
@@ -266,7 +268,7 @@ export default function Cockpit() {
           ))}
         </div>
       )}
-      <div className="ck-body">
+      <div className={`ck-body${mapAt ? ' ck-mapped' : ''}`}>
         <div className="ck-inbox" ref={body}>
           {inbox.needs.length > 0 ? (
             <div className="ck-needs">{renderRows(inbox.needs)}</div>

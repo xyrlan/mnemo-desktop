@@ -15,7 +15,7 @@ import { store as appStore } from '../layout/app-store'
 import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'
-import { withPrs, shipped } from './fixtures'
+import { merged, withPrs, shipped } from './fixtures'
 import { githubStore } from '../github/app-store'
 import { mnemoIssues } from '../github/fixtures'
 import { desktop, snapshot } from '../mission/fixtures'
@@ -207,6 +207,39 @@ test('"este repo" names the focused repo and branch, and says nada pendente with
   expect(host.querySelector('.ck-fold')?.textContent).toBe('▾ andando: 1')
   expect(rows('.ck-working').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['#40'])
   expect(host.querySelector('.nd-repo')).toBeNull()
+})
+
+test('opened in a tab of its own, "este repo" is the repo you just left', async () => {
+  settingsStore.setState({ sidebarScope: 'repo' })
+  await act(async () => {
+    await appStore.getState().newTab()
+  })
+  const tab = appStore.getState().tabs.at(-1)!
+  act(() => appStore.getState().setCwd(tab.focused, '/Users/me/github/mnemo'))
+  act(() => appStore.getState().openView('cockpit', {}, 'tab', 'cockpit'))
+  expect(appStore.getState().activeTab).not.toBe(tab.id)
+  missionStore.setState({ snapshot: withPrs })
+  await render()
+  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main')
+  expect(rows().map((r) => r.dataset.key)).toEqual(['ci:/Users/me/github/mnemo#13', `land:${shipped.missions[0].contract_path}`])
+})
+
+test('a merged PR with a red last rollup is not a row', async () => {
+  missionStore.setState({ snapshot: { ...withPrs, repos: [merged] } })
+  await render()
+  expect(rows()).toEqual([])
+  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
+})
+
+test('the open map asks for the width its layout spans and the inbox narrows to titles', async () => {
+  await render()
+  expect(host.querySelector('.ck-body')?.className).not.toContain('ck-mapped')
+  await act(async () => button(rows()[1], '⤢ round4')!.click())
+  expect(host.querySelector('.ck-body')?.className).toContain('ck-mapped')
+  // Contract, pieces, PRs, land: four 200px columns 48px apart, plus 16px either side.
+  expect(host.querySelector<HTMLElement>('.ck-map .mm')?.style.getPropertyValue('--mm-w')).toBe(`${4 * 200 + 3 * 48 + 32}px`)
+  key('Escape')
+  expect(host.querySelector('.ck-body')?.className).not.toContain('ck-mapped')
 })
 
 test('shows errors, and nada pendente when there is nothing at all', async () => {

@@ -1,6 +1,6 @@
 import { buildMissionMap, mapId, CARD_H, CARD_W, type MapCard } from './model'
 import { desktop } from '../mission/fixtures'
-import { shipped } from './fixtures'
+import { merged, shipped } from './fixtures'
 import { mnemoIssues } from '../github/fixtures'
 
 type M = ReturnType<typeof buildMissionMap>
@@ -85,4 +85,25 @@ test('laid out left to right at card size, no two cards overlapping, every edge 
       const apart = Math.abs(a.position.x - b.position.x) >= CARD_W || Math.abs(a.position.y - b.position.y) >= CARD_H
       expect(apart, `${a.id} overlaps ${b.id}`).toBe(true)
     }
+})
+
+test('the map spans its columns at 100%: contract, pieces, PRs, land, with the gaps between', () => {
+  const m = shipped.missions[0]
+  const g = buildMissionMap(shipped, m, {}, mnemoIssues)
+  const xs = g.nodes.map((n) => n.position.x)
+  expect(g.width).toBe(Math.max(...xs) - Math.min(...xs) + CARD_W)
+  // Four ranks of cards (issues share the contract's), 48px apart.
+  expect(g.width).toBe(4 * CARD_W + 3 * 48)
+  expect(g.height).toBeGreaterThanOrEqual(3 * CARD_H)
+})
+
+test('a merged or closed PR is history on the map: no red, no job to open', () => {
+  const m = merged.missions[0]
+  const g = buildMissionMap(merged, m, {})
+  const [vault, chrome, docs] = m.pieces.map((p) => mapId.pr(merged, p.pr!))
+  expect(data(g, vault)).toMatchObject({ sub: 'merged · CI ✗ fail', tone: 'ok' })
+  expect(kinds(g, vault)).toEqual(['pr'])
+  expect(kinds(g, chrome)).toEqual(['pr'])
+  expect(data(g, docs)).toMatchObject({ tone: 'muted' })
+  expect(kinds(g, docs)).toEqual(['pr'])
 })

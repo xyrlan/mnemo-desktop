@@ -60,8 +60,12 @@ function ActionCard({ data }: NodeProps<Node<MapCard, 'action'>>) {
 
 const nodeTypes = { action: ActionCard }
 
-/** One mission as React Flow at 100%: no fit-to-view shrink, pan to see the rest. The reply
- *  box of the child whose `reply` was pressed opens under the canvas. */
+/** Viewport offset of the cards inside the canvas, on every side. */
+const PAD = 16
+
+/** One mission as React Flow at 100%: no fit-to-view shrink. The map asks for the width its
+ *  layout spans (`--mm-w`); the cockpit gives it that much where the pane allows, and the rest
+ *  pans. The reply box of the child whose `reply` was pressed opens under the canvas. */
 export default function MissionMap({ repo, mission, onClose }: { repo: RepoGroup; mission: Mission; onClose: () => void }) {
   const looked = useMission((s) => s.looked)
   const issues = useGithub((s) => s.issues[repo.root]?.list)
@@ -95,7 +99,7 @@ export default function MissionMap({ repo, mission, onClose }: { repo: RepoGroup
   }
 
   return (
-    <div className="mm">
+    <div className="mm" style={{ '--mm-w': `${map.width + 2 * PAD}px` } as React.CSSProperties}>
       <div className="mm-head">
         <span className="ck-title">mission {mission.feature}</span>
         <span className="ck-quiet">{repo.name}</span>
@@ -112,7 +116,7 @@ export default function MissionMap({ repo, mission, onClose }: { repo: RepoGroup
               nodes={map.nodes}
               edges={map.edges}
               nodeTypes={nodeTypes}
-              defaultViewport={{ x: 16, y: 16, zoom: 1 }}
+              defaultViewport={{ x: PAD, y: PAD, zoom: 1 }}
               minZoom={0.5}
               maxZoom={1.5}
               nodesDraggable={false}

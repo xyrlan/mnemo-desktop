@@ -44,9 +44,14 @@
 .ck-fold { align-self: flex-start; background: transparent; border: 0; color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; padding: 2px 0; }
 .ck-fold:hover { color: var(--fg); }
 
-/* The mission map: a side panel beside the inbox, React Flow at 100%. */
-.ck-map { flex: 0 0 58%; min-width: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
-.mm { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* The mission map: a side panel beside the inbox, React Flow at 100%. It takes the width its
+   layout asks for (--mm-w, set by MissionMap), at least 60% of the pane, leaving the inbox a
+   column of titles; past that the canvas pans. */
+.ck-map { flex: 0 1 auto; min-width: 60%; max-width: calc(100% - 180px); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.mm { display: flex; flex-direction: column; height: 100%; min-height: 0; width: var(--mm-w, 100%); max-width: 100%; }
+.ck-mapped .ck-inbox { min-width: 160px; }
+.ck-mapped .ck-row .ck-detail, .ck-mapped .ck-row .ck-tokens, .ck-mapped .ck-row .nd-repo, .ck-mapped .ck-row .m-delta, .ck-mapped .ck-row .ck-act:not(.ck-mission) { display: none; }
+.ck-mapped .ck-row:not(.sel) .m-reply { display: none; }
 .mm-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
 .mm-canvas { position: relative; flex: 1; min-height: 0; }
 .mm-reply { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 4px 6px; }
