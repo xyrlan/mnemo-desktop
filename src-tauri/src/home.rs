@@ -151,10 +151,13 @@ pub fn classify_live(live: &HashMap<String, LiveRow>, id: &str, here: &[String])
 /// `/x/mnemo-wt-211` → `/x/mnemo`: a dispatch worktree that has since been removed still
 /// belongs to the repo beside it. None when the last segment has no `-wt-` suffix.
 pub fn worktree_sibling(cwd: &str) -> Option<String> {
-    let p = Path::new(cwd);
-    let name = p.file_name()?.to_str()?;
+    // String-based on purpose: `Path::with_file_name` would rewrite the separator on
+    // Windows and the result must stay comparable with the paths history recorded.
+    let cut = cwd.trim_end_matches(['/', '\\']);
+    let start = cut.rfind(['/', '\\']).map(|i| i + 1).unwrap_or(0);
+    let name = &cut[start..];
     let idx = name.rfind("-wt-")?;
-    Some(p.with_file_name(&name[..idx]).to_string_lossy().to_string())
+    Some(format!("{}{}", &cut[..start], &name[..idx]))
 }
 
 /// Roots Home never lists: Claude Code's own scratch clones under `~/.claude/`.
@@ -357,6 +360,7 @@ mod tests {
         assert_eq!(repos[0].root, "/Users/me/github/mnemo");
         assert_eq!(repos[0].sessions[0].cwd, "/Users/me/github/mnemo-wt-999");
         assert_eq!(worktree_sibling("/Users/me/github/plain"), None);
+        assert_eq!(worktree_sibling("C:\\src\\mnemo-wt-3").as_deref(), Some("C:\\src\\mnemo"));
     }
 
     #[test]
