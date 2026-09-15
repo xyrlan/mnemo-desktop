@@ -5,6 +5,7 @@ pub mod pty;
 // blank lines, so two branches adding a module never touch the same hunk.
 
 // -- editor (src/fs.rs) --
+pub mod fs;
 
 // -- browser (src/browser.rs) --
 
@@ -54,6 +55,9 @@ pub fn run() {
             // module anchors at the top of this file).
 
             // -- editor commands --
+            fs::fs_read,
+            fs::fs_write,
+            fs::fs_list,
 
             // -- browser commands --
 
