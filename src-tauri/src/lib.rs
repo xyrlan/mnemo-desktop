@@ -24,6 +24,7 @@ pub mod voice;
 pub mod marketplace;
 
 // -- vault (src/vault.rs) --
+pub mod vault;
 
 // -- cockpit: no Rust --
 
@@ -103,6 +104,9 @@ pub fn run() {
             voice::voice_set_language,
 
             // -- vault commands --
+            vault::vault_tree,
+            vault::vault_page,
+            vault::vault_run,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
