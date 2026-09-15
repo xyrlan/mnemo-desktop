@@ -22,3 +22,7 @@
 ## Out of scope
 
 Floating windows, a chronological feed (maybe a second tab of the cockpit later), multi-CLI (#5), whole-vault rendering.
+
+## Addendum (2026-09-15, later): pulse — after round 5
+
+User: "ver efeitos visuais na tela quando uma memória é usada, alguma tool do mnemo é usada". Decision **A + C**: the pane bar (from #35) pulses and shows `↯ <slug>` for ~3 s with a running counter; the vault graph node (from #37) glows. Toasts only for `enforce`. Source = tail of `.mnemo/{mcp-access-log,reflex-log,enrichment-log}.jsonl` → `mnemo://pulse`. Issue #44, built after round 5 lands (a separate round-6 contract already exists for cwd/quiet launch/brand; pulse joins the next one).
