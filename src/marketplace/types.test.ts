@@ -1,4 +1,4 @@
-import { groupBySource, typeSummary, type RuleSet } from './types'
+import { countStandings, groupBySource, typeSummary, type RuleSet } from './types'
 
 const rs = (source: string, name: string): RuleSet => ({
   source, name, path: `/${name}`, description: '', rule_count: 1, types: {}, topics: [], projects: [], last_commit: null, error: null,
@@ -12,4 +12,9 @@ test('groups keep the listed order of sources and sets', () => {
 test('type summary', () => {
   expect(typeSummary({ feedback: 3, project: 1 })).toBe('3 feedback · 1 project')
   expect(typeSummary({})).toBe('')
+})
+
+test('standings are counted, unclassified rules are not', () => {
+  const r = (standing: 'new' | 'changed' | null) => ({ slug: 'x', page_type: 'feedback', description: '', rel: 'feedback/x.md', standing })
+  expect(countStandings([r('new'), r('new'), r('changed'), r(null)])).toEqual({ new: 2, changed: 1, same: 0, yours: 0 })
 })

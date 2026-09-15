@@ -9,7 +9,7 @@ tags:
   - debugging
   - deployment
 published:
-  vault: 3f9c2a7e5b1d4c8a9e6f0b2d4a6c8e1f
+  vault: b7e4d1c9a3f6082e5d9c1b4a7e3f6d20
   project: mnemo-desktop
   date: 2026-09-10
   source_count: 0
