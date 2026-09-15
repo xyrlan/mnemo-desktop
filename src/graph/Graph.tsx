@@ -36,14 +36,16 @@ export type GraphProps = {
   edges: Edge[]
   onNodeClick?: (id: string) => void
   onNodeDoubleClick?: (id: string) => void
-  /** Re-fit the viewport when this changes (e.g. the set of node ids). */
+  /** Re-fit the viewport (remount) only when this changes, e.g. the scope. Node and edge
+   *  changes between polls update in place, so a node appearing or vanishing never
+   *  re-lays the whole canvas under the user. */
   fitKey?: string
 }
 
 /** Themed React Flow canvas with the `card` node type. Layout is the caller's job
  *  (see `layoutDagre`); this only renders and reports clicks. */
 export default function Graph({ nodes, edges, onNodeClick, onNodeDoubleClick, fitKey }: GraphProps) {
-  const key = useMemo(() => fitKey ?? nodes.map((n) => n.id).join(','), [fitKey, nodes])
+  const key = useMemo(() => fitKey ?? 'graph', [fitKey])
   return (
     <div className="gr-canvas">
       <ReactFlow

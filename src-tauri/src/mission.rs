@@ -708,6 +708,20 @@ pub fn read_timeline(id: &str, from_line: usize) -> Timeline {
 }
 
 /// One poll. Every failure is recorded in `errors` and never aborts the snapshot.
+fn pr_cache() -> &'static std::sync::Mutex<HashMap<String, Vec<Pr>>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Vec<Pr>>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// The last PR list `gh` returned for a repo root, kept for the polls that skip `gh`.
+pub fn remember_prs(root: &str, prs: &[Pr]) {
+    pr_cache().lock().unwrap().insert(root.to_string(), prs.to_vec());
+}
+
+pub fn recall_prs(root: &str) -> Option<Vec<Pr>> {
+    pr_cache().lock().unwrap().get(root).cloned()
+}
+
 pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut errors = Vec::new();
     let agents = run("claude", &["agents", "--json", "--all"], None);
@@ -767,18 +781,29 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         }
         branches.extend(worktree_branches(r));
         let cs = contracts_in(r);
-        if with_prs && !cs.is_empty() {
-            match run(
-                "gh",
-                &["pr", "list", "--json", "headRefName,number,url,statusCheckRollup,state", "--state", "all", "--limit", "100"],
-                Some(Path::new(r)),
-            )
-            .and_then(|j| parse_prs(&j))
-            {
-                Ok(p) => {
+        if !cs.is_empty() {
+            // PRs are fetched every tenth poll; the polls between reuse the last answer, so a
+            // PR node never blinks out of the cockpit graph and back (every id change there
+            // re-laid the canvas).
+            if with_prs {
+                match run(
+                    "gh",
+                    &["pr", "list", "--json", "headRefName,number,url,statusCheckRollup,state", "--state", "all", "--limit", "100"],
+                    Some(Path::new(r)),
+                )
+                .and_then(|j| parse_prs(&j))
+                {
+                    Ok(p) => {
+                        remember_prs(r, &p);
+                        prs.insert(r.clone(), p);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+            if !prs.contains_key(r) {
+                if let Some(p) = recall_prs(r) {
                     prs.insert(r.clone(), p);
                 }
-                Err(e) => errors.push(e),
             }
         }
         contracts.insert(r.clone(), cs);
@@ -922,6 +947,14 @@ mod tests {
         assert_eq!(f, "panes");
         assert_eq!(p, vec!["editor", "browser"]);
         assert!(parse_contract("# not a contract\n## x").is_none());
+    }
+
+    #[test]
+    fn remembered_prs_survive_a_poll_without_gh() {
+        let prs = parse_prs(PRS).unwrap();
+        remember_prs("/tmp/repo-cache-test", &prs);
+        assert_eq!(recall_prs("/tmp/repo-cache-test").as_deref(), Some(prs.as_slice()));
+        assert_eq!(recall_prs("/tmp/never-seen"), None);
     }
 
     #[test]

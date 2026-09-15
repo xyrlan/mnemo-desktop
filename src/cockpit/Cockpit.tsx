@@ -83,7 +83,7 @@ export default function Cockpit() {
         {repos.length === 0 ? (
           !err && <div className="ck-empty">{effective === 'repo' ? 'nothing recent in this repo' : 'no live sessions'}</div>
         ) : (
-          <Graph nodes={graph.nodes} edges={graph.edges} onNodeClick={onClick} onNodeDoubleClick={onDoubleClick} />
+          <Graph nodes={graph.nodes} edges={graph.edges} onNodeClick={onClick} onNodeDoubleClick={onDoubleClick} fitKey={`${effective}:${focusedRoot ?? ''}`} />
         )}
       </div>
       <div className="ck-hint">click a child: mission pane · double-click: attach · click a PR: open it</div>
