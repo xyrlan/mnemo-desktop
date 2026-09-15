@@ -23,6 +23,10 @@ pub mod voice;
 // -- marketplace (src/marketplace.rs) --
 pub mod marketplace;
 
+// -- vault (src/vault.rs) --
+
+// -- cockpit: no Rust --
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -97,6 +101,8 @@ pub fn run() {
             voice::voice_start,
             voice::voice_stop,
             voice::voice_set_language,
+
+            // -- vault commands --
 
             // -- marketplace commands --
             marketplace::marketplace_list,
