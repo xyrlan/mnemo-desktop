@@ -94,6 +94,8 @@ export function createVoice(deps: VoiceDeps): Voice {
       show({ kind: 'error', message: message(e) }, true)
     } finally {
       if (take === t) take = null
+      // The model is ready or its download failed; either way no bar should linger.
+      store.setState({ download: null })
     }
   }
 

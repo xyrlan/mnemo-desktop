@@ -127,6 +127,18 @@ describe('voice controller', () => {
     expect(voice.store.getState().download).toBeNull()
   })
 
+  it('clears a download bar when the take ends, even if the download failed', async () => {
+    const { voice } = setup({
+      stop: vi.fn(async () => {
+        voice.progress({ downloaded: 10, total: 100 })
+        throw 'model download: offline'
+      }),
+    })
+    voice.begin()
+    await voice.end()
+    expect(voice.store.getState()).toEqual({ phase: { kind: 'error', message: 'model download: offline' }, download: null })
+  })
+
   it('cycles languages auto → pt → en → auto', () => {
     expect(nextLanguage('auto')).toBe('pt')
     expect(nextLanguage('pt')).toBe('en')

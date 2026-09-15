@@ -220,11 +220,13 @@ fn sinc(x: f64) -> f64 {
     }
 }
 
-/// True when no 30 ms window of 16 kHz audio rises above a quiet room. Whisper, fed
-/// silence, invents a "Thank you." rather than returning nothing.
+/// True when no 30 ms window of 16 kHz audio rises above a muted or dead input. Whisper,
+/// fed digital silence, invents a "Thank you." rather than returning nothing; room noise it
+/// handles itself, and a higher floor would swallow a quiet microphone (measured: a built-in
+/// mic idles near 0.0013 RMS, faint speech at 0.0024).
 pub fn is_silent(audio: &[f32]) -> bool {
     const WINDOW: usize = WHISPER_RATE as usize * 3 / 100;
-    const FLOOR: f32 = 0.005;
+    const FLOOR: f32 = 0.001;
     !audio.chunks(WINDOW).any(|w| {
         let rms = (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt();
         rms > FLOOR
@@ -251,7 +253,8 @@ pub fn clean_transcript(raw: &str) -> String {
 // Model and transcription
 
 pub fn models_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("models")
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    home.map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("models")
 }
 
 /// Returns the model in `dir`, downloading it first if it is missing or truncated.
@@ -478,8 +481,8 @@ mod tests {
     #[test]
     fn silence_is_detected_and_speech_level_is_not() {
         assert!(is_silent(&vec![0.0; 16_000]));
-        assert!(is_silent(&tone(200.0, WHISPER_RATE, 1.0, 0.002)));
-        assert!(!is_silent(&tone(200.0, WHISPER_RATE, 1.0, 0.05)));
+        assert!(is_silent(&tone(200.0, WHISPER_RATE, 1.0, 0.001)));
+        assert!(!is_silent(&tone(200.0, WHISPER_RATE, 1.0, 0.004)));
         assert!(is_silent(&[]));
     }
 
@@ -530,5 +533,17 @@ mod tests {
             assert!(words.iter().all(|w| text.contains(w)), "{name} {language:?}: {text:?}");
         }
         assert_eq!(transcribe(&ctx, &vec![0.0; 32_000], Language::Auto).unwrap(), "");
+        // Above the silence gate, so whisper itself must hear nothing in a quiet room's hiss.
+        let mut seed = 0x2545_f491u32;
+        let hiss: Vec<f32> = (0..48_000)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed as f32 / u32::MAX as f32 - 0.5) * 0.005
+            })
+            .collect();
+        assert!(!is_silent(&hiss));
+        assert_eq!(transcribe(&ctx, &hiss, Language::Auto).unwrap(), "");
     }
 }
