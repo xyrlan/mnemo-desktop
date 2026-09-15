@@ -32,6 +32,10 @@ pub mod vault;
 pub mod home;
 pub mod home_commands;
 
+// -- chrome (src/chrome.rs) --
+
+// -- graph: no Rust --
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -116,6 +120,8 @@ pub fn run() {
             // -- home commands --
             home_commands::home_snapshot,
             home_commands::home_register_repo,
+
+            // -- chrome commands --
 
             // -- marketplace commands --
             marketplace::marketplace_list,
