@@ -30,3 +30,7 @@ User: "ver efeitos visuais na tela quando uma memória é usada, alguma tool do 
 ## Addendum (2026-09-15, later): GitHub via gh
 
 No native OAuth for now: `gh` is the identity (Home offers `gh auth login --web`; OAuth only with the team layer). Issues become roots of the cockpit graph — the ones with a child/PR plus the 10 most recent, **filtered by label** (picker in the strip, persisted per repo) — with a "dispatch" action on the node. A linked GitHub Project renders as a board pane. Issue #45.
+
+## Addendum (2026-09-15, evening): vault graph withdrawn
+
+First use: "tá muito lagado… bem sem sal". Decision: the vault screen becomes a **health table** (rules by heat, badges for never-fired / stale / needs-review / inbox, status tiles on top, row actions) and the only graph left is a ≤30-node **ego view** of the selected rule under its page. Whole-vault graph and force layout are removed. Issue #56.
