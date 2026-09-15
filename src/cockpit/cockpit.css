@@ -7,6 +7,13 @@
 .ck-strip { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--border); min-width: 0; }
 .ck-strip-title { color: var(--fg-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; flex: 0 0 auto; }
 .ck-quiet { color: var(--fg-muted); }
+.ck-issues { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.ck-issue-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 4px; border-bottom: 1px solid var(--border); min-width: 0; }
+.ck-issue-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-issue-bar button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); font: inherit; padding: 1px 8px; border-radius: 4px; cursor: pointer; }
+.ck-issue-bar button:hover { border-color: var(--accent); }
+.ck-issue-bar .ck-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+.ck-issue-bar .ck-close { border: 0; background: transparent; color: var(--fg-muted); }
 .ck-canvas { position: relative; flex: 1; min-height: 0; }
 .ck-empty { color: var(--fg-muted); padding: 12px 4px; }
 .ck-hint { flex: 0 0 auto; color: var(--fg-muted); font-size: 10px; padding: 2px 4px 0; }

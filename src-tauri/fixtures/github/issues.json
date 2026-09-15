@@ -1,0 +1,6 @@
+[
+  {"assignees":[{"id":"MDQ6","login":"xyrlan","name":"pedro"}],"closedByPullRequestsReferences":[{"id":"PR_1","number":52,"repository":{"id":"R_1","name":"mnemo-desktop","owner":{"id":"U_1","login":"xyrlan"}},"url":"https://github.com/xyrlan/mnemo-desktop/pull/52"}],"labels":[{"id":"LA_1","name":"ui","description":"","color":"ededed"},{"id":"LA_2","name":"round5","description":"","color":"ededed"}],"milestone":{"number":1,"title":"v0.2","description":"","dueOn":null},"number":35,"state":"OPEN","title":"Pane bar with repo, branch and tokens","updatedAt":"2026-09-15T11:00:00Z","url":"https://github.com/xyrlan/mnemo-desktop/issues/35"},
+  {"assignees":[],"closedByPullRequestsReferences":[],"labels":[],"milestone":null,"number":45,"state":"OPEN","title":"GitHub via gh","updatedAt":"2026-09-15T11:45:33Z","url":"https://github.com/xyrlan/mnemo-desktop/issues/45"},
+  {"assignees":[],"closedByPullRequestsReferences":[],"labels":[{"id":"LA_3","name":"bug","description":"","color":"d73a4a"}],"milestone":null,"number":29,"state":"OPEN","title":"Opening a done child blanks the app","updatedAt":"2026-09-14T09:00:00Z","url":"https://github.com/xyrlan/mnemo-desktop/issues/29"},
+  {"title":"row without a number is skipped"}
+]

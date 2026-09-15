@@ -41,6 +41,7 @@ pub mod chrome;
 pub mod pulse;
 
 // -- github (src/github.rs) --
+pub mod github;
 
 use commands::PtyState;
 use tauri::Manager;
@@ -138,6 +139,9 @@ pub fn run() {
             pulse::pulse_start,
 
             // -- github commands --
+            github::gh_auth,
+            github::gh_issues,
+            github::gh_project,
 
             // -- marketplace commands --
             marketplace::marketplace_list,

@@ -1,0 +1,6 @@
+{"items":[
+  {"assignees":["xyrlan"],"content":{"body":"","number":45,"repository":"xyrlan/mnemo-desktop","title":"GitHub via gh","type":"Issue","url":"https://github.com/xyrlan/mnemo-desktop/issues/45"},"id":"PVTI_1","labels":["github"],"repository":"https://github.com/xyrlan/mnemo-desktop","status":"In Progress","title":"GitHub via gh"},
+  {"content":{"body":"","number":52,"repository":"xyrlan/mnemo-desktop","title":"Pane bar","type":"PullRequest","url":"https://github.com/xyrlan/mnemo-desktop/pull/52"},"id":"PVTI_2","repository":"https://github.com/xyrlan/mnemo-desktop","status":"Done","title":"Pane bar"},
+  {"content":{"body":"sketch","title":"Team layer","type":"DraftIssue","id":"DI_1"},"id":"PVTI_3","title":"Team layer"},
+  {"content":{"body":"","number":44,"repository":"xyrlan/mnemo-desktop","title":"Pulse","type":"Issue","url":"https://github.com/xyrlan/mnemo-desktop/issues/44"},"id":"PVTI_4","status":"Blocked","title":"Pulse"}
+],"totalCount":4}

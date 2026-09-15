@@ -73,3 +73,43 @@ test('every edge joins two nodes and ids are unique', () => {
   }
   expect(buildGraph({ repos: [], errors: [], at: '' }, {})).toEqual({ nodes: [], edges: [], targets: {} })
 })
+
+test('issues are roots: a dispatched child hangs off its issue, pieces and PRs are linked, the rest are recent roots', async () => {
+  const { snapWithIssues, mnemoIssues } = await import('../github/fixtures')
+  const root = '/Users/me/github/mnemo'
+  const g = buildGraph(snapWithIssues, {}, undefined, { issues: { [root]: mnemoIssues }, labels: {} })
+  const issue = (n: number) => `issue:${root}#${n}`
+  const repo = `repo:${root}`
+
+  // #40: its child moves from the repo to the issue.
+  expect(has(g, issue(40), 'child:c0ffee01')).toBe(true)
+  expect(has(g, repo, 'child:c0ffee01')).toBe(false)
+  // #41 names the api piece: linked to its child (inside the group), not to that child's PR.
+  expect(has(g, issue(41), 'child:beef0001')).toBe(true)
+  expect(has(g, issue(41), `pr:${root}#12`)).toBe(false)
+  // #42 is closed by the docs PR, which has no child.
+  expect(has(g, issue(42), `pr:${root}#13`)).toBe(true)
+  expect(data(g, issue(42))).toMatchObject({ label: '#42 closed by the docs PR', badge: 'PR #13 CI ✗', tone: 'accent' })
+  expect(data(g, issue(43))?.badge).toBe('PR #99')
+
+  // Issues have no incoming edge.
+  for (const n of g.nodes.filter((x) => x.id.startsWith('issue:'))) expect(g.edges.some((e) => e.target === n.id)).toBe(false)
+  expect(g.nodes.filter((n) => n.id.startsWith('issue:')).length).toBe(14)
+  expect(data(g, issue(12))).toMatchObject({ tone: 'muted', sub: 'ui · @me' })
+  expect(data(g, issue(1))).toBeUndefined() // the 11th most recent unlinked one
+  expect(g.targets[issue(12)]).toMatchObject({ kind: 'issue', root, issue: { number: 12 } })
+
+  const ids = g.nodes.map((n) => n.id)
+  expect(new Set(ids).size).toBe(ids.length)
+  for (const e of g.edges) expect(ids).toContain(e.source)
+  for (const e of g.edges) expect(ids).toContain(e.target)
+})
+
+test('the label filter narrows only the recent issues; other repos and no input change nothing', async () => {
+  const { snapWithIssues, mnemoIssues } = await import('../github/fixtures')
+  const root = '/Users/me/github/mnemo'
+  const g = buildGraph(snapWithIssues, {}, undefined, { issues: { [root]: mnemoIssues }, labels: { [root]: ['ui'] } })
+  const shown = g.nodes.filter((n) => n.id.startsWith('issue:')).map((n) => Number(n.id.split('#')[1]))
+  expect(shown).toEqual([43, 42, 41, 40, 12, 10, 8, 6, 4, 2])
+  expect(buildGraph(withPrs, {}, undefined, { issues: {}, labels: {} })).toEqual(buildGraph(withPrs, {}))
+})

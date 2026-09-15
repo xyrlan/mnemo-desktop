@@ -12,9 +12,11 @@ export type Settings = {
   homePinned: string[]
   homeHidden: string[]
   cloneBase: string | null
+  /** Cockpit and board: the labels the recent-issues filter keeps, per repo root. */
+  issueLabels: Record<string, string[]>
 }
 
-export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null }
+export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {} }
 
 export interface SettingsClient {
   read(): Promise<Partial<Settings>>
@@ -41,9 +43,10 @@ export function createSettingsStore(client: SettingsClient): StoreApi<SettingsSt
     },
     async set(key, value) {
       set({ [key]: value } as Partial<SettingsState>)
-      const { outgoing, replyLanguage, sidebarScope, homePinned, homeHidden, cloneBase } = get()
+      const s = get()
+      const whole = Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, s[k as keyof Settings]])) as Settings
       try {
-        await client.write({ outgoing, replyLanguage, sidebarScope, homePinned, homeHidden, cloneBase })
+        await client.write(whole)
       } catch {
         /* keep the in-memory value; the file is a convenience */
       }
@@ -62,6 +65,9 @@ function pick(v: Partial<Settings>): Partial<Settings> {
   const hidden = strs(v.homeHidden)
   if (hidden) out.homeHidden = hidden
   if (typeof v.cloneBase === 'string' && v.cloneBase) out.cloneBase = v.cloneBase
+  if (v.issueLabels && typeof v.issueLabels === 'object' && !Array.isArray(v.issueLabels)) {
+    out.issueLabels = Object.fromEntries(Object.entries(v.issueLabels).flatMap(([root, ls]) => (strs(ls) ? [[root, strs(ls)!]] : [])))
+  }
   return out
 }
 
