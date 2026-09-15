@@ -3,6 +3,7 @@ import { homeStore, useHome } from './app-store'
 import { relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
 import { store as layout, useApp } from '../layout/app-store'
 import { Wordmark } from '../brand/Wordmark'
+import Account from '../github/Account'
 import './home.css'
 
 const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~')
@@ -115,6 +116,7 @@ export default function Home() {
           </button>
         )}
         <Entry />
+        <Account />
       </header>
       <div className="hm-body">
         <aside className="hm-left">

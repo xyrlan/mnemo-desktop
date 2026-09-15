@@ -2,12 +2,17 @@ import type { Edge, Node } from '@xyflow/react'
 import type { CardData } from '../graph'
 import { childWord, delta, missionSummary, type ChildSession, type Mission, type ParentSession, type Pr, type RepoGroup, type Snapshot } from '../mission/types'
 import { fmtTokens, parentTokens } from '../mission/tokens'
+import { issueOfBranch, linkIssues, linkWord, shownIssues, type Issue } from '../github/types'
 
 /** What a click on a node acts on. Repo and parent nodes have none. */
 export type Target =
   | { kind: 'child'; child: ChildSession }
   | { kind: 'pr'; pr: Pr }
   | { kind: 'mission'; mission: Mission }
+  | { kind: 'issue'; issue: Issue; root: string }
+
+/** Open issues per repo root and the label filter per root (settings `issueLabels`). */
+export type IssueInput = { issues: Record<string, Issue[]>; labels: Record<string, string[]> }
 
 export type CockpitGraph = { nodes: Node[]; edges: Edge[]; targets: Record<string, Target> }
 
@@ -26,14 +31,17 @@ export const nodeId = {
   child: (c: ChildSession) => `child:${c.id}`,
   pr: (r: RepoGroup, pr: Pr) => `pr:${r.root}#${pr.number}`,
   ci: (r: RepoGroup, pr: Pr) => `ci:${r.root}#${pr.number}`,
+  issue: (r: RepoGroup, n: number) => `issue:${r.root}#${n}`,
 }
 
 const origin = { x: 0, y: 0 }
 
 /** The cockpit canvas as a DAG: repo → parent → children, a mission's pieces inside a group
  *  headed by the mission node, child → PR → CI. Children hang off the parent that dispatched
- *  them when the snapshot says so, else off the repo. Positions are left to the layout. */
-export function buildGraph(snap: Snapshot, looked: Record<string, number>, focusedRoot?: string): CockpitGraph {
+ *  them when the snapshot says so, else off the repo. Issues (`github`) are roots: every one
+ *  with a child or PR, linked to it, plus the most recent that pass the label filter. A child
+ *  on an issue's branch hangs off the issue instead of the repo. Positions are left to the layout. */
+export function buildGraph(snap: Snapshot, looked: Record<string, number>, focusedRoot?: string, github?: IssueInput): CockpitGraph {
   const nodes: Node[] = []
   const edges: Edge[] = []
   const targets: Record<string, Target> = {}
@@ -127,10 +135,45 @@ export function buildGraph(snap: Snapshot, looked: Record<string, number>, focus
       }
     }
 
+    const issues = github?.issues[r.root] ?? []
+    const links = linkIssues(r, issues)
+    const shown = shownIssues(issues, links, github?.labels[r.root] ?? [])
+    const issueIds = new Set(shown.map((i) => i.number))
+    for (const i of shown) {
+      const id = nodeId.issue(r, i.number)
+      add(id, {
+        label: `#${i.number} ${i.title}`,
+        sub: [i.labels.join(', '), i.assignees.map((a) => `@${a}`).join(' '), i.milestone ?? ''].filter(Boolean).join(' · ') || 'open issue',
+        badge: linkWord(links.get(i.number)) ?? undefined,
+        tone: links.has(i.number) ? 'accent' : 'muted',
+      })
+      targets[id] = { kind: 'issue', issue: i, root: r.root }
+    }
+    // Edges from issues go in after every node exists, so a target is linked only when drawn.
+    const fromIssues: [string, string, boolean][] = []
+
     for (const c of r.children) {
       const id = addChild(c, undefined)
-      link(upstream(c) ?? repoId, id, childWord(c) === 'active')
+      const n = issueOfBranch(c.branch)
+      const issue = n !== null && issueIds.has(n) ? nodeId.issue(r, n) : undefined
+      link(upstream(c) ?? issue ?? repoId, id, childWord(c) === 'active')
+      if (issue && upstream(c)) fromIssues.push([issue, id, childWord(c) === 'active'])
     }
+
+    for (const i of shown) {
+      const l = links.get(i.number)
+      if (!l) continue
+      const from = nodeId.issue(r, i.number)
+      for (const { mission, piece } of l.pieces) {
+        const to = piece.child ? nodeId.child(piece.child) : piece.pr ? nodeId.pr(r, piece.pr) : nodeId.piece(mission, piece.name)
+        fromIssues.push([from, to, !!piece.child && childWord(piece.child) === 'active'])
+      }
+      for (const pr of l.prs) {
+        const withChild = l.pieces.some((p) => p.piece.pr?.number === pr.number && p.piece.child)
+        if (!withChild) fromIssues.push([from, nodeId.pr(r, pr), false])
+      }
+    }
+    for (const [from, to, animated] of fromIssues) if (seen.has(to)) link(from, to, animated)
   }
   return { nodes, edges, targets }
 }

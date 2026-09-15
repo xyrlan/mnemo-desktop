@@ -2,7 +2,13 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
+/** What the GitHub commands answer (issues for the `mnemo` repo only); everything else gets `{}`. */
+const gh: { auth: unknown; issues: unknown } = { auth: {}, issues: [] }
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async (cmd: string, args?: { root?: string }) =>
+    cmd === 'gh_auth' ? gh.auth : cmd === 'gh_issues' ? (args?.root === '/Users/me/github/mnemo' ? gh.issues : []) : {},
+  ),
+}))
 
 import { missionStore } from '../mission/app-store'
 import { store as appStore } from '../layout/app-store'
@@ -10,6 +16,8 @@ import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'
 import { withPrs } from './fixtures'
+import { githubStore } from '../github/app-store'
+import { mnemoIssues, snapWithIssues } from '../github/fixtures'
 import './view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -30,7 +38,10 @@ beforeEach(() => {
   document.body.appendChild(host)
   root = createRoot(host)
   missionStore.setState({ snapshot: withPrs, lastError: null, looked: {}, drafts: {}, sent: {} })
-  settingsStore.setState({ sidebarScope: 'all' })
+  settingsStore.setState({ sidebarScope: 'all', issueLabels: {} })
+  gh.auth = {}
+  gh.issues = []
+  githubStore.setState({ auth: null, issues: {}, boards: {} })
 })
 
 afterEach(() => {
@@ -99,4 +110,49 @@ test('shows the empty state and errors', () => {
   expect(host.textContent).toContain('no live sessions')
   expect(host.textContent).toContain('gh missing on PATH')
   expect(host.querySelector('.ck-strip')?.textContent).toContain('nothing')
+})
+
+test('logged in: issue roots on the canvas, a label picker in the strip, click an issue to dispatch it', async () => {
+  const root = '/Users/me/github/mnemo'
+  gh.auth = { installed: true, logged: true, login: 'me', scopes: [] }
+  gh.issues = mnemoIssues
+  missionStore.setState({ snapshot: snapWithIssues })
+  const typed: [string | undefined, string][] = []
+  appStore.setState({ openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
+  render()
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  expect(node(`issue:${root}#40`)?.textContent).toContain('#40 dispatched issue')
+  expect(node(`issue:${root}#12`)).not.toBeNull()
+  expect(node(`issue:${root}#1`)).toBeNull()
+
+  // One picker per repo with issues; only mnemo has any, so it carries no repo name.
+  const chip = host.querySelector<HTMLButtonElement>('.ck-strip .gh-picker-chip')!
+  expect(chip.textContent).toContain('all labels')
+  act(() => chip.click())
+  const bug = [...host.querySelectorAll<HTMLLabelElement>('.gh-picker-menu label')].find((l) => l.textContent === 'bug')!
+  await act(async () => bug.querySelector('input')!.click())
+  expect(settingsStore.getState().issueLabels).toEqual({ [root]: ['bug'] })
+  expect(node(`issue:${root}#12`)).toBeNull()
+  expect(node(`issue:${root}#1`)).not.toBeNull()
+
+  act(() => node(`issue:${root}#1`)!.click())
+  expect(host.querySelector('.ck-issue-bar')?.textContent).toContain('#1 issue 1')
+  act(() => [...host.querySelectorAll<HTMLButtonElement>('.ck-issue-bar button')].find((b) => b.textContent === 'dispatch')!.click())
+  expect(typed).toEqual([[root, 'mnemo dispatch 1']])
+  act(() => node(`issue:${root}#1`)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+  expect(Object.values(appStore.getState().panes).some((p) => p.view === 'browser' && p.props?.url === 'https://github.com/me/mnemo/issues/1')).toBe(true)
+})
+
+test('not logged in: no issues are fetched and the strip has no picker', async () => {
+  gh.auth = { installed: true, logged: false, login: null, scopes: [] }
+  gh.issues = mnemoIssues
+  render()
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0))
+  })
+  expect(githubStore.getState().issues).toEqual({})
+  expect(host.querySelector('.gh-picker')).toBeNull()
 })
