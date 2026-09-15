@@ -1,0 +1,2 @@
+# Fixtures are compared byte-for-byte and hashed; never let git rewrite their line endings.
+src-tauri/fixtures/** -text
