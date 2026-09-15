@@ -1,6 +1,7 @@
 import type { Store } from '../layout/store'
 import { neighbour, type Side } from '../layout/tree'
 import { paneRects } from '../layout/rects'
+import { cwdForNewShell } from '../layout/cwd'
 
 export type Action = { id: string; title: string; shortcut?: string; run: () => void | Promise<void> }
 
@@ -31,9 +32,10 @@ export function registerBuiltins(store: Store) {
     const next = neighbour(tab.focused, side, paneRects())
     if (next !== null) st.focusPane(next)
   }
-  register({ id: 'tab.new', title: 'New tab', shortcut: '⌘T', run: () => s().newTab() })
-  register({ id: 'pane.split.row', title: 'Split right', shortcut: '⌘D', run: () => s().split('row') })
-  register({ id: 'pane.split.col', title: 'Split down', shortcut: '⌘⇧D', run: () => s().split('col') })
+  // New shells start where you are: the focused pane's directory, or Home's selected repo.
+  register({ id: 'tab.new', title: 'New tab', shortcut: '⌘T', run: () => s().newTab(cwdForNewShell(s())) })
+  register({ id: 'pane.split.row', title: 'Split right', shortcut: '⌘D', run: () => s().split('row', cwdForNewShell(s())) })
+  register({ id: 'pane.split.col', title: 'Split down', shortcut: '⌘⇧D', run: () => s().split('col', cwdForNewShell(s())) })
   register({ id: 'pane.close', title: 'Close pane', shortcut: '⌘W', run: () => s().closePane() })
   register({ id: 'pane.close-others', title: 'Close other panes', run: () => s().closeOthers() })
   register({ id: 'tab.close', title: 'Close tab', shortcut: '⌘⇧W', run: () => s().closeTab(s().activeTab) })
