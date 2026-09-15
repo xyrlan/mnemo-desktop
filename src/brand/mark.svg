@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- mnemo mark: a small octopus whose arms end in memory nodes. accent #7aa2f7 on #0f1116. -->
+  <g fill="none" stroke="#7aa2f7" stroke-width="30" stroke-linecap="round">
+    <path d="M145 295 C95 330 55 390 80 445"/>
+    <path d="M190 330 C165 380 130 420 150 470"/>
+    <path d="M235 340 C225 390 205 430 220 480"/>
+    <path d="M277 340 C287 390 307 430 292 480"/>
+    <path d="M322 330 C347 380 382 420 362 470"/>
+    <path d="M367 295 C417 330 457 390 432 445"/>
+  </g>
+  <g fill="#0f1116" stroke="#7aa2f7" stroke-width="10">
+    <circle cx="80" cy="445" r="17"/>
+    <circle cx="150" cy="470" r="17"/>
+    <circle cx="220" cy="480" r="17"/>
+    <circle cx="292" cy="480" r="17"/>
+    <circle cx="362" cy="470" r="17"/>
+    <circle cx="432" cy="445" r="17"/>
+  </g>
+  <ellipse cx="256" cy="210" rx="142" ry="132" fill="#7aa2f7"/>
+  <circle cx="214" cy="218" r="19" fill="#0f1116"/>
+  <circle cx="298" cy="218" r="19" fill="#0f1116"/>
+  <circle cx="221" cy="211" r="6" fill="#d6dae3"/>
+  <circle cx="305" cy="211" r="6" fill="#d6dae3"/>
+  <path d="M236 262 Q256 280 276 262" fill="none" stroke="#0f1116" stroke-width="9" stroke-linecap="round"/>
+</svg>
