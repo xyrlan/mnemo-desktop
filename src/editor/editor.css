@@ -1,0 +1,33 @@
+.editor-pane { display: flex; flex-direction: column; min-height: 0; }
+
+.editor-head { flex: 0 0 24px; display: flex; align-items: center; gap: 6px; padding: 0 4px; color: var(--fg-muted); border-bottom: 1px solid var(--border); user-select: none; min-width: 0; }
+.editor-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 0 1 auto; }
+.editor-dirty { color: var(--accent); }
+.editor-icon { background: transparent; border: 0; color: var(--fg-muted); font: inherit; padding: 0 4px; cursor: default; }
+.editor-icon.on, .editor-icon:hover { color: var(--fg); }
+
+.editor-banner { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg-elev); border-bottom: 1px solid var(--border); color: var(--fg); }
+.editor-banner.error { color: var(--ansi-red); }
+.editor-banner span { flex: 1; overflow-wrap: anywhere; }
+.editor-banner button { background: var(--bg); color: var(--fg); border: 1px solid var(--border); padding: 2px 8px; font: inherit; }
+
+.editor-main { flex: 1; display: flex; min-height: 0; }
+.editor-tree { flex: 0 0 220px; overflow: auto; border-right: 1px solid var(--border); padding-bottom: 8px; user-select: none; }
+.editor-tree-head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: var(--bg); color: var(--fg-muted); text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+.editor-tree-head button { background: transparent; border: 0; color: var(--fg-muted); font: inherit; cursor: default; }
+.editor-tree-head button:hover { color: var(--fg); }
+.editor-tree-row { padding: 1px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); cursor: default; }
+.editor-tree-row:hover { background: var(--bg-elev); }
+.editor-tree-row.file { padding-left: 20px; }
+.editor-tree-row.current { color: var(--accent); background: var(--bg-elev); }
+.editor-tree-chevron { display: inline-block; width: 12px; color: var(--fg-muted); }
+.editor-tree-note { padding: 1px 8px; color: var(--fg-muted); white-space: nowrap; }
+.editor-tree-note.error { color: var(--ansi-red); white-space: normal; }
+
+.editor-code { flex: 1; position: relative; min-width: 0; }
+.editor-monaco { position: absolute; inset: 0; }
+.editor-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); pointer-events: none; }
+
+.editor-prompt { padding: 0; }
+.editor-prompt input { width: 100%; padding: 12px 14px; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--fg); font: inherit; outline: none; }
+.editor-prompt-hint { padding: 8px 14px; color: var(--fg-muted); font-size: 11px; }
