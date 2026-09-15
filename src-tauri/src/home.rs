@@ -148,6 +148,20 @@ pub fn classify_live(live: &HashMap<String, LiveRow>, id: &str, here: &[String])
     Some(Live::Elsewhere)
 }
 
+/// `/x/mnemo-wt-211` → `/x/mnemo`: a dispatch worktree that has since been removed still
+/// belongs to the repo beside it. None when the last segment has no `-wt-` suffix.
+pub fn worktree_sibling(cwd: &str) -> Option<String> {
+    let p = Path::new(cwd);
+    let name = p.file_name()?.to_str()?;
+    let idx = name.rfind("-wt-")?;
+    Some(p.with_file_name(&name[..idx]).to_string_lossy().to_string())
+}
+
+/// Roots Home never lists: Claude Code's own scratch clones under `~/.claude/`.
+pub fn is_internal_root(root: &str, home: &str) -> bool {
+    !home.is_empty() && Path::new(root).starts_with(Path::new(home).join(".claude"))
+}
+
 fn basename(p: &str) -> String {
     Path::new(p).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| p.to_string())
 }
@@ -168,8 +182,9 @@ pub fn group_repos(
 ) -> Vec<HomeRepo> {
     let mut by_root: HashMap<String, Vec<KnownSession>> = HashMap::new();
     let mut cache: HashMap<String, Option<String>> = HashMap::new();
+    let resolve = |cwd: &str| root_of(cwd).or_else(|| worktree_sibling(cwd).and_then(|sib| root_of(&sib)));
     for s in sessions {
-        let root = cache.entry(s.cwd.clone()).or_insert_with(|| root_of(&s.cwd)).clone();
+        let root = cache.entry(s.cwd.clone()).or_insert_with(|| resolve(&s.cwd)).clone();
         if let Some(root) = root {
             by_root.entry(root).or_default().push(s);
         }
@@ -254,7 +269,9 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
     let mut errors = Vec::new();
     let text = std::fs::read_to_string(history_path()).unwrap_or_default();
     let sessions = sessions_from_history(&parse_history(&text));
+    let home = home_dir().to_string_lossy().to_string();
     let mut repos = group_repos(sessions.into_values().collect(), &crate::mission::repo_root, pinned, hidden);
+    repos.retain(|r| !is_internal_root(&r.root, &home));
     for root in extra_roots {
         if !repos.iter().any(|r| &r.root == root) {
             repos.push(HomeRepo {
@@ -277,7 +294,7 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
     };
     join_live(&mut repos, &live, here, &|cwd, id| crate::mission::transcript_path(cwd, id).is_some());
     let roots: Vec<String> = repos.iter().map(|r| r.root.clone()).collect();
-    HomeSnapshot { repos, clone_base: clone_base(&roots, &home_dir().to_string_lossy()), errors }
+    HomeSnapshot { repos, clone_base: clone_base(&roots, &home), errors }
 }
 
 /// A folder the user picked: its main-checkout root, or an error when it is not a git repo.
@@ -332,6 +349,24 @@ mod tests {
     }
 
     #[test]
+    fn removed_dispatch_worktree_falls_back_to_the_sibling_repo() {
+        // `/Users/me/github/mnemo-wt-999` no longer exists (fake_root → None) but `mnemo` does.
+        let s = KnownSession { id: "w".into(), cwd: "/Users/me/github/mnemo-wt-999".into(), title: "t".into(), first_at: 5, last_at: 5 };
+        let repos = group_repos(vec![s], &fake_root, &[], &[]);
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].root, "/Users/me/github/mnemo");
+        assert_eq!(repos[0].sessions[0].cwd, "/Users/me/github/mnemo-wt-999");
+        assert_eq!(worktree_sibling("/Users/me/github/plain"), None);
+    }
+
+    #[test]
+    fn internal_roots_are_claude_scratch_dirs() {
+        assert!(is_internal_root("/Users/me/.claude/jobs/e3/tmp/probe-repo", "/Users/me"));
+        assert!(!is_internal_root("/Users/me/github/mnemo", "/Users/me"));
+        assert!(!is_internal_root("/Users/me/github/mnemo", ""));
+    }
+
+    #[test]
     fn hidden_repos_are_flagged_not_dropped() {
         let sessions = sessions_from_history(&parse_history(HISTORY));
         let repos = group_repos(sessions.into_values().collect(), &fake_root, &[], &["/Users/me/github/mnemo".to_string()]);
@@ -376,6 +411,20 @@ mod tests {
         let c = mnemo.sessions.iter().find(|s| s.id == "cccc-3").unwrap();
         assert!(!c.transcript);
         assert_eq!(c.live, None);
+    }
+
+    /// Dogfood: `cargo test home::tests::dump_real_home -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_real_home() {
+        let snap = collect_home(&[], &[], &[], &[]);
+        eprintln!("clone_base={} errors={:?}", snap.clone_base, snap.errors);
+        for r in &snap.repos {
+            eprintln!("{:<28} {:>3} sessions  last={}  {}", r.name, r.sessions.len(), r.last_at, r.root);
+            for s in r.sessions.iter().take(3) {
+                eprintln!("    {:?} {:?} t={} {} | {}", s.live, s.transcript, s.kind, &s.id[..8], s.title);
+            }
+        }
     }
 
     #[test]
