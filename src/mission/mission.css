@@ -1,0 +1,17 @@
+/* Scope toggle at the top of the sidebar, and the rows' full-size variant (cockpit pane).
+   The base row styles live in theme.css. */
+.m-scope { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; flex: 0 0 auto; }
+.m-scope button { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.m-scope button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+.m-scope button:hover:not(.on) { color: var(--fg); }
+.m-scope-hint { flex: 1 1 0; min-width: 0; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-scope .m-scope-open { border: 0; padding: 0 4px; font-size: 13px; }
+
+.m-tokens { color: var(--ansi-cyan); font-size: 11px; flex: 0 0 auto; }
+.m-sub { color: var(--fg-muted); font-size: 11px; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.m-full .m-row { white-space: normal; flex-wrap: wrap; overflow: visible; }
+.m-full .m-label { max-width: none; }
+.m-full .m-detail { overflow: visible; white-space: pre-wrap; word-break: break-word; flex: 1 1 100%; }
+.m-full .m-repo-head .m-detail, .m-full .m-mission-head .m-detail { flex: 1 1 auto; }
+.m-full .m-sub { white-space: normal; word-break: break-all; }

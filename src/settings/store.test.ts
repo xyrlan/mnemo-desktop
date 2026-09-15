@@ -12,7 +12,23 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt' }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', sidebarScope: 'repo' }])
+})
+
+test('sidebarScope defaults to this repo, loads, and persists alongside the rest', async () => {
+  const written: unknown[] = []
+  const s = createSettingsStore({ read: async () => ({ sidebarScope: 'all', outgoing: 'as-typed' }), write: async (v) => { written.push(v) } })
+  expect(s.getState().sidebarScope).toBe('repo')
+  await s.getState().load()
+  expect(s.getState().sidebarScope).toBe('all')
+  await s.getState().set('sidebarScope', 'repo')
+  expect(written).toEqual([{ outgoing: 'as-typed', replyLanguage: 'unchanged', sidebarScope: 'repo' }])
+})
+
+test('a junk sidebarScope falls back to the default', async () => {
+  const s = createSettingsStore({ read: async () => ({ sidebarScope: 'everything' as never }), write: async () => {} })
+  await s.getState().load()
+  expect(s.getState().sidebarScope).toBe('repo')
 })
 
 test('a failing read still marks loaded', async () => {
