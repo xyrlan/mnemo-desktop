@@ -1,7 +1,7 @@
 # mnemo-desktop — sub-project 1: shell + free terminal
 
 **Date:** 2026-09-14
-**Status:** approved in brainstorm, awaiting spec review
+**Status:** shipped (PR #1, 2026-09-14)
 **Scope:** the first of six sub-projects that together form the mnemo ADE (agentic development environment). This spec covers only the desktop shell and a free terminal. Later sub-projects (mission cockpit, editor, browser pane, multi-CLI, marketplace + voice) get their own specs.
 
 ## 1. Why

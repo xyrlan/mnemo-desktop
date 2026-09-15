@@ -1,7 +1,7 @@
 # mnemo-desktop — sub-project 2: mission cockpit
 
 **Date:** 2026-09-14
-**Status:** approved in brainstorm (user confirmed a+b+c+d in the sidebar, e in detail; multi-repo, multi-session)
+**Status:** shipped (PR #6, 2026-09-15); #3 editor and #4 browser shipped alongside via dispatch (PRs #5, #7)
 **Depends on:** sub-project 1 (shell) and the pane view registry (PR #2).
 
 ## 1. Why
