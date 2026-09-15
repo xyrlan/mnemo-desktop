@@ -3,10 +3,11 @@ import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { marketplace, useMarketplace } from './app-store'
-import { ALL } from './store'
+import { ALL, newKey } from './store'
 import { IDLE } from './cards'
 import { importCwd } from './cwd'
-import { groupBySource, typeSummary, type RuleSet } from './types'
+import { busy, IDLE_PUBLISH, localDate } from './publish'
+import { countStandings, groupBySource, STANDINGS, typeSummary, type RepoRules, type RuleSet } from './types'
 import { promptSource } from './UrlPrompt'
 import './marketplace.css'
 
@@ -60,6 +61,185 @@ function SetCard({ set, cwd }: { set: RuleSet; cwd: string | undefined }) {
         </div>
       )}
     </article>
+  )
+}
+
+function Output({ ok, head, output, onDismiss }: { ok: boolean; head: string; output: string; onDismiss?: () => void }) {
+  return (
+    <div className={`mk-output ${ok ? 'mk-output-ok' : 'mk-output-error'}`}>
+      <div className="mk-output-head">
+        <span>{head}</span>
+        {onDismiss && (
+          <button title="Dismiss" onClick={onDismiss}>
+            ×
+          </button>
+        )}
+      </div>
+      <pre>{output || '(no output)'}</pre>
+    </div>
+  )
+}
+
+/** Publish's output, then Open PR behind a confirmation that spells out every step. */
+function PublishFlow({ repo }: { repo: RepoRules }) {
+  const p = useMarketplace((s) => s.publish[repo.root] ?? IDLE_PUBLISH)
+  const m = marketplace.getState()
+  const onTeamBranch = !!repo.branch?.startsWith('team-rules/') && repo.branch !== repo.default_branch
+  const canOpen = repo.uncommitted && (p.status === 'idle' || ((p.status === 'published' || p.status === 'opened') && p.ok))
+  const date = localDate()
+  return (
+    <>
+      {p.status === 'publishing' && <div className="mk-empty">running mnemo publish…</div>}
+      {(p.status === 'published' || p.status === 'confirming' || p.status === 'opening') && p.output && (
+        <Output
+          ok={p.status !== 'published' || p.ok}
+          head={p.status === 'published' && !p.ok ? 'mnemo publish failed' : 'mnemo publish'}
+          output={p.output}
+          onDismiss={p.status === 'published' ? () => m.dismissPublish(repo.root) : undefined}
+        />
+      )}
+      {p.status === 'opened' && (
+        <Output
+          ok={p.ok}
+          head={p.ok ? `pushed ${p.branch}` : 'Open PR failed'}
+          output={p.output}
+          onDismiss={() => m.dismissPublish(repo.root)}
+        />
+      )}
+      {p.status === 'opened' && p.ok && p.url && (
+        <div className="mk-pr-link">
+          PR{' '}
+          <button className="mk-link" title="Open in a browser pane" onClick={() => store.getState().openView('browser', { url: p.url }, 'auto')}>
+            {p.url}
+          </button>
+        </div>
+      )}
+      {canOpen && (
+        <div className="mk-repo-line">
+          <span className="mk-count">{SHARE}/ has uncommitted changes</span>
+          <button onClick={() => m.askOpenPr(repo.root)}>Open PR</button>
+        </div>
+      )}
+      {p.status === 'confirming' && (
+        <div className="mk-confirm">
+          <ol>
+            {onTeamBranch ? (
+              <li>
+                commit {SHARE}/ only on <b>{repo.branch}</b> and push it (its PR picks the commit up)
+              </li>
+            ) : (
+              <>
+                <li>
+                  <code>git checkout -b team-rules/{date}</code> from <b>origin/{repo.default_branch ?? '<default branch>'}</b> (your other changes come along, uncommitted)
+                </li>
+                <li>commit {SHARE}/ only</li>
+                <li>push the branch to origin</li>
+                <li>
+                  <code>gh pr create</code> against {repo.default_branch ?? 'the default branch'}
+                </li>
+              </>
+            )}
+          </ol>
+          <div className="mk-confirm-actions">
+            <button className="mk-primary" onClick={() => void m.openPr(repo.root, date)}>
+              Confirm
+            </button>
+            <button onClick={() => m.cancelOpenPr(repo.root)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {p.status === 'opening' && <div className="mk-empty">branching, committing, pushing, opening the PR…</div>}
+    </>
+  )
+}
+
+const SHARE = '.mnemo-shared'
+
+/** The focused pane's repo as the first source: its working copy's tree, each rule
+ *  badged against the local vault, with Publish and Open PR. */
+function RepoSection({ cwd }: { cwd: string | undefined }) {
+  const repo = useMarketplace((s) => s.repo)
+  const loading = useMarketplace((s) => s.repoLoading)
+  const flow = useMarketplace((s) => (repo ? (s.publish[repo.root] ?? IDLE_PUBLISH) : IDLE_PUBLISH))
+  const newCard = useMarketplace((s) => (repo ? (s.cards[newKey(repo.root)] ?? IDLE) : IDLE))
+  const m = marketplace.getState()
+
+  useEffect(() => {
+    void marketplace.getState().loadRepo(cwd)
+  }, [cwd])
+
+  const ready = repo && !repo.error
+  const counts = countStandings(repo?.rules ?? [])
+  const publishButton = ready && (
+    <button disabled={busy(flow)} title={`mnemo publish in ${repo.root}`} onClick={() => void m.publishRepo(repo.root)}>
+      {flow.status === 'publishing' ? 'publishing…' : 'Publish'}
+    </button>
+  )
+
+  return (
+    <section className="mk-source mk-repo">
+      <header className="mk-source-head">
+        <span className="mk-repo-label">this repo</span>
+        <span className="mk-source-url" title={repo?.root}>
+          {ready ? `${repo.name}${repo.branch ? ` · ${repo.branch}` : ''}` : ''}
+        </span>
+        <button title="Read the tree again" disabled={!cwd || loading} onClick={() => void m.loadRepo(cwd)}>
+          {loading ? 'reading…' : '↻'}
+        </button>
+        {ready && repo.rules.length > 0 && publishButton}
+      </header>
+      {!cwd && <div className="mk-empty">open a terminal in a repo to see its team rules</div>}
+      {cwd && !repo && loading && <div className="mk-empty">reading {short(cwd)}…</div>}
+      {repo?.error && <pre className="mk-error mk-source-error">{repo.error}</pre>}
+      {ready && repo.rules.length === 0 && (
+        <div className="mk-repo-line">
+          <span className="mk-count">no team rules published yet</span>
+          {publishButton}
+        </div>
+      )}
+      {ready && repo.set && repo.rules.length > 0 && (
+        <>
+          <SetCard set={repo.set} cwd={cwd} />
+          <div className="mk-repo-line">
+            <span className="mk-count">
+              {repo.vault
+                ? STANDINGS.filter((k) => counts[k] > 0)
+                    .map((k) => `${counts[k]} ${k}`)
+                    .join(' · ')
+                : 'no mnemo vault found: rules are not compared'}
+            </span>
+            {counts.new > 0 && (
+              <button
+                disabled={!cwd || newCard.status === 'importing'}
+                title={`mnemo import of the ${counts.new} new ${counts.new === 1 ? 'rule' : 'rules'} into ${cwd}`}
+                onClick={() => cwd && void m.importNew(repo.root, cwd)}
+              >
+                {newCard.status === 'importing' ? 'importing…' : 'Import all new'}
+              </button>
+            )}
+          </div>
+          {(newCard.status === 'ok' || newCard.status === 'error') && (
+            <Output
+              ok={newCard.status === 'ok'}
+              head={`${newCard.status === 'ok' ? 'imported' : 'import failed'} in ${short(newCard.cwd)}`}
+              output={newCard.output}
+              onDismiss={() => m.dismiss(newKey(repo.root))}
+            />
+          )}
+          <ul className="mk-rules">
+            {repo.rules.map((r) => (
+              <li key={r.rel} className="mk-rule" title={r.rel}>
+                {r.standing && <span className={`mk-badge mk-badge-${r.standing}`}>{r.standing}</span>}
+                <span className="mk-rule-slug">{r.slug}</span>
+                <span className="mk-rule-type">{r.page_type}</span>
+                {r.description && <span className="mk-rule-desc">{r.description}</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {ready && <PublishFlow repo={repo} />}
+    </section>
   )
 }
 
@@ -118,6 +298,7 @@ function MarketplacePane(_: PaneViewProps) {
       </div>
       <div className="mk-list">
         {!loaded && loading && <div className="mk-empty">cloning sources…</div>}
+        <RepoSection cwd={cwd} />
         {loaded && groups.length === 0 && <div className="mk-empty">No sources. Add a git URL above.</div>}
         {groups.map((g) => (
           <section key={g.source} className="mk-source">

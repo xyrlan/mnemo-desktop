@@ -1,6 +1,6 @@
-import { createMarketplaceStore, ALL } from './store'
+import { createMarketplaceStore, ALL, newKey } from './store'
 import { makeMarketplaceClient, type MarketplaceClient } from './client'
-import type { RuleSet } from './types'
+import type { RepoRules, RuleSet } from './types'
 
 const set = (over: Partial<RuleSet> = {}): RuleSet => ({
   source: 'https://x/rules',
@@ -12,6 +12,19 @@ const set = (over: Partial<RuleSet> = {}): RuleSet => ({
   topics: [],
   projects: [],
   last_commit: null,
+  error: null,
+  ...over,
+})
+
+const repo = (over: Partial<RepoRules> = {}): RepoRules => ({
+  root: '/w/app',
+  name: 'app',
+  set: set({ source: '/w/app', path: '/w/app/.mnemo-shared' }),
+  rules: [{ slug: 'a', page_type: 'feedback', description: '', rel: 'feedback/a.md', standing: 'new' }],
+  vault: '/v',
+  default_branch: 'main',
+  branch: 'main',
+  uncommitted: false,
   error: null,
   ...over,
 })
@@ -33,6 +46,10 @@ function fake(over: Partial<MarketplaceClient> = {}): MarketplaceClient {
     addSource: async () => {},
     removeSource: async () => {},
     importSet: async () => 'import: 2 staged',
+    repo: async () => repo(),
+    publish: async () => ({ output: 'published 1 rule', uncommitted: true }),
+    openPr: async () => ({ branch: 'team-rules/2026-09-15', base: 'main', url: 'https://pr/7', output: '$ gh pr create' }),
+    importNew: async () => 'staged 1',
     ...over,
   }
 }
@@ -123,6 +140,10 @@ test('client sends the argument names the Rust commands take', async () => {
   await c.addSource('u')
   await c.removeSource('u')
   await c.importSet('/t', '/p')
+  await c.repo('/p/src')
+  await c.publish('/p')
+  await c.openPr('/p', '2026-09-15')
+  await c.importNew('/p/src')
   expect(calls).toEqual([
     ['marketplace_list', undefined],
     ['marketplace_refresh', { url: null }],
@@ -130,5 +151,84 @@ test('client sends the argument names the Rust commands take', async () => {
     ['marketplace_add_source', { url: 'u' }],
     ['marketplace_remove_source', { url: 'u' }],
     ['marketplace_import', { path: '/t', cwd: '/p' }],
+    ['marketplace_repo', { cwd: '/p/src' }],
+    ['marketplace_publish', { root: '/p' }],
+    ['marketplace_open_pr', { root: '/p', date: '2026-09-15' }],
+    ['marketplace_import_new', { cwd: '/p/src' }],
   ])
+})
+
+test('the repo section follows the cwd, and drops an answer for a cwd no longer focused', async () => {
+  const pending: Record<string, ReturnType<typeof deferred<RepoRules>>> = {}
+  const s = createMarketplaceStore(fake({ repo: (cwd) => (pending[cwd] = deferred<RepoRules>()).promise }))
+  const first = s.getState().loadRepo('/w/app')
+  const second = s.getState().loadRepo('/w/other')
+  pending['/w/other'].resolve(repo({ root: '/w/other', name: 'other' }))
+  await second
+  pending['/w/app'].resolve(repo())
+  await first
+  expect(s.getState().repo?.name).toBe('other')
+  expect(s.getState().repoLoading).toBe(false)
+  await s.getState().loadRepo(undefined)
+  expect(s.getState().repo).toBeNull()
+})
+
+test('a failing repo read shows as the section error', async () => {
+  const s = createMarketplaceStore(fake({ repo: async () => Promise.reject('git: not found') }))
+  await s.getState().loadRepo('/w/app')
+  expect(s.getState().repo).toMatchObject({ error: 'git: not found', rules: [] })
+})
+
+test('publish shows the output, Open PR runs only after confirming, and the repo is read again after each', async () => {
+  const reads: string[] = []
+  const prs: [string, string][] = []
+  const s = createMarketplaceStore(
+    fake({
+      repo: async (cwd) => (reads.push(cwd), repo({ uncommitted: true })),
+      openPr: async (root, date) => (prs.push([root, date]), { branch: 'team-rules/2026-09-15', base: 'main', url: 'https://pr/7', output: '$ gh pr create' }),
+    }),
+  )
+  await s.getState().loadRepo('/w/app/src')
+  await s.getState().publishRepo('/w/app')
+  expect(s.getState().publish['/w/app']).toEqual({ status: 'published', ok: true, output: 'published 1 rule' })
+  expect(reads).toEqual(['/w/app/src', '/w/app/src'])
+
+  await s.getState().openPr('/w/app', '2026-09-15')
+  expect(prs).toEqual([])
+  s.getState().askOpenPr('/w/app')
+  await s.getState().openPr('/w/app', '2026-09-15')
+  expect(prs).toEqual([['/w/app', '2026-09-15']])
+  expect(s.getState().publish['/w/app']).toEqual({ status: 'opened', ok: true, output: '$ gh pr create', url: 'https://pr/7', branch: 'team-rules/2026-09-15' })
+  expect(reads).toHaveLength(3)
+})
+
+test('publish and Open PR failures carry their output', async () => {
+  const s = createMarketplaceStore(
+    fake({ publish: async () => Promise.reject('error: no vault'), openPr: async () => Promise.reject('$ git push\nrejected') }),
+  )
+  await s.getState().publishRepo('/w/app')
+  expect(s.getState().publish['/w/app']).toEqual({ status: 'published', ok: false, output: 'error: no vault' })
+  s.getState().dismissPublish('/w/app')
+  s.getState().askOpenPr('/w/app')
+  await s.getState().openPr('/w/app', '2026-09-15')
+  expect(s.getState().publish['/w/app']).toMatchObject({ status: 'opened', ok: false, output: '$ git push\nrejected' })
+})
+
+test('Import all new runs once per click and puts its output on the repo, then rereads it', async () => {
+  const d = deferred<string>()
+  let reads = 0
+  const cwds: string[] = []
+  const s = createMarketplaceStore(fake({ importNew: (cwd) => (cwds.push(cwd), d.promise), repo: async () => (reads++, repo()) }))
+  await s.getState().loadRepo('/w/app')
+  const run = s.getState().importNew('/w/app', '/w/app')
+  void s.getState().importNew('/w/app', '/w/app')
+  d.resolve('staged 1')
+  await run
+  expect(cwds).toEqual(['/w/app'])
+  expect(s.getState().cards[newKey('/w/app')]).toEqual({ status: 'ok', cwd: '/w/app', output: 'staged 1' })
+  expect(reads).toBe(2)
+  // Importing the repo's whole tree rereads the section too; another source's does not.
+  await s.getState().importSet('/w/app/.mnemo-shared', '/w/app')
+  await s.getState().importSet('/c/abc/.mnemo-shared', '/w/app')
+  expect(reads).toBe(3)
 })

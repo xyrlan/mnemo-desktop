@@ -114,6 +114,10 @@ pub fn run() {
             marketplace::marketplace_add_source,
             marketplace::marketplace_remove_source,
             marketplace::marketplace_import,
+            marketplace::marketplace_repo,
+            marketplace::marketplace_publish,
+            marketplace::marketplace_open_pr,
+            marketplace::marketplace_import_new,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {

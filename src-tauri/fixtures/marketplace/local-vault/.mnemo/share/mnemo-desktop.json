@@ -1,0 +1,9 @@
+{
+  "cwd": "/Users/me/github/mnemo-desktop",
+  "path": ".mnemo-shared",
+  "published_at": "2026-09-10T09:00:00Z",
+  "rules": {
+    "login-shell-path-for-clis": "71a148e64a3b47b021b4e706d178683a2f5dfb20ce0f0f495af82ad19129a8fe"
+  },
+  "vault": "b7e4d1c9a3f6082e5d9c1b4a7e3f6d20"
+}
