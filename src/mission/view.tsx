@@ -5,7 +5,7 @@ import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
 import { allChildren, childWord, isRecent, type ChildSession, type TimelineLine } from './types'
-import { openMissionPane } from './Sidebar'
+import { openMissionPane } from './rows'
 import { estimateUsd, fmtUsd } from './cost'
 import { settingsStore } from '../settings/app-store'
 

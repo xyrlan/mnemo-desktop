@@ -1,4 +1,15 @@
-export type ParentSession = { session_id: string; pid: number | null; name: string | null; status: string; cwd: string }
+/** `tokens`, `cache_read`, `children_tokens` come from the tokens piece (#22); snapshots from
+ *  before it lack them, so read them through `parentTokens`, never directly. */
+export type ParentSession = {
+  session_id: string
+  pid: number | null
+  name: string | null
+  status: string
+  cwd: string
+  tokens?: number
+  cache_read?: number
+  children_tokens?: number
+}
 export type ChildSession = {
   id: string
   session_id: string | null
@@ -15,6 +26,8 @@ export type ChildSession = {
   intent: string | null
   branch: string | null
   timeline_len: number
+  /** The parent session that dispatched this child, when known (#22). */
+  parent_session?: string | null
 }
 export type Pr = { number: number; url: string; state: string; head: string; ci: 'pass' | 'fail' | 'pending' | 'none' }
 export type Piece = { name: string; branch: string; child: ChildSession | null; pr: Pr | null }
