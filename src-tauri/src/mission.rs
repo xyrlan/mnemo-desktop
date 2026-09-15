@@ -340,9 +340,47 @@ pub fn join(input: JoinInput) -> Vec<RepoGroup> {
 
 // ------------------------------------------------------------------ io --
 
+/// PATH as the user's login shell sees it. An app launched from the Dock or Finder
+/// inherits launchd's minimal PATH, which has neither `~/.local/bin` (claude, mnemo)
+/// nor Homebrew (gh); the terminal panes are fine because they run a login shell,
+/// but every `Command` here must be given the same PATH explicitly.
+pub fn login_path() -> String {
+    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let inherited = std::env::var("PATH").unwrap_or_default();
+            if cfg!(windows) {
+                return inherited;
+            }
+            let shell = crate::pty::default_shell();
+            let out = Command::new(&shell)
+                .args(["-lc", "printf %s \"$PATH\""])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if out.is_empty() {
+                inherited
+            } else {
+                // Keep anything launchd gave us that the profile did not, at the end.
+                let mut parts: Vec<&str> = out.split(':').collect();
+                for p in inherited.split(':') {
+                    if !parts.contains(&p) && !p.is_empty() {
+                        parts.push(p);
+                    }
+                }
+                parts.join(":")
+            }
+        })
+        .clone()
+}
+
 fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
+    cmd.env("PATH", login_path());
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }
@@ -675,6 +713,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn login_path_includes_the_profile_dirs_and_never_loses_inherited_ones() {
+        let p = login_path();
+        assert!(p.split(':').any(|d| d == "/usr/bin"), "got {p}");
+        for d in std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty()) {
+            assert!(p.split(':').any(|x| x == d), "inherited {d} missing from {p}");
+        }
+    }
+
+    #[test]
+    fn run_carries_the_login_path() {
+        // The login profile on a dev box adds dirs launchd would not know about;
+        // whatever it adds, `run` must resolve programs through the same list.
+        assert!(run("git", &["--version"], None).map(|o| o.starts_with("git version")).unwrap_or(false));
+        assert!(!login_path().is_empty());
+    }
+
+    #[test]
     fn looked_marker_round_trips() {
         let home = std::env::temp_dir().join(format!("mnemo-desktop-home-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
@@ -706,6 +762,7 @@ pub fn roster_pid(roster_json: &str, id: &str) -> Option<u32> {
 }
 
 fn child_pids(pid: u32) -> Vec<u32> {
+    // `run` already carries the login PATH, so pgrep resolves from the Dock too.
     run("pgrep", &["-P", &pid.to_string()], None)
         .map(|s| s.lines().filter_map(|l| l.trim().parse().ok()).collect())
         .unwrap_or_default()
