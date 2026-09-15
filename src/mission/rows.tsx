@@ -101,6 +101,7 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
   const draft = useMission((s) => s.drafts[c.id] ?? '')
   const err = useMission((s) => s.replyErrors[c.id])
   const sending = useMission((s) => s.sending[c.id])
+  const typing = useMission((s) => s.typing[c.id])
   const lastSent = useMission((s) => s.sent[c.id]?.at(-1))
   useEffect(() => {
     if (draft === '' && c.suggested_reply) missionStore.getState().setDraft(c.id, c.suggested_reply)
@@ -118,8 +119,16 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
         }}
       />
       <div className="m-reply-actions">
-        <button disabled={sending || !draft.trim()} onClick={() => void missionStore.getState().sendReply(c.id)}>
+        <button disabled={sending || typing || !draft.trim()} onClick={() => void missionStore.getState().sendReply(c.id)}>
           {sending ? 'sending…' : 'send ⌘↩'}
+        </button>
+        <button
+          className="m-as-me"
+          disabled={sending || typing || !draft.trim()}
+          title={`Types the draft, as written, into claude attach ${c.id}: the child reads it as you typed it in its terminal, so it can approve a push or a PR`}
+          onClick={() => void missionStore.getState().replyAsMe(c.id, c.suggested_reply)}
+        >
+          {typing ? 'typing…' : 'reply as me'}
         </button>
         {attach && (
           <button className="m-attach-link" title={`claude attach ${c.id}`} onClick={() => attachChild(c.id)}>
@@ -129,11 +138,11 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
         {err && <span className="m-error">{err}</span>}
       </div>
       {/* Claude Code delivers socket writes as another session's message, which it tells
-          the child is never user approval (#84); only the child's own terminal is the user. */}
-      <div className="m-reply-note">arrives as a message from another session: it cannot approve anything, attach to approve</div>
+          the child is never user approval (#84); only the child's own terminal is the user (#86). */}
+      <div className="m-reply-note">send arrives as a message from another session and cannot approve anything; reply as me types it into the child's terminal, as you</div>
       {lastSent && (
         <div className="m-sent">
-          sent ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · waiting for the child to pick it up… <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
+          {lastSent.asMe ? 'typed as you' : 'sent'} ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {lastSent.asMe ? 'in its terminal' : 'waiting for the child to pick it up…'} <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
         </div>
       )}
     </div>

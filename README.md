@@ -31,6 +31,10 @@ In a terminal: ⌘←/⌘→ line start/end, ⌘⌫ kill line, ⌥⌫ kill word,
 
 Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), cockpit (all repos), vault (mnemo rules with the native actions as buttons), marketplace (shared rule sets). Open them from ⌘K.
 
+## Replying to a child
+
+A blocked child's reply box has two ways out. **send** posts to the child's inbox socket; Claude Code hands that to the child as another session's message, which can never approve a push, a merge or a PR. **reply as me** types the draft, exactly as written (no English rewrite, no language footer), into a hidden `claude attach <id>`, presses Enter and detaches with Ctrl+Z, so the child reads it as its user's typed turn. It refuses, and types nothing, when the child is on a permission or other prompt (Enter there picks "1. Yes" and the text is lost), when the child's input box already holds text (every attach shares that box, and Enter would send both), and when the draft is still the child's own suggested reply.
+
 ## Settings
 
 `~/.mnemo-desktop/settings.json`, toggled from ⌘K: `outgoing` (`en` rewrites replies and dictation in English through your own `claude -p` before they leave, keeping the text as typed when it is under four words or the answer does not look like a rewrite; `as-typed` sends verbatim), `replyLanguage` (`pt`/`en`/`unchanged`, asks a child to answer in that language), `sidebarScope` (`repo`/`all`).
