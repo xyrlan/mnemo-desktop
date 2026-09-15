@@ -534,7 +534,7 @@ pub fn login_path() -> String {
         .clone()
 }
 
-fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.env("PATH", login_path());

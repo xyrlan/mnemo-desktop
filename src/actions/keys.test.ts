@@ -15,6 +15,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('{', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.prev')
   expect(actionForKey(ev('k', { metaKey: true }), 'mac')).toBe('palette.open')
   expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('mission.toggle-sidebar')
+  expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBe('home.show')
   expect(actionForKey(ev('t', { ctrlKey: true }), 'mac')).toBeNull()
   expect(actionForKey(ev('c', { metaKey: true }), 'mac')).toBeNull()
 })
@@ -148,7 +149,7 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(ids.sort()).toEqual(
     [
       'tab.new', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
-      'mission.toggle-sidebar', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
+      'mission.toggle-sidebar', 'home.show', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `tab.go.${n}`),
     ].sort(),
   )

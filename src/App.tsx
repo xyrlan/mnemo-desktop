@@ -10,29 +10,25 @@ import { registerBuiltins } from './actions/registry'
 import.meta.glob('./*/view.tsx', { eager: true })
 import './terminal/cmd-view'
 import Sidebar from './mission/Sidebar'
+import Home from './home/Home'
 
 registerBuiltins(store)
-
-/** StrictMode runs effects twice before the first newTab resolves; boot exactly once. */
-let booted = false
 
 export default function App() {
   const tabs = useApp((s) => s.tabs)
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
 
-  useEffect(() => {
-    if (!booted && store.getState().tabs.length === 0) {
-      booted = true
-      void store.getState().newTab()
-    }
-    return installKeys()
-  }, [])
+  // No tab at boot: Home shows until the user opens or resumes something.
+  useEffect(() => installKeys(), [])
 
   return (
     <div className="app">
       <div className="app-main">
       <div className="tabbar">
+        <div className={`tab-home${activeTab === '' ? ' active' : ''}`} title="Home (⌘⇧H)" onMouseDown={() => store.getState().showHome()}>
+          ⌂
+        </div>
         {tabs.map((t, i) => (
           <div
             key={t.id}
@@ -66,6 +62,7 @@ export default function App() {
             <SplitView node={t.root} />
           </div>
         ))}
+        {activeTab === '' && <Home />}
       </div>
       </div>
       <Sidebar />

@@ -28,6 +28,10 @@ pub mod vault;
 
 // -- cockpit: no Rust --
 
+// -- home (src/home.rs) --
+pub mod home;
+pub mod home_commands;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -62,6 +66,7 @@ fn run_smoke(app: &tauri::App) -> Result<(), String> {
 pub fn run() {
     env_logger::init();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -107,6 +112,10 @@ pub fn run() {
             vault::vault_tree,
             vault::vault_page,
             vault::vault_run,
+
+            // -- home commands --
+            home_commands::home_snapshot,
+            home_commands::home_register_repo,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
@@ -162,6 +171,7 @@ pub fn run() {
                 const VIEW: &[(&str, &str, &str)] = &[
                     ("palette.open", "Command Palette", "CmdOrCtrl+K"),
                     ("mission.toggle-sidebar", "Toggle Mission Sidebar", "CmdOrCtrl+B"),
+                    ("home.show", "Home", "CmdOrCtrl+Shift+H"),
                 ];
                 const PREFIX: &str = "action:";
 
