@@ -41,6 +41,8 @@ pub mod chrome;
 
 // -- workspace (src/workspace.rs) --
 
+// -- mcp (src/mcp.rs) --
+
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
@@ -141,6 +143,8 @@ pub fn run() {
             // -- vaultmap commands --
 
             // -- workspace commands --
+
+            // -- mcp commands --
             chrome::chrome_branch,
             chrome::chrome_repo,
 
