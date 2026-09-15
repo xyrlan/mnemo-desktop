@@ -1,5 +1,5 @@
 import libRs from '../../src-tauri/src/lib.rs?raw'
-import { actionForKey, actionFromMenu, installKeys, makeDedupe } from './keys'
+import { actionForKey, actionFromMenu, installKeys, listKey, makeDedupe } from './keys'
 
 const ev = (key: string, o: Partial<KeyboardEvent> = {}) =>
   ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...o }) as KeyboardEvent
@@ -16,6 +16,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('k', { metaKey: true }), 'mac')).toBe('palette.open')
   expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('mission.toggle-sidebar')
   expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBe('home.show')
+  expect(actionForKey(ev('B', { metaKey: true, shiftKey: true }), 'mac')).toBe('cockpit.open')
   expect(actionForKey(ev('t', { ctrlKey: true }), 'mac')).toBeNull()
   expect(actionForKey(ev('c', { metaKey: true }), 'mac')).toBeNull()
 })
@@ -25,6 +26,27 @@ test('other platforms use ctrl', () => {
   expect(actionForKey(ev('t', { metaKey: true }), 'other')).toBeNull()
 })
 
+test('list keys: plain arrows, Enter, r, a and Esc; nothing with a modifier or while typing', () => {
+  const on = (tagName: string, o: { isContentEditable?: boolean } = {}) => ({ target: { tagName, ...o } as unknown as EventTarget })
+  expect(listKey(ev('ArrowDown'))).toBe('down')
+  expect(listKey(ev('ArrowUp', on('DIV')))).toBe('up')
+  expect(listKey(ev('Enter', on('DIV')))).toBe('open')
+  expect(listKey(ev('r'))).toBe('reply')
+  expect(listKey(ev('a'))).toBe('attach')
+  expect(listKey(ev('Escape'))).toBe('close')
+  expect(listKey(ev('x'))).toBeNull()
+  // Modified chords belong to actionForKey.
+  expect(listKey(ev('a', { metaKey: true }))).toBeNull()
+  expect(listKey(ev('ArrowDown', { ctrlKey: true }))).toBeNull()
+  expect(listKey(ev('R', { shiftKey: true }))).toBeNull()
+  // Typing a reply is typing.
+  expect(listKey(ev('r', on('TEXTAREA')))).toBeNull()
+  expect(listKey(ev('ArrowDown', on('INPUT')))).toBeNull()
+  expect(listKey(ev('a', on('DIV', { isContentEditable: true })))).toBeNull()
+  // A focused button runs itself on Enter; letters still reach the list.
+  expect(listKey(ev('Enter', on('BUTTON')))).toBeNull()
+  expect(listKey(ev('a', on('BUTTON')))).toBe('attach')
+})
 
 test('a menu event carries its action id', () => {
   expect(actionFromMenu({ id: 'palette.open' })).toBe('palette.open')

@@ -2,11 +2,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 
-/** What the GitHub commands answer (issues for the `mnemo` repo only); everything else gets `{}`. */
+/** What the Tauri side answers: a branch for the header, GitHub issues for the `mnemo` repo. */
 const gh: { auth: unknown; issues: unknown } = { auth: {}, issues: [] }
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args?: { root?: string }) =>
-    cmd === 'gh_auth' ? gh.auth : cmd === 'gh_issues' ? (args?.root === '/Users/me/github/mnemo' ? gh.issues : []) : {},
+    cmd === 'chrome_branch' ? 'main' : cmd === 'gh_auth' ? gh.auth : cmd === 'gh_issues' ? (args?.root === '/Users/me/github/mnemo' ? gh.issues : []) : {},
   ),
 }))
 
@@ -15,9 +15,10 @@ import { store as appStore } from '../layout/app-store'
 import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'
-import { withPrs } from './fixtures'
+import { withPrs, shipped } from './fixtures'
 import { githubStore } from '../github/app-store'
-import { mnemoIssues, snapWithIssues } from '../github/fixtures'
+import { mnemoIssues } from '../github/fixtures'
+import { desktop, snapshot } from '../mission/fixtures'
 import './view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -32,6 +33,7 @@ class RO {
 
 let host: HTMLDivElement
 let root: Root
+let typed: [string | undefined, string][]
 
 beforeEach(() => {
   host = document.createElement('div')
@@ -42,6 +44,9 @@ beforeEach(() => {
   gh.auth = {}
   gh.issues = []
   githubStore.setState({ auth: null, issues: {}, boards: {} })
+  typed = []
+  // Fresh panes per test, so what a test opened is what it sees.
+  appStore.setState({ tabs: [], activeTab: '', panes: {}, openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
 })
 
 afterEach(() => {
@@ -49,110 +54,165 @@ afterEach(() => {
   host.remove()
 })
 
-function render() {
+async function render() {
   const View = paneView('cockpit')!
-  act(() => root.render(<View id={-1} props={{}} />))
+  await act(async () => root.render(<View id={-1} props={{}} />))
 }
 
-const node = (id: string) => [...host.querySelectorAll<HTMLElement>('.react-flow__node')].find((n) => n.dataset.id === id) ?? null
+const rows = (sel = '.ck-needs .ck-row') => [...host.querySelectorAll<HTMLElement>(sel)]
+const row = (key: string) => rows('.ck-row').find((r) => r.dataset.key === key)!
+const button = (el: ParentNode, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)
+const opened = (view: string) => Object.values(appStore.getState().panes).filter((p) => p.view === view).map((p) => p.props)
+const key = (k: string, target: Element = host.querySelector('.cockpit')!) =>
+  act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })))
 
-test('registers the cockpit view and the cockpit.open action', () => {
+test('registers the cockpit view and the cockpit.open action on ⌘⇧B', () => {
   expect(paneView('cockpit')).toBeDefined()
   expect(all().find((a) => a.id === 'cockpit.open')?.shortcut).toBe('⌘⇧B')
 })
 
-test('renders the canvas: repo, parent, mission group, children, PR and CI nodes', () => {
-  render()
-  expect(host.querySelector('.ck-head')?.textContent).toContain('3 repos')
-  expect(node('repo:/Users/me/github/mnemo-desktop')?.textContent).toContain('mnemo-desktop')
-  expect(node('parent:0ff9d810-aaaa')?.textContent).toContain('round3 dispatch')
-  expect(node('child:094c6a03')?.querySelector('.gr-card')?.className).toContain('gr-pulse')
-  expect(node('pr:/Users/me/github/mnemo#13')?.querySelector('.gr-bad')).not.toBeNull()
-  expect(node('ci:/Users/me/github/mnemo#12')).not.toBeNull()
-  expect(host.querySelectorAll('.react-flow__node-group').length).toBe(2)
+test('the inbox lists what needs you by urgency, with the reply inline and the row actions', async () => {
+  await render()
+  expect(host.querySelector('.ck-where')?.textContent).toBe('3 repos')
+  expect(rows().map((r) => r.dataset.key)).toEqual(['blocked:094c6a03', 'ci:/Users/me/github/mnemo#13', `land:${shipped.missions[0].contract_path}`])
+  expect(rows().map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['vault', 'docs · PR #13', 'round4'])
+  // Every repo is listed, so each row names its own.
+  expect(rows().map((r) => r.querySelector('.nd-repo')?.textContent)).toEqual(['mnemo-desktop', 'mnemo', 'mnemo'])
+
+  const blocked = rows()[0]
+  expect(blocked.querySelector('.m-needs')?.textContent).toBe('may I add a crate?')
+  expect(blocked.querySelector('textarea')?.value).toBe('yes')
+  act(() => button(blocked, 'attach')!.click())
+  expect(opened('terminal-cmd')).toContainEqual({ cmd: 'claude attach 094c6a03' })
+  act(() => button(blocked, 'stop')!.click())
+  expect(opened('terminal-cmd')).not.toContainEqual({ cmd: 'claude stop 094c6a03' })
+  act(() => button(blocked, 'really stop?')!.click())
+  expect(opened('terminal-cmd')).toContainEqual({ cmd: 'claude stop 094c6a03' })
+
+  act(() => button(rows()[1], 'abrir job')!.click())
+  expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
 })
 
-test('the needs-you strip lists blocked, red CI and landable, and opens them', () => {
-  render()
-  const chips = [...host.querySelectorAll<HTMLButtonElement>('.ck-strip .nd')]
-  expect(chips.map((c) => c.className.split(' ')[1])).toEqual(['nd-blocked', 'nd-ci', 'nd-land'])
-  expect(chips[0].textContent).toContain('vault')
-  act(() => chips[0].click())
-  expect(Object.values(appStore.getState().panes).find((p) => p.view === 'mission')?.props).toEqual({ id: '094c6a03' })
+test('land and merge run in a terminal tab only after a second press', async () => {
+  const m = desktop.missions[0]
+  const ready = { ...desktop, missions: [{ ...m, pieces: [{ ...m.pieces[0], pr: { number: 7, url: 'https://github.com/me/d/pull/7', state: 'OPEN', head: 'feat/round3/cockpit', ci: 'pass' as const } }] }] }
+  missionStore.setState({ snapshot: { ...withPrs, repos: [ready, shipped] } })
+  await render()
+  const land = row(`land:${shipped.missions[0].contract_path}`)
+  act(() => button(land, 'land')!.click())
+  expect(typed).toEqual([])
+  expect(button(land, 'confirm land?')).toBeDefined()
+  act(() => button(land, 'confirm land?')!.click())
+  expect(typed).toEqual([[shipped.root, `mnemo land ${shipped.missions[0].contract_path} --merge`]])
+
+  const merge = row(`ready:${desktop.root}#7`)
+  expect(merge.querySelector('.ck-label')?.textContent).toBe('cockpit · PR #7')
+  act(() => button(merge, 'merge')!.click())
+  act(() => button(merge, 'confirm merge?')!.click())
+  expect(typed.at(-1)).toEqual([desktop.root, 'gh pr merge 7 --squash'])
 })
 
-test('click a child opens its mission pane; double-click attaches; click a PR opens it', () => {
-  render()
-  act(() => node('child:a43d3832')!.click())
-  expect(Object.values(appStore.getState().panes).some((p) => p.view === 'mission' && p.props?.id === 'a43d3832')).toBe(true)
-  act(() => node('child:a43d3832')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
-  expect(Object.values(appStore.getState().panes).some((p) => p.view === 'terminal-cmd' && p.props?.cmd === 'claude attach a43d3832')).toBe(true)
-  act(() => node('pr:/Users/me/github/mnemo#13')!.click())
-  expect(Object.values(appStore.getState().panes).some((p) => p.view === 'browser' && p.props?.url === 'https://github.com/me/mnemo/pull/13')).toBe(true)
+test('andando and feito hoje are collapsed below the needs and open on click', async () => {
+  missionStore.setState({ snapshot: { ...withPrs, repos: withPrs.repos.map((r) => (r.root === shipped.root ? { ...r, children: r.children.map((c) => ({ ...c, branch: 'fix/issue-40' })) } : r)) } })
+  await render()
+  const [working, done] = [...host.querySelectorAll<HTMLButtonElement>('.ck-fold')]
+  expect(working.textContent).toBe('▸ andando: 2')
+  expect(done.textContent).toBe('▸ feito hoje: 1')
+  expect(rows('.ck-working')).toEqual([])
+  act(() => working.click())
+  expect(rows('.ck-working').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['cockpit', '#40'])
+  expect(rows('.ck-working')[0].querySelector('.ck-detail')?.textContent).toBe('writing the cockpit pane')
+  expect(rows('.ck-working')[0].querySelector('.ck-tokens')?.textContent).toBe('320k')
+  act(() => done.click())
+  expect(rows('.ck-done').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['api'])
+  act(() => (rows('.ck-done')[0].querySelector('.ck-row-head') as HTMLElement).click())
+  expect(opened('mission')).toContainEqual({ id: 'beef0001' })
 })
 
-test('"this repo" narrows the canvas to the focused repo', async () => {
+test('keyboard: ↑↓ move the selection, Enter runs the row action, r focuses the reply, a attaches, typing is left alone', async () => {
+  await render()
+  const pane = host.querySelector<HTMLElement>('.cockpit')!
+  expect(rows()[0].className).toContain('sel')
+  key('ArrowDown')
+  expect(rows()[1].className).toContain('sel')
+  expect(opened('browser')).toEqual([])
+  key('Enter')
+  expect(opened('browser')).toEqual([{ url: 'https://github.com/me/mnemo/pull/13/checks' }])
+  key('ArrowDown')
+  key('ArrowDown')
+  expect(rows()[2].className).toContain('sel')
+  key('Enter')
+  expect(typed).toEqual([])
+  expect(button(rows()[2], 'confirm land?')).toBeDefined()
+
+  key('ArrowUp')
+  key('ArrowUp')
+  key('r')
+  const box = rows()[0].querySelector('textarea')!
+  expect(document.activeElement).toBe(box)
+  // Typed into the reply: not a list key.
+  key('a', box)
+  expect(opened('terminal-cmd')).toEqual([])
+  pane.focus()
+  key('a')
+  expect(opened('terminal-cmd')).toEqual([{ cmd: 'claude attach 094c6a03' }])
+})
+
+test('a row\'s mission opens as a map beside the inbox, at 100%, with action cards; Esc closes it', async () => {
+  gh.auth = { installed: true, logged: true, login: 'me', scopes: [] }
+  gh.issues = mnemoIssues
+  await render()
+  await act(async () => button(rows()[1], '⤢ round4')!.click())
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0))
+  })
+  const map = host.querySelector('.ck-map')!
+  expect(map.querySelector('.mm-head')?.textContent).toContain('mission round4')
+  const card = (id: string) => [...map.querySelectorAll<HTMLElement>('.react-flow__node')].find((n) => n.dataset.id === id)
+  expect(card(`piece:${shipped.missions[0].contract_path}#docs`)).toBeDefined()
+  expect(card('issue:/Users/me/github/mnemo#41')?.textContent).toContain('#41 contract api piece')
+  expect(map.querySelector<HTMLElement>('.react-flow__viewport')?.style.transform).toContain('scale(1)')
+
+  const land = card(`land:${shipped.missions[0].contract_path}`)!
+  act(() => button(land, 'land')!.click())
+  act(() => button(land, 'confirm land?')!.click())
+  expect(typed).toEqual([[shipped.root, `mnemo land ${shipped.missions[0].contract_path} --merge`]])
+  act(() => button(card('pr:/Users/me/github/mnemo#13')!, 'abrir job')!.click())
+  expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
+
+  key('Escape')
+  expect(host.querySelector('.ck-map')).toBeNull()
+})
+
+test('a blocked card on the map opens its reply under the canvas', async () => {
+  await render()
+  await act(async () => button(rows()[0], '⤢ round3')!.click())
+  const vault = [...host.querySelectorAll<HTMLElement>('.ck-map .react-flow__node')].find((n) => n.dataset.id === `piece:${desktop.missions[0].contract_path}#vault`)!
+  expect(vault.querySelector('.gr-pulse')).not.toBeNull()
+  act(() => button(vault, 'reply')!.click())
+  expect(host.querySelector<HTMLTextAreaElement>('.mm-reply textarea')?.value).toBe('yes')
+})
+
+test('"este repo" names the focused repo and branch, and says nada pendente with who is working', async () => {
   settingsStore.setState({ sidebarScope: 'repo' })
   await act(async () => {
     await appStore.getState().newTab()
   })
   const tab = appStore.getState().tabs.at(-1)!
   act(() => appStore.getState().setCwd(tab.focused, '/Users/me/github/mnemo-issue-40'))
-  render()
-  expect(node('repo:/Users/me/github/mnemo')?.querySelector('.gr-accent')).not.toBeNull()
-  expect(node('repo:/Users/me/github/mnemo-desktop')).toBeNull()
-  expect(host.querySelector('.ck-strip')?.textContent).not.toContain('vault')
+  missionStore.setState({ snapshot })
+  await render()
+  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main')
+  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
+  expect(host.querySelector('.ck-fold')?.textContent).toBe('▾ andando: 1')
+  expect(rows('.ck-working').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['#40'])
+  expect(host.querySelector('.nd-repo')).toBeNull()
 })
 
-test('shows the empty state and errors', () => {
+test('shows errors, and nada pendente when there is nothing at all', async () => {
   missionStore.setState({ snapshot: { repos: [], errors: ['gh missing on PATH'], at: '' }, lastError: null })
-  render()
-  expect(host.textContent).toContain('no live sessions')
+  await render()
   expect(host.textContent).toContain('gh missing on PATH')
-  expect(host.querySelector('.ck-strip')?.textContent).toContain('nothing')
-})
-
-test('logged in: issue roots on the canvas, a label picker in the strip, click an issue to dispatch it', async () => {
-  const root = '/Users/me/github/mnemo'
-  gh.auth = { installed: true, logged: true, login: 'me', scopes: [] }
-  gh.issues = mnemoIssues
-  missionStore.setState({ snapshot: snapWithIssues })
-  const typed: [string | undefined, string][] = []
-  appStore.setState({ openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
-  render()
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 0))
-  })
-
-  expect(node(`issue:${root}#40`)?.textContent).toContain('#40 dispatched issue')
-  expect(node(`issue:${root}#12`)).not.toBeNull()
-  expect(node(`issue:${root}#1`)).toBeNull()
-
-  // One picker per repo with issues; only mnemo has any, so it carries no repo name.
-  const chip = host.querySelector<HTMLButtonElement>('.ck-strip .gh-picker-chip')!
-  expect(chip.textContent).toContain('all labels')
-  act(() => chip.click())
-  const bug = [...host.querySelectorAll<HTMLLabelElement>('.gh-picker-menu label')].find((l) => l.textContent === 'bug')!
-  await act(async () => bug.querySelector('input')!.click())
-  expect(settingsStore.getState().issueLabels).toEqual({ [root]: ['bug'] })
-  expect(node(`issue:${root}#12`)).toBeNull()
-  expect(node(`issue:${root}#1`)).not.toBeNull()
-
-  act(() => node(`issue:${root}#1`)!.click())
-  expect(host.querySelector('.ck-issue-bar')?.textContent).toContain('#1 issue 1')
-  act(() => [...host.querySelectorAll<HTMLButtonElement>('.ck-issue-bar button')].find((b) => b.textContent === 'dispatch')!.click())
-  expect(typed).toEqual([[root, 'mnemo dispatch 1']])
-  act(() => node(`issue:${root}#1`)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
-  expect(Object.values(appStore.getState().panes).some((p) => p.view === 'browser' && p.props?.url === 'https://github.com/me/mnemo/issues/1')).toBe(true)
-})
-
-test('not logged in: no issues are fetched and the strip has no picker', async () => {
-  gh.auth = { installed: true, logged: false, login: null, scopes: [] }
-  gh.issues = mnemoIssues
-  render()
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 0))
-  })
-  expect(githubStore.getState().issues).toEqual({})
-  expect(host.querySelector('.gh-picker')).toBeNull()
+  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
+  expect(host.querySelector('.ck-fold')).toBeNull()
 })

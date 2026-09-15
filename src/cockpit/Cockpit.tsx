@@ -1,93 +1,258 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMission } from '../mission/app-store'
 import { useApp } from '../layout/app-store'
 import { settingsStore, useSettings } from '../settings/app-store'
-import { pruneSnapshot } from '../mission/types'
+import { childWord, delta, pruneSnapshot, type Mission } from '../mission/types'
 import { focusedCwd, repoOfCwd, scopeRepos } from '../mission/scope'
-import { attachChild, openContract, openMissionPane, openPr } from '../mission/rows'
-import { Graph } from '../graph'
-import { buildGraph } from './model'
-import { layoutGrouped } from './layout'
-import { needsYou } from './needs'
-import NeedsList from './NeedsList'
+import { fmtTokens } from '../mission/tokens'
+import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import { githubStore, useGithub } from '../github/app-store'
-import { dispatchIssue, openIssue } from '../github/actions'
-import { labelsOf, type Issue } from '../github/types'
-import LabelPicker from '../github/LabelPicker'
+import { tauriChrome } from '../chrome/client'
+import { listKey } from '../actions/keys'
+import { pruneGone } from './needs'
+import { buildInbox, rowChild, type Row } from './inbox'
+import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
+import MissionMap from './MissionMap'
 import './cockpit.css'
 
-/** The missions as a node canvas (repo → parent → children → PR → CI, contracts as groups)
- *  under a needs-you strip. Reads the snapshot the sidebar polls; it never polls itself. */
+/** Branch checked out in `cwd`, re-asked every few seconds while the cockpit is open. */
+function useBranch(cwd: string | undefined): string | null {
+  const [git, setGit] = useState<{ cwd?: string; branch: string | null }>({ branch: null })
+  useEffect(() => {
+    if (!cwd) return
+    let live = true
+    const ask = () =>
+      void tauriChrome
+        .branch(cwd)
+        .catch(() => null)
+        .then((b) => live && setGit({ cwd, branch: typeof b === 'string' && b ? b : null }))
+    ask()
+    const t = setInterval(ask, 5000)
+    return () => {
+      live = false
+      clearInterval(t)
+    }
+  }, [cwd])
+  return git.cwd === cwd ? git.branch : null
+}
+
+/** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
+const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'abrir job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
+const armKey = (r: Row) => `${r.kind === 'ready' ? 'merge' : r.kind === 'land' ? 'land' : 'stop'}:${r.key}`
+
+function runPrimary(r: Row, fire: (key: string) => boolean) {
+  if (r.kind === 'ci') openJob(r.pr)
+  else if (r.kind === 'ready') fire(armKey(r)) && mergePr(r.repo.root, r.pr)
+  else if (r.kind === 'land') fire(armKey(r)) && landMission(r.repo.root, r.mission)
+  else openMissionPane(r.child)
+}
+
+/** A click on the row itself opens what it is about, never anything that cannot be undone. */
+function openRow(r: Row) {
+  if (r.kind === 'ci' || r.kind === 'ready') openPr(r.pr)
+  else if (r.kind === 'land') openContract(r.mission)
+  else openMissionPane(r.child)
+}
+
+function InboxRow({ row, selected, showRepo, armed, fire, onSelect, onMap }: {
+  row: Row
+  selected: boolean
+  showRepo: boolean
+  armed: string | null
+  fire: (key: string) => boolean
+  onSelect: () => void
+  onMap: (m: Mission) => void
+}) {
+  const looked = useMission((s) => s.looked)
+  const lastSent = useMission((s) => (row.kind === 'blocked' ? s.sent[row.child.id]?.at(-1)?.at : undefined))
+  const replied = row.kind === 'blocked' && Date.now() - (lastSent ?? 0) < 60_000
+  const child = rowChild(row)
+  const d = child ? delta(child, looked) : 0
+  const isArmed = armed === armKey(row)
+
+  const [word, label, detail] =
+    row.kind === 'blocked' ? [replied ? 'replied' : 'BLOCKED', row.label, '']
+    : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, row.pr.head]
+    : row.kind === 'ready' ? ['ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
+    : row.kind === 'land' ? ['land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
+    : [childWord(row.child), row.label, row.child.detail]
+
+  const btn = (text: string, run: () => void, cls = '', title?: string) => (
+    <button
+      className={`ck-act${cls ? ` ${cls}` : ''}`}
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect()
+        run()
+      }}
+    >
+      {text}
+    </button>
+  )
+
+  return (
+    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}`} data-key={row.key}>
+      <div
+        className="ck-row-head"
+        onClick={() => {
+          onSelect()
+          openRow(row)
+        }}
+        title={child?.cwd ?? row.repo.root}
+      >
+        <span className="nd-word">{word}</span>
+        <span className="ck-label">{label}</span>
+        {detail && <span className="ck-detail">{detail}</span>}
+        <span className="ck-spacer" />
+        {showRepo && <span className="nd-repo">{row.repo.name}</span>}
+        {d > 0 && <span className="m-delta">+{d}</span>}
+        {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
+        {row.mission && btn(`⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', 'Open the mission map')}
+        {row.kind === 'ci' && btn('abrir job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
+        {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
+        {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
+        {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
+        {child && (row.kind === 'blocked' || child.live) && btn('attach', () => attachChild(child.id), '', `claude attach ${child.id}`)}
+        {row.kind === 'blocked' &&
+          btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
+      </div>
+      {row.kind === 'blocked' && <ReplyBox c={row.child} />}
+    </div>
+  )
+}
+
+/** What needs you, across repos or in the focused one: blocked children with their reply,
+ *  red CI, PRs ready to merge, contracts ready to land; then who is still working and who
+ *  finished today, collapsed. A row's mission opens as a map beside the list. Reads the
+ *  snapshot the sidebar polls; it never polls it itself. */
 export default function Cockpit() {
   const raw = useMission((s) => s.snapshot)
   const err = useMission((s) => s.lastError)
-  const looked = useMission((s) => s.looked)
   const tabs = useApp((s) => s.tabs)
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
   const scope = useSettings((s) => s.sidebarScope)
-  const issueLabels = useSettings((s) => s.issueLabels)
-  const auth = useGithub((s) => s.auth)
-  const issueSlots = useGithub((s) => s.issues)
-  const [picked, setPicked] = useState<{ root: string; issue: Issue } | null>(null)
+  const logged = useGithub((s) => s.auth?.logged)
+  const cwd = focusedCwd({ tabs, activeTab, panes }, raw)
   // Resolve against the unpruned snapshot: a finished child's worktree still names its repo.
-  const focusedRoot = repoOfCwd(raw, focusedCwd({ tabs, activeTab, panes }, raw))?.root
+  const focused = repoOfCwd(raw, cwd)
+  const branch = useBranch(cwd)
 
-  const { snap, repos, effective, graph, needs } = useMemo(() => {
-    const snap = pruneSnapshot(raw)
-    const { repos, effective } = scopeRepos(snap, scope, focusedRoot)
-    const scoped = { ...snap, repos }
-    const issues = Object.fromEntries(Object.entries(issueSlots).map(([root, slot]) => [root, slot.list]))
-    const g = buildGraph(scoped, looked, focusedRoot, { issues, labels: issueLabels })
-    return { snap, repos, effective, graph: { ...g, nodes: layoutGrouped(g.nodes, g.edges) }, needs: needsYou(scoped) }
-  }, [raw, looked, scope, focusedRoot, issueSlots, issueLabels])
+  const { snap, repos, effective, inbox } = useMemo(() => {
+    const snap = pruneGone(pruneSnapshot(raw))
+    const { repos, effective } = scopeRepos(snap, scope, focused?.root)
+    return { snap, repos, effective, inbox: buildInbox({ ...snap, repos }) }
+  }, [raw, scope, focused?.root])
 
-  // Issues of the repos on the canvas, re-read every minute (gh answers from its own cache).
-  const roots = repos.map((r) => r.root).join('\n')
+  const [open, setOpen] = useState<{ working?: boolean; done?: boolean }>({})
+  // Nothing pending: who is working is the whole story, so it starts open.
+  const workingOpen = open.working ?? inbox.needs.length === 0
+  const doneOpen = open.done ?? false
+  const rows: Row[] = [...inbox.needs, ...(workingOpen ? inbox.working : []), ...(doneOpen ? inbox.done : [])]
+
+  const [selKey, setSelKey] = useState<string | null>(null)
+  const sel = Math.max(0, rows.findIndex((r) => r.key === selKey))
+  const { armed, fire } = useArm()
+  const body = useRef<HTMLDivElement>(null)
+
+  const [mapAt, setMapAt] = useState<{ root: string; path: string } | null>(null)
+  const mapRepo = mapAt && snap.repos.find((r) => r.root === mapAt.root)
+  const mapMission = mapRepo?.missions.find((m) => m.contract_path === mapAt?.path)
+
   useEffect(() => {
     void githubStore.getState().loadAuth()
   }, [])
+  // Issues feed the map's issue cards; only the mapped repo's, re-read every minute.
+  const mapRoot = mapAt?.root
   useEffect(() => {
-    if (!auth?.logged || !roots) return
-    const load = () => roots.split('\n').forEach((r) => void githubStore.getState().loadIssues(r))
+    if (!logged || !mapRoot) return
+    const load = () => void githubStore.getState().loadIssues(mapRoot)
     load()
     const t = setInterval(load, 60_000)
     return () => clearInterval(t)
-  }, [auth?.logged, roots])
+  }, [logged, mapRoot])
 
   const at = raw.at && Number.isFinite(Date.parse(raw.at)) ? new Date(raw.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null
   const setScope = (v: 'repo' | 'all') => void settingsStore.getState().set('sidebarScope', v)
+  const showRepo = effective === 'all'
 
-  const onClick = (id: string) => {
-    const t = graph.targets[id]
-    if (t?.kind === 'child') openMissionPane(t.child)
-    else if (t?.kind === 'pr') openPr(t.pr)
-    else if (t?.kind === 'mission') openContract(t.mission)
-    setPicked(t?.kind === 'issue' ? { root: t.root, issue: t.issue } : null)
+  const rowEl = (key: string) => [...(body.current?.querySelectorAll<HTMLElement>('.ck-row') ?? [])].find((el) => el.dataset.key === key)
+  const select = (i: number) => {
+    const r = rows[Math.min(rows.length - 1, Math.max(0, i))]
+    if (!r) return
+    setSelKey(r.key)
+    rowEl(r.key)?.scrollIntoView?.({ block: 'nearest' })
   }
-  const onDoubleClick = (id: string) => {
-    const t = graph.targets[id]
-    if (t?.kind === 'child') attachChild(t.child.id)
-    else if (t?.kind === 'issue') openIssue(t.issue)
+
+  /** Runs a list key; false when it does nothing here, so the key goes on. */
+  const onListKey = (k: NonNullable<ReturnType<typeof listKey>>): boolean => {
+    const r = rows[sel]
+    switch (k) {
+      case 'up':
+        select(sel - 1)
+        return true
+      case 'down':
+        select(sel + 1)
+        return true
+      case 'close':
+        if (!mapAt) return false
+        setMapAt(null)
+        return true
+      case 'open':
+        if (!r) return false
+        runPrimary(r, fire)
+        return true
+      case 'reply': {
+        const box = r?.kind === 'blocked' ? rowEl(r.key)?.querySelector('textarea') : null
+        box?.focus()
+        return !!box
+      }
+      case 'attach': {
+        const c = r && rowChild(r)
+        if (c) attachChild(c.id)
+        return !!c
+      }
+    }
   }
-  const pickers = repos.filter((r) => issueSlots[r.root]?.list.length)
-  const issueErrors = repos.flatMap((r) => (issueSlots[r.root]?.error ? [`${r.name}: ${issueSlots[r.root].error}`] : []))
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const k = listKey(e.nativeEvent)
+    if (!k || !onListKey(k)) return
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const renderRows = (list: Row[]) =>
+    list.map((r) => (
+      <InboxRow
+        key={r.key}
+        row={r}
+        selected={rows[sel]?.key === r.key}
+        showRepo={showRepo}
+        armed={armed}
+        fire={fire}
+        onSelect={() => setSelKey(r.key)}
+        onMap={(m) => setMapAt({ root: r.repo.root, path: m.contract_path })}
+      />
+    ))
+
+  const where = effective === 'repo' && focused ? [focused.name, branch].filter(Boolean).join(' · ') : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}`
 
   return (
-    <div className="pane-body cockpit">
+    <div className="pane-body cockpit" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="ck-head">
         <span className="ck-title">cockpit</span>
-        <span>
-          {repos.length} {repos.length === 1 ? 'repo' : 'repos'}
+        <span className="ck-where" title={effective === 'repo' ? focused?.root : undefined}>
+          {where}
         </span>
         {at && <span>updated {at}</span>}
         <span className="ck-spacer" />
         <span className="m-scope ck-scope">
           <button className={scope === 'repo' ? 'on' : ''} onClick={() => setScope('repo')} title="Only the repo of the focused pane">
-            this repo
+            este repo
           </button>
-          <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')} title="Every repo with a live session">
-            all
+          <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')} title="Every repo with a recent session">
+            todos
           </button>
         </span>
       </div>
@@ -101,51 +266,46 @@ export default function Cockpit() {
           ))}
         </div>
       )}
-      <div className="ck-strip">
-        <span className="ck-strip-title">needs you</span>
-        {needs.length > 0 ? <NeedsList needs={needs} variant="strip" showRepo={effective === 'all'} /> : <span className="ck-quiet">nothing</span>}
-        {(pickers.length > 0 || issueErrors.length > 0) && (
-          <span className="ck-issues">
-            <span className="ck-strip-title">issues</span>
-            {pickers.map((r) => (
-              <LabelPicker
-                key={r.root}
-                root={r.root}
-                name={pickers.length > 1 ? r.name : undefined}
-                labels={labelsOf(issueSlots[r.root].list)}
-                selected={issueLabels[r.root] ?? []}
-              />
-            ))}
-            {issueErrors.length > 0 && (
-              <span className="ck-quiet ck-issue-error" title={issueErrors.join('\n')}>
-                issues ✗
-              </span>
-            )}
-          </span>
-        )}
-      </div>
-      {picked && (
-        <div className="ck-issue-bar">
-          <span className="ck-issue-title">
-            #{picked.issue.number} {picked.issue.title}
-          </span>
-          <button onClick={() => openIssue(picked.issue)}>open on GitHub</button>
-          <button className="ck-primary" onClick={() => dispatchIssue(picked.root, picked.issue.number)} title={`mnemo dispatch ${picked.issue.number} in a terminal tab`}>
-            dispatch
-          </button>
-          <button className="ck-close" onClick={() => setPicked(null)} title="Dismiss">
-            ×
-          </button>
+      <div className="ck-body">
+        <div className="ck-inbox" ref={body}>
+          {inbox.needs.length > 0 ? (
+            <div className="ck-needs">{renderRows(inbox.needs)}</div>
+          ) : (
+            !err && <div className="ck-empty">{repos.length === 0 && effective === 'repo' && focused ? `nada pendente em ${focused.name}` : 'nada pendente'}</div>
+          )}
+          {inbox.working.length > 0 && (
+            <div className="ck-section">
+              <button className="ck-fold" aria-expanded={workingOpen} onClick={() => setOpen((o) => ({ ...o, working: !workingOpen }))}>
+                {workingOpen ? '▾' : '▸'} andando: {inbox.working.length}
+              </button>
+              {workingOpen && renderRows(inbox.working)}
+            </div>
+          )}
+          {inbox.done.length > 0 && (
+            <div className="ck-section">
+              <button className="ck-fold" aria-expanded={doneOpen} onClick={() => setOpen((o) => ({ ...o, done: !doneOpen }))}>
+                {doneOpen ? '▾' : '▸'} feito hoje: {inbox.done.length}
+              </button>
+              {doneOpen && renderRows(inbox.done)}
+            </div>
+          )}
         </div>
-      )}
-      <div className="ck-canvas">
-        {repos.length === 0 ? (
-          !err && <div className="ck-empty">{effective === 'repo' ? 'nothing recent in this repo' : 'no live sessions'}</div>
-        ) : (
-          <Graph nodes={graph.nodes} edges={graph.edges} onNodeClick={onClick} onNodeDoubleClick={onDoubleClick} fitKey={`${effective}:${focusedRoot ?? ''}`} />
+        {mapAt && (
+          <div className="ck-map">
+            {mapRepo && mapMission ? (
+              <MissionMap repo={mapRepo} mission={mapMission} onClose={() => setMapAt(null)} />
+            ) : (
+              <div className="ck-empty">
+                this mission has no recent sessions or PRs{' '}
+                <button className="ck-close" onClick={() => setMapAt(null)}>
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
-      <div className="ck-hint">click a child: mission pane · double-click: attach · click a PR: open it · click an issue: dispatch</div>
+      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · r reply · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>
   )
 }

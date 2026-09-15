@@ -4,7 +4,7 @@ import { store as appStore, useApp } from '../layout/app-store'
 import { settingsStore, useSettings } from '../settings/app-store'
 import { allChildren, pruneSnapshot } from './types'
 import { focusedCwd, repoOfCwd, scopeRepos } from './scope'
-import { needsYou } from '../cockpit/needs'
+import { needsYou, pruneGone } from '../cockpit/needs'
 import NeedsList from '../cockpit/NeedsList'
 
 export { openMissionPane } from './rows'
@@ -12,14 +12,15 @@ export { openMissionPane } from './rows'
 const openCockpit = () => appStore.getState().openView('cockpit', {}, 'auto', 'cockpit')
 
 /** What needs you, narrow and always there: blocked children with their reply field, red CI,
- *  contracts ready to land. The whole picture is the cockpit canvas (⌘⇧B). This component
- *  owns the snapshot poll every mission surface reads. */
+ *  PRs ready to merge, contracts ready to land. The cockpit inbox (⌘⇧B) has the same list with
+ *  its actions, who is still working and the mission maps. This component owns the snapshot
+ *  poll every mission surface reads. */
 export default function Sidebar() {
   const open = useMission((s) => s.sidebarOpen)
   const width = useMission((s) => s.sidebarWidth)
   const raw = useMission((s) => s.snapshot)
   const err = useMission((s) => s.lastError)
-  const snap = pruneSnapshot(raw)
+  const snap = pruneGone(pruneSnapshot(raw))
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
   const tabs = useApp((s) => s.tabs)
@@ -73,7 +74,7 @@ export default function Sidebar() {
         <span className="m-scope-hint" title={focused?.root}>
           {scope === 'repo' && effective === 'all' ? 'no repo in focus, showing all' : focused && scope === 'repo' ? focused.name : ''}
         </span>
-        <button className="m-scope-open" onClick={openCockpit} title="Open the cockpit canvas (⌘⇧B)">
+        <button className="m-scope-open" onClick={openCockpit} title="Open the cockpit (⌘⇧B)">
           ⤢
         </button>
       </div>
@@ -87,13 +88,13 @@ export default function Sidebar() {
           {needs.length > 0 && <span className="m-needs-count">{needs.length}</span>}
         </div>
         {needs.length > 0 ? (
-          <NeedsList needs={needs} variant="list" showRepo={effective === 'all'} />
+          <NeedsList needs={needs} showRepo={effective === 'all'} />
         ) : (
           !err && <div className="m-empty">{repos.length === 0 ? (effective === 'repo' && focused ? `nothing recent in ${focused.name}` : 'no live sessions') : 'nothing needs you'}</div>
         )}
         {repos.length > 0 && (
-          <div className="m-live" onClick={openCockpit} title="Open the cockpit canvas (⌘⇧B)">
-            {live} live{effective === 'all' ? ` in ${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}` : ''} · graph ⤢
+          <div className="m-live" onClick={openCockpit} title="Open the cockpit (⌘⇧B)">
+            {live} live{effective === 'all' ? ` in ${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}` : ''} · cockpit ⤢
           </div>
         )}
       </div>

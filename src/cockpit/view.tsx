@@ -7,4 +7,4 @@ registerPaneView('cockpit', Cockpit)
 
 export const openCockpit = () => store.getState().openView('cockpit', {}, 'auto', 'cockpit')
 
-register({ id: 'cockpit.open', title: 'Open cockpit (session graph)', shortcut: '⌘⇧B', run: openCockpit })
+register({ id: 'cockpit.open', title: 'Open cockpit (what needs you)', shortcut: '⌘⇧B', run: openCockpit })

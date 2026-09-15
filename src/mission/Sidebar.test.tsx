@@ -95,3 +95,15 @@ test('the expand button opens the cockpit pane', async () => {
   await act(async () => (host.querySelector('.m-scope-open') as HTMLButtonElement).click())
   expect(Object.values(appStore.getState().panes).some((p) => p.view === 'cockpit')).toBe(true)
 })
+
+test('a PR ready to merge is listed; a finished child whose worktree is gone is not a repo', async () => {
+  const m = snapshot.repos[0].missions[0]
+  const pr = { number: 7, url: 'https://github.com/me/d/pull/7', state: 'OPEN', head: 'feat/round3/cockpit', ci: 'pass' as const }
+  const gone = { root: '/Users/me/github/mnemo-desktop-wt-c-old', name: 'mnemo-desktop-wt-c-old', parents: [], missions: [], children: [{ ...snapshot.repos[1].children[0], id: 'dead0001', live: false, state: 'done', updated_at: new Date().toISOString() }] }
+  serve({ ...snapshot, repos: [{ ...snapshot.repos[0], missions: [{ ...m, pieces: [{ ...m.pieces[0], pr }, m.pieces[1]] }] }, gone] })
+  settingsStore.setState({ sidebarScope: 'all' })
+  await render()
+  expect(needs()).toEqual(['vault', 'cockpit · PR #7'])
+  expect(host.querySelector('.nd-ready .nd-word')?.textContent).toBe('merge')
+  expect(host.querySelector('.m-live')?.textContent).toBe('2 live in 1 repo · cockpit ⤢')
+})
