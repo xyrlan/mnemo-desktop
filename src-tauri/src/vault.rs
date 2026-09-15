@@ -669,7 +669,8 @@ mod tests {
             [("shared", "shared"), ("mnemo-desktop", "repo"), ("bg-T-pytest-of-user-pytest-12-test-lean-child0-lean", "other")]
         );
         let desk = &tree[1];
-        assert_eq!(desk.dir, format!("{FIXTURE}/bots/mnemo-desktop/memory"));
+        // `dir` is forward-slashed; the fixture path carries backslashes on Windows.
+        assert_eq!(desk.dir, format!("{FIXTURE}/bots/mnemo-desktop/memory").replace('\\', "/"));
         let types: Vec<&str> = desk.groups.iter().map(|g| g.page_type.as_str()).collect();
         assert_eq!(types, ["feedback", "project"]);
         assert_eq!(names(&desk.groups[0]), ["no-silent-contract-changes"]);
