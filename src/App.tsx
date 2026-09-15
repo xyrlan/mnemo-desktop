@@ -39,7 +39,18 @@ export default function App() {
             className={`tab${t.id === activeTab ? ' active' : ''}`}
             onMouseDown={() => store.getState().goToTab(i)}
           >
-            {panes[t.focused]?.title || 'shell'}
+            <span className="tab-title">{panes[t.focused]?.title || 'shell'}</span>
+            <button
+              className="tab-close"
+              title="Close tab"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                void store.getState().closeTab(t.id)
+              }}
+            >
+              ×
+            </button>
           </div>
         ))}
         <div className="tab-new" onMouseDown={() => void store.getState().newTab()}>

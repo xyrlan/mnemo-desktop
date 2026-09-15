@@ -8,8 +8,16 @@ function Leaf({ id }: { id: number }) {
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
   const View = paneView(pane?.view ?? 'terminal')
   if (!View) return <div className="pane pane-message">unknown pane view: {pane?.view}</div>
+  const close = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    store.getState().focusPane(id)
+    void store.getState().closePane()
+  }
   return (
     <div className={`pane${focused ? ' focused' : ''}`} data-pane={id} onMouseDown={() => store.getState().focusPane(id)}>
+      <button className="pane-close" title="Close pane (⌘W)" onMouseDown={(e) => e.stopPropagation()} onClick={close}>
+        ×
+      </button>
       <View id={id} props={pane?.props ?? {}} />
     </div>
   )

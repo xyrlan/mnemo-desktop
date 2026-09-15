@@ -158,3 +158,17 @@ test('openView as a tab works on an empty store', () => {
   expect(s.getState().tabs).toHaveLength(1)
   expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
 })
+
+test('closeTab kills every pane of the tab and activates a neighbour', async () => {
+  const pty = fakePty()
+  const s = createStore(pty)
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().newTab()
+  const first = s.getState().tabs[0].id
+  await s.getState().closeTab(first)
+  expect(pty.killed.sort()).toEqual([1, 2])
+  expect(s.getState().tabs).toHaveLength(1)
+  expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
+  expect(s.getState().panes[1]).toBeUndefined()
+})

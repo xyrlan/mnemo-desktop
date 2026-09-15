@@ -41,6 +41,14 @@ body { font-family: var(--font-mono); font-size: var(--font-size); font-variant-
 .tabbar { height: var(--tabbar-h); display: flex; align-items: stretch; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
 .tab { padding: 0 14px; display: flex; align-items: center; color: var(--fg-muted); border-right: 1px solid var(--border); cursor: default; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab.active { color: var(--fg); background: var(--bg); }
+.tab { gap: 8px; }
+.tab-title { overflow: hidden; text-overflow: ellipsis; }
+.tab-close, .pane-close { background: transparent; border: 0; color: var(--fg-muted); font: inherit; font-size: 14px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 3px; }
+.tab-close { opacity: 0; }
+.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+.tab-close:hover, .pane-close:hover { color: var(--fg); background: var(--bg-elev); }
+.pane-close { position: absolute; top: 2px; right: 4px; z-index: 2; opacity: 0; }
+.pane:hover .pane-close { opacity: 1; }
 .tab-new { padding: 0 12px; display: flex; align-items: center; color: var(--fg-muted); cursor: default; }
 .workspace { flex: 1; min-height: 0; position: relative; }
 
