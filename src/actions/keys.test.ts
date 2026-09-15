@@ -12,6 +12,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('3', { metaKey: true }), 'mac')).toBe('tab.go.3')
   expect(actionForKey(ev('{', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.prev')
   expect(actionForKey(ev('k', { metaKey: true }), 'mac')).toBe('palette.open')
+  expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('mission.toggle-sidebar')
   expect(actionForKey(ev('t', { ctrlKey: true }), 'mac')).toBeNull()
   expect(actionForKey(ev('c', { metaKey: true }), 'mac')).toBeNull()
 })

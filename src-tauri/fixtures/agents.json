@@ -1,0 +1,357 @@
+[
+  {
+    "id": "2797ba7b",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-233",
+    "kind": "background",
+    "startedAt": 1789343569435,
+    "sessionId": "2797ba7b-c055-44ca-8b0b-dce764b3f688",
+    "name": "dispatch session access",
+    "state": "done"
+  },
+  {
+    "id": "7a18a654",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-234",
+    "kind": "background",
+    "startedAt": 1789343570847,
+    "sessionId": "7a18a654-ec5a-4e59-8c00-2e2e6df2874c",
+    "name": "backfill docs code mismatch",
+    "state": "stopped"
+  },
+  {
+    "id": "e3dd60e6",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-235",
+    "kind": "background",
+    "startedAt": 1789343572832,
+    "sessionId": "e3dd60e6-e014-4448-9e75-fe8f42f61391",
+    "name": "dispatch claude behavior tests",
+    "state": "done"
+  },
+  {
+    "id": "23b62795",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-236",
+    "kind": "background",
+    "startedAt": 1789343575706,
+    "sessionId": "23b62795-902e-4466-8371-26eff6772f4c",
+    "name": "contract delivery signatures",
+    "state": "stopped"
+  },
+  {
+    "id": "1623322d",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-237",
+    "kind": "background",
+    "startedAt": 1789343577726,
+    "sessionId": "1623322d-8fa5-4a35-a13c-4b047d02c2b3",
+    "name": "mnemo measurement harness",
+    "state": "done"
+  },
+  {
+    "id": "7d07ec04",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-158",
+    "kind": "background",
+    "startedAt": 1789347527114,
+    "sessionId": "7d07ec04-aed0-4e31-8d1a-596405cc85e7",
+    "name": "primacy ranking issue",
+    "state": "done"
+  },
+  {
+    "id": "11b57c7b",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-243",
+    "kind": "background",
+    "startedAt": 1789347528390,
+    "sessionId": "11b57c7b-9ddb-47e0-ba71-fa2a376dca83",
+    "name": "readme dispatch loop alignment",
+    "state": "done"
+  },
+  {
+    "id": "04082ea7",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-244",
+    "kind": "background",
+    "startedAt": 1789347529746,
+    "sessionId": "04082ea7-50dd-421e-9c0e-1191a28a4346",
+    "name": "extraction reference correction rules",
+    "state": "done"
+  },
+  {
+    "id": "6d5f6bc3",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-245",
+    "kind": "background",
+    "startedAt": 1789347531223,
+    "sessionId": "6d5f6bc3-901f-40db-bd5d-9806044dc5a1",
+    "name": "vault multi-user support",
+    "state": "stopped"
+  },
+  {
+    "id": "88426e4f",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-246",
+    "kind": "background",
+    "startedAt": 1789347532679,
+    "sessionId": "88426e4f-6f6c-4c42-becd-cf944ca8f19d",
+    "name": "changelog merge conflicts",
+    "state": "done"
+  },
+  {
+    "id": "934f353f",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-247",
+    "kind": "background",
+    "startedAt": 1789347534106,
+    "sessionId": "934f353f-4d32-49d5-b26d-fa85d489bc76",
+    "name": "dispatch orphan namespace",
+    "state": "stopped"
+  },
+  {
+    "id": "aafd88e7",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-c-format",
+    "kind": "background",
+    "startedAt": 1789348448395,
+    "sessionId": "aafd88e7-b300-45e5-a809-883546385047",
+    "name": "format share-rules piece",
+    "state": "done"
+  },
+  {
+    "id": "67af948c",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-c-publish",
+    "kind": "background",
+    "startedAt": 1789348449858,
+    "sessionId": "67af948c-81ac-4d69-9707-32b82e17eed7",
+    "name": "publish share-rules piece",
+    "state": "done"
+  },
+  {
+    "id": "a1d3ebc8",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-c-import",
+    "kind": "background",
+    "startedAt": 1789348451062,
+    "sessionId": "a1d3ebc8-af54-46c8-a84b-b8fd9d69f049",
+    "name": "import share-rules piece",
+    "state": "done"
+  },
+  {
+    "id": "57b82160",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-255",
+    "kind": "background",
+    "startedAt": 1789348875727,
+    "sessionId": "57b82160-5051-4088-8656-acf84e05d607",
+    "name": "encoding audit src/",
+    "state": "stopped"
+  },
+  {
+    "id": "d4774990",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-248",
+    "kind": "background",
+    "startedAt": 1789352152071,
+    "sessionId": "d4774990-e59f-4ef6-bc7b-28ebadaf3301",
+    "name": "extractor overwrites shared page",
+    "state": "stopped"
+  },
+  {
+    "id": "228f5aaf",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-257",
+    "kind": "background",
+    "startedAt": 1789352153558,
+    "sessionId": "228f5aaf-aa1f-455e-a551-e3e405b2b205",
+    "name": "reclassify verified labels",
+    "state": "stopped"
+  },
+  {
+    "id": "0e8ad5fe",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-176",
+    "kind": "background",
+    "startedAt": 1789354161001,
+    "sessionId": "0e8ad5fe-cf75-4ab6-b2c7-fa97deea86dc",
+    "name": "unblock detector cadence",
+    "state": "done"
+  },
+  {
+    "id": "41227e78",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-268",
+    "kind": "background",
+    "startedAt": 1789382172634,
+    "sessionId": "41227e78-06f5-4e9b-977a-6bd400aca869",
+    "name": "dispatch model selection",
+    "state": "stopped"
+  },
+  {
+    "id": "812d9d86",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-272",
+    "kind": "background",
+    "startedAt": 1789382173831,
+    "sessionId": "812d9d86-e942-42b5-b0e7-455a34a216b6",
+    "name": "ci corrections learning",
+    "state": "done"
+  },
+  {
+    "id": "f1457353",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-273",
+    "kind": "background",
+    "startedAt": 1789382175008,
+    "sessionId": "f1457353-4924-494a-8086-efb2707b5d39",
+    "name": "rule checkable shape",
+    "state": "stopped"
+  },
+  {
+    "id": "a92035ff",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-274",
+    "kind": "background",
+    "startedAt": 1789382176293,
+    "sessionId": "a92035ff-bdfb-4148-b2b7-85dd4b31fb01",
+    "name": "rules citation validation",
+    "state": "stopped"
+  },
+  {
+    "id": "8268eb7b",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-270",
+    "kind": "background",
+    "startedAt": 1789382203820,
+    "sessionId": "8268eb7b-23b4-4016-8974-76bbd060b837",
+    "name": "child profile inheritance",
+    "state": "done"
+  },
+  {
+    "id": "fd7ed8c6",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-191",
+    "kind": "background",
+    "startedAt": 1789384445350,
+    "sessionId": "fd7ed8c6-6838-4d7a-9158-64998fc60432",
+    "name": "permission guard scan",
+    "state": "done"
+  },
+  {
+    "id": "14fa8a4d",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-192",
+    "kind": "background",
+    "startedAt": 1789384446863,
+    "sessionId": "14fa8a4d-a851-42a2-912b-1a35ec87f7c4",
+    "name": "fallback balance detection bug",
+    "state": "done"
+  },
+  {
+    "id": "fc5a1516",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-181",
+    "kind": "background",
+    "startedAt": 1789384448763,
+    "sessionId": "fc5a1516-efca-4546-84dc-d33139f514a6",
+    "name": "recurring payments queue",
+    "state": "done"
+  },
+  {
+    "id": "cbce2e9d",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-190",
+    "kind": "background",
+    "startedAt": 1789384450323,
+    "sessionId": "cbce2e9d-49cd-41d4-8ee0-b9a5c03e10ed",
+    "name": "card exchange permission scope",
+    "state": "blocked"
+  },
+  {
+    "id": "1e5d5558",
+    "cwd": "/Users/xyrlan/github/mnemo",
+    "kind": "background",
+    "startedAt": 1789389817712,
+    "sessionId": "1e5d5558-4a6b-4607-82e5-0022becee158",
+    "name": "changelog cleanup unreleased sections",
+    "state": "done"
+  },
+  {
+    "id": "63d152a5",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-269",
+    "kind": "background",
+    "startedAt": 1789405994143,
+    "sessionId": "63d152a5-052b-4515-9bbf-6b90fba3e94d",
+    "name": "dispatched child metrics tracking",
+    "state": "done"
+  },
+  {
+    "id": "1f87be87",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-271",
+    "kind": "background",
+    "startedAt": 1789405995381,
+    "sessionId": "1f87be87-10c0-4c3f-9e2a-54901eb79198",
+    "name": "memory prompt scope issue",
+    "state": "done"
+  },
+  {
+    "id": "f4f35061",
+    "cwd": "/Users/xyrlan/github/mnemo-wt-280",
+    "kind": "background",
+    "startedAt": 1789405996719,
+    "sessionId": "f4f35061-c139-4cc2-9574-f13a62603e57",
+    "name": "bg-spare pool orphans",
+    "state": "blocked"
+  },
+  {
+    "id": "4f941f9d",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-212",
+    "kind": "background",
+    "startedAt": 1789409417256,
+    "sessionId": "4f941f9d-2ffa-4c4c-95ce-f3eee8204270",
+    "name": "cron timezone declaration",
+    "state": "done"
+  },
+  {
+    "id": "5bb5535b",
+    "cwd": "/Users/xyrlan/github/clubinho-wt-213",
+    "kind": "background",
+    "startedAt": 1789409418797,
+    "sessionId": "5bb5535b-3e20-4ade-8b32-b35d6bf10bac",
+    "name": "generate-renew-link permission scope",
+    "state": "blocked"
+  },
+  {
+    "id": "e99f7c60",
+    "cwd": "/private/tmp/lean-probe",
+    "kind": "background",
+    "startedAt": 1789413393556,
+    "sessionId": "e99f7c60-ce0b-4335-8004-28696033b5a9",
+    "name": "hi",
+    "state": "stopped"
+  },
+  {
+    "id": "095ef1c4",
+    "cwd": "/private/tmp/lean-probe",
+    "kind": "background",
+    "startedAt": 1789413397730,
+    "sessionId": "095ef1c4-7bf9-4107-8330-de99039f1865",
+    "name": "hi",
+    "state": "stopped"
+  },
+  {
+    "pid": 11201,
+    "cwd": "/Users/xyrlan/github/mnemo",
+    "kind": "interactive",
+    "startedAt": 1789430044143,
+    "sessionId": "0ff9d810-e54d-41f3-a045-b0ccff6c5186",
+    "name": "mnemo-7d",
+    "status": "busy"
+  },
+  {
+    "pid": 17759,
+    "cwd": "/Users/xyrlan/github/saints-network",
+    "kind": "interactive",
+    "startedAt": 1789431643733,
+    "sessionId": "89de6d87-3494-4bb0-9daf-127e9a1299b0",
+    "name": "saints-network-10",
+    "status": "idle"
+  },
+  {
+    "pid": 20147,
+    "id": "a43d3832",
+    "cwd": "/Users/xyrlan/github/mnemo-desktop-wt-c-editor",
+    "kind": "background",
+    "startedAt": 1789432431984,
+    "sessionId": "a43d3832-e7a9-49b7-9496-2d86aeac8aad",
+    "name": "panes editor decomposition",
+    "status": "busy",
+    "state": "working"
+  },
+  {
+    "pid": 20138,
+    "id": "094c6a03",
+    "cwd": "/Users/xyrlan/github/mnemo-desktop-wt-c-browser",
+    "kind": "background",
+    "startedAt": 1789432432519,
+    "sessionId": "094c6a03-f435-4915-8883-9f0ba82da7ff",
+    "name": "panes browser implementation",
+    "status": "busy",
+    "state": "working"
+  }
+]

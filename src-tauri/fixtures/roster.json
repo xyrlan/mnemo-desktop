@@ -1,0 +1,55 @@
+{
+ "proto": 1,
+ "supervisorPid": 20106,
+ "updatedAt": 1789432432437,
+ "workers": {
+  "a43d3832": {
+   "pid": 20126,
+   "procStart": "Tue Sep 15 00:33:51 2026",
+   "sessionId": "a43d3832-e7a9-49b7-9496-2d86aeac8aad",
+   "rendezvousSock": "/tmp/cc-daemon-501/3c0b3d77/rv/a43d3832.sock",
+   "ptySock": "/tmp/cc-daemon-501/3c0b3d77/pty/a43d3832.sock",
+   "cliVersion": "2.1.271",
+   "startedAt": 1789432431464,
+   "attempt": 1,
+   "cwd": "/Users/xyrlan/github/mnemo-desktop-wt-c-editor",
+   "decModes": [
+    1000,
+    1002,
+    1003,
+    1006,
+    2004,
+    2031,
+    1004
+   ],
+   "rvAuth": "8b9d03e8bac002f521094fbaf3b05900",
+   "ptyAuth": "b89e1141cd68fc72fb5b04ae888c2cdb",
+   "replPid": 20147,
+   "replProcStart": "Tue Sep 15 00:33:51 2026"
+  },
+  "094c6a03": {
+   "pid": 20125,
+   "procStart": "Tue Sep 15 00:33:51 2026",
+   "sessionId": "094c6a03-f435-4915-8883-9f0ba82da7ff",
+   "rendezvousSock": "/tmp/cc-daemon-501/3c0b3d77/rv/094c6a03.sock",
+   "ptySock": "/tmp/cc-daemon-501/3c0b3d77/spare/df14d597.pty.sock",
+   "cliVersion": "2.1.271",
+   "startedAt": 1789432432262,
+   "attempt": 1,
+   "cwd": "/Users/xyrlan/github/mnemo-desktop-wt-c-browser",
+   "decModes": [
+    1000,
+    1002,
+    1003,
+    1006,
+    2004,
+    2031,
+    1004
+   ],
+   "rvAuth": "213a673214130ccf7f2495de7e62320b",
+   "ptyAuth": "f3bac8985b59b26f9c19aef0d3fd4333",
+   "replPid": 20138,
+   "replProcStart": "Tue Sep 15 00:33:51 2026"
+  }
+ }
+}

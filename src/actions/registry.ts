@@ -4,14 +4,19 @@ import { neighbour, type Rect, type Side } from '../layout/tree'
 export type Action = { id: string; title: string; shortcut?: string; run: () => void | Promise<void> }
 
 const actions: Action[] = []
+/** Providers contribute actions computed at palette-open time (one per live child, say). */
+const providers: (() => Action[])[] = []
 export function register(a: Action) {
   actions.push(a)
 }
+export function registerProvider(p: () => Action[]) {
+  providers.push(p)
+}
 export function all(): Action[] {
-  return actions
+  return [...actions, ...providers.flatMap((p) => p())]
 }
 export function run(id: string) {
-  const a = actions.find((x) => x.id === id)
+  const a = all().find((x) => x.id === id)
   if (a) void a.run()
 }
 

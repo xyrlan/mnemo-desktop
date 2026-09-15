@@ -10,6 +10,8 @@ pub mod fs;
 // -- browser (src/browser.rs) --
 
 // -- mission (src/mission.rs) --
+pub mod mission;
+pub mod mission_commands;
 
 use commands::PtyState;
 use tauri::Manager;
@@ -62,6 +64,11 @@ pub fn run() {
             // -- browser commands --
 
             // -- mission commands --
+            mission_commands::mission_snapshot,
+            mission_commands::mission_timeline,
+            mission_commands::mission_reply,
+            mission_commands::mission_mark_looked,
+            mission_commands::mission_looked,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {

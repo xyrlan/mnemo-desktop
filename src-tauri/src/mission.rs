@@ -1,0 +1,833 @@
+//! Mission cockpit data: sessions, repos, contracts and PRs joined into one snapshot.
+//!
+//! Pure parsing and joining live in functions that take strings, so `cargo test`
+//! covers them on fixtures captured from real files. Process spawning is confined
+//! to `collect_snapshot` and the small helpers under `// -- io --`.
+
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+// ---------------------------------------------------------------- model --
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParentSession {
+    pub session_id: String,
+    pub pid: Option<u64>,
+    pub name: Option<String>,
+    pub status: String,
+    pub cwd: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChildSession {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub name: Option<String>,
+    pub state: String,
+    pub tempo: String,
+    pub needs: Option<String>,
+    pub detail: String,
+    pub suggested_reply: Option<String>,
+    pub cwd: String,
+    pub tokens: u64,
+    pub live: bool,
+    pub updated_at: Option<String>,
+    /// First line of the dispatch prompt, for rows that have no `name`.
+    pub intent: Option<String>,
+    /// `feat/<feature>/<piece>` when the child's worktree is on a contract branch.
+    pub branch: Option<String>,
+    /// Timeline lines the child has now; the front-end diffs against its looked marker.
+    pub timeline_len: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Pr {
+    pub number: u64,
+    pub url: String,
+    pub state: String,
+    pub head: String,
+    /// pass | fail | pending | none
+    pub ci: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Piece {
+    pub name: String,
+    pub branch: String,
+    pub child: Option<ChildSession>,
+    pub pr: Option<Pr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Mission {
+    pub feature: String,
+    pub contract_path: String,
+    pub pieces: Vec<Piece>,
+    pub landable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepoGroup {
+    pub root: String,
+    pub name: String,
+    pub parents: Vec<ParentSession>,
+    pub missions: Vec<Mission>,
+    /// Children of this repo that belong to no contract (issue dispatches).
+    pub children: Vec<ChildSession>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Snapshot {
+    pub repos: Vec<RepoGroup>,
+    pub errors: Vec<String>,
+    pub at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimelineLine {
+    pub at: String,
+    pub state: String,
+    pub detail: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Timeline {
+    pub lines: Vec<TimelineLine>,
+    pub total: usize,
+}
+
+// ------------------------------------------------------------- parsers --
+
+/// `claude agents --json --all`: keep interactive rows only; background rows are
+/// better described by `mnemo sessions`.
+pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| format!("agents json: {e}"))?;
+    Ok(rows
+        .iter()
+        .filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("interactive"))
+        .filter_map(|r| {
+            Some(ParentSession {
+                session_id: r.get("sessionId")?.as_str()?.to_string(),
+                pid: r.get("pid").and_then(|p| p.as_u64()),
+                name: r.get("name").and_then(|n| n.as_str()).map(str::to_string),
+                status: r.get("status").and_then(|s| s.as_str()).unwrap_or("unknown").to_string(),
+                cwd: r.get("cwd")?.as_str()?.to_string(),
+            })
+        })
+        .collect())
+}
+
+/// `mnemo sessions --json --all`.
+pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| format!("sessions json: {e}"))?;
+    let s = |v: Option<&serde_json::Value>| v.and_then(|x| x.as_str()).map(str::to_string);
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(ChildSession {
+                id: r.get("short_id")?.as_str()?.to_string(),
+                session_id: s(r.get("session_id")),
+                name: s(r.get("name")),
+                state: s(r.get("state")).unwrap_or_default(),
+                tempo: s(r.get("tempo")).unwrap_or_default(),
+                needs: s(r.get("needs")),
+                detail: s(r.get("detail")).unwrap_or_default(),
+                suggested_reply: s(r.get("suggested_reply")),
+                cwd: s(r.get("cwd")).unwrap_or_default(),
+                tokens: r.get("tokens").and_then(|t| t.as_u64()).unwrap_or(0),
+                live: r.get("live").and_then(|l| l.as_bool()).unwrap_or(false),
+                updated_at: s(r.get("updated_at")),
+                intent: s(r.get("intent")).map(|i| i.lines().next().unwrap_or("").to_string()),
+                branch: None,
+                timeline_len: 0,
+            })
+        })
+        .collect())
+}
+
+/// A contract file: `feature:` from the frontmatter and one `## <slug>` per piece.
+pub fn parse_contract(md: &str) -> Option<(String, Vec<String>)> {
+    let mut feature = None;
+    let mut pieces = Vec::new();
+    let mut in_front = false;
+    for (i, line) in md.lines().enumerate() {
+        let t = line.trim();
+        if i == 0 && t == "---" {
+            in_front = true;
+            continue;
+        }
+        if in_front {
+            if t == "---" {
+                in_front = false;
+            } else if let Some(v) = t.strip_prefix("feature:") {
+                feature = Some(v.trim().to_string());
+            }
+            continue;
+        }
+        if let Some(h) = t.strip_prefix("## ") {
+            pieces.push(h.trim().to_string());
+        }
+    }
+    feature.map(|f| (f, pieces))
+}
+
+/// `gh pr list --json headRefName,number,url,statusCheckRollup,state`.
+pub fn parse_prs(json: &str) -> Result<Vec<Pr>, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| format!("prs json: {e}"))?;
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(Pr {
+                number: r.get("number")?.as_u64()?,
+                url: r.get("url")?.as_str()?.to_string(),
+                state: r.get("state")?.as_str()?.to_string(),
+                head: r.get("headRefName")?.as_str()?.to_string(),
+                ci: ci_state(r.get("statusCheckRollup")),
+            })
+        })
+        .collect())
+}
+
+pub fn ci_state(rollup: Option<&serde_json::Value>) -> String {
+    let Some(checks) = rollup.and_then(|r| r.as_array()) else { return "none".into() };
+    if checks.is_empty() {
+        return "none".into();
+    }
+    let mut pending = false;
+    for c in checks {
+        let conclusion = c.get("conclusion").and_then(|x| x.as_str()).unwrap_or("");
+        let status = c.get("status").and_then(|x| x.as_str()).unwrap_or("");
+        let state = c.get("state").and_then(|x| x.as_str()).unwrap_or("");
+        match (conclusion, status, state) {
+            ("FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED", _, _) | (_, _, "FAILURE" | "ERROR") => {
+                return "fail".into()
+            }
+            ("SUCCESS" | "NEUTRAL" | "SKIPPED", _, _) | (_, _, "SUCCESS") => {}
+            _ => pending = true,
+        }
+    }
+    if pending { "pending".into() } else { "pass".into() }
+}
+
+pub fn parse_timeline(text: &str, from_line: usize) -> Timeline {
+    let all: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let total = all.len();
+    let lines = all
+        .iter()
+        .skip(from_line)
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .map(|v| {
+            let g = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            TimelineLine { at: g("at"), state: g("state"), detail: g("detail"), text: g("text") }
+        })
+        .collect();
+    Timeline { lines, total }
+}
+
+// ---------------------------------------------------------------- join --
+
+pub struct JoinInput<'a> {
+    pub parents: Vec<ParentSession>,
+    pub children: Vec<ChildSession>,
+    /// cwd (session or worktree) → main checkout root. Missing entries are dropped
+    /// into a repo named after the cwd itself.
+    pub roots: &'a HashMap<String, String>,
+    /// worktree path → branch, from `git worktree list --porcelain` of each root.
+    pub branches: &'a HashMap<String, String>,
+    /// root → contracts found there: (path, feature, pieces).
+    pub contracts: &'a HashMap<String, Vec<(String, String, Vec<String>)>>,
+    /// root → PRs.
+    pub prs: &'a HashMap<String, Vec<Pr>>,
+    pub focused_root: Option<&'a str>,
+}
+
+fn root_of(cwd: &str, roots: &HashMap<String, String>) -> String {
+    roots.get(cwd).cloned().unwrap_or_else(|| cwd.to_string())
+}
+
+pub fn join(input: JoinInput) -> Vec<RepoGroup> {
+    let mut groups: BTreeMap<String, RepoGroup> = BTreeMap::new();
+    let ensure = |groups: &mut BTreeMap<String, RepoGroup>, root: &str| {
+        groups.entry(root.to_string()).or_insert_with(|| RepoGroup {
+            root: root.to_string(),
+            name: Path::new(root).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| root.to_string()),
+            parents: vec![],
+            missions: vec![],
+            children: vec![],
+        });
+    };
+
+    for p in input.parents {
+        let root = root_of(&p.cwd, input.roots);
+        ensure(&mut groups, &root);
+        groups.get_mut(&root).unwrap().parents.push(p);
+    }
+
+    // Children get their branch from the worktree map, then are claimed by a
+    // contract piece when the branch is `feat/<feature>/<piece>`.
+    let mut unclaimed: BTreeMap<String, Vec<ChildSession>> = BTreeMap::new();
+    let mut by_branch: HashMap<(String, String), ChildSession> = HashMap::new();
+    for mut c in input.children {
+        let root = root_of(&c.cwd, input.roots);
+        c.branch = input
+            .branches
+            .get(&c.cwd)
+            .cloned()
+            .or_else(|| Path::new(&c.cwd).canonicalize().ok().and_then(|p| input.branches.get(&p.to_string_lossy().to_string()).cloned()));
+        match &c.branch {
+            Some(b) => {
+                by_branch.insert((root.clone(), b.clone()), c);
+            }
+            None => unclaimed.entry(root).or_default().push(c),
+        }
+    }
+
+    let mut all_roots: Vec<String> = groups.keys().cloned().collect();
+    all_roots.extend(by_branch.keys().map(|(r, _)| r.clone()));
+    all_roots.extend(unclaimed.keys().cloned());
+    all_roots.sort();
+    all_roots.dedup();
+
+    for root in all_roots {
+        ensure(&mut groups, &root);
+        let g = groups.get_mut(&root).unwrap();
+        let prs = input.prs.get(&root).cloned().unwrap_or_default();
+        for (path, feature, pieces) in input.contracts.get(&root).cloned().unwrap_or_default() {
+            let mut ps = Vec::new();
+            for piece in pieces {
+                let branch = format!("feat/{feature}/{piece}");
+                let child = by_branch.remove(&(root.clone(), branch.clone()));
+                let pr = prs.iter().find(|p| p.head == branch).cloned();
+                ps.push(Piece { name: piece, branch, child, pr });
+            }
+            // A contract nobody is working on and nobody delivered is noise.
+            if ps.iter().all(|p| p.child.is_none() && p.pr.is_none()) {
+                continue;
+            }
+            let landable = !ps.is_empty()
+                && ps.iter().all(|p| p.pr.as_ref().map(|pr| pr.state == "OPEN" && pr.ci == "pass").unwrap_or(false));
+            g.missions.push(Mission { feature, contract_path: path, pieces: ps, landable });
+        }
+        let mut leftover: Vec<ChildSession> = by_branch
+            .iter()
+            .filter(|((r, _), _)| *r == root)
+            .map(|(_, c)| c.clone())
+            .collect();
+        for k in leftover.iter().filter_map(|c| c.branch.clone()).map(|b| (root.clone(), b)).collect::<Vec<_>>() {
+            by_branch.remove(&k);
+        }
+        leftover.extend(unclaimed.remove(&root).unwrap_or_default());
+        leftover.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        g.children = leftover;
+    }
+
+    let mut out: Vec<RepoGroup> = groups.into_values().collect();
+    // Focused repo first, then repos with live children, then the rest by name.
+    let live = |g: &RepoGroup| {
+        g.children.iter().any(|c| c.live)
+            || g.missions.iter().flat_map(|m| &m.pieces).any(|p| p.child.as_ref().map(|c| c.live).unwrap_or(false))
+    };
+    out.sort_by(|a, b| {
+        let fa = Some(a.root.as_str()) == input.focused_root;
+        let fb = Some(b.root.as_str()) == input.focused_root;
+        fb.cmp(&fa).then(live(b).cmp(&live(a))).then(a.name.cmp(&b.name))
+    });
+    out
+}
+
+// ------------------------------------------------------------------ io --
+
+fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    cmd.stdin(std::process::Stdio::null());
+    let out = cmd.output().map_err(|e| format!("{program}: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("{program} {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Main checkout root for a cwd, following worktrees back to their common dir.
+pub fn repo_root(cwd: &str) -> Option<String> {
+    let common = run("git", &["rev-parse", "--path-format=absolute", "--git-common-dir"], Some(Path::new(cwd))).ok()?;
+    let common = PathBuf::from(common.trim());
+    common.parent().map(|p| p.to_string_lossy().to_string())
+}
+
+/// worktree path → branch name, from `git worktree list --porcelain`.
+pub fn worktree_branches(root: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Ok(text) = run("git", &["worktree", "list", "--porcelain"], Some(Path::new(root))) else { return map };
+    let mut cur: Option<String> = None;
+    for line in text.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            cur = Some(p.to_string());
+        } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
+            if let Some(p) = &cur {
+                // Key by both the printed path and its canonical form: git prints
+                // forward slashes on Windows while callers pass native paths.
+                map.insert(p.clone(), b.to_string());
+                if let Ok(c) = Path::new(p).canonicalize() {
+                    map.insert(c.to_string_lossy().to_string(), b.to_string());
+                }
+            }
+        }
+    }
+    map
+}
+
+pub fn contracts_in(root: &str) -> Vec<(String, String, Vec<String>)> {
+    let dir = Path::new(root).join("docs").join("contracts");
+    let Ok(rd) = std::fs::read_dir(&dir) else { return vec![] };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().map(|x| x == "md").unwrap_or(false) {
+            if let Ok(md) = std::fs::read_to_string(&p) {
+                if let Some((f, pieces)) = parse_contract(&md) {
+                    out.push((p.to_string_lossy().to_string(), f, pieces));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn jobs_dir() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("jobs")
+}
+
+pub fn timeline_len(id: &str) -> usize {
+    std::fs::read_to_string(jobs_dir().join(id).join("timeline.jsonl"))
+        .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
+pub fn read_timeline(id: &str, from_line: usize) -> Timeline {
+    std::fs::read_to_string(jobs_dir().join(id).join("timeline.jsonl"))
+        .map(|t| parse_timeline(&t, from_line))
+        .unwrap_or_default()
+}
+
+/// One poll. Every failure is recorded in `errors` and never aborts the snapshot.
+pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
+    let mut errors = Vec::new();
+    let parents = match run("claude", &["agents", "--json", "--all"], None).and_then(|j| parse_agents(&j)) {
+        Ok(p) => p,
+        Err(e) => {
+            errors.push(e);
+            vec![]
+        }
+    };
+    let mut children = match run("mnemo", &["sessions", "--json", "--all"], None).and_then(|j| parse_sessions(&j)) {
+        Ok(c) => c,
+        Err(e) => {
+            errors.push(e);
+            vec![]
+        }
+    };
+    for c in &mut children {
+        c.timeline_len = timeline_len(&c.id);
+    }
+
+    let mut roots: HashMap<String, String> = HashMap::new();
+    let cwds: Vec<String> = parents
+        .iter()
+        .map(|p| p.cwd.clone())
+        .chain(children.iter().map(|c| c.cwd.clone()))
+        .chain(focused_cwd.map(str::to_string))
+        .collect();
+    for cwd in cwds {
+        if roots.contains_key(&cwd) {
+            continue;
+        }
+        if let Some(r) = repo_root(&cwd) {
+            roots.insert(cwd, r);
+        }
+    }
+    let focused_root = focused_cwd.and_then(|c| roots.get(c).cloned());
+
+    let mut branches: HashMap<String, String> = HashMap::new();
+    let mut contracts = HashMap::new();
+    let mut prs = HashMap::new();
+    let mut seen = std::collections::HashSet::new();
+    for r in roots.values() {
+        if !seen.insert(r.clone()) {
+            continue;
+        }
+        branches.extend(worktree_branches(r));
+        let cs = contracts_in(r);
+        if with_prs && !cs.is_empty() {
+            match run(
+                "gh",
+                &["pr", "list", "--json", "headRefName,number,url,statusCheckRollup,state", "--state", "all", "--limit", "100"],
+                Some(Path::new(r)),
+            )
+            .and_then(|j| parse_prs(&j))
+            {
+                Ok(p) => {
+                    prs.insert(r.clone(), p);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+        contracts.insert(r.clone(), cs);
+    }
+
+    let repos = join(JoinInput {
+        parents,
+        children,
+        roots: &roots,
+        branches: &branches,
+        contracts: &contracts,
+        prs: &prs,
+        focused_root: focused_root.as_deref(),
+    });
+    Snapshot { repos, errors, at: chrono_now() }
+}
+
+fn chrono_now() -> String {
+    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    format!("{}", d.as_secs())
+}
+
+// ------------------------------------------------------------- looked --
+
+fn looked_path() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("looked.json")
+}
+
+pub fn read_looked() -> HashMap<String, usize> {
+    std::fs::read_to_string(looked_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+pub fn mark_looked(id: &str, timeline_len: usize) -> Result<(), String> {
+    let mut m = read_looked();
+    m.insert(id.to_string(), timeline_len);
+    let p = looked_path();
+    if let Some(d) = p.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&m).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+}
+
+// --------------------------------------------------------------- tests --
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AGENTS: &str = include_str!("../fixtures/agents.json");
+    const SESSIONS: &str = include_str!("../fixtures/sessions.json");
+    const PRS: &str = include_str!("../fixtures/prs.json");
+    const CONTRACT: &str = include_str!("../fixtures/contract.md");
+    const TIMELINE: &str = include_str!("../fixtures/timeline.jsonl");
+
+    #[test]
+    fn agents_keeps_interactive_rows_with_pid_and_status() {
+        let p = parse_agents(AGENTS).unwrap();
+        assert!(!p.is_empty());
+        assert!(p.iter().all(|x| x.pid.is_some()));
+        assert!(p.iter().any(|x| x.cwd == "/Users/xyrlan/github/mnemo" && x.status == "busy"));
+    }
+
+    #[test]
+    fn sessions_parse_children_with_tempo_and_first_intent_line() {
+        let c = parse_sessions(SESSIONS).unwrap();
+        let e = c.iter().find(|x| x.id == "a43d3832").unwrap();
+        assert_eq!(e.tempo, "active");
+        assert_eq!(e.cwd, "/Users/xyrlan/github/mnemo-desktop-wt-c-editor");
+        assert!(e.tokens > 0);
+        assert!(e.live);
+        assert_eq!(e.intent.as_deref(), Some("You are building one piece of the feature \"panes\": editor"));
+    }
+
+    #[test]
+    fn contract_yields_feature_and_pieces() {
+        let (f, p) = parse_contract(CONTRACT).unwrap();
+        assert_eq!(f, "panes");
+        assert_eq!(p, vec!["editor", "browser"]);
+        assert!(parse_contract("# not a contract\n## x").is_none());
+    }
+
+    #[test]
+    fn prs_parse_with_ci_state() {
+        let p = parse_prs(PRS).unwrap();
+        let two = p.iter().find(|x| x.number == 2).unwrap();
+        assert_eq!(two.head, "feat/pane-kinds");
+        assert_eq!(two.state, "MERGED");
+        assert_eq!(two.ci, "pass");
+    }
+
+    #[test]
+    fn ci_state_rules() {
+        let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert_eq!(ci_state(None), "none");
+        assert_eq!(ci_state(Some(&j("[]"))), "none");
+        assert_eq!(ci_state(Some(&j(r#"[{"conclusion":"SUCCESS"},{"conclusion":"","status":"IN_PROGRESS"}]"#))), "pending");
+        assert_eq!(ci_state(Some(&j(r#"[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]"#))), "fail");
+        assert_eq!(ci_state(Some(&j(r#"[{"state":"SUCCESS"}]"#))), "pass");
+    }
+
+    #[test]
+    fn timeline_tail_from_offset() {
+        let all = parse_timeline(TIMELINE, 0);
+        assert!(all.total >= 4);
+        assert_eq!(all.lines.len(), all.total);
+        assert_eq!(all.lines[0].state, "working");
+        let tail = parse_timeline(TIMELINE, all.total - 1);
+        assert_eq!(tail.lines.len(), 1);
+        assert_eq!(tail.total, all.total);
+    }
+
+    fn fixture_join(focused: Option<&str>) -> Vec<RepoGroup> {
+        let parents = parse_agents(AGENTS).unwrap();
+        let children = parse_sessions(SESSIONS).unwrap();
+        let mut roots = HashMap::new();
+        roots.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-editor".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
+        roots.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-browser".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
+        roots.insert("/Users/xyrlan/github/mnemo".to_string(), "/Users/xyrlan/github/mnemo".to_string());
+        let mut branches = HashMap::new();
+        branches.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-editor".to_string(), "feat/panes/editor".to_string());
+        branches.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-browser".to_string(), "feat/panes/browser".to_string());
+        let mut contracts = HashMap::new();
+        let (f, p) = parse_contract(CONTRACT).unwrap();
+        contracts.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), vec![("docs/contracts/panes.md".to_string(), f, p)]);
+        let mut prs = HashMap::new();
+        let mut list = parse_prs(PRS).unwrap();
+        list.push(Pr { number: 9, url: "u".into(), state: "OPEN".into(), head: "feat/panes/editor".into(), ci: "pass".into() });
+        prs.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), list);
+        join(JoinInput { parents, children, roots: &roots, branches: &branches, contracts: &contracts, prs: &prs, focused_root: focused })
+    }
+
+    #[test]
+    fn join_claims_children_into_contract_pieces_and_attaches_prs() {
+        let groups = fixture_join(None);
+        let g = groups.iter().find(|g| g.name == "mnemo-desktop").unwrap();
+        assert_eq!(g.missions.len(), 1);
+        let m = &g.missions[0];
+        assert_eq!(m.feature, "panes");
+        let editor = m.pieces.iter().find(|p| p.name == "editor").unwrap();
+        assert_eq!(editor.child.as_ref().unwrap().id, "a43d3832");
+        assert_eq!(editor.child.as_ref().unwrap().branch.as_deref(), Some("feat/panes/editor"));
+        assert_eq!(editor.pr.as_ref().unwrap().number, 9);
+        let browser = m.pieces.iter().find(|p| p.name == "browser").unwrap();
+        assert_eq!(browser.child.as_ref().unwrap().id, "094c6a03");
+        assert!(browser.pr.is_none());
+        assert!(!m.landable, "one piece has no PR yet");
+        // Claimed children do not also appear as loose children.
+        assert!(g.children.iter().all(|c| c.id != "a43d3832" && c.id != "094c6a03"));
+    }
+
+    #[test]
+    fn join_groups_parents_by_repo_and_orders_focused_first() {
+        let groups = fixture_join(Some("/Users/xyrlan/github/mnemo"));
+        assert_eq!(groups[0].name, "mnemo");
+        assert!(groups[0].parents.iter().any(|p| p.status == "busy"));
+        let groups = fixture_join(Some("/Users/xyrlan/github/mnemo-desktop"));
+        assert_eq!(groups[0].name, "mnemo-desktop");
+    }
+
+    #[test]
+    fn join_leaves_unknown_cwds_as_their_own_repo() {
+        let children = vec![ChildSession {
+            id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
+            detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
+            updated_at: None, intent: None, branch: None, timeline_len: 0,
+        }];
+        let empty = HashMap::new();
+        let groups = join(JoinInput { parents: vec![], children, roots: &empty, branches: &empty, contracts: &HashMap::new(), prs: &HashMap::new(), focused_root: None });
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "elsewhere");
+        assert_eq!(groups[0].children.len(), 1);
+    }
+
+    #[test]
+    fn worktree_root_resolves_to_main_checkout() {
+        let tmp = std::env::temp_dir().join(format!("mnemo-desktop-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let main = tmp.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |args: &[&str], cwd: &Path| {
+            let ok = Command::new("git").args(args).current_dir(cwd).output().unwrap().status.success();
+            assert!(ok, "git {:?}", args);
+        };
+        git(&["init", "-q", "-b", "main"], &main);
+        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], &main);
+        let wt = tmp.join("wt");
+        git(&["worktree", "add", "-q", "-b", "feat/x/y", wt.to_str().unwrap()], &main);
+        let canon = |p: &Path| p.canonicalize().unwrap().to_string_lossy().to_string();
+        assert_eq!(repo_root(wt.to_str().unwrap()).map(|r| canon(Path::new(&r))), Some(canon(&main)));
+        assert_eq!(repo_root(main.to_str().unwrap()).map(|r| canon(Path::new(&r))), Some(canon(&main)));
+        let b = worktree_branches(main.to_str().unwrap());
+        assert_eq!(b.get(&canon(&wt)).map(String::as_str), Some("feat/x/y"), "keys: {:?}", b.keys().collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn looked_marker_round_trips() {
+        let home = std::env::temp_dir().join(format!("mnemo-desktop-home-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        mark_looked("abc", 7).unwrap();
+        assert_eq!(read_looked().get("abc"), Some(&7));
+        match prev { Some(p) => std::env::set_var("HOME", p), None => std::env::remove_var("HOME") }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+// -------------------------------------------------------------- reply --
+
+/// Where a `--bg` child's inbox socket lives. The daemon's roster maps a short id
+/// to its pty-host pid; the Claude session is that process's child, and the
+/// session's inbox is `/tmp/cc-socks/<session pid>.sock` (or `cc-socks-<n>`).
+#[derive(Debug, Deserialize)]
+struct Roster {
+    workers: HashMap<String, RosterWorker>,
+}
+#[derive(Debug, Deserialize)]
+struct RosterWorker {
+    pid: u32,
+}
+
+pub fn roster_pid(roster_json: &str, id: &str) -> Option<u32> {
+    serde_json::from_str::<Roster>(roster_json).ok()?.workers.get(id).map(|w| w.pid)
+}
+
+fn child_pids(pid: u32) -> Vec<u32> {
+    run("pgrep", &["-P", &pid.to_string()], None)
+        .map(|s| s.lines().filter_map(|l| l.trim().parse().ok()).collect())
+        .unwrap_or_default()
+}
+
+pub fn socket_dirs() -> Vec<PathBuf> {
+    let mut out = vec![PathBuf::from("/tmp/cc-socks")];
+    if let Ok(rd) = std::fs::read_dir("/tmp") {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.starts_with("cc-socks-") {
+                out.push(e.path());
+            }
+        }
+    }
+    out
+}
+
+fn socket_for_pid(pid: u32) -> Option<PathBuf> {
+    socket_dirs().into_iter().map(|d| d.join(format!("{pid}.sock"))).find(|p| p.exists())
+}
+
+/// Resolve a child's inbox socket: roster pid → its children → the one with a socket.
+pub fn inbox_socket(id: &str) -> Result<PathBuf, String> {
+    let roster_path = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("daemon").join("roster.json");
+    let roster = std::fs::read_to_string(&roster_path).map_err(|e| format!("roster.json: {e}"))?;
+    let host = roster_pid(&roster, id).ok_or_else(|| format!("{id} is not in the daemon roster"))?;
+    let mut candidates = child_pids(host);
+    candidates.push(host);
+    for pid in candidates {
+        if let Some(p) = socket_for_pid(pid) {
+            return Ok(p);
+        }
+    }
+    Err(format!("no inbox socket found for {id} (pty host pid {host})"))
+}
+
+/// Post one user message into a session's inbox. Format taken from Claude Code's
+/// own help text: an optional auth line, then a `stream-json` user turn.
+#[cfg(unix)]
+pub fn post_message(sock: &Path, token: Option<&str>, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    let mut s = UnixStream::connect(sock).map_err(|e| format!("connect {}: {e}", sock.display()))?;
+    s.set_write_timeout(Some(std::time::Duration::from_secs(5))).ok();
+    if let Some(t) = token {
+        let auth = serde_json::json!({ "type": "auth", "token": t });
+        writeln!(s, "{auth}").map_err(|e| format!("auth: {e}"))?;
+    }
+    let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
+    writeln!(s, "{msg}").map_err(|e| format!("write: {e}"))?;
+    s.flush().map_err(|e| format!("flush: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn post_message(_sock: &Path, _token: Option<&str>, _text: &str) -> Result<(), String> {
+    Err("replying through the inbox socket is not supported on this platform yet".into())
+}
+
+pub fn reply(id: &str, text: &str) -> Result<(), String> {
+    let sock = inbox_socket(id)?;
+    post_message(&sock, None, text)
+}
+
+#[cfg(all(test, unix))]
+mod reply_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixListener;
+
+    const ROSTER: &str = include_str!("../fixtures/roster.json");
+
+    #[test]
+    fn roster_maps_short_id_to_pty_host_pid() {
+        assert_eq!(roster_pid(ROSTER, "a43d3832"), Some(20126));
+        assert_eq!(roster_pid(ROSTER, "nope"), None);
+        assert_eq!(roster_pid("{}", "a43d3832"), None);
+    }
+
+    #[test]
+    fn post_message_writes_auth_then_user_turn_as_json_lines() {
+        let dir = std::env::temp_dir().join(format!("mnemo-desktop-sock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            BufReader::new(conn).lines().map(|l| l.unwrap()).collect::<Vec<_>>()
+        });
+        post_message(&path, Some("tok"), "yes, go ahead").unwrap();
+        let lines = server.join().unwrap();
+        assert_eq!(lines.len(), 2);
+        let auth: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(auth["type"], "auth");
+        assert_eq!(auth["token"], "tok");
+        let msg: serde_json::Value = serde_json::from_str(&lines[1]).unwrap();
+        assert_eq!(msg["type"], "user");
+        assert_eq!(msg["message"]["role"], "user");
+        assert_eq!(msg["message"]["content"], "yes, go ahead");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn post_message_without_token_skips_the_auth_line() {
+        let dir = std::env::temp_dir().join(format!("mnemo-desktop-sock2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            BufReader::new(conn).lines().map(|l| l.unwrap()).collect::<Vec<_>>()
+        });
+        post_message(&path, None, "x").unwrap();
+        assert_eq!(server.join().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn post_message_to_missing_socket_is_an_error() {
+        assert!(post_message(Path::new("/nonexistent/x.sock"), None, "x").is_err());
+    }
+}
