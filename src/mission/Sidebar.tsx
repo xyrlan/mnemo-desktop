@@ -31,14 +31,18 @@ function ChildRow({ c, label }: { c: ChildSession; label?: string }) {
   const draft = useMission((s) => s.drafts[c.id] ?? '')
   const err = useMission((s) => s.replyErrors[c.id])
   const sending = useMission((s) => s.sending[c.id])
-  const word = childWord(c)
+  const translating = useMission((s) => s.translating[c.id])
+  const lastSent = useMission((s) => s.sent[c.id]?.at(-1))
+  const word0 = childWord(c)
   const d = delta(c, looked)
-  const blocked = word === 'BLOCKED'
+  const blocked = word0 === 'BLOCKED'
+  const replied = blocked && lastSent !== undefined && Date.now() - lastSent.at < 60_000
+  const word = replied ? 'replied' : word0
   useEffect(() => {
     if (blocked && draft === '' && c.suggested_reply) missionStore.getState().setDraft(c.id, c.suggested_reply)
   }, [blocked, c.id, c.suggested_reply, draft])
   return (
-    <div className={`m-child m-${word.toLowerCase()}`}>
+    <div className={`m-child m-${word0.toLowerCase()}${replied ? ' m-replied' : ''}`}>
       <div className="m-row" onClick={() => openMissionPane(c)} title={c.cwd}>
         <span className="m-label">{label ?? c.name ?? c.intent ?? c.id}</span>
         <span className="m-id">{c.id}</span>
@@ -62,8 +66,16 @@ function ChildRow({ c, label }: { c: ChildSession; label?: string }) {
             <button disabled={sending || !draft.trim()} onClick={() => void missionStore.getState().sendReply(c.id)}>
               {sending ? 'sending…' : 'send ⌘↩'}
             </button>
+            <button disabled={translating || !draft.trim()} title="Rewrite the draft in English before sending" onClick={() => void missionStore.getState().translateDraft(c.id)}>
+              {translating ? '…' : '→EN'}
+            </button>
             {err && <span className="m-error">{err}</span>}
           </div>
+          {lastSent && (
+            <div className="m-sent">
+              sent ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · waiting for the child to pick it up… <span className="m-sent-text">{lastSent.text}</span>
+            </div>
+          )}
         </div>
       )}
     </div>

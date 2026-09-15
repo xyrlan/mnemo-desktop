@@ -27,3 +27,8 @@ pub fn mission_mark_looked(id: String, timeline_len: usize) -> Result<(), String
 pub fn mission_looked() -> HashMap<String, usize> {
     mission::read_looked()
 }
+
+#[tauri::command]
+pub async fn mission_translate(text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || mission::translate(&text)).await.map_err(|e| e.to_string())?
+}

@@ -18,6 +18,8 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   const looked = useMission((s) => s.looked[id])
   const draft = useMission((s) => s.drafts[id] ?? '')
   const err = useMission((s) => s.replyErrors[id])
+  const sentList = useMission((s) => s.sent[id] ?? [])
+  const translating = useMission((s) => s.translating[id])
   const [lines, setLines] = useState<TimelineLine[]>([])
   const [confirmStop, setConfirmStop] = useState(false)
   const seenAtOpen = useRef<number | undefined>(looked)
@@ -93,6 +95,13 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
             </div>
           )
         })}
+        {sentList.map((m, i) => (
+          <div key={`you-${i}`} className="tl-line fresh tl-you">
+            <span className="tl-at">{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            <span className="tl-state">you</span>
+            <span className="tl-detail">{m.text}</span>
+          </div>
+        ))}
         {final && (
           <div className="tl-final">
             <div className="tl-final-head">report</div>
@@ -115,6 +124,9 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
           />
           <div className="m-reply-actions">
             <button onClick={() => void missionStore.getState().sendReply(id)}>send ⌘↩</button>
+            <button disabled={translating || !draft.trim()} onClick={() => void missionStore.getState().translateDraft(id)}>
+              {translating ? '…' : '→EN'}
+            </button>
             {err && <span className="m-error">{err}</span>}
           </div>
         </div>

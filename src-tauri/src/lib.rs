@@ -86,6 +86,7 @@ pub fn run() {
             mission_commands::mission_reply,
             mission_commands::mission_mark_looked,
             mission_commands::mission_looked,
+            mission_commands::mission_translate,
 
             // -- voice commands --
             voice::voice_start,

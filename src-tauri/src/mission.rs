@@ -888,3 +888,43 @@ mod reply_tests {
         assert!(post_message(Path::new("/nonexistent/x.sock"), None, "x").is_err());
     }
 }
+
+// ---------------------------------------------------------- translate --
+
+/// English rewrite of a reply through the user's own Claude Code (`claude -p`),
+/// so no API key is needed. `program` is injectable for tests.
+pub fn translate_with(program: &str, text: &str) -> Result<String, String> {
+    let prompt = format!(
+        "Rewrite the following message in clear, natural English. Keep the meaning, tone and any code, paths or identifiers exactly. Output only the rewritten message, nothing else.\n\n{text}"
+    );
+    let out = run(program, &["-p", "--model", "haiku", "--output-format", "text", &prompt], None)?;
+    Ok(out.trim().to_string())
+}
+
+pub fn translate(text: &str) -> Result<String, String> {
+    translate_with("claude", text)
+}
+
+#[cfg(all(test, unix))]
+mod translate_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn translate_passes_the_prompt_as_the_last_argument_and_trims_the_answer() {
+        let dir = std::env::temp_dir().join(format!("mnemo-desktop-tr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("claude");
+        std::fs::write(&fake, "#!/bin/sh\nprintf '  EN:%s  \\n' \"${@: -1}\"\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = translate_with(fake.to_str().unwrap(), "pode seguir").unwrap();
+        assert!(out.starts_with("EN:Rewrite the following"), "{out}");
+        assert!(out.ends_with("pode seguir"), "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn translate_reports_a_missing_program() {
+        assert!(translate_with("/nonexistent/claude", "x").is_err());
+    }
+}

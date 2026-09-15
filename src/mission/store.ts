@@ -13,6 +13,9 @@ export type MissionState = {
   drafts: Record<string, string>
   replyErrors: Record<string, string>
   sending: Record<string, boolean>
+  /** Replies that left this app, newest last; shown until the child moves and in the timeline. */
+  sent: Record<string, { at: number; text: string }[]>
+  translating: Record<string, boolean>
 }
 
 export type MissionActions = {
@@ -23,6 +26,8 @@ export type MissionActions = {
   setSidebarWidth(w: number): void
   setDraft(id: string, text: string): void
   sendReply(id: string): Promise<boolean>
+  /** Replace the draft with its English translation (via `claude -p`). */
+  translateDraft(id: string): Promise<boolean>
 }
 
 export type MissionStore = StoreApi<MissionState & MissionActions>
@@ -40,6 +45,8 @@ export function createMissionStore(client: MissionClient): MissionStore {
     drafts: {},
     replyErrors: {},
     sending: {},
+    sent: {},
+    translating: {},
 
     async refresh(focusedCwd, withPrs) {
       if (get().polling) return
@@ -87,13 +94,32 @@ export function createMissionStore(client: MissionClient): MissionStore {
       set((s) => ({ sending: { ...s.sending, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
       try {
         await client.reply(id, text)
-        set((s) => ({ drafts: { ...s.drafts, [id]: '' } }))
+        set((s) => ({
+          drafts: { ...s.drafts, [id]: '' },
+          sent: { ...s.sent, [id]: [...(s.sent[id] ?? []), { at: Date.now(), text }] },
+        }))
         return true
       } catch (e) {
         set((s) => ({ replyErrors: { ...s.replyErrors, [id]: String(e) } }))
         return false
       } finally {
         set((s) => ({ sending: { ...s.sending, [id]: false } }))
+      }
+    },
+
+    async translateDraft(id) {
+      const text = (get().drafts[id] ?? '').trim()
+      if (!text) return false
+      set((s) => ({ translating: { ...s.translating, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
+      try {
+        const out = await client.translate(text)
+        if (out.trim()) set((s) => ({ drafts: { ...s.drafts, [id]: out.trim() } }))
+        return true
+      } catch (e) {
+        set((s) => ({ replyErrors: { ...s.replyErrors, [id]: String(e) } }))
+        return false
+      } finally {
+        set((s) => ({ translating: { ...s.translating, [id]: false } }))
       }
     },
   }))
