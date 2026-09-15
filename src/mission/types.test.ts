@@ -1,4 +1,4 @@
-import { childWord, delta, missionSummary, isRecent, pruneSnapshot, allChildren, type Mission, type ChildSession, type Snapshot } from './types'
+import { childWord, needKind, permissionAsk, delta, missionSummary, isRecent, pruneSnapshot, allChildren, type Mission, type ChildSession, type Snapshot } from './types'
 
 test('childWord folds state and tempo', () => {
   expect(childWord({ state: 'working', tempo: 'active', live: true })).toBe('active')
@@ -67,4 +67,20 @@ test('allChildren dedupes by id across repos', () => {
     ],
   }
   expect(allChildren(snap).map((c) => c.id)).toEqual(['x', 'y'])
+})
+
+test('needKind: a permission prompt from claude agents or an approve ask from mnemo; anything else is a question', () => {
+  expect(needKind({ needs: 'approve Bash: cd ~/.claude/projects && ls', waiting_for: null })).toBe('permission')
+  expect(needKind({ needs: 'approve Bash: touch x', waiting_for: 'permission prompt' })).toBe('permission')
+  expect(needKind({ needs: 'may I add a crate?', waiting_for: 'permission prompt' })).toBe('permission')
+  expect(needKind({ needs: null, waiting_for: 'permission prompt' })).toBe('permission')
+  expect(needKind({ needs: 'may I add a crate?', waiting_for: null })).toBe('question')
+  expect(needKind({ needs: 'should I approve the PR?' })).toBe('question')
+  expect(needKind({ needs: null })).toBe('question')
+})
+
+test('permissionAsk drops the approve prefix', () => {
+  expect(permissionAsk({ needs: 'approve Bash: touch approve-probe.txt && ls -la' })).toBe('Bash: touch approve-probe.txt && ls -la')
+  expect(permissionAsk({ needs: 'Edit src/x.ts' })).toBe('Edit src/x.ts')
+  expect(permissionAsk({ needs: null })).toBeNull()
 })

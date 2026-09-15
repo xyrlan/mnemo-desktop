@@ -11,6 +11,13 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string) => (cmd === 'mission_snapshot' ? served.snap : cmd === 'home_snapshot' ? served.home : {})),
 }))
 
+// Answering a prompt attaches to a real child; here it only records what was asked.
+const answered = vi.hoisted(() => [] as [string, string][])
+vi.mock('../cockpit/approve', async (orig) => ({
+  ...(await orig<typeof import('../cockpit/approve')>()),
+  answerPrompt: vi.fn(async (c: { id: string }, choice: string) => void answered.push([c.id, choice])),
+}))
+
 import Sidebar from './Sidebar'
 import { missionStore } from './app-store'
 import { store as appStore } from '../layout/app-store'
@@ -77,6 +84,38 @@ test('a blocked child keeps its reply field, prefilled; clicking it opens the mi
   expect(blocked.querySelector('textarea')?.value).toBe('yes')
   await act(async () => (blocked.querySelector('.nd-row') as HTMLElement).click())
   expect(Object.values(appStore.getState().panes).find((p) => p.view === 'mission')?.props).toEqual({ id: '094c6a03' })
+})
+
+test('a question keeps the reply field and gets an attach link', async () => {
+  await render()
+  const blocked = host.querySelector('.nd-blocked')!
+  expect(blocked.querySelector('.m-permission')).toBeNull()
+  await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'attach')!.click())
+  expect(Object.values(appStore.getState().panes).find((p) => p.view === 'terminal-cmd')?.props).toEqual({ cmd: 'claude attach 094c6a03' })
+})
+
+test('a child parked on a permission prompt shows the command and Aprovar / Negar, no reply field; y and n answer it', async () => {
+  answered.length = 0
+  const m = snapshot.repos[0].missions[0]
+  const vault = m.pieces[1]
+  const asking = { ...vault.child!, needs: 'approve Bash: cd ~/.claude/projects && ls -la', suggested_reply: null, waiting_for: 'permission prompt' }
+  serve({ ...snapshot, repos: [{ ...snapshot.repos[0], missions: [{ ...m, pieces: [m.pieces[0], { ...vault, child: asking }] }] }, ...snapshot.repos.slice(1)] })
+  await render()
+  const blocked = host.querySelector('.nd-blocked')!
+  const box = blocked.querySelector<HTMLElement>('.m-permission')!
+  expect(box.querySelector('.m-perm-tool')?.textContent).toBe('Bash')
+  expect(box.querySelector('.m-perm-cmd')?.textContent).toBe('cd ~/.claude/projects && ls -la')
+  expect(blocked.querySelector('textarea')).toBeNull()
+  const buttons = [...box.querySelectorAll('button')].map((b) => b.textContent)
+  expect(buttons).toEqual(['Aprovar', 'Aprovar e não perguntar de novo', 'Negar'])
+
+  await act(async () => [...box.querySelectorAll('button')].find((b) => b.textContent === 'Negar')!.click())
+  expect(answered).toEqual([['094c6a03', 'no']])
+  const press = (key: string, shiftKey = false) => act(async () => void box.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true })))
+  await press('y')
+  await press('Y', true)
+  await press('x')
+  expect(answered).toEqual([['094c6a03', 'no'], ['094c6a03', 'yes'], ['094c6a03', 'always']])
 })
 
 test('no sessions at all says so', async () => {

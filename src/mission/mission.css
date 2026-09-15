@@ -23,3 +23,14 @@
 .nd-label { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .nd-repo { color: var(--fg-muted); font-size: 11px; flex: 0 0 auto; }
 .nd-sub { color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A permission prompt: the tool call in full, then Aprovar / Negar (#81). */
+.m-permission:focus { outline: 1px solid var(--ansi-yellow); outline-offset: 1px; }
+.m-perm-head { color: var(--fg-muted); font-size: 11px; margin-bottom: 4px; }
+.m-perm-tool { color: var(--fg); font-weight: 700; }
+.m-perm-cmd { margin: 0 0 6px; padding: 4px 6px; background: var(--bg-elev); border: 1px solid var(--border); color: var(--fg); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 10em; overflow: auto; }
+.m-permission .m-reply-actions { flex-wrap: wrap; }
+.m-reply button.m-approve { border-color: var(--ansi-green); color: var(--ansi-green); }
+.m-reply button.m-deny { border-color: var(--ansi-red); color: var(--ansi-red); }
+.m-reply button.m-attach-link { background: transparent; border-color: transparent; color: var(--fg-muted); }
+.m-reply button.m-attach-link:hover { color: var(--fg); }

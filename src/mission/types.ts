@@ -28,6 +28,9 @@ export type ChildSession = {
   timeline_len: number
   /** The parent session that dispatched this child, when known (#22). */
   parent_session?: string | null
+  /** What the child's process is parked on, from `claude agents` (`permission prompt`);
+   *  absent in snapshots from before #81. */
+  waiting_for?: string | null
 }
 export type Pr = { number: number; url: string; state: string; head: string; ci: 'pass' | 'fail' | 'pending' | 'none' }
 export type Piece = { name: string; branch: string; child: ChildSession | null; pr: Pr | null }
@@ -44,6 +47,21 @@ export function childWord(c: Pick<ChildSession, 'state' | 'tempo' | 'live'>): 'a
   if (c.tempo === 'blocked') return 'BLOCKED'
   if (c.tempo === 'stalled') return 'stalled'
   return 'active'
+}
+
+/** What a BLOCKED child waits for: a tool it wants permission to run (answered with
+ *  Aprovar / Negar through `claude attach`), or a question (answered with a reply). */
+export function needKind(c: Pick<ChildSession, 'needs' | 'waiting_for'>): 'permission' | 'question' {
+  if (c.waiting_for?.toLowerCase().includes('permission')) return 'permission'
+  return c.needs?.startsWith('approve ') ? 'permission' : 'question'
+}
+
+/** The tool call a permission prompt asks about (`Bash: cd … && …`), without mnemo's
+ *  `approve ` prefix; null when only `claude agents` knows the child is waiting. */
+export function permissionAsk(c: Pick<ChildSession, 'needs'>): string | null {
+  const n = c.needs?.trim()
+  if (!n) return null
+  return n.startsWith('approve ') ? n.slice('approve '.length) : n
 }
 
 /** Events since the user last looked; 0 when never looked so a fresh child is not a wall of badges. */

@@ -52,6 +52,10 @@ pub struct ChildSession {
     /// `session_id` of the parent that dispatched this child: recorded by `mnemo
     /// dispatch` when it can, otherwise guessed by `link_children`.
     pub parent_session: Option<String>,
+    /// What the child's process is stopped on, as `claude agents` says it (`permission
+    /// prompt`); None while it is not waiting or when `claude agents` does not list it.
+    #[serde(default)]
+    pub waiting_for: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -159,6 +163,7 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 branch: None,
                 timeline_len: 0,
                 parent_session: s(r.get("parent_session")),
+                waiting_for: None,
             })
         })
         .collect())
@@ -170,6 +175,30 @@ pub fn parse_agent_starts(json: &str) -> HashMap<String, u64> {
     rows.iter()
         .filter_map(|r| Some((r.get("sessionId")?.as_str()?.to_string(), r.get("startedAt")?.as_u64()?)))
         .collect()
+}
+
+/// Session id and short id → `waitingFor` for every row of `claude agents --json --all`
+/// that is waiting on something (`status: "waiting"`). mnemo's `needs` only guesses from
+/// the transcript; this is the process saying it is parked on a prompt.
+pub fn parse_agent_waiting(json: &str) -> HashMap<String, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
+    let mut out = HashMap::new();
+    for r in &rows {
+        let Some(w) = r.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()) else { continue };
+        for key in ["sessionId", "id"] {
+            if let Some(k) = r.get(key).and_then(|k| k.as_str()) {
+                out.insert(k.to_string(), w.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Marks each child with what its process waits for, matched by session id, else short id.
+pub fn apply_waiting(children: &mut [ChildSession], waiting: &HashMap<String, String>) {
+    for c in children {
+        c.waiting_for = c.session_id.as_ref().and_then(|s| waiting.get(s)).or_else(|| waiting.get(&c.id)).cloned();
+    }
 }
 
 /// A contract file: `feature:` from the frontmatter and one `## <slug>` per piece.
@@ -726,6 +755,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut errors = Vec::new();
     let agents = run("claude", &["agents", "--json", "--all"], None);
     let agent_starts = agents.as_deref().map(parse_agent_starts).unwrap_or_default();
+    let agent_waiting = agents.as_deref().map(parse_agent_waiting).unwrap_or_default();
     let mut parents = match agents.and_then(|j| parse_agents(&j)) {
         Ok(p) => p,
         Err(e) => {
@@ -740,6 +770,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
             vec![]
         }
     };
+    apply_waiting(&mut children, &agent_waiting);
     let mut child_starts = HashMap::new();
     for c in &mut children {
         c.timeline_len = timeline_len(&c.id);
@@ -942,6 +973,28 @@ mod tests {
     }
 
     #[test]
+    fn a_child_parked_on_a_permission_prompt_carries_what_it_waits_for() {
+        let waiting = parse_agent_waiting(AGENTS);
+        assert_eq!(waiting.get("987fb657-a6c1-4319-8547-49167aa01a65").map(String::as_str), Some("permission prompt"));
+        assert!(!waiting.contains_key("a43d3832-e7a9-49b7-9496-2d86aeac8aad"), "a busy child waits for nothing");
+        let mut c = parse_sessions(SESSIONS).unwrap();
+        apply_waiting(&mut c, &waiting);
+        let probe = c.iter().find(|x| x.id == "987fb657").unwrap();
+        assert_eq!(probe.waiting_for.as_deref(), Some("permission prompt"));
+        assert_eq!(probe.needs.as_deref(), Some("approve Bash: touch approve-probe.txt && ls -la"));
+        assert!(c.iter().filter(|x| x.id != "987fb657").all(|x| x.waiting_for.is_none()));
+        // Matched by short id when mnemo does not know the session id.
+        let mut bare = vec![ChildSession { session_id: None, ..probe.clone() }];
+        apply_waiting(&mut bare, &waiting);
+        assert_eq!(bare[0].waiting_for.as_deref(), Some("permission prompt"));
+        // A cleared prompt clears the field on the next poll.
+        apply_waiting(&mut bare, &HashMap::new());
+        assert_eq!(bare[0].waiting_for, None);
+        let json = serde_json::to_value(probe).unwrap();
+        assert_eq!(json["waiting_for"], "permission prompt");
+    }
+
+    #[test]
     fn contract_yields_feature_and_pieces() {
         let (f, p) = parse_contract(CONTRACT).unwrap();
         assert_eq!(f, "panes");
@@ -1055,7 +1108,7 @@ mod tests {
         let children = vec![ChildSession {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
-            updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None,
+            updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
         }];
         let empty = HashMap::new();
         let groups = join(JoinInput {

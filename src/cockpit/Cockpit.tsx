@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMission } from '../mission/app-store'
 import { store as appStore, useApp } from '../layout/app-store'
-import { childWord, delta, pruneSnapshot, type Mission } from '../mission/types'
+import { childWord, delta, needKind, pruneSnapshot, type Mission } from '../mission/types'
 import { focusedCwd, focusedFirst, repoOfCwd } from '../mission/scope'
 import { paneForSession } from '../layout/tabs'
 import { fmtTokens } from '../mission/tokens'
@@ -13,6 +13,7 @@ import { pruneGone } from './needs'
 import { buildInbox, rowChild, type Inbox, type Row } from './inbox'
 import type { RepoGroup } from '../mission/types'
 import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
+import { answerPane, answerPrompt, detachAnswer, useAnswer, type Choice } from './approve'
 import MissionMap from './MissionMap'
 import { lastCwd } from './where'
 import './cockpit.css'
@@ -41,6 +42,19 @@ function useBranch(cwd: string | undefined): string | null {
 /** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
 const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'abrir job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
 const armKey = (r: Row) => `${r.kind === 'ready' ? 'merge' : r.kind === 'land' ? 'land' : 'stop'}:${r.key}`
+
+/** A blocked row whose child is parked on a permission prompt: Aprovar / Negar, not a reply. */
+const isPermission = (r: Row | undefined) => r?.kind === 'blocked' && needKind(r.child) === 'permission'
+
+/** `y` / `n` (⇧Y: and do not ask again) on the selected row. Never with ⌘/⌃/⌥ or while typing. */
+export function answerKey(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'target'>): Choice | null {
+  if (e.metaKey || e.ctrlKey || e.altKey) return null
+  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null
+  const tag = t?.tagName?.toUpperCase() ?? ''
+  if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || t?.isContentEditable) return null
+  const k = e.key.toLowerCase()
+  return k === 'y' ? (e.shiftKey ? 'always' : 'yes') : k === 'n' && !e.shiftKey ? 'no' : null
+}
 
 /** The pane of this window the row's child runs in, if it is open here. */
 function rowPane(r: Row): number | null {
@@ -92,6 +106,9 @@ function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMa
   const here = useApp((s) => (child ? paneForSession(s, child) : null))
   const d = child ? delta(child, looked) : 0
   const isArmed = armed === armKey(row)
+  // The attach an Aprovar / Negar opened, while its pane is still open here.
+  const answer = useAnswer(child?.id ?? '')
+  const answered = useApp(() => (child && answer ? answerPane(child.id) : null))
 
   const [word, label, detail] =
     row.kind === 'blocked' ? [replied ? 'replied' : 'BLOCKED', row.label, '']
@@ -137,7 +154,8 @@ function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMa
         {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
         {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
-        {child && (row.kind === 'blocked' || child.live) && btn('attach', () => attachChild(child.id), '', `claude attach ${child.id}`)}
+        {child && answered !== null && btn('detach', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
+        {child && answered === null && (row.kind === 'blocked' || child.live) && btn('attach', () => attachChild(child.id), '', `claude attach ${child.id}`)}
         {row.kind === 'blocked' &&
           btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
       </div>
@@ -240,6 +258,14 @@ export default function Cockpit() {
     }
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
+    const choice = answerKey(e.nativeEvent)
+    const r = rows[sel]
+    if (choice && r?.kind === 'blocked' && isPermission(r)) {
+      e.preventDefault()
+      e.stopPropagation()
+      void answerPrompt(r.child, choice)
+      return
+    }
     const k = listKey(e.nativeEvent)
     if (!k || !onListKey(k)) return
     e.preventDefault()
@@ -322,7 +348,7 @@ export default function Cockpit() {
           </div>
         )}
       </div>
-      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · r reply · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
+      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y aprovar · n negar' : 'r reply'} · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>
   )
 }
