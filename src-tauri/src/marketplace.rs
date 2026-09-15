@@ -265,8 +265,8 @@ pub fn find_trees(root: &Path) -> Vec<PathBuf> {
 
 /// `https://github.com/a/rules.git` → `rules`.
 pub fn repo_name(url: &str) -> String {
-    let t = url.trim().trim_end_matches('/');
-    let last = t.rsplit(['/', ':']).next().unwrap_or(t);
+    let t = url.trim().trim_end_matches(['/', '\\']);
+    let last = t.rsplit(['/', '\\', ':']).next().unwrap_or(t);
     let name = last.strip_suffix(".git").unwrap_or(last);
     if name.is_empty() { t.to_string() } else { name.to_string() }
 }
@@ -293,7 +293,9 @@ pub fn validate_source(url: &str) -> Result<String, String> {
     }
     let remote = ["https://", "http://", "ssh://", "git://", "file://"].iter().any(|p| u.starts_with(p));
     let scp = u.starts_with("git@") && u.contains(':');
-    if remote || scp || Path::new(u).is_absolute() {
+    // `/abs/path` counts as absolute on every platform: local sources are
+    // written with forward slashes even on Windows.
+    if remote || scp || Path::new(u).is_absolute() || u.starts_with('/') {
         Ok(u.to_string())
     } else {
         Err(format!("not a git URL: {u} (expected https://, ssh://, git@host:path or an absolute path)"))
@@ -422,7 +424,7 @@ impl Marketplace {
             .map(|tree| {
                 let rel = tree.strip_prefix(clone).unwrap_or(tree);
                 let holder = rel.parent().filter(|p| !p.as_os_str().is_empty());
-                let rel_s = rel.to_string_lossy().to_string();
+                let rel_s = rel.to_string_lossy().replace('\\', "/");
                 let last_commit = self
                     .git(&["log", "-1", "--format=%cI", "--", &rel_s], Some(clone))
                     .ok()
@@ -663,7 +665,7 @@ mod tests {
     fn trees_are_found_root_first_and_not_inside_each_other() {
         let trees = find_trees(Path::new(FIXTURE));
         let rel: Vec<String> =
-            trees.iter().map(|t| t.strip_prefix(FIXTURE).unwrap().to_string_lossy().to_string()).collect();
+            trees.iter().map(|t| t.strip_prefix(FIXTURE).unwrap().to_string_lossy().replace('\\', "/")).collect();
         assert_eq!(rel, vec![".mnemo-shared", "sets/react/.mnemo-shared"]);
     }
 
