@@ -1445,7 +1445,18 @@ mod translate_tests {
         // POSIX sh (dash on Ubuntu) has no `${@: -1}`; walk to the last argument instead.
         std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\nprintf '  EN:%s  \\n' \"$last\"\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let out = translate_with(fake.to_str().unwrap(), "pode seguir").unwrap();
+        // Another test's fork can hold the script's write fd for a moment after we
+        // closed it; Linux then refuses to exec it (ETXTBSY). Retry briefly.
+        let out = (0..20)
+            .find_map(|_| match translate_with(fake.to_str().unwrap(), "pode seguir") {
+                Err(e) if e.contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    None
+                }
+                r => Some(r),
+            })
+            .expect("exec kept failing with ETXTBSY")
+            .unwrap();
         assert!(out.starts_with("EN:Rewrite the following"), "{out}");
         assert!(out.ends_with("pode seguir"), "{out}");
         let _ = std::fs::remove_dir_all(&dir);
