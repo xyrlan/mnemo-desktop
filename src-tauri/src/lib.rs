@@ -37,6 +37,10 @@ pub mod chrome;
 
 // -- graph: no Rust --
 
+// -- pulse (src/pulse.rs) --
+
+// -- github (src/github.rs) --
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -128,6 +132,10 @@ pub fn run() {
             // -- chrome commands --
             chrome::chrome_branch,
             chrome::chrome_repo,
+
+            // -- pulse commands --
+
+            // -- github commands --
 
             // -- marketplace commands --
             marketplace::marketplace_list,
