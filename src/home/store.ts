@@ -25,7 +25,8 @@ export type HomeState = {
 }
 export type HomeActions = {
   load(): Promise<void>
-  select(root: string): void
+  /** A user's pick. Resolves an unresolved repo; `load` never does, so launch stays quiet. */
+  select(root: string): Promise<void>
   setFilter(q: string): void
   setShowHidden(v: boolean): void
   setCloneSpec(s: string): void
@@ -61,12 +62,22 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
         const snapshot = await client.snapshot({ here, pinned: s.homePinned, hidden: s.homeHidden, extraRoots: get().extraRoots })
         const selected = get().selected
         const keep = selected !== null && snapshot.repos.some((r) => r.root === selected)
-        set({ snapshot, loading: false, selected: keep ? selected : (snapshot.repos.find((r) => !r.hidden)?.root ?? null) })
+        const first = snapshot.repos.find((r) => !r.hidden && !r.unresolved) ?? snapshot.repos.find((r) => !r.hidden)
+        set({ snapshot, loading: false, selected: keep ? selected : (first?.root ?? null) })
       } catch (e) {
         set({ loading: false, notice: String(e) })
       }
     },
-    select: (root) => set({ selected: root }),
+    async select(root) {
+      set({ selected: root })
+      if (!get().snapshot.repos.find((r) => r.root === root)?.unresolved) return
+      try {
+        set({ selected: await client.resolveRepo(root) })
+      } catch (e) {
+        set({ notice: String(e) })
+      }
+      await get().load()
+    },
     setFilter: (filter) => set({ filter }),
     setShowHidden: (showHidden) => set({ showHidden }),
     setCloneSpec: (cloneSpec) => set({ cloneSpec }),

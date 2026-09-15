@@ -550,10 +550,59 @@ pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<St
 }
 
 /// Main checkout root for a cwd, following worktrees back to their common dir.
+/// Callers that act without a user gesture check `may_probe` first.
 pub fn repo_root(cwd: &str) -> Option<String> {
-    let common = run("git", &["rev-parse", "--path-format=absolute", "--git-common-dir"], Some(Path::new(cwd))).ok()?;
+    git_root(cwd).ok()
+}
+
+/// `repo_root` with git's error kept, so a TCC denial can be told apart from "not a repo".
+pub fn git_root(cwd: &str) -> Result<String, String> {
+    let common = run("git", &["rev-parse", "--path-format=absolute", "--git-common-dir"], Some(Path::new(cwd)))?;
     let common = PathBuf::from(common.trim());
-    common.parent().map(|p| p.to_string_lossy().to_string())
+    common.parent().map(|p| p.to_string_lossy().to_string()).ok_or_else(|| format!("git common dir: {}", common.display()))
+}
+
+/// Under a folder macOS guards with a "would like to access files in…" dialog: `~/Desktop`,
+/// `~/Documents`, `~/Downloads`, or a volume under `/Volumes`. Pure path comparison — even a
+/// `stat` inside one of these would raise the dialog.
+pub fn is_protected(path: &str, home: &str) -> bool {
+    let p = Path::new(path);
+    let in_home = !home.is_empty() && ["Desktop", "Documents", "Downloads"].iter().any(|d| p.starts_with(Path::new(home).join(d)));
+    in_home || p.strip_prefix("/Volumes").map(|rest| rest.components().next().is_some()).unwrap_or(false)
+}
+
+fn unlocked() -> std::sync::MutexGuard<'static, Vec<String>> {
+    static UNLOCKED: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+    UNLOCKED.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The user asked for `dir` (picked it, or selected it in Home): probing it and anything
+/// under it may raise a dialog now. Lasts for this run only — TCC's answer outlives us,
+/// but after `tccutil reset` a remembered unlock would prompt at launch again.
+pub fn unlock(dir: &str) {
+    let mut u = unlocked();
+    if !u.iter().any(|d| d == dir) {
+        u.push(dir.to_string());
+    }
+}
+
+pub fn relock(dir: &str) {
+    unlocked().retain(|d| d != dir);
+}
+
+/// Whether touching `path` (running git in it, reading a file under it) is quiet: not in a
+/// protected folder, or under one the user unlocked. The one guard for every caller that
+/// probes a path without a user gesture — Home's snapshot and the sidebar poll.
+pub fn may_probe(path: &str) -> bool {
+    if !cfg!(target_os = "macos") {
+        return true;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    !is_protected(path, &home) || unlock_covers(path)
+}
+
+pub fn unlock_covers(path: &str) -> bool {
+    unlocked().iter().any(|d| Path::new(path).starts_with(d))
 }
 
 /// worktree path → branch name, from `git worktree list --porcelain`.
@@ -634,7 +683,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut child_starts = HashMap::new();
     for c in &mut children {
         c.timeline_len = timeline_len(&c.id);
-        if c.parent_session.is_none() {
+        if c.parent_session.is_none() && may_probe(&c.cwd) {
             c.parent_session = declared_parent(&c.cwd);
         }
         // Creation time survives a respawn; the process start does not.
@@ -652,7 +701,8 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         .chain(focused_cwd.map(str::to_string))
         .collect();
     for cwd in cwds {
-        if roots.contains_key(&cwd) {
+        // A locked protected cwd stays its own group, as a cwd with no repo does.
+        if roots.contains_key(&cwd) || !may_probe(&cwd) {
             continue;
         }
         if let Some(r) = repo_root(&cwd) {
@@ -666,7 +716,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut prs = HashMap::new();
     let mut seen = std::collections::HashSet::new();
     for r in roots.values() {
-        if !seen.insert(r.clone()) {
+        if !seen.insert(r.clone()) || !may_probe(r) {
             continue;
         }
         branches.extend(worktree_branches(r));
@@ -1057,6 +1107,18 @@ mod tests {
         // The second poll only reads what was appended in between.
         let again = collect_snapshot(None, false);
         assert!(again.repos.iter().flat_map(|g| &g.parents).any(|p| p.tokens > 0));
+    }
+
+    #[test]
+    fn protected_folders_are_the_tcc_ones() {
+        let home = "/Users/me";
+        for p in ["/Users/me/Downloads", "/Users/me/Downloads/x", "/Users/me/Desktop/a/b", "/Users/me/Documents/gh/r", "/Volumes/usb/r"] {
+            assert!(is_protected(p, home), "{p}");
+        }
+        for p in ["/Users/me/github/r", "/Users/me/Downloads2/x", "/Users/me", "/Volumes", "/Users/other/Downloads/x"] {
+            assert!(!is_protected(p, home), "{p}");
+        }
+        assert!(!is_protected("/Downloads/x", ""));
     }
 
     #[test]

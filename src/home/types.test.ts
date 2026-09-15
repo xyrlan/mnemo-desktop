@@ -3,7 +3,7 @@ import { cloneDest, paneForSession, relTime, visibleRepos, whatClickDoes, type H
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession =>
   ({ title: 't', cwd: '/r', last_at: 0, transcript: true, live: null, kind: 'interactive', ...o })
 const repo = (o: Partial<HomeRepo> & { root: string }): HomeRepo =>
-  ({ name: o.root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, sessions: [], ...o })
+  ({ name: o.root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], ...o })
 
 test('visibleRepos drops hidden unless showHidden, filters by name/path', () => {
   const rs = [repo({ root: '/a/mnemo' }), repo({ root: '/a/secret', hidden: true }), repo({ root: '/b/desk' })]

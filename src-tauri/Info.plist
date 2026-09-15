@@ -4,5 +4,15 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>mnemo transcribes your voice on this Mac while you hold ⌥Space, to type into the focused pane.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>mnemo runs git in the repository you opened on your Desktop to find its root, branches and sessions.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>mnemo runs git in the repository you opened in Documents to find its root, branches and sessions.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>mnemo runs git in the repository you opened in Downloads to find its root, branches and sessions.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>mnemo runs git in the repository you opened on this volume to find its root, branches and sessions.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>mnemo runs git in the repository you opened on this network volume to find its root, branches and sessions.</string>
 </dict>
 </plist>

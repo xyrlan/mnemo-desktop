@@ -120,6 +120,7 @@ pub fn run() {
             // -- home commands --
             home_commands::home_snapshot,
             home_commands::home_register_repo,
+            home_commands::home_resolve_repo,
 
             // -- chrome commands --
 

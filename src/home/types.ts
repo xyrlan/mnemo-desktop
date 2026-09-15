@@ -1,7 +1,9 @@
 /** Mirrors `src-tauri/src/home.rs`. */
 export type Live = 'here' | 'bg' | 'elsewhere'
 export type HomeSession = { id: string; title: string; cwd: string; last_at: number; transcript: boolean; live: Live | null; kind: string }
-export type HomeRepo = { root: string; name: string; last_at: number; pinned: boolean; hidden: boolean; sessions: HomeSession[] }
+/** `unresolved`: under a folder macOS guards, grouped by its history path without running git
+ *  (see `mission::is_protected`); selecting it resolves it. */
+export type HomeRepo = { root: string; name: string; last_at: number; pinned: boolean; hidden: boolean; unresolved: boolean; sessions: HomeSession[] }
 export type HomeSnapshot = { repos: HomeRepo[]; clone_base: string; errors: string[] }
 
 export const EMPTY: HomeSnapshot = { repos: [], clone_base: '', errors: [] }
