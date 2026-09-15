@@ -1234,7 +1234,11 @@ mod tests {
         for p in &parents {
             println!("parent {} tokens={} cache_read={} children_tokens={}", p.session_id, p.tokens, p.cache_read, p.children_tokens);
         }
-        println!("children linked: {}", linked.filter(|c| c.parent_session.is_some()).count());
+        let linked: Vec<&ChildSession> = linked.collect();
+        println!("children linked: {}", linked.iter().filter(|c| c.parent_session.is_some()).count());
+        for c in linked.iter().filter(|c| c.waiting_for.is_some()) {
+            println!("child {} waiting_for={:?} needs={:?}", c.id, c.waiting_for, c.needs);
+        }
         assert!(parents.iter().any(|p| p.tokens > 0), "no parent has tokens");
         // The second poll only reads what was appended in between.
         let again = collect_snapshot(None, false);
