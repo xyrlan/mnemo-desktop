@@ -236,6 +236,7 @@ test('the open map asks for the width its layout spans and the inbox narrows to 
   expect(host.querySelector('.ck-body')?.className).not.toContain('ck-mapped')
   await act(async () => button(rows()[1], '⤢ round4')!.click())
   expect(host.querySelector('.ck-body')?.className).toContain('ck-mapped')
+  expect(button(rows()[1], '⤢')?.title).toBe('Open the mission map of round4')
   // Contract, pieces, PRs, land: four 200px columns 48px apart, plus 16px either side.
   expect(host.querySelector<HTMLElement>('.ck-map .mm')?.style.getPropertyValue('--mm-w')).toBe(`${4 * 200 + 3 * 48 + 32}px`)
   key('Escape')

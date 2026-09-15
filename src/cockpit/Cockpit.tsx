@@ -55,10 +55,12 @@ function openRow(r: Row) {
   else openMissionPane(r.child)
 }
 
-function InboxRow({ row, selected, showRepo, armed, fire, onSelect, onMap }: {
+function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMap }: {
   row: Row
   selected: boolean
   showRepo: boolean
+  /** The map is open beside the list: the row is its title, the map button just `⤢`. */
+  narrow: boolean
   armed: string | null
   fire: (key: string) => boolean
   onSelect: () => void
@@ -109,7 +111,7 @@ function InboxRow({ row, selected, showRepo, armed, fire, onSelect, onMap }: {
         {showRepo && <span className="nd-repo">{row.repo.name}</span>}
         {d > 0 && <span className="m-delta">+{d}</span>}
         {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
-        {row.mission && btn(`⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', 'Open the mission map')}
+        {row.mission && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
         {row.kind === 'ci' && btn('abrir job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
         {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
         {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
@@ -231,6 +233,7 @@ export default function Cockpit() {
         row={r}
         selected={rows[sel]?.key === r.key}
         showRepo={showRepo}
+        narrow={!!mapAt}
         armed={armed}
         fire={fire}
         onSelect={() => setSelKey(r.key)}
