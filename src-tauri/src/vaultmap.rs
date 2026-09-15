@@ -502,7 +502,9 @@ mod tests {
     }
 
     fn short(p: &str) -> &str {
-        p.strip_prefix(FIXTURE).unwrap_or(p)
+        // Paths come back with `/` on every platform; FIXTURE has `\\` on Windows.
+        let fixture = FIXTURE.replace('\\', "/");
+        p.strip_prefix(fixture.as_str()).unwrap_or(p)
     }
 
     fn edges(m: &VaultMap) -> Vec<(String, String, String)> {
