@@ -20,6 +20,16 @@ portable-pty = "0.9"
 log = "0.4"
 env_logger = "0.11"
 
+# Voice dictation (voice.rs): whisper.cpp transcription (its build needs cmake and libclang),
+# microphone capture (ALSA headers, libasound2-dev, on Linux), and the first-use model download.
+whisper-rs = { version = "0.16", features = ["log_backend"] }
+cpal = "0.18"
+ureq = "3"
+
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+
+[dev-dependencies]
+# Reads the voice test fixture.
+hound = "3.5"
