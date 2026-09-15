@@ -35,9 +35,9 @@ function RepoRow({ r, selected }: { r: HomeRepo; selected: boolean }) {
   const live = r.sessions.some((s) => s.live)
   return (
     <button
-      className={`hm-repo${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}`}
-      onClick={() => homeStore.getState().select(r.root)}
-      title={r.root}
+      className={`hm-repo${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}${r.unresolved ? ' hm-unresolved' : ''}`}
+      onClick={() => void homeStore.getState().select(r.root)}
+      title={r.unresolved ? `${r.root}\nclique para ler o repositório (o macOS pode pedir permissão)` : r.root}
     >
       <span className="hm-repo-name">
         {r.pinned ? '★ ' : ''}

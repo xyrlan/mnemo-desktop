@@ -37,6 +37,7 @@ test("renders repos and sessions from the store, live badge and disabled row", a
         last_at: Date.now(),
         pinned: true,
         hidden: false,
+        unresolved: false,
         sessions: [
           {
             id: "s1",
@@ -85,4 +86,22 @@ test("empty history shows the two entry buttons", async () => {
   await act(async () => root.render(<Home />));
   expect(host.querySelector(".hm-empty")).not.toBeNull();
   expect(host.querySelectorAll(".hm-empty button")).toHaveLength(2);
+});
+
+test("an unresolved repo is muted and not auto-selected", async () => {
+  const repo = { name: "", last_at: 1, pinned: false, hidden: false, sessions: [] };
+  current = {
+    repos: [
+      { ...repo, root: "/Users/me/Downloads/x", name: "x", unresolved: true },
+      { ...repo, root: "/gh/b", name: "b", unresolved: false },
+    ],
+    clone_base: "/gh",
+    errors: [],
+  };
+  homeStore.setState({ selected: null });
+  await act(async () => root.render(<Home />));
+  const rows = host.querySelectorAll(".hm-repo");
+  expect(rows[0].classList.contains("hm-unresolved")).toBe(true);
+  expect(rows[1].classList.contains("hm-unresolved")).toBe(false);
+  expect(host.querySelector(".hm-repo.hm-selected .hm-repo-name")?.textContent).toBe("b");
 });

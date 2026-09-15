@@ -94,6 +94,10 @@ pub struct HomeRepo {
     pub last_at: u64,
     pub pinned: bool,
     pub hidden: bool,
+    /// A cwd in a folder macOS guards (`mission::is_protected`), grouped by its history path
+    /// without running git: `root` may be a subdirectory or a worktree until the user selects
+    /// it and `home_resolve_repo` runs.
+    pub unresolved: bool,
     pub sessions: Vec<HomeSession>,
 }
 
@@ -174,27 +178,38 @@ fn sort_repos(repos: &mut [HomeRepo]) {
 }
 
 /// Group sessions by repo root (`root_of(cwd)`), dropping sessions whose cwd is not a git
-/// checkout. Sessions newest first (max `SESSIONS_PER_REPO`); repos pinned first, then
+/// checkout. A cwd `may_probe` refuses is never handed to `root_of`: it is its own repo,
+/// `unresolved`. Sessions newest first (max `SESSIONS_PER_REPO`); repos pinned first, then
 /// by last activity. Hidden repos stay in the list with `hidden: true` so the view can
 /// offer "mostrar".
 pub fn group_repos(
     sessions: Vec<KnownSession>,
     root_of: &dyn Fn(&str) -> Option<String>,
+    may_probe: &dyn Fn(&str) -> bool,
     pinned: &[String],
     hidden: &[String],
 ) -> Vec<HomeRepo> {
-    let mut by_root: HashMap<String, Vec<KnownSession>> = HashMap::new();
-    let mut cache: HashMap<String, Option<String>> = HashMap::new();
-    let resolve = |cwd: &str| root_of(cwd).or_else(|| worktree_sibling(cwd).and_then(|sib| root_of(&sib)));
+    // root → (sessions, every member unresolved)
+    let mut by_root: HashMap<String, (Vec<KnownSession>, bool)> = HashMap::new();
+    let mut cache: HashMap<String, Option<(String, bool)>> = HashMap::new();
+    let probe = |p: &str| if may_probe(p) { root_of(p) } else { None };
+    let resolve = |cwd: &str| {
+        if !may_probe(cwd) {
+            return Some((cwd.to_string(), true));
+        }
+        root_of(cwd).or_else(|| worktree_sibling(cwd).and_then(|sib| probe(&sib))).map(|r| (r, false))
+    };
     for s in sessions {
         let root = cache.entry(s.cwd.clone()).or_insert_with(|| resolve(&s.cwd)).clone();
-        if let Some(root) = root {
-            by_root.entry(root).or_default().push(s);
+        if let Some((root, unresolved)) = root {
+            let e = by_root.entry(root).or_insert_with(|| (vec![], true));
+            e.0.push(s);
+            e.1 &= unresolved;
         }
     }
     let mut repos: Vec<HomeRepo> = by_root
         .into_iter()
-        .map(|(root, mut ss)| {
+        .map(|(root, (mut ss, unresolved))| {
             ss.sort_by(|a, b| b.last_at.cmp(&a.last_at));
             ss.truncate(SESSIONS_PER_REPO);
             HomeRepo {
@@ -202,6 +217,7 @@ pub fn group_repos(
                 last_at: ss.iter().map(|s| s.last_at).max().unwrap_or(0),
                 pinned: pinned.contains(&root),
                 hidden: hidden.contains(&root),
+                unresolved,
                 sessions: ss
                     .into_iter()
                     .map(|s| HomeSession {
@@ -273,7 +289,13 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
     let text = std::fs::read_to_string(history_path()).unwrap_or_default();
     let sessions = sessions_from_history(&parse_history(&text));
     let home = home_dir().to_string_lossy().to_string();
-    let mut repos = group_repos(sessions.into_values().collect(), &crate::mission::repo_root, pinned, hidden);
+    let mut repos = group_repos(
+        sessions.into_values().collect(),
+        &crate::mission::repo_root,
+        &crate::mission::may_probe,
+        pinned,
+        hidden,
+    );
     repos.retain(|r| !is_internal_root(&r.root, &home));
     for root in extra_roots {
         if !repos.iter().any(|r| &r.root == root) {
@@ -283,6 +305,7 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
                 last_at: 0,
                 pinned: pinned.contains(root),
                 hidden: hidden.contains(root),
+                unresolved: !crate::mission::may_probe(root),
                 sessions: vec![],
             });
         }
@@ -302,7 +325,34 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
 
 /// A folder the user picked: its main-checkout root, or an error when it is not a git repo.
 pub fn register_repo(path: &str) -> Result<String, String> {
-    crate::mission::repo_root(path).ok_or_else(|| "não é um repositório git".to_string())
+    resolve_repo(path)
+}
+
+pub const NOT_A_REPO: &str = "não é um repositório git";
+
+/// The user selected an unresolved repo (or picked a folder): unlock it and run git there,
+/// which is when macOS may ask, once. Returns the main-checkout root. On "not a repo" the
+/// path stays unlocked, so the next snapshot drops it like any other non-git cwd; on a
+/// denial it is locked again and stays listed, unresolved.
+pub fn resolve_repo(root: &str) -> Result<String, String> {
+    resolve_with(root, &crate::mission::git_root)
+}
+
+pub fn resolve_with(root: &str, git_root: &dyn Fn(&str) -> Result<String, String>) -> Result<String, String> {
+    crate::mission::unlock(root);
+    match git_root(root) {
+        Ok(r) => {
+            crate::mission::unlock(&r);
+            Ok(r)
+        }
+        Err(e) if e.contains("Operation not permitted") => {
+            crate::mission::relock(root);
+            Err(format!(
+                "sem permissão para ler {root}: libere o mnemo em Ajustes do Sistema › Privacidade e Segurança › Arquivos e Pastas"
+            ))
+        }
+        Err(_) => Err(NOT_A_REPO.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -313,7 +363,7 @@ mod tests {
     #[test]
     fn parse_history_skips_bad_lines() {
         let rows = parse_history(HISTORY);
-        assert_eq!(rows.len(), 8);
+        assert_eq!(rows.len(), 10);
         assert_eq!(rows[0].session_id, "aaaa-1");
         assert_eq!(rows[0].project, "/Users/me/github/mnemo");
     }
@@ -337,10 +387,15 @@ mod tests {
         }
     }
 
+    /// Nothing is protected: every cwd may be probed.
+    fn quiet(_: &str) -> bool {
+        true
+    }
+
     #[test]
     fn group_repos_collapses_worktrees_and_drops_non_git() {
         let sessions = sessions_from_history(&parse_history(HISTORY));
-        let repos = group_repos(sessions.into_values().collect(), &fake_root, &["/Users/me/github/other".to_string()], &[]);
+        let repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &["/Users/me/github/other".to_string()], &[]);
         let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["other", "mnemo"]);
         let mnemo = &repos[1];
@@ -355,12 +410,48 @@ mod tests {
     fn removed_dispatch_worktree_falls_back_to_the_sibling_repo() {
         // `/Users/me/github/mnemo-wt-999` no longer exists (fake_root → None) but `mnemo` does.
         let s = KnownSession { id: "w".into(), cwd: "/Users/me/github/mnemo-wt-999".into(), title: "t".into(), first_at: 5, last_at: 5 };
-        let repos = group_repos(vec![s], &fake_root, &[], &[]);
+        let repos = group_repos(vec![s], &fake_root, &quiet, &[], &[]);
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].root, "/Users/me/github/mnemo");
         assert_eq!(repos[0].sessions[0].cwd, "/Users/me/github/mnemo-wt-999");
         assert_eq!(worktree_sibling("/Users/me/github/plain"), None);
         assert_eq!(worktree_sibling("C:\\src\\mnemo-wt-3").as_deref(), Some("C:\\src\\mnemo"));
+    }
+
+    #[test]
+    fn protected_cwds_group_by_path_without_running_git() {
+        let sessions = sessions_from_history(&parse_history(HISTORY));
+        let probed = std::cell::RefCell::new(Vec::<String>::new());
+        let root_of = |p: &str| {
+            probed.borrow_mut().push(p.to_string());
+            fake_root(p)
+        };
+        let may_probe = |p: &str| !crate::mission::is_protected(p, "/Users/me");
+        let repos = group_repos(sessions.into_values().collect(), &root_of, &may_probe, &[], &[]);
+        assert!(probed.borrow().iter().all(|p| !p.contains("/Downloads")), "git ran in {:?}", probed.borrow());
+        let x = repos.iter().find(|r| r.root == "/Users/me/Downloads/x").unwrap();
+        assert!(x.unresolved);
+        assert_eq!(x.name, "x");
+        assert_eq!(x.sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["ffff-6"]);
+        // Its worktree is not folded into it until resolved (no sibling probe either).
+        let wt = repos.iter().find(|r| r.root == "/Users/me/Downloads/x-wt-2").unwrap();
+        assert!(wt.unresolved);
+        let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
+        assert!(!mnemo.unresolved);
+    }
+
+    #[test]
+    fn resolving_unlocks_the_path_and_keeps_denials_listed() {
+        use crate::mission::unlock_covers;
+        let ok = resolve_with("/Users/me/Downloads/r1/sub", &|_| Ok("/Users/me/Downloads/r1".into()));
+        assert_eq!(ok.as_deref(), Ok("/Users/me/Downloads/r1"));
+        assert!(unlock_covers("/Users/me/Downloads/r1/other"));
+        let not_git = resolve_with("/Users/me/Downloads/r2", &|_| Err("git rev-parse: fatal: not a git repository".into()));
+        assert_eq!(not_git, Err(NOT_A_REPO.to_string()));
+        assert!(unlock_covers("/Users/me/Downloads/r2"), "stays unlocked so the next snapshot drops it");
+        let denied = resolve_with("/Users/me/Downloads/r3", &|_| Err("git: Operation not permitted (os error 1)".into()));
+        assert!(denied.unwrap_err().contains("sem permissão"));
+        assert!(!unlock_covers("/Users/me/Downloads/r3"), "locked again so it stays listed, unresolved");
     }
 
     #[test]
@@ -373,7 +464,7 @@ mod tests {
     #[test]
     fn hidden_repos_are_flagged_not_dropped() {
         let sessions = sessions_from_history(&parse_history(HISTORY));
-        let repos = group_repos(sessions.into_values().collect(), &fake_root, &[], &["/Users/me/github/mnemo".to_string()]);
+        let repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &["/Users/me/github/mnemo".to_string()]);
         assert!(repos.iter().find(|r| r.name == "mnemo").unwrap().hidden);
     }
 
@@ -404,7 +495,7 @@ mod tests {
     #[test]
     fn join_marks_transcript_and_live_and_names() {
         let sessions = sessions_from_history(&parse_history(HISTORY));
-        let mut repos = group_repos(sessions.into_values().collect(), &fake_root, &[], &[]);
+        let mut repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &[]);
         let live = parse_live(r#"[{"id":"a","cwd":"/x","kind":"interactive","pid":10,"sessionId":"aaaa-1","name":"pty flake"}]"#).unwrap();
         join_live(&mut repos, &live, &[], &|_cwd, id| id == "aaaa-1");
         let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
@@ -424,7 +515,7 @@ mod tests {
         let snap = collect_home(&[], &[], &[], &[]);
         eprintln!("clone_base={} errors={:?}", snap.clone_base, snap.errors);
         for r in &snap.repos {
-            eprintln!("{:<28} {:>3} sessions  last={}  {}", r.name, r.sessions.len(), r.last_at, r.root);
+            eprintln!("{:<28} {:>3} sessions  last={}  unresolved={}  {}", r.name, r.sessions.len(), r.last_at, r.unresolved, r.root);
             for s in r.sessions.iter().take(3) {
                 eprintln!("    {:?} {:?} t={} {} | {}", s.live, s.transcript, s.kind, &s.id[..8], s.title);
             }

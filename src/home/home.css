@@ -17,6 +17,7 @@
 .hm-repo:hover { background: var(--bg-elev); }
 .hm-repo.hm-selected { background: var(--bg-elev); outline: 1px solid var(--border-focus); }
 .hm-repo.hm-hidden { opacity: .5; }
+.hm-repo.hm-unresolved .hm-repo-name { color: var(--fg-muted); font-weight: 400; }
 .hm-repo-name { font-weight: 700; }
 .hm-repo-path { grid-column: 1; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hm-repo-when { grid-column: 2; grid-row: 1 / span 2; color: var(--fg-muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
