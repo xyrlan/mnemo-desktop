@@ -26,6 +26,8 @@ whisper-rs = { version = "0.16", features = ["log_backend"] }
 cpal = "0.18"
 ureq = "3"
 tauri-plugin-dialog = "2"
+# Vault map (vaultmap.rs): wakes the born watcher when pages appear, change or go.
+notify = "8"
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
