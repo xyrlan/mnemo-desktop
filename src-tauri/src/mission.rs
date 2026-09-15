@@ -1284,7 +1284,8 @@ mod translate_tests {
         let dir = std::env::temp_dir().join(format!("mnemo-desktop-tr-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("claude");
-        std::fs::write(&fake, "#!/bin/sh\nprintf '  EN:%s  \\n' \"${@: -1}\"\n").unwrap();
+        // POSIX sh (dash on Ubuntu) has no `${@: -1}`; walk to the last argument instead.
+        std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\nprintf '  EN:%s  \\n' \"$last\"\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let out = translate_with(fake.to_str().unwrap(), "pode seguir").unwrap();
         assert!(out.starts_with("EN:Rewrite the following"), "{out}");
