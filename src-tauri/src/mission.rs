@@ -194,6 +194,22 @@ pub fn parse_agent_waiting(json: &str) -> HashMap<String, String> {
     out
 }
 
+/// What `id` (short or session id) is parked on right now, from `claude agents --json --all`:
+/// `Some("permission prompt")` while a dialog holds its keys, `None` otherwise. Err when no
+/// row has that id, so nothing is typed at a session Claude Code does not know.
+pub fn agent_waiting_for(json: &str, id: &str) -> Result<Option<String>, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| format!("agents json: {e}"))?;
+    let row = rows
+        .iter()
+        .find(|r| ["id", "sessionId"].iter().any(|k| r.get(*k).and_then(|v| v.as_str()) == Some(id)))
+        .ok_or_else(|| format!("{id} is not in `claude agents`"))?;
+    Ok(row.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()).map(str::to_string))
+}
+
+pub fn waiting_for(id: &str) -> Result<Option<String>, String> {
+    agent_waiting_for(&run("claude", &["agents", "--json", "--all"], None)?, id)
+}
+
 /// Marks each child with what its process waits for, matched by session id, else short id.
 pub fn apply_waiting(children: &mut [ChildSession], waiting: &HashMap<String, String>) {
     for c in children {
@@ -992,6 +1008,15 @@ mod tests {
         assert_eq!(bare[0].waiting_for, None);
         let json = serde_json::to_value(probe).unwrap();
         assert_eq!(json["waiting_for"], "permission prompt");
+    }
+
+    #[test]
+    fn waiting_for_reads_one_row_by_short_or_session_id() {
+        assert_eq!(agent_waiting_for(AGENTS, "987fb657").unwrap().as_deref(), Some("permission prompt"));
+        assert_eq!(agent_waiting_for(AGENTS, "987fb657-a6c1-4319-8547-49167aa01a65").unwrap().as_deref(), Some("permission prompt"));
+        assert_eq!(agent_waiting_for(AGENTS, "a43d3832").unwrap(), None);
+        assert!(agent_waiting_for(AGENTS, "nope").unwrap_err().contains("nope"));
+        assert!(agent_waiting_for("not json", "987fb657").is_err());
     }
 
     #[test]

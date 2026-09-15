@@ -122,6 +122,7 @@ pub fn run() {
             mission_commands::mission_mark_looked,
             mission_commands::mission_looked,
             mission_commands::mission_translate,
+            mission_commands::mission_waiting_for,
             settings::settings_read,
             settings::settings_write,
 

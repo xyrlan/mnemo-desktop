@@ -18,6 +18,10 @@ vi.mock('../cockpit/approve', async (orig) => ({
   answerPrompt: vi.fn(async (c: { id: string }, choice: string) => void answered.push([c.id, choice])),
 }))
 
+// Reply as me types into a real child's terminal; here it only records what was typed.
+const typedAsMe = vi.hoisted(() => [] as [string, string][])
+vi.mock('./as-me', () => ({ typeAsMe: vi.fn(async (id: string, text: string) => void typedAsMe.push([id, text])) }))
+
 import Sidebar from './Sidebar'
 import { missionStore } from './app-store'
 import { store as appStore } from '../layout/app-store'
@@ -92,6 +96,21 @@ test('a question keeps the reply field and gets an attach link', async () => {
   expect(blocked.querySelector('.m-permission')).toBeNull()
   await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'attach')!.click())
   expect(Object.values(appStore.getState().panes).find((p) => p.view === 'terminal-cmd')?.props).toEqual({ cmd: 'claude attach 094c6a03' })
+})
+
+test("reply as me refuses the prefilled suggestion and types the maintainer's own words into the child", async () => {
+  typedAsMe.length = 0
+  await render()
+  const blocked = host.querySelector('.nd-blocked')!
+  const asMe = blocked.querySelector<HTMLButtonElement>('button.m-as-me')!
+  expect(asMe.textContent).toBe('reply as me')
+  await act(async () => asMe.click())
+  expect(typedAsMe).toEqual([])
+  expect(blocked.querySelector('.m-error')?.textContent).toContain('suggested reply')
+  await act(async () => missionStore.getState().setDraft('094c6a03', 'sim, pode adicionar a crate'))
+  await act(async () => asMe.click())
+  expect(typedAsMe).toEqual([['094c6a03', 'sim, pode adicionar a crate']])
+  expect(blocked.querySelector('.m-sent')?.textContent).toContain('typed as you')
 })
 
 test('a child parked on a permission prompt shows the command and Aprovar / Negar, no reply field; y and n answer it', async () => {

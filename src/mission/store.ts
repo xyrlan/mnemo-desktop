@@ -15,10 +15,15 @@ export type MissionState = {
   drafts: Record<string, string>
   replyErrors: Record<string, string>
   sending: Record<string, boolean>
-  /** Replies that left this app, newest last; `text` is what went out, `original` what was typed. */
-  sent: Record<string, { at: number; text: string; original: string }[]>
+  /** A reply being typed into the child's terminal (`replyAsMe`). */
+  typing: Record<string, boolean>
+  /** Replies that left this app, newest last; `text` is what went out, `original` what was typed,
+   *  `asMe` when it was typed into the child's terminal instead of posted to its inbox. */
+  sent: Record<string, Sent[]>
   translating: Record<string, boolean>
 }
+
+export type Sent = { at: number; text: string; original: string; asMe?: boolean }
 
 export type MissionActions = {
   refresh(focusedCwd: string | undefined, withPrs: boolean): Promise<void>
@@ -28,6 +33,10 @@ export type MissionActions = {
   setSidebarWidth(w: number): void
   setDraft(id: string, text: string): void
   sendReply(id: string): Promise<boolean>
+  /** Types the draft, exactly as written, into the child's terminal through `claude attach`, so
+   *  the child reads it as its user's turn and it can approve a push or a PR. `suggested` is the
+   *  child's own suggested reply: sent unedited it would be the child approving itself. */
+  replyAsMe(id: string, suggested?: string | null): Promise<boolean>
   /** Replace the draft with its English translation (via `claude -p`). */
   translateDraft(id: string): Promise<boolean>
 }
@@ -49,6 +58,7 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
     drafts: {},
     replyErrors: {},
     sending: {},
+    typing: {},
     sent: {},
     translating: {},
 
@@ -120,6 +130,30 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
         return false
       } finally {
         set((s) => ({ sending: { ...s.sending, [id]: false } }))
+      }
+    },
+
+    async replyAsMe(id, suggested) {
+      const text = (get().drafts[id] ?? '').trim()
+      if (!text) return false
+      if (suggested && text === suggested.trim()) {
+        set((s) => ({ replyErrors: { ...s.replyErrors, [id]: "this is the child's suggested reply, not yours: edit it, or send it as a message" } }))
+        return false
+      }
+      set((s) => ({ typing: { ...s.typing, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
+      try {
+        // No English rewrite and no language footer: an approval reaches the child in the words typed.
+        await client.typeAsMe(id, text)
+        set((s) => ({
+          drafts: { ...s.drafts, [id]: '' },
+          sent: { ...s.sent, [id]: [...(s.sent[id] ?? []), { at: Date.now(), text, original: text, asMe: true }] },
+        }))
+        return true
+      } catch (e) {
+        set((s) => ({ replyErrors: { ...s.replyErrors, [id]: e instanceof Error ? e.message : String(e) } }))
+        return false
+      } finally {
+        set((s) => ({ typing: { ...s.typing, [id]: false } }))
       }
     },
 
