@@ -18,6 +18,8 @@ export type HomeState = {
   selected: string | null
   filter: string
   showHidden: boolean
+  /** Unresolved protected folders listed without a filter. */
+  showProtected: boolean
   cloneSpec: string
   /** Roots opened or cloned this run that history does not know yet. */
   extraRoots: string[]
@@ -29,6 +31,7 @@ export type HomeActions = {
   select(root: string): Promise<void>
   setFilter(q: string): void
   setShowHidden(v: boolean): void
+  setShowProtected(v: boolean): void
   setCloneSpec(s: string): void
   togglePin(root: string): Promise<void>
   toggleHidden(root: string): Promise<void>
@@ -50,6 +53,7 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
     selected: null,
     filter: '',
     showHidden: false,
+    showProtected: false,
     cloneSpec: '',
     extraRoots: [],
     notice: null,
@@ -62,7 +66,9 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
         const snapshot = await client.snapshot({ here, pinned: s.homePinned, hidden: s.homeHidden, extraRoots: get().extraRoots })
         const selected = get().selected
         const keep = selected !== null && snapshot.repos.some((r) => r.root === selected)
-        const first = snapshot.repos.find((r) => !r.hidden && !r.unresolved) ?? snapshot.repos.find((r) => !r.hidden)
+        // Never an unresolved repo: it may be folded out of the list, and selecting one is a
+        // user's act (it runs git where macOS may ask).
+        const first = snapshot.repos.find((r) => !r.hidden && !r.unresolved)
         set({ snapshot, loading: false, selected: keep ? selected : (first?.root ?? null) })
       } catch (e) {
         set({ loading: false, notice: String(e) })
@@ -80,6 +86,7 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
     },
     setFilter: (filter) => set({ filter }),
     setShowHidden: (showHidden) => set({ showHidden }),
+    setShowProtected: (showProtected) => set({ showProtected }),
     setCloneSpec: (cloneSpec) => set({ cloneSpec }),
     async togglePin(root) {
       await setSetting('homePinned', toggle(settings().homePinned, root))

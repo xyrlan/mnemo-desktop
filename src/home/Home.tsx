@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { homeStore, useHome } from './app-store'
-import { relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
+import { isFolded, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
 import { store as layout, useApp } from '../layout/app-store'
 import { Wordmark } from '../brand/Wordmark'
 import Account from '../github/Account'
@@ -33,7 +33,7 @@ function Entry() {
 }
 
 function RepoRow({ r, selected }: { r: HomeRepo; selected: boolean }) {
-  const live = r.sessions.some((s) => s.live)
+  const live = r.sessions.some((s) => s.live) || r.children.some((s) => s.live)
   return (
     <button
       className={`hm-repo${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}${r.unresolved ? ' hm-unresolved' : ''}`}
@@ -67,6 +67,11 @@ function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
     >
       {s.live && <span className={`hm-live hm-live-${s.live}`}>{BADGE[s.live]}</span>}
       <span className="hm-session-title">{s.title || s.id.slice(0, 8)}</span>
+      {s.agent && (
+        <span className="hm-agent" title="nome em claude agents">
+          {s.agent}
+        </span>
+      )}
       <span className="hm-session-meta">
         {s.cwd !== repo.root && <span className="hm-session-cwd">{short(s.cwd)}</span>}
         {relTime(s.last_at)}
@@ -75,11 +80,43 @@ function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
   )
 }
 
+/** Background children of dispatches: one collapsed row per repo, rows on click. */
+function Children({ repo }: { repo: HomeRepo }) {
+  const [open, setOpen] = useState(false)
+  const kids = repo.children
+  const live = kids.filter((s) => s.live).length
+  return (
+    <>
+      <button className={`hm-session hm-children${open ? ' hm-open' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="hm-caret">{open ? '▾' : '▸'}</span>
+        <span className="hm-session-title">filhos de dispatch ({kids.length})</span>
+        <span className="hm-session-meta">
+          {live > 0 && (
+            <span className="hm-children-live">
+              <span className="hm-dot" />
+              {live}
+            </span>
+          )}
+          {relTime(kids[0]?.last_at ?? 0)}
+        </span>
+      </button>
+      {open && (
+        <div className="hm-children-rows">
+          {kids.map((s) => (
+            <SessionRow key={s.id} repo={repo} s={s} />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function Home() {
   const snap = useHome((s) => s.snapshot)
   const selected = useHome((s) => s.selected)
   const filter = useHome((s) => s.filter)
   const showHidden = useHome((s) => s.showHidden)
+  const showProtected = useHome((s) => s.showProtected)
   const notice = useHome((s) => s.notice)
   const tabs = useApp((s) => s.tabs)
   const h = homeStore.getState()
@@ -88,7 +125,8 @@ export default function Home() {
     void homeStore.getState().load()
   }, [])
 
-  const repos = visibleRepos(snap.repos, filter, showHidden)
+  const repos = visibleRepos(snap.repos, filter, showHidden, showProtected)
+  const folded = snap.repos.filter(isFolded).length
   const repo = snap.repos.find((r) => r.root === selected) ?? null
   const hiddenCount = snap.repos.filter((r) => r.hidden).length
 
@@ -124,6 +162,11 @@ export default function Home() {
           {repos.map((r) => (
             <RepoRow key={r.root} r={r} selected={r.root === selected} />
           ))}
+          {folded > 0 && (
+            <button className="hm-link hm-protected" onClick={() => h.setShowProtected(!showProtected)} title="pastas que o macOS protege (Downloads, Desktop, Documents, volumes); selecionar uma lê o repositório">
+              {showProtected ? 'ocultar pastas protegidas' : `${folded} pasta${folded > 1 ? 's' : ''} protegida${folded > 1 ? 's' : ''} · mostrar`}
+            </button>
+          )}
           {hiddenCount > 0 && (
             <button className="hm-link" onClick={() => h.setShowHidden(!showHidden)}>
               {showHidden ? 'ocultar escondidos' : `${hiddenCount} escondido${hiddenCount > 1 ? 's' : ''}`}
@@ -151,7 +194,8 @@ export default function Home() {
                   </button>
                 </span>
               </div>
-              {repo.sessions.length === 0 ? (
+              {repo.children.length > 0 && <Children key={repo.root} repo={repo} />}
+              {repo.sessions.length === 0 && repo.children.length === 0 ? (
                 <p className="hm-muted">Nenhuma sessão ainda.</p>
               ) : (
                 repo.sessions.map((s) => <SessionRow key={s.id} repo={repo} s={s} />)
