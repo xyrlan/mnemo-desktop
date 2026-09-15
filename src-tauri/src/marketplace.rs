@@ -1442,7 +1442,8 @@ mod tests {
             "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         );
         assert_eq!(sha256_hex(&[b'a'; 1000]), "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3");
-        let text = std::fs::read_to_string(Path::new(FIXTURE).join(".mnemo-shared/project/shared-target-dir.md")).unwrap();
+        // A CRLF checkout (Windows runners) must not double the CR when the test re-adds it.
+        let text = std::fs::read_to_string(Path::new(FIXTURE).join(".mnemo-shared/project/shared-target-dir.md")).unwrap().replace("\r\n", "\n");
         assert_eq!(portable_hash(&text), LocalVault::read(Path::new(VAULT)).imported["project/shared-target-dir"]);
         assert_eq!(portable_hash(&text.replace('\n', "\r\n")), portable_hash(&text), "a CRLF checkout hashes the same");
     }
@@ -1493,7 +1494,8 @@ mod tests {
         std::fs::write(&manifest, &text).unwrap();
         assert_eq!(standing_of(&tree, &vault, rel), Standing::New, "another hash, published from another checkout");
         let repo = tree.parent().unwrap();
-        let text = text.replace("/Users/me/github/mnemo-desktop", &repo.to_string_lossy());
+        // The manifest is JSON: a Windows path needs its backslashes escaped.
+        let text = text.replace("/Users/me/github/mnemo-desktop", &repo.to_string_lossy().replace('\\', "\\\\"));
         std::fs::write(&manifest, text).unwrap();
         let page_text = std::fs::read_to_string(tree.join(rel)).unwrap();
         let v = LocalVault::read(&vault);

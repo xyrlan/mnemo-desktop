@@ -367,7 +367,8 @@ pub fn is_noise(name: &str) -> bool {
 pub fn read_tree(root: &Path) -> Vec<Agent> {
     let agent = |name: String, kind: &str, dir: PathBuf| {
         let pages: Vec<PageInfo> = page_files(&dir).iter().filter_map(|f| read_page(f)).map(|p| p.info).collect();
-        (!pages.is_empty()).then(|| Agent { name, kind: kind.to_string(), dir: dir.to_string_lossy().to_string(), groups: group(pages) })
+        // Forward slashes everywhere: the front-end shows and joins these, and Windows accepts them.
+        (!pages.is_empty()).then(|| Agent { name, kind: kind.to_string(), dir: dir.to_string_lossy().replace('\\', "/"), groups: group(pages) })
     };
     let mut out: Vec<Agent> = agent("shared".into(), "shared", root.join("shared")).into_iter().collect();
     let mut bots: Vec<PathBuf> = std::fs::read_dir(root.join("bots")).into_iter().flatten().flatten().map(|e| e.path()).collect();
