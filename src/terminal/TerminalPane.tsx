@@ -7,8 +7,9 @@ import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7 } from './osc7'
+import { registerPaneView, type PaneViewProps } from '../panes/registry'
 
-export default function TerminalPane({ id }: { id: number }) {
+export default function TerminalPane({ id }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
@@ -76,9 +77,7 @@ export default function TerminalPane({ id }: { id: number }) {
   const close = () => void store.getState().closePane()
   return (
     <div
-      className={`pane${focused ? ' focused' : ''}`}
-      data-pane={id}
-      onMouseDown={() => store.getState().focusPane(id)}
+      className="pane-body"
       onKeyDown={exited ? close : undefined}
       tabIndex={exited || broken ? 0 : -1}
     >
@@ -95,3 +94,5 @@ export default function TerminalPane({ id }: { id: number }) {
     </div>
   )
 }
+
+registerPaneView('terminal', TerminalPane)

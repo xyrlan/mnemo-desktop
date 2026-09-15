@@ -4,7 +4,19 @@ import { closeLeaf, leaf, leaves, replaceRatio, splitAt, type Dir, type Node, ty
 import type { PtyClient } from '../pty/client'
 
 export type Tab = { id: string; root: Node; focused: PaneId }
-export type Pane = { id: PaneId; cwd?: string; title?: string; exitCode?: number | null; error?: string }
+/** `view` names the registered renderer (see panes/registry). Terminal panes have a
+ *  positive id issued by the Rust core; every other view gets a negative synthetic id
+ *  and never crosses the PTY boundary. */
+export type Pane = {
+  id: PaneId
+  view: string
+  props?: Record<string, unknown>
+  cwd?: string
+  title?: string
+  exitCode?: number | null
+  error?: string
+}
+export type Place = 'tab' | 'split-row' | 'split-col'
 
 export type State = {
   tabs: Tab[]
@@ -18,6 +30,8 @@ export type State = {
 export type Actions = {
   newTab(cwd?: string): Promise<void>
   split(dir: Dir): Promise<void>
+  /** Open a non-terminal view (editor, browser, mission…) as a new tab or a split of the focused pane. */
+  openView(view: string, props: Record<string, unknown>, place: Place, title?: string): void
   closePane(): Promise<void>
   focusPane(id: PaneId): void
   goToTab(index: number): void
@@ -64,12 +78,12 @@ export function createStore(pty: PtyClient): Store {
         })
         assigned = id
         if (early.length) pending.set(id, [...(pending.get(id) ?? []), ...early])
-        set((s) => ({ panes: { ...s.panes, [id]: { id, cwd } } }))
+        set((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal', cwd } } }))
         void pty.onExit(id, (code) => get().paneExited(id, code))
         return id
       } catch (e) {
         const id = synthetic--
-        set((s) => ({ panes: { ...s.panes, [id]: { id, error: String(e) } } }))
+        set((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal', error: String(e) } } }))
         return id
       }
     }
@@ -120,6 +134,26 @@ export function createStore(pty: PtyClient): Store {
           return { tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root, focused } : t)), panes, sinks }
         })
         if (get().tabs.length === 0) await get().newTab()
+      },
+
+      openView(view, props, place, title) {
+        const id = synthetic--
+        set((s) => ({ panes: { ...s.panes, [id]: { id, view, props, title } } }))
+        if (place === 'tab') {
+          const tab: Tab = { id: `tab-${id}`, root: leaf(id), focused: id }
+          set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id }))
+          return
+        }
+        const tab = active()
+        if (!tab) {
+          const t: Tab = { id: `tab-${id}`, root: leaf(id), focused: id }
+          set((s) => ({ tabs: [...s.tabs, t], activeTab: t.id }))
+          return
+        }
+        const dir: Dir = place === 'split-row' ? 'row' : 'col'
+        set((s) => ({
+          tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root: splitAt(t.root, tab.focused, id, dir), focused: id } : t)),
+        }))
       },
 
       focusPane(id) {

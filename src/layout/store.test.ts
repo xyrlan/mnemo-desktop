@@ -31,7 +31,7 @@ test('boot creates one tab with one pane', async () => {
   expect(st.tabs).toHaveLength(1)
   expect(st.tabs[0].root).toEqual({ kind: 'leaf', pane: 1 })
   expect(st.tabs[0].focused).toBe(1)
-  expect(st.panes[1]).toEqual({ id: 1, cwd: undefined })
+  expect(st.panes[1]).toEqual({ id: 1, view: 'terminal', cwd: undefined })
 })
 
 test('split focuses the new pane and inherits cwd', async () => {
@@ -95,7 +95,7 @@ test('setCwd and setTitle update the pane record', async () => {
   await s.getState().newTab()
   s.getState().setCwd(1, '/tmp')
   s.getState().setTitle(1, 'vim')
-  expect(s.getState().panes[1]).toEqual({ id: 1, cwd: '/tmp', title: 'vim' })
+  expect(s.getState().panes[1]).toEqual({ id: 1, view: 'terminal', cwd: '/tmp', title: 'vim' })
 })
 
 test('paneExited marks the pane', async () => {
@@ -136,4 +136,25 @@ test('output before the pane attaches is buffered, including bytes sent before s
   expect(got).toEqual([36, 32, 104, 105])
   pty.outputs[1](new Uint8Array([33]))
   expect(got).toEqual([36, 32, 104, 105, 33])
+})
+
+test('openView adds a negative-id pane as a split and never touches the PTY', async () => {
+  const pty = fakePty()
+  const s = createStore(pty)
+  await s.getState().newTab()
+  s.getState().openView('editor', { path: '/a.ts' }, 'split-row', 'a.ts')
+  const t = s.getState().tabs[0]
+  expect(t.root.kind).toBe('split')
+  expect(t.focused).toBeLessThan(0)
+  expect(s.getState().panes[t.focused]).toEqual({ id: t.focused, view: 'editor', props: { path: '/a.ts' }, title: 'a.ts' })
+  await s.getState().closePane()
+  expect(pty.killed).toEqual([])
+  expect(s.getState().tabs[0].root).toEqual({ kind: 'leaf', pane: 1 })
+})
+
+test('openView as a tab works on an empty store', () => {
+  const s = createStore(fakePty())
+  s.getState().openView('mission', {}, 'tab')
+  expect(s.getState().tabs).toHaveLength(1)
+  expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
 })

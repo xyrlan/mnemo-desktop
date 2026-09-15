@@ -4,6 +4,7 @@ import SplitView from './layout/SplitView'
 import Palette from './palette/Palette'
 import { installKeys } from './actions/keys'
 import { registerBuiltins } from './actions/registry'
+import './terminal/TerminalPane'
 
 registerBuiltins(store)
 
