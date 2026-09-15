@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import type { HomeSnapshot } from "./types";
 
 /** What `home_snapshot` answers; Home loads on mount, so the store state alone is not enough. */
-let current: HomeSnapshot = { repos: [], clone_base: "/gh", errors: [] };
+let current: HomeSnapshot = { repos: [], clone_base: "/gh", errors: [], protected: 0 };
 /** What `gh_auth` answers; `{}` renders nothing on the header's right side. */
 let auth: unknown = {};
 vi.mock("@tauri-apps/api/core", () => ({
@@ -55,6 +55,7 @@ test("renders repos and sessions from the store, live badge and disabled row", a
             transcript: true,
             live: "elsewhere",
             kind: "interactive",
+            agent: null,
           },
           {
             id: "s2",
@@ -64,12 +65,15 @@ test("renders repos and sessions from the store, live badge and disabled row", a
             transcript: false,
             live: null,
             kind: "interactive",
+            agent: null,
           },
         ],
+        children: [],
       },
     ],
     clone_base: "/gh",
     errors: [],
+    protected: 0,
   };
   homeStore.setState({ selected: null });
   await act(async () => root.render(<Home />));
@@ -89,15 +93,15 @@ test("renders repos and sessions from the store, live badge and disabled row", a
 });
 
 test("empty history shows the two entry buttons", async () => {
-  current = { repos: [], clone_base: "/gh", errors: [] };
+  current = { repos: [], clone_base: "/gh", errors: [], protected: 0 };
   homeStore.setState({ selected: null });
   await act(async () => root.render(<Home />));
   expect(host.querySelector(".hm-empty")).not.toBeNull();
   expect(host.querySelectorAll(".hm-empty button")).toHaveLength(2);
 });
 
-test("an unresolved repo is muted and not auto-selected", async () => {
-  const repo = { name: "", last_at: 1, pinned: false, hidden: false, sessions: [] };
+test("an unresolved repo is folded behind one line, muted when shown, and not auto-selected", async () => {
+  const repo = { name: "", last_at: 1, pinned: false, hidden: false, sessions: [], children: [] };
   current = {
     repos: [
       { ...repo, root: "/Users/me/Downloads/x", name: "x", unresolved: true },
@@ -105,19 +109,73 @@ test("an unresolved repo is muted and not auto-selected", async () => {
     ],
     clone_base: "/gh",
     errors: [],
+    protected: 1,
   };
-  homeStore.setState({ selected: null });
+  homeStore.setState({ selected: null, filter: "", showProtected: false });
   await act(async () => root.render(<Home />));
+  expect(host.querySelectorAll(".hm-repo")).toHaveLength(1);
+  const line = host.querySelector<HTMLButtonElement>(".hm-protected")!;
+  expect(line.textContent).toBe("1 pasta protegida · mostrar");
+  act(() => line.click());
   const rows = host.querySelectorAll(".hm-repo");
   expect(rows[0].classList.contains("hm-unresolved")).toBe(true);
   expect(rows[1].classList.contains("hm-unresolved")).toBe(false);
   expect(host.querySelector(".hm-repo.hm-selected .hm-repo-name")?.textContent).toBe("b");
+  expect(host.querySelector(".hm-protected")?.textContent).toBe("ocultar pastas protegidas");
+  // Folded again; a typed filter that matches brings it back on its own.
+  act(() => host.querySelector<HTMLButtonElement>(".hm-protected")!.click());
+  act(() => homeStore.getState().setFilter("downloads"));
+  expect([...host.querySelectorAll(".hm-repo-name")].map((n) => n.textContent)).toEqual(["x"]);
+  act(() => homeStore.getState().setFilter(""));
+});
+
+test("dispatch children sit under one collapsed row; the agent name is a badge beside the prompt", async () => {
+  const sess = { cwd: "/gh/a", last_at: 1, transcript: true, live: null, kind: "interactive", agent: null };
+  current = {
+    repos: [
+      {
+        root: "/gh/a",
+        name: "a",
+        last_at: 5,
+        pinned: false,
+        hidden: false,
+        unresolved: false,
+        sessions: [{ ...sess, id: "s1", title: "melhorar a primeira tela", live: "elsewhere", agent: "a-f2" }],
+        children: [
+          { ...sess, id: "c1", title: "Work on issue #288 in this repo", cwd: "/gh/a-wt-288", live: "bg", kind: "background" },
+          { ...sess, id: "c2", title: "Work on issue #287 in this repo", cwd: "/gh/a-wt-287" },
+        ],
+      },
+    ],
+    clone_base: "/gh",
+    errors: [],
+    protected: 0,
+  };
+  homeStore.setState({ selected: null });
+  await act(async () => root.render(<Home />));
+  const titles = () => [...host.querySelectorAll(".hm-session-title")].map((n) => n.textContent);
+  expect(titles()).toEqual(["filhos de dispatch (2)", "melhorar a primeira tela"]);
+  expect(host.querySelector(".hm-agent")?.textContent).toBe("a-f2");
+  const group = host.querySelector<HTMLButtonElement>(".hm-children")!;
+  expect(group.getAttribute("aria-expanded")).toBe("false");
+  act(() => group.click());
+  expect(titles()).toEqual([
+    "filhos de dispatch (2)",
+    "Work on issue #288 in this repo",
+    "Work on issue #287 in this repo",
+    "melhorar a primeira tela",
+  ]);
+  const kids = host.querySelectorAll(".hm-children-rows .hm-session");
+  expect(kids[0].querySelector(".hm-live")?.textContent).toBe("background");
+  act(() => group.click());
+  expect(host.querySelectorAll(".hm-children-rows")).toHaveLength(0);
 });
 
 const oneRepo = (): HomeSnapshot => ({
-  repos: [{ root: "/gh/a", name: "a", last_at: 1, pinned: false, hidden: false, unresolved: false, sessions: [] }],
+  repos: [{ root: "/gh/a", name: "a", last_at: 1, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }],
   clone_base: "/gh",
   errors: [],
+  protected: 0,
 });
 
 test("header right side: @login when gh is logged in, the wordmark and repo rows stay", async () => {

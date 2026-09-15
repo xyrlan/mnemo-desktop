@@ -44,8 +44,13 @@ fn cut(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
-/// Sessions keyed by id. Title = first prompt that is not a slash command (else the
-/// first prompt), cut to `TITLE_MAX` chars; `cwd` = the project of the first row.
+/// A prompt worth a title: not a slash command and at least 4 characters (`a`, `ok`).
+fn is_real_prompt(line: &str) -> bool {
+    !line.starts_with('/') && line.chars().count() >= 4
+}
+
+/// Sessions keyed by id. Title = first real prompt (`is_real_prompt`), else the first
+/// prompt, cut to `TITLE_MAX` chars; `cwd` = the project of the first row.
 pub fn sessions_from_history(rows: &[HistoryRow]) -> HashMap<String, KnownSession> {
     let mut out: HashMap<String, KnownSession> = HashMap::new();
     for r in rows {
@@ -59,8 +64,7 @@ pub fn sessions_from_history(rows: &[HistoryRow]) -> HashMap<String, KnownSessio
         });
         e.last_at = e.last_at.max(r.ts);
         e.first_at = e.first_at.min(r.ts);
-        let is_slash = line.starts_with('/');
-        if !line.is_empty() && (e.title.is_empty() || (e.title.starts_with('/') && !is_slash)) {
+        if !line.is_empty() && (e.title.is_empty() || (!is_real_prompt(&e.title) && is_real_prompt(&line))) {
             e.title = cut(&line, TITLE_MAX);
         }
     }
@@ -85,6 +89,8 @@ pub struct HomeSession {
     pub live: Option<Live>,
     /// "interactive" | "background", from `claude agents`; "interactive" when unknown.
     pub kind: String,
+    /// The `claude agents` name of a live session, only when it differs from `title`.
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -98,7 +104,11 @@ pub struct HomeRepo {
     /// without running git: `root` may be a subdirectory or a worktree until the user selects
     /// it and `home_resolve_repo` runs.
     pub unresolved: bool,
+    /// The user's own sessions.
     pub sessions: Vec<HomeSession>,
+    /// Sessions run in a dispatch worktree beside the repo (`<name>-wt-<n>`, see
+    /// `is_dispatch_child`): background children of a dispatch, not the user's conversations.
+    pub children: Vec<HomeSession>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -106,6 +116,9 @@ pub struct HomeSnapshot {
     pub repos: Vec<HomeRepo>,
     pub clone_base: String,
     pub errors: Vec<String>,
+    /// Unresolved repos neither hidden nor pinned: the view keeps them behind one
+    /// "N pastas protegidas" line.
+    pub protected: u32,
 }
 
 pub const SESSIONS_PER_REPO: usize = 50;
@@ -164,6 +177,18 @@ pub fn worktree_sibling(cwd: &str) -> Option<String> {
     Some(format!("{}{}", &cut[..start], &name[..idx]))
 }
 
+/// A session whose cwd is a dispatch worktree (`mnemo-wt-288`) rather than the checkout the
+/// user works in.
+pub fn is_dispatch_child(cwd: &str) -> bool {
+    worktree_sibling(cwd).is_some()
+}
+
+/// Unresolved repos the view folds away: not hidden (already behind "escondidos") and not
+/// pinned (the user asked for those).
+pub fn protected_count(repos: &[HomeRepo]) -> u32 {
+    repos.iter().filter(|r| r.unresolved && !r.hidden && !r.pinned).count() as u32
+}
+
 /// Roots Home never lists: Claude Code's own scratch clones under `~/.claude/`.
 pub fn is_internal_root(root: &str, home: &str) -> bool {
     !home.is_empty() && Path::new(root).starts_with(Path::new(home).join(".claude"))
@@ -209,33 +234,41 @@ pub fn group_repos(
     }
     let mut repos: Vec<HomeRepo> = by_root
         .into_iter()
-        .map(|(root, (mut ss, unresolved))| {
-            ss.sort_by(|a, b| b.last_at.cmp(&a.last_at));
-            ss.truncate(SESSIONS_PER_REPO);
+        .map(|(root, (ss, unresolved))| {
+            let last_at = ss.iter().map(|s| s.last_at).max().unwrap_or(0);
+            let (children, own): (Vec<_>, Vec<_>) = ss.into_iter().partition(|s| s.cwd != root && is_dispatch_child(&s.cwd));
             HomeRepo {
                 name: basename(&root),
-                last_at: ss.iter().map(|s| s.last_at).max().unwrap_or(0),
+                last_at,
                 pinned: pinned.contains(&root),
                 hidden: hidden.contains(&root),
                 unresolved,
-                sessions: ss
-                    .into_iter()
-                    .map(|s| HomeSession {
-                        id: s.id,
-                        title: s.title,
-                        cwd: s.cwd,
-                        last_at: s.last_at,
-                        transcript: false,
-                        live: None,
-                        kind: "interactive".into(),
-                    })
-                    .collect(),
+                sessions: home_sessions(own),
+                children: home_sessions(children),
                 root,
             }
         })
         .collect();
     sort_repos(&mut repos);
     repos
+}
+
+/// Newest first, at most `SESSIONS_PER_REPO`, not yet joined with live agents.
+fn home_sessions(mut ss: Vec<KnownSession>) -> Vec<HomeSession> {
+    ss.sort_by(|a, b| b.last_at.cmp(&a.last_at).then(a.id.cmp(&b.id)));
+    ss.truncate(SESSIONS_PER_REPO);
+    ss.into_iter()
+        .map(|s| HomeSession {
+            id: s.id,
+            title: s.title,
+            cwd: s.cwd,
+            last_at: s.last_at,
+            transcript: false,
+            live: None,
+            kind: "interactive".into(),
+            agent: None,
+        })
+        .collect()
 }
 
 /// Where clones go by default: the parent directory most repos share, else `<home>/github`.
@@ -253,7 +286,9 @@ pub fn clone_base(roots: &[String], home: &str) -> String {
         .unwrap_or_else(|| format!("{home}/github"))
 }
 
-/// Fill `live`, `kind`, `transcript`, and prefer the agent's `name` as title.
+/// Fill `live`, `kind`, `transcript`. The title stays the history prompt; the agent's `name`
+/// (an id-ish label like `mnemo-f2`) becomes the title only when history has none, else
+/// `agent` when it says something else.
 pub fn join_live(
     repos: &mut [HomeRepo],
     live: &HashMap<String, LiveRow>,
@@ -261,13 +296,17 @@ pub fn join_live(
     has_transcript: &dyn Fn(&str, &str) -> bool,
 ) {
     for r in repos.iter_mut() {
-        for s in r.sessions.iter_mut() {
+        for s in r.sessions.iter_mut().chain(r.children.iter_mut()) {
             s.transcript = has_transcript(&s.cwd, &s.id);
             s.live = classify_live(live, &s.id, here);
             if let Some(row) = live.get(&s.id) {
                 s.kind = row.kind.clone();
-                if let Some(n) = row.name.as_ref().filter(|n| !n.is_empty()) {
-                    s.title = cut(n, TITLE_MAX);
+                if let Some(n) = row.name.as_ref().map(|n| cut(n.trim(), TITLE_MAX)).filter(|n| !n.is_empty()) {
+                    if s.title.is_empty() {
+                        s.title = n;
+                    } else if n != s.title {
+                        s.agent = Some(n);
+                    }
                 }
             }
         }
@@ -307,6 +346,7 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
                 hidden: hidden.contains(root),
                 unresolved: !crate::mission::may_probe(root),
                 sessions: vec![],
+                children: vec![],
             });
         }
     }
@@ -320,7 +360,8 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
     };
     join_live(&mut repos, &live, here, &|cwd, id| crate::mission::transcript_path(cwd, id).is_some());
     let roots: Vec<String> = repos.iter().map(|r| r.root.clone()).collect();
-    HomeSnapshot { repos, clone_base: clone_base(&roots, &home), errors }
+    let protected = protected_count(&repos);
+    HomeSnapshot { repos, clone_base: clone_base(&roots, &home), errors, protected }
 }
 
 /// A folder the user picked: its main-checkout root, or an error when it is not a git repo.
@@ -363,7 +404,7 @@ mod tests {
     #[test]
     fn parse_history_skips_bad_lines() {
         let rows = parse_history(HISTORY);
-        assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len(), 14);
         assert_eq!(rows[0].session_id, "aaaa-1");
         assert_eq!(rows[0].project, "/Users/me/github/mnemo");
     }
@@ -377,6 +418,9 @@ mod tests {
         assert_eq!(s["cccc-3"].title.len(), 80);
         // Only slash prompts: fall back to the slash command itself.
         assert_eq!(s["dddd-4"].title, "/help");
+        // `a` is too short and `/resume` a command: the next real prompt wins.
+        assert_eq!(s["hhhh-8"].title, "port the sidebar tests");
+        assert!(!is_real_prompt("abc") && is_real_prompt("usage") && !is_real_prompt("/resume"));
     }
 
     fn fake_root(p: &str) -> Option<String> {
@@ -399,11 +443,41 @@ mod tests {
         let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["other", "mnemo"]);
         let mnemo = &repos[1];
-        assert_eq!(mnemo.sessions.len(), 2);
-        assert_eq!(mnemo.sessions[0].id, "cccc-3");
-        assert_eq!(mnemo.sessions[0].cwd, "/Users/me/github/mnemo-wt-233");
-        assert_eq!(mnemo.last_at, 1789310001000);
+        assert_eq!(mnemo.sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["hhhh-8", "aaaa-1"]);
+        // The worktree's session folds into mnemo, as a dispatch child.
+        assert_eq!(mnemo.children.iter().find(|s| s.id == "cccc-3").unwrap().cwd, "/Users/me/github/mnemo-wt-233");
         assert!(repos[0].pinned && !repos[1].pinned);
+    }
+
+    #[test]
+    fn dispatch_children_are_split_out_of_sessions() {
+        let sessions = sessions_from_history(&parse_history(HISTORY));
+        // `mnemo-wt-288` is gone from disk: it still lands as a child of mnemo.
+        let repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &[]);
+        let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
+        assert_eq!(mnemo.children.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["iiii-9", "cccc-3"]);
+        assert!(mnemo.sessions.iter().all(|s| !is_dispatch_child(&s.cwd)));
+        assert_eq!(mnemo.last_at, 1789360000000);
+        // A repo whose own folder carries the suffix keeps its sessions.
+        let s = KnownSession { id: "o".into(), cwd: "/gh/tool-wt-1".into(), title: "t".into(), first_at: 1, last_at: 1 };
+        let repos = group_repos(vec![s], &|p| Some(p.to_string()), &quiet, &[], &[]);
+        assert_eq!((repos[0].sessions.len(), repos[0].children.len()), (1, 0));
+    }
+
+    #[test]
+    fn protected_counts_unresolved_repos_not_hidden_or_pinned() {
+        let sessions = sessions_from_history(&parse_history(HISTORY));
+        let may_probe = |p: &str| !crate::mission::is_protected(p, "/Users/me");
+        let repos = group_repos(sessions.clone().into_values().collect(), &fake_root, &may_probe, &[], &[]);
+        assert_eq!(protected_count(&repos), 2);
+        let repos = group_repos(
+            sessions.into_values().collect(),
+            &fake_root,
+            &may_probe,
+            &["/Users/me/Downloads/x".to_string()],
+            &["/Users/me/Downloads/x-wt-2".to_string()],
+        );
+        assert_eq!(protected_count(&repos), 0);
     }
 
     #[test]
@@ -413,7 +487,7 @@ mod tests {
         let repos = group_repos(vec![s], &fake_root, &quiet, &[], &[]);
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].root, "/Users/me/github/mnemo");
-        assert_eq!(repos[0].sessions[0].cwd, "/Users/me/github/mnemo-wt-999");
+        assert_eq!(repos[0].children[0].cwd, "/Users/me/github/mnemo-wt-999");
         assert_eq!(worktree_sibling("/Users/me/github/plain"), None);
         assert_eq!(worktree_sibling("C:\\src\\mnemo-wt-3").as_deref(), Some("C:\\src\\mnemo"));
     }
@@ -496,16 +570,37 @@ mod tests {
     fn join_marks_transcript_and_live_and_names() {
         let sessions = sessions_from_history(&parse_history(HISTORY));
         let mut repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &[]);
-        let live = parse_live(r#"[{"id":"a","cwd":"/x","kind":"interactive","pid":10,"sessionId":"aaaa-1","name":"pty flake"}]"#).unwrap();
+        let live = parse_live(
+            r#"[{"id":"a","cwd":"/x","kind":"interactive","pid":10,"sessionId":"aaaa-1","name":"mnemo-f2"},
+                {"id":"h","cwd":"/x","kind":"interactive","pid":12,"sessionId":"hhhh-8","name":"port the sidebar tests"},
+                {"id":"i","cwd":"/x","kind":"background","sessionId":"iiii-9","name":"issue 288","state":"working"}]"#,
+        )
+        .unwrap();
         join_live(&mut repos, &live, &[], &|_cwd, id| id == "aaaa-1");
         let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
         let a = mnemo.sessions.iter().find(|s| s.id == "aaaa-1").unwrap();
-        assert_eq!(a.title, "pty flake");
+        // The history prompt is the title; the agent name is only a badge.
+        assert_eq!(a.title, "fix the flaky test in pty.rs please");
+        assert_eq!(a.agent.as_deref(), Some("mnemo-f2"));
         assert!(a.transcript);
         assert_eq!(a.live, Some(Live::Elsewhere));
-        let c = mnemo.sessions.iter().find(|s| s.id == "cccc-3").unwrap();
+        let h = mnemo.sessions.iter().find(|s| s.id == "hhhh-8").unwrap();
+        assert_eq!(h.agent, None, "same as the title: no badge");
+        let c = mnemo.children.iter().find(|s| s.id == "cccc-3").unwrap();
         assert!(!c.transcript);
         assert_eq!(c.live, None);
+        // Children are joined too.
+        let i = mnemo.children.iter().find(|s| s.id == "iiii-9").unwrap();
+        assert_eq!((i.live, i.kind.as_str()), (Some(Live::Bg), "background"));
+    }
+
+    #[test]
+    fn agent_name_is_the_title_when_history_has_none() {
+        let s = KnownSession { id: "n".into(), cwd: "/gh/r".into(), title: String::new(), first_at: 1, last_at: 1 };
+        let mut repos = group_repos(vec![s], &|p| Some(p.to_string()), &quiet, &[], &[]);
+        let live = parse_live(r#"[{"id":"n","cwd":"/gh/r","kind":"interactive","sessionId":"n","name":"r-f1"}]"#).unwrap();
+        join_live(&mut repos, &live, &[], &|_, _| true);
+        assert_eq!((repos[0].sessions[0].title.as_str(), repos[0].sessions[0].agent.as_deref()), ("r-f1", None));
     }
 
     /// Dogfood: `cargo test home::tests::dump_real_home -- --ignored --nocapture`.
@@ -513,11 +608,19 @@ mod tests {
     #[ignore]
     fn dump_real_home() {
         let snap = collect_home(&[], &[], &[], &[]);
-        eprintln!("clone_base={} errors={:?}", snap.clone_base, snap.errors);
+        eprintln!("clone_base={} protected={} errors={:?}", snap.clone_base, snap.protected, snap.errors);
         for r in &snap.repos {
-            eprintln!("{:<28} {:>3} sessions  last={}  unresolved={}  {}", r.name, r.sessions.len(), r.last_at, r.unresolved, r.root);
+            eprintln!(
+                "{:<28} {:>3} sessions {:>3} children  last={}  unresolved={}  {}",
+                r.name,
+                r.sessions.len(),
+                r.children.len(),
+                r.last_at,
+                r.unresolved,
+                r.root
+            );
             for s in r.sessions.iter().take(3) {
-                eprintln!("    {:?} {:?} t={} {} | {}", s.live, s.transcript, s.kind, &s.id[..8], s.title);
+                eprintln!("    {:?} {:?} t={} {} | {} {:?}", s.live, s.transcript, s.kind, &s.id[..8], s.title, s.agent);
             }
         }
     }

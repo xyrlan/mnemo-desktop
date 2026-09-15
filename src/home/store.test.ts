@@ -4,11 +4,12 @@ import type { HomeSnapshot } from './types'
 
 const snap: HomeSnapshot = {
   repos: [
-    { root: '/gh/a', name: 'a', last_at: 2, pinned: false, hidden: false, unresolved: false, sessions: [{ id: 's1', title: 'one', cwd: '/gh/a', last_at: 2, transcript: true, live: null, kind: 'interactive' }] },
-    { root: '/gh/b', name: 'b', last_at: 1, pinned: false, hidden: false, unresolved: false, sessions: [] },
+    { root: '/gh/a', name: 'a', last_at: 2, pinned: false, hidden: false, unresolved: false, sessions: [{ id: 's1', title: 'one', cwd: '/gh/a', last_at: 2, transcript: true, live: null, kind: 'interactive', agent: null }], children: [] },
+    { root: '/gh/b', name: 'b', last_at: 1, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] },
   ],
   clone_base: '/gh',
   errors: [],
+  protected: 0,
 }
 
 function mk(over: Partial<HomeClient> = {}) {
@@ -17,7 +18,7 @@ function mk(over: Partial<HomeClient> = {}) {
     // Like the Rust side: roots opened this run come back as (empty) repos.
     snapshot: async (a) => ({
       ...snap,
-      repos: [...snap.repos, ...a.extraRoots.map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [] }))],
+      repos: [...snap.repos, ...a.extraRoots.map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }))],
     }),
     registerRepo: async (p) => p,
     resolveRepo: async (p) => p,
@@ -112,7 +113,7 @@ test('openFolder registers the picked dir and refreshes; non-git surfaces the er
 function mkProtected(resolveRepo: HomeClient['resolveRepo']) {
   let resolved = false
   const resolves: string[] = []
-  const locked = { root: '/dl/x-sub', name: 'x-sub', last_at: 9, pinned: false, hidden: false, unresolved: true, sessions: [] }
+  const locked = { root: '/dl/x-sub', name: 'x-sub', last_at: 9, pinned: false, hidden: false, unresolved: true, sessions: [], children: [] }
   const t = mk({
     snapshot: async () => ({ ...snap, repos: resolved ? snap.repos : [locked, ...snap.repos] }),
     resolveRepo: async (root) => {
@@ -132,6 +133,15 @@ test('load never resolves: it lists unresolved repos and prefers a resolved one 
   expect(resolves).toEqual([])
   expect(store.getState().snapshot.repos[0].unresolved).toBe(true)
   expect(store.getState().selected).toBe('/gh/a')
+})
+
+test('load never selects an unresolved repo, even when it is the only one', async () => {
+  const locked = { ...snap.repos[1], root: '/dl/only', name: 'only', unresolved: true }
+  const { store } = mk({ snapshot: async () => ({ ...snap, repos: [locked], protected: 1 }) })
+  await store.getState().load()
+  expect(store.getState().selected).toBeNull()
+  store.getState().setShowProtected(true)
+  expect(store.getState().showProtected).toBe(true)
 })
 
 test('selecting an unresolved repo resolves it once and selects the resolved root', async () => {

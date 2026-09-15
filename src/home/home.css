@@ -40,3 +40,9 @@
 .hm-empty .hm-entry { margin: 0; }
 .hm-errors { padding: 6px 20px; color: var(--fg-muted); font-size: 11px; border-top: 1px solid var(--border); }
 .hm-notice { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-elev); border: 1px solid var(--ansi-yellow); color: var(--fg); padding: 8px 14px; border-radius: 4px; cursor: pointer; }
+.hm-agent { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
+.hm-children { color: var(--fg-muted); }
+.hm-children.hm-open { color: var(--fg); }
+.hm-caret { width: 10px; color: var(--fg-muted); }
+.hm-children-live { display: flex; align-items: center; gap: 4px; }
+.hm-children-rows { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; margin-bottom: 6px; border-left: 1px solid var(--border); margin-left: 14px; }
