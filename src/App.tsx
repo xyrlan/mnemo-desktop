@@ -7,13 +7,19 @@ import { registerBuiltins } from './actions/registry'
 
 registerBuiltins(store)
 
+/** StrictMode runs effects twice before the first newTab resolves; boot exactly once. */
+let booted = false
+
 export default function App() {
   const tabs = useApp((s) => s.tabs)
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
 
   useEffect(() => {
-    if (store.getState().tabs.length === 0) void store.getState().newTab()
+    if (!booted && store.getState().tabs.length === 0) {
+      booted = true
+      void store.getState().newTab()
+    }
     return installKeys()
   }, [])
 
