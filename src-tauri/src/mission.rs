@@ -272,7 +272,11 @@ pub fn join(input: JoinInput) -> Vec<RepoGroup> {
     let mut by_branch: HashMap<(String, String), ChildSession> = HashMap::new();
     for mut c in input.children {
         let root = root_of(&c.cwd, input.roots);
-        c.branch = input.branches.get(&c.cwd).cloned();
+        c.branch = input
+            .branches
+            .get(&c.cwd)
+            .cloned()
+            .or_else(|| Path::new(&c.cwd).canonicalize().ok().and_then(|p| input.branches.get(&p.to_string_lossy().to_string()).cloned()));
         match &c.branch {
             Some(b) => {
                 by_branch.insert((root.clone(), b.clone()), c);
@@ -367,7 +371,12 @@ pub fn worktree_branches(root: &str) -> HashMap<String, String> {
             cur = Some(p.to_string());
         } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
             if let Some(p) = &cur {
+                // Key by both the printed path and its canonical form: git prints
+                // forward slashes on Windows while callers pass native paths.
                 map.insert(p.clone(), b.to_string());
+                if let Ok(c) = Path::new(p).canonicalize() {
+                    map.insert(c.to_string_lossy().to_string(), b.to_string());
+                }
             }
         }
     }
@@ -446,7 +455,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     }
     let focused_root = focused_cwd.and_then(|c| roots.get(c).cloned());
 
-    let mut branches = HashMap::new();
+    let mut branches: HashMap<String, String> = HashMap::new();
     let mut contracts = HashMap::new();
     let mut prs = HashMap::new();
     let mut seen = std::collections::HashSet::new();
@@ -661,7 +670,7 @@ mod tests {
         assert_eq!(repo_root(wt.to_str().unwrap()).map(|r| canon(Path::new(&r))), Some(canon(&main)));
         assert_eq!(repo_root(main.to_str().unwrap()).map(|r| canon(Path::new(&r))), Some(canon(&main)));
         let b = worktree_branches(main.to_str().unwrap());
-        assert_eq!(b.get(&canon(&wt)).or(b.get(wt.to_str().unwrap())).map(String::as_str), Some("feat/x/y"));
+        assert_eq!(b.get(&canon(&wt)).map(String::as_str), Some("feat/x/y"), "keys: {:?}", b.keys().collect::<Vec<_>>());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
