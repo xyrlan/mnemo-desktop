@@ -1,22 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { importCwd } from '../marketplace/cwd'
 import { useVault, vault } from './app-store'
-import { ACTIONS, type VaultAction } from './actions'
-import { agentForCwd, filterTree, orderAgents, pageCount, resolveWikilink, terms } from './search'
+import { agentForCwd, filterTree, orderAgents, pageCount, terms } from './search'
 import { decisionsFor, parseWhy } from './why'
-import { Markdown } from './Markdown'
-import { GraphView } from './GraphView'
+import { HealthTable } from './HealthTable'
+import { PageView, short } from './PageView'
 import type { LogEntry } from './store'
-import type { Agent, Page } from './types'
+import type { Agent } from './types'
 import './vault.css'
 
-const short = (path: string) => path.replace(/^\/Users\/[^/]+/, '~')
-const basename = (p: string) => p.split('/').pop() ?? p
-const dirname = (p: string) => p.replace(/\/[^/]*$/, '') || '/'
-const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 /** `expanded` key of the folded `other` section; `/` never occurs in an agent name. */
 const OTHER = '/other'
 
@@ -75,121 +70,6 @@ function Tree({ current }: { current: string | undefined }) {
           {otherOpen &&
             other.map((a) => <AgentSection key={a.name} agent={a} open={searching || (expanded[a.name] ?? false)} selected={selected} />)}
         </section>
-      )}
-    </div>
-  )
-}
-
-function ActionBar({ page, cwd }: { page: Page; cwd: string | undefined }) {
-  const log = useVault((s) => s.log)
-  const [armed, setArmed] = useState<string | null>(null)
-  const timer = useRef<number>(undefined)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
-  const click = (a: VaultAction) => {
-    // Destructive actions ask once, like the mission pane's stop.
-    if (a.destructive && armed !== a.id) {
-      setArmed(a.id)
-      window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => setArmed(null), 4000)
-      return
-    }
-    setArmed(null)
-    void vault.getState().run(a.id, cwd ?? '')
-  }
-  return (
-    <div className="vt-actions">
-      {ACTIONS.map((a) => {
-        const busy = log.some((e) => e.actionId === a.id && e.result === null)
-        return (
-          <button
-            key={a.id}
-            className={`${a.destructive ? 'vt-destructive' : ''}${armed === a.id ? ' vt-armed' : ''}`}
-            title={a.title.replace('<slug>', page.slug)}
-            disabled={busy || (a.needsPage && !!page.error)}
-            onClick={() => click(a)}
-          >
-            {busy ? `${a.label}…` : armed === a.id ? `really ${a.label.toLowerCase()}?` : a.label}
-          </button>
-        )
-      })}
-      <span className="vt-cwd" title={cwd ?? 'no terminal open: runs in your home directory'}>
-        in {cwd ? short(cwd) : '~'}
-      </span>
-    </div>
-  )
-}
-
-function PageView({ cwd }: { cwd: string | undefined }) {
-  const page = useVault((s) => s.page)
-  const selected = useVault((s) => s.selected)
-  const tree = useVault((s) => s.tree)
-  if (!selected) return <div className="vt-page vt-empty">Select a page.</div>
-  if (!page) return <div className="vt-page vt-empty">reading…</div>
-  const agentDir = tree.find((a) => page.path.startsWith(a.dir + '/'))?.dir
-  const edit = (props: Record<string, unknown>) => store.getState().openView('editor', props, 'auto', basename(page.path))
-  const meta = [
-    ['type', page.type],
-    ['confidence', page.confidence],
-    ['runtime', page.runtime],
-    ['modified', page.modified ? day(page.modified) : null],
-  ].filter((m): m is [string, string] => !!m[1])
-  return (
-    <div className="vt-page">
-      <header className="vt-page-head">
-        <div className="vt-title-row">
-          <span className="vt-title">{page.name || basename(page.path)}</span>
-          <button title={`Open ${short(page.path)} in the editor`} disabled={!!page.error} onClick={() => edit({ path: page.path })}>
-            Edit
-          </button>
-          <button title={`Open ${short(dirname(page.path))} in the file tree`} onClick={() => edit({ path: page.path, root: dirname(page.path) })}>
-            Open folder
-          </button>
-        </div>
-        {page.description && <div className="vt-desc">{page.description}</div>}
-        <div className="vt-meta">
-          {meta.map(([k, v]) => (
-            <span key={k}>
-              <span className="vt-meta-key">{k}</span> {v}
-            </span>
-          ))}
-          {page.topics.map((t) => (
-            <span key={`t:${t}`} className="vt-topic">
-              {t}
-            </span>
-          ))}
-        </div>
-        <ActionBar page={page} cwd={cwd} />
-      </header>
-      {page.error ? (
-        <pre className="vt-error vt-page-error">{page.error}</pre>
-      ) : (
-        <div className="vt-body">
-          <Markdown
-            text={page.body}
-            onWiki={(target) => {
-              const hit = resolveWikilink(tree, target, agentDir)
-              if (hit) void vault.getState().select(hit.path)
-            }}
-            onLink={(href) => {
-              if (/^https?:\/\//.test(href)) store.getState().openView('browser', { url: href }, 'auto')
-            }}
-          />
-          {page.frontmatter.length > 0 && (
-            <details className="vt-frontmatter">
-              <summary>frontmatter</summary>
-              <table>
-                <tbody>
-                  {page.frontmatter.map((f) => (
-                    <tr key={f.key}>
-                      <td>{f.key}</td>
-                      <td>{f.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
-          )}
-        </div>
       )}
     </div>
   )
@@ -264,52 +144,54 @@ function VaultPane(_: PaneViewProps) {
   const loading = useVault((s) => s.loading)
   const treeError = useVault((s) => s.treeError)
   const tree = useVault((s) => s.tree)
+  const agents = useVault((s) => s.agents)
   const query = useVault((s) => s.query)
   const mode = useVault((s) => s.mode)
   const cwd = useApp(importCwd)
-  const current = agentForCwd(cwd, tree)
+  // The table never reads the tree: its agents, as `repo`, name the current repo too.
+  const current = agentForCwd(cwd, tree.length ? tree : agents.map((name) => ({ name, kind: name === 'shared' ? 'shared' : 'repo' })))
 
   useEffect(() => {
-    if (!vault.getState().loaded) void vault.getState().load()
-  }, [])
+    if (mode === 'pages' && !vault.getState().loaded) void vault.getState().load()
+  }, [mode])
 
   return (
     <div className="pane-body vault">
       <div className="vt-modes">
-        {(['pages', 'graph'] as const).map((m) => (
+        {(['health', 'pages'] as const).map((m) => (
           <button key={m} className={mode === m ? 'vt-mode-on' : ''} onClick={() => vault.getState().setMode(m)}>
-            {m === 'pages' ? 'Pages' : 'Graph'}
+            {m === 'health' ? 'Health' : 'Pages'}
           </button>
         ))}
       </div>
-      {mode === 'graph' ? (
-        <GraphView cwd={cwd} current={current} page={<PageView cwd={cwd} />} />
+      {mode === 'health' ? (
+        <HealthTable cwd={cwd} current={current} />
       ) : (
-      <div className="vt-main">
-        <aside className="vt-side">
-          <div className="vt-bar">
-            <input
-              value={query}
-              placeholder="Search name, description, body"
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-              onChange={(e) => vault.getState().setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Escape' && vault.getState().setQuery('')}
-            />
-            <button title="Re-read the vault" disabled={loading} onClick={() => void vault.getState().load()}>
-              {loading ? '…' : '↻'}
-            </button>
-          </div>
-          {!loaded && <div className="vt-empty">reading the vault…</div>}
-          {treeError && <pre className="vt-error">{treeError}</pre>}
-          {loaded && !treeError && tree.length === 0 && (
-            <div className="vt-empty">No vault found: `mnemo status` names none, or it holds no pages.</div>
-          )}
-          <Tree current={current} />
-        </aside>
-        <PageView cwd={cwd} />
-      </div>
+        <div className="vt-main">
+          <aside className="vt-side">
+            <div className="vt-bar">
+              <input
+                value={query}
+                placeholder="Search name, description, body"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                onChange={(e) => vault.getState().setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Escape' && vault.getState().setQuery('')}
+              />
+              <button title="Re-read the vault" disabled={loading} onClick={() => void vault.getState().load()}>
+                {loading ? '…' : '↻'}
+              </button>
+            </div>
+            {!loaded && <div className="vt-empty">reading the vault…</div>}
+            {treeError && <pre className="vt-error">{treeError}</pre>}
+            {loaded && !treeError && tree.length === 0 && (
+              <div className="vt-empty">No vault found: `mnemo status` names none, or it holds no pages.</div>
+            )}
+            <Tree current={current} />
+          </aside>
+          <PageView cwd={cwd} />
+        </div>
       )}
       <Log />
     </div>
@@ -318,13 +200,11 @@ function VaultPane(_: PaneViewProps) {
 
 registerPaneView('vault', VaultPane)
 
-register({ id: 'vault.open', title: 'Open vault', run: () => store.getState().openView('vault', {}, 'auto', 'vault') })
+const open = (mode?: 'health' | 'pages') => () => {
+  if (mode) vault.getState().setMode(mode)
+  store.getState().openView('vault', {}, 'auto', 'vault')
+}
 
-register({
-  id: 'vault.graph',
-  title: 'Open vault graph and health',
-  run: () => {
-    vault.getState().setMode('graph')
-    store.getState().openView('vault', {}, 'auto', 'vault')
-  },
-})
+register({ id: 'vault.open', title: 'Open vault', run: open() })
+register({ id: 'vault.health', title: 'Open vault health: rules by heat, what needs review', run: open('health') })
+register({ id: 'vault.pages', title: 'Open vault pages by agent', run: open('pages') })

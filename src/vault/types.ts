@@ -27,29 +27,53 @@ export type Page = PageInfo & {
 
 export type RunResult = { stdout: string; stderr: string; code: number | null }
 
+/** A badge of the health table. `stale` is added on this side, from `mnemo stale --json`. */
+export type Badge = 'never' | 'stale' | 'review' | 'inbox'
+
+export type RuleRow = {
+  path: string
+  slug: string
+  name: string
+  description: string
+  type: string
+  /** `shared`, or the repo agent. */
+  agent: string
+  confidence: string | null
+  topics: string[]
+  fires: number
+  /** ms since the epoch */
+  last_fired: number | null
+  /** Fires with a 30-day half-life; rows come hottest first. */
+  heat: number
+  badges: Badge[]
+  /** Why `review`. */
+  reasons: string[]
+}
+
 export type GraphNode = {
-  /** The page path, or `topic:<name>` for a topic hub. */
+  /** The page path. */
   id: string
-  kind: 'rule' | 'topic'
   label: string
-  /** Empty for a topic hub. */
   slug: string
   type: string
   confidence: string | null
   topics: string[]
-  /** Reflex emissions plus MCP reads; for a hub, how many of the graph's rules carry the topic. */
   fires: number
   /** ms since the epoch */
   last_fired: number | null
 }
 
-export type GraphEdge = { id: string; source: string; target: string; kind: 'link' | 'topic' }
+/** `link`: a `[[wikilink]]` from source to target. `topic`: centre → a neighbour sharing `label`'s topics. */
+export type GraphEdge = { id: string; source: string; target: string; kind: 'link' | 'topic'; label: string }
 
+/** `vault_ego`: one rule and its neighbourhood. */
 export type VaultGraph = {
-  scope: string
+  /** The centre's path, as asked. */
+  center: string
+  /** The centre first. */
   nodes: GraphNode[]
   edges: GraphEdge[]
-  /** Rule pages in scope before the node cap. */
+  /** Neighbours found before the node limit. */
   total: number
   error: string | null
 }
