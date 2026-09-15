@@ -13,7 +13,9 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   const id = String(props.id ?? '')
   const child = useMission((s) => allChildren(s.snapshot).find((c) => c.id === id))
   const looked = useMission((s) => s.looked[id])
-  const sentList = useMission((s) => s.sent[id] ?? [])
+  // Default outside the selector: a fresh `[]` per read is never Object.is-equal, and
+  // useSyncExternalStore then re-renders until React throws and unmounts the app.
+  const sentList = useMission((s) => s.sent[id]) ?? []
   const [lines, setLines] = useState<TimelineLine[]>([])
   const [confirmStop, setConfirmStop] = useState(false)
   const seenAtOpen = useRef<number | undefined>(looked)
@@ -33,9 +35,11 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
     }
   }, [id])
 
+  // Depend on the length, not the child: every poll deserialises a new object graph.
+  const timelineLen = child?.timeline_len
   useEffect(() => {
-    if (child) void missionStore.getState().markLooked(id, child.timeline_len)
-  }, [id, child?.timeline_len, child])
+    if (timelineLen !== undefined) void missionStore.getState().markLooked(id, timelineLen)
+  }, [id, timelineLen])
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' })

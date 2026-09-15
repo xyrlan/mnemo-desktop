@@ -11,6 +11,7 @@ import.meta.glob('./*/view.tsx', { eager: true })
 import './terminal/cmd-view'
 import Sidebar from './mission/Sidebar'
 import Home from './home/Home'
+import ErrorBoundary from './panes/ErrorBoundary'
 
 registerBuiltins(store)
 
@@ -59,13 +60,21 @@ export default function App() {
             key={t.id}
             style={{ position: 'absolute', inset: 0, display: t.id === activeTab ? 'block' : 'none' }}
           >
-            <SplitView node={t.root} />
+            <ErrorBoundary label={`tab ${panes[t.focused]?.title || 'shell'}`}>
+              <SplitView node={t.root} />
+            </ErrorBoundary>
           </div>
         ))}
-        {activeTab === '' && <Home />}
+        {activeTab === '' && (
+          <ErrorBoundary label="Home">
+            <Home />
+          </ErrorBoundary>
+        )}
       </div>
       </div>
-      <Sidebar />
+      <ErrorBoundary label="sidebar">
+        <Sidebar />
+      </ErrorBoundary>
       <Palette />
     </div>
   )
