@@ -8,9 +8,13 @@ export type Settings = {
   outgoing: 'en' | 'as-typed'
   replyLanguage: 'pt' | 'en' | 'unchanged'
   sidebarScope: 'repo' | 'all'
+  /** Home screen: repo roots pinned to the top / hidden, and where `gh repo clone` lands. */
+  homePinned: string[]
+  homeHidden: string[]
+  cloneBase: string | null
 }
 
-export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', sidebarScope: 'repo' }
+export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null }
 
 export interface SettingsClient {
   read(): Promise<Partial<Settings>>
@@ -37,9 +41,9 @@ export function createSettingsStore(client: SettingsClient): StoreApi<SettingsSt
     },
     async set(key, value) {
       set({ [key]: value } as Partial<SettingsState>)
-      const s = get()
+      const { outgoing, replyLanguage, sidebarScope, homePinned, homeHidden, cloneBase } = get()
       try {
-        await client.write({ outgoing: s.outgoing, replyLanguage: s.replyLanguage, sidebarScope: s.sidebarScope })
+        await client.write({ outgoing, replyLanguage, sidebarScope, homePinned, homeHidden, cloneBase })
       } catch {
         /* keep the in-memory value; the file is a convenience */
       }
@@ -52,6 +56,12 @@ function pick(v: Partial<Settings>): Partial<Settings> {
   if (v.outgoing === 'en' || v.outgoing === 'as-typed') out.outgoing = v.outgoing
   if (v.replyLanguage === 'pt' || v.replyLanguage === 'en' || v.replyLanguage === 'unchanged') out.replyLanguage = v.replyLanguage
   if (v.sidebarScope === 'repo' || v.sidebarScope === 'all') out.sidebarScope = v.sidebarScope
+  const strs = (x: unknown): string[] | null => (Array.isArray(x) && x.every((s) => typeof s === 'string') ? (x as string[]) : null)
+  const pinned = strs(v.homePinned)
+  if (pinned) out.homePinned = pinned
+  const hidden = strs(v.homeHidden)
+  if (hidden) out.homeHidden = hidden
+  if (typeof v.cloneBase === 'string' && v.cloneBase) out.cloneBase = v.cloneBase
   return out
 }
 

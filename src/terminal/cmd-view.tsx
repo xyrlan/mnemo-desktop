@@ -8,23 +8,13 @@ import TerminalPane from './view'
 function TerminalCmd(p: PaneViewProps) {
   const cmd = String(p.props.cmd ?? '')
   useEffect(() => {
-    // The pane has a negative synthetic id (openView); swap it for a real PTY pane
-    // by replacing this leaf with a terminal split and typing the command.
+    // The pane has a negative synthetic id (openView); open a real terminal tab that types
+    // the command, then close this placeholder.
     const s = store.getState()
-    const tab = s.tabs.find((t) => t.id === s.activeTab)
-    if (!tab) return
-    void (async () => {
-      await s.split('row')
-      const fresh = store.getState().tabs.find((t) => t.id === tab.id)?.focused
-      if (fresh && fresh > 0) {
-        const { tauriPty } = await import('../pty/client')
-        // Give the shell a moment to print its prompt before the command lands.
-        window.setTimeout(() => void tauriPty.write(fresh, cmd + '\n'), 700)
-      }
-      // Close this placeholder pane (focus back to it first).
-      store.getState().focusPane(p.id)
-      void store.getState().closePane()
-    })()
+    const sessionId = typeof p.props.sessionId === 'string' ? p.props.sessionId : undefined
+    void s.openCommandTab(s.panes[p.id]?.cwd, cmd, sessionId)
+    s.focusPane(p.id)
+    void s.closePane()
   }, [cmd, p.id])
   return <div className="pane-message">opening {cmd}…</div>
 }

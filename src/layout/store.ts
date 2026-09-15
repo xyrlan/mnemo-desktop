@@ -17,6 +17,8 @@ export type Pane = {
   title?: string
   exitCode?: number | null
   error?: string
+  /** The Claude Code session this terminal runs, when opened for one (Home focuses it instead of forking). */
+  sessionId?: string
 }
 /** `auto`: reuse a pane of the same view in the active tab, else split right when the
  *  focused pane is wide, else split down when it is tall, else open a tab. */
@@ -42,6 +44,11 @@ export type State = {
 
 export type Actions = {
   newTab(cwd?: string): Promise<void>
+  /** Show Home without closing anything: clears `activeTab`; any tab click restores. */
+  showHome(): void
+  /** New terminal tab in `cwd` that types `cmd` once the shell prompt is up; `sessionId`
+   *  marks the pane as running that Claude session so Home can focus it instead of forking. */
+  openCommandTab(cwd: string | undefined, cmd: string, sessionId?: string): Promise<void>
   split(dir: Dir): Promise<void>
   /** Open a non-terminal view (editor, browser, mission…) as a new tab, a split of the focused
    *  pane, or (`auto`) wherever it fits best. */
@@ -66,6 +73,8 @@ export type Store = StoreApi<State & Actions>
 
 export const DEFAULT_COLS = 80
 export const DEFAULT_ROWS = 24
+/** Delay before a command is typed into a fresh shell, so it lands after the prompt. */
+export const PROMPT_DELAY_MS = 700
 
 export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
   const workspace = opts.workspace ?? (() => workspaceRect())
@@ -128,6 +137,21 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id }))
       },
 
+      showHome() {
+        set({ activeTab: '' })
+      },
+
+      async openCommandTab(cwd, cmd, sessionId) {
+        const pane = await spawnPane(cwd)
+        const tab: Tab = { id: `tab-${pane}`, root: leaf(pane), focused: pane }
+        set((s) => ({
+          tabs: [...s.tabs, tab],
+          activeTab: tab.id,
+          panes: { ...s.panes, [pane]: { ...s.panes[pane], id: pane, sessionId } },
+        }))
+        if (pane > 0) setTimeout(() => void pty.write(pane, cmd + '\n'), PROMPT_DELAY_MS)
+      },
+
       async split(dir) {
         const tab = active()
         if (!tab) return
@@ -160,7 +184,6 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           const focused = leaves(root)[0]
           return { tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root, focused } : t)), panes, sinks }
         })
-        if (get().tabs.length === 0) await get().newTab()
       },
 
       openView(view, props, place, title) {
@@ -220,7 +243,6 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           const next = s.activeTab === id ? tabs[Math.max(0, idx - 1)]?.id ?? '' : s.activeTab
           return { tabs, activeTab: next, panes, sinks }
         })
-        if (get().tabs.length === 0) await get().newTab()
       },
 
       focusPane(id) {

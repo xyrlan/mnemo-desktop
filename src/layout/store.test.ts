@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { createStore } from './store'
 import { registerReuse } from './reuse'
 import type { PtyClient } from '../pty/client'
@@ -46,16 +47,49 @@ test('split focuses the new pane and inherits cwd', async () => {
   expect(s.getState().panes[2].cwd).toBe('/work')
 })
 
-test('closing the last pane of the last tab opens a fresh tab', async () => {
+test('closing the last pane of the last tab leaves no tab and no active tab (Home shows)', async () => {
   const pty = fakePty()
   const s = createStore(pty)
   await s.getState().newTab()
   await s.getState().closePane()
   const st = s.getState()
   expect(pty.killed).toEqual([1])
-  expect(st.tabs).toHaveLength(1)
-  expect(st.tabs[0].root).toEqual({ kind: 'leaf', pane: 2 })
+  expect(st.tabs).toEqual([])
+  expect(st.activeTab).toBe('')
   expect(st.panes[1]).toBeUndefined()
+})
+
+test('closing the last tab leaves activeTab empty', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().closeTab(s.getState().activeTab)
+  expect(s.getState().tabs).toEqual([])
+  expect(s.getState().activeTab).toBe('')
+})
+
+test('showHome keeps tabs but clears activeTab; goToTab restores', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  s.getState().showHome()
+  expect(s.getState().activeTab).toBe('')
+  expect(s.getState().tabs).toHaveLength(1)
+  s.getState().goToTab(0)
+  expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
+})
+
+test('openCommandTab spawns in cwd, tags the pane with the session and types the command after the prompt delay', async () => {
+  vi.useFakeTimers()
+  const writes: [number, string][] = []
+  const pty = { ...fakePty(), write: async (id: number, data: string) => { writes.push([id, data]) } }
+  const s = createStore(pty)
+  await s.getState().openCommandTab('/repo', 'claude --resume abc', 'abc')
+  const id = s.getState().tabs[0].focused
+  expect(s.getState().panes[id].cwd).toBe('/repo')
+  expect(s.getState().panes[id].sessionId).toBe('abc')
+  expect(writes).toEqual([])
+  vi.advanceTimersByTime(700)
+  expect(writes).toEqual([[id, 'claude --resume abc\n']])
+  vi.useRealTimers()
 })
 
 test('closing a pane in a split promotes the sibling and focuses it', async () => {

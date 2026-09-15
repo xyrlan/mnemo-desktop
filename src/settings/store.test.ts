@@ -12,7 +12,7 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', sidebarScope: 'repo' }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null }])
 })
 
 test('sidebarScope defaults to this repo, loads, and persists alongside the rest', async () => {
@@ -22,7 +22,7 @@ test('sidebarScope defaults to this repo, loads, and persists alongside the rest
   await s.getState().load()
   expect(s.getState().sidebarScope).toBe('all')
   await s.getState().set('sidebarScope', 'repo')
-  expect(written).toEqual([{ outgoing: 'as-typed', replyLanguage: 'unchanged', sidebarScope: 'repo' }])
+  expect(written).toEqual([{ outgoing: 'as-typed', replyLanguage: 'unchanged', sidebarScope: 'repo', homePinned: [], homeHidden: [], cloneBase: null }])
 })
 
 test('a junk sidebarScope falls back to the default', async () => {
@@ -41,4 +41,18 @@ test('reply footers', () => {
   expect(replyLanguageFooter('pt')).toContain('Portuguese')
   expect(replyLanguageFooter('en')).toContain('English')
   expect(replyLanguageFooter('unchanged')).toBe('')
+})
+
+test('home keys round-trip and reject junk', async () => {
+  let written: unknown = null
+  const s = createSettingsStore({
+    read: async () => ({ homePinned: ['/a'], homeHidden: 'nope' as unknown as string[], cloneBase: '/gh' }),
+    write: async (v) => { written = v },
+  })
+  await s.getState().load()
+  expect(s.getState().homePinned).toEqual(['/a'])
+  expect(s.getState().homeHidden).toEqual([])
+  expect(s.getState().cloneBase).toBe('/gh')
+  await s.getState().set('homeHidden', ['/b'])
+  expect((written as { homeHidden: string[] }).homeHidden).toEqual(['/b'])
 })

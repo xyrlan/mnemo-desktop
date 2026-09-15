@@ -66,6 +66,7 @@ fn run_smoke(app: &tauri::App) -> Result<(), String> {
 pub fn run() {
     env_logger::init();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -170,6 +171,7 @@ pub fn run() {
                 const VIEW: &[(&str, &str, &str)] = &[
                     ("palette.open", "Command Palette", "CmdOrCtrl+K"),
                     ("mission.toggle-sidebar", "Toggle Mission Sidebar", "CmdOrCtrl+B"),
+                    ("home.show", "Home", "CmdOrCtrl+Shift+H"),
                 ];
                 const PREFIX: &str = "action:";
 

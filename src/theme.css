@@ -49,6 +49,8 @@ body { font-family: var(--font-mono); font-size: var(--font-size); font-variant-
 .tab-close:hover, .pane-close:hover { color: var(--fg); background: var(--bg-elev); }
 .pane-close { position: absolute; top: 2px; right: 4px; z-index: 2; opacity: 0; }
 .pane:hover .pane-close { opacity: 1; }
+.tab-home { padding: 0 12px; display: flex; align-items: center; color: var(--fg-muted); border-right: 1px solid var(--border); cursor: default; font-size: 15px; }
+.tab-home.active { color: var(--fg); background: var(--bg); }
 .tab-new { padding: 0 12px; display: flex; align-items: center; color: var(--fg-muted); cursor: default; }
 .workspace { flex: 1; min-height: 0; position: relative; }
 
