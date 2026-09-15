@@ -2,6 +2,8 @@ name: release
 on:
   push:
     tags: ['v*']
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 jobs:
   build:
     strategy:

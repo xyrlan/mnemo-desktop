@@ -1,6 +1,15 @@
 pub mod commands;
 pub mod pty;
 
+// Feature modules register below. Each one owns its own block, separated by
+// blank lines, so two branches adding a module never touch the same hunk.
+
+// -- editor (src/fs.rs) --
+
+// -- browser (src/browser.rs) --
+
+// -- mission (src/mission.rs) --
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -41,6 +50,14 @@ pub fn run() {
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
+            // Feature commands, one block each, blank-line separated (see the
+            // module anchors at the top of this file).
+
+            // -- editor commands --
+
+            // -- browser commands --
+
+            // -- mission commands --
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {

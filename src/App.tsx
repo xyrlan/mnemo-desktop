@@ -5,6 +5,10 @@ import Palette from './palette/Palette'
 import { installKeys } from './actions/keys'
 import { registerBuiltins } from './actions/registry'
 
+// Every `src/<view>/view.tsx` registers its pane view on import. A new pane kind
+// (editor, browser, mission) therefore needs no edit here.
+import.meta.glob('./*/view.tsx', { eager: true })
+
 registerBuiltins(store)
 
 /** StrictMode runs effects twice before the first newTab resolves; boot exactly once. */

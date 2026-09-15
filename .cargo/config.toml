@@ -1,0 +1,5 @@
+# One target dir shared by every worktree of this repo (dispatch children live in
+# sibling directories), so a child does not rebuild Tauri from scratch.
+# CI overrides with CARGO_TARGET_DIR so its paths stay inside the checkout.
+[build]
+target-dir = "../.mnemo-desktop-target"

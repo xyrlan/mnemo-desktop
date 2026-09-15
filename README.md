@@ -11,7 +11,7 @@ Desktop shell for the mnemo agentic development environment. Sub-project 1: a te
 
     pnpm test                                        # front-end
     cargo test --manifest-path src-tauri/Cargo.toml  # core
-    MNEMO_DESKTOP_SMOKE=1 src-tauri/target/debug/mnemo-desktop   # shell round-trip, exit 0
+    MNEMO_DESKTOP_SMOKE=1 ../.mnemo-desktop-target/debug/mnemo-desktop   # shell round-trip, exit 0 (target dir is shared across worktrees, see .cargo/config.toml)
 
 ## Shortcuts
 
