@@ -23,8 +23,14 @@ Run your parent Claude Code session inside the app from the repo whose project m
 
 ## Shortcuts
 
-⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌥Space hold to dictate (Ctrl on Linux/Windows)
+⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌘⇧B cockpit · ⌥Space hold to dictate (Ctrl on Linux/Windows)
 
-Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), marketplace (shared rule sets). Open them from ⌘K.
+In a terminal: ⌘←/⌘→ line start/end, ⌘⌫ kill line, ⌥⌫ kill word, ⌘C/⌘V clipboard, Shift+Enter newline (Claude Code).
+
+Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), cockpit (all repos), vault (mnemo rules with the native actions as buttons), marketplace (shared rule sets). Open them from ⌘K.
+
+## Settings
+
+`~/.mnemo-desktop/settings.json`, toggled from ⌘K: `outgoing` (`en` rewrites replies and dictation in English through your own `claude -p` before they leave; `as-typed` sends verbatim), `replyLanguage` (`pt`/`en`/`unchanged`, asks a child to answer in that language), `sidebarScope` (`repo`/`all`).
 
 Specs and plans: `docs/superpowers/`.
