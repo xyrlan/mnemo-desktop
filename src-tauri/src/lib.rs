@@ -17,6 +17,9 @@ pub mod mission_commands;
 // -- voice (src/voice.rs) --
 pub mod voice;
 
+// -- marketplace (src/marketplace.rs) --
+pub mod marketplace;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -88,11 +91,102 @@ pub fn run() {
             voice::voice_start,
             voice::voice_stop,
             voice::voice_set_language,
+
+            // -- marketplace commands --
+            marketplace::marketplace_list,
+            marketplace::marketplace_refresh,
+            marketplace::marketplace_add_source,
+            marketplace::marketplace_remove_source,
+            marketplace::marketplace_import,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
                 run_smoke(app)?;
             }
+
+            // -- menu --
+            // App chords as native menu accelerators, so they reach the app while a browser
+            // pane's child webview has keyboard focus. Each item emits `app://action` with
+            // its action id; `src/actions/keys.ts` runs it (and reads this table in its test,
+            // so keep one `("id", "Title", "Accelerator")` tuple per line). macOS only: other
+            // platforms would grow a visible menu bar, and keep the keydown handler.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+                use tauri::Emitter;
+
+                const TAB: &[(&str, &str, &str)] = &[
+                    ("tab.new", "New Tab", "CmdOrCtrl+T"),
+                    ("tab.prev", "Previous Tab", "CmdOrCtrl+Shift+["),
+                    ("tab.next", "Next Tab", "CmdOrCtrl+Shift+]"),
+                    ("tab.go.1", "Tab 1", "CmdOrCtrl+1"),
+                    ("tab.go.2", "Tab 2", "CmdOrCtrl+2"),
+                    ("tab.go.3", "Tab 3", "CmdOrCtrl+3"),
+                    ("tab.go.4", "Tab 4", "CmdOrCtrl+4"),
+                    ("tab.go.5", "Tab 5", "CmdOrCtrl+5"),
+                    ("tab.go.6", "Tab 6", "CmdOrCtrl+6"),
+                    ("tab.go.7", "Tab 7", "CmdOrCtrl+7"),
+                    ("tab.go.8", "Tab 8", "CmdOrCtrl+8"),
+                    ("tab.go.9", "Tab 9", "CmdOrCtrl+9"),
+                ];
+                const PANE: &[(&str, &str, &str)] = &[
+                    ("pane.split.row", "Split Right", "CmdOrCtrl+D"),
+                    ("pane.split.col", "Split Down", "CmdOrCtrl+Shift+D"),
+                    ("pane.close", "Close Pane", "CmdOrCtrl+W"),
+                    ("tab.close", "Close Tab", "CmdOrCtrl+Shift+W"),
+                    ("focus.left", "Focus Pane Left", "CmdOrCtrl+Alt+Left"),
+                    ("focus.right", "Focus Pane Right", "CmdOrCtrl+Alt+Right"),
+                    ("focus.up", "Focus Pane Up", "CmdOrCtrl+Alt+Up"),
+                    ("focus.down", "Focus Pane Down", "CmdOrCtrl+Alt+Down"),
+                ];
+                const VIEW: &[(&str, &str, &str)] = &[
+                    ("palette.open", "Command Palette", "CmdOrCtrl+K"),
+                    ("mission.toggle-sidebar", "Toggle Mission Sidebar", "CmdOrCtrl+B"),
+                ];
+                const PREFIX: &str = "action:";
+
+                let h = app.handle();
+                let submenu = |title: &str, items: &[(&str, &str, &str)]| {
+                    items.iter().try_fold(SubmenuBuilder::new(h, title), |b, (id, text, accel)| {
+                        let item = MenuItemBuilder::with_id(format!("{PREFIX}{id}"), *text).accelerator(*accel).build(h)?;
+                        Ok::<_, tauri::Error>(b.item(&item))
+                    })
+                };
+                // Rebuilt rather than `Menu::default`, whose File > Close Window takes ⌘W.
+                let name = h.package_info().name.clone();
+                let app_menu = SubmenuBuilder::new(h, name)
+                    .about(None)
+                    .separator()
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator()
+                    .quit()
+                    .build()?;
+                let edit = SubmenuBuilder::new(h, "Edit")
+                    .undo()
+                    .redo()
+                    .separator()
+                    .cut()
+                    .copy()
+                    .paste()
+                    .select_all()
+                    .build()?;
+                let view = submenu("View", VIEW)?.separator().item(&PredefinedMenuItem::fullscreen(h, None)?).build()?;
+                let window = SubmenuBuilder::new(h, "Window").minimize().maximize().build()?;
+                let menu = MenuBuilder::new(h)
+                    .items(&[&app_menu, &edit, &view, &submenu("Tab", TAB)?.build()?, &submenu("Pane", PANE)?.build()?, &window])
+                    .build()?;
+                app.set_menu(menu)?;
+                app.on_menu_event(|app, event| {
+                    if let Some(id) = event.id().as_ref().strip_prefix(PREFIX) {
+                        let _ = app.emit_to("main", "app://action", serde_json::json!({ "id": id }));
+                    }
+                });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {

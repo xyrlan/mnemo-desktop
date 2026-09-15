@@ -9,6 +9,7 @@ import { cssVar } from '../theme'
 import { tauriFs } from './client'
 import { createSessions } from './sessions'
 import { openEditor, registerEditorActions } from './actions'
+import { registerReuse } from '../layout/reuse'
 import { promptPath } from './Prompt'
 import { basename, defaultRoot, languageFor } from './paths'
 import Tree from './Tree'
@@ -226,6 +227,14 @@ function EditorPane({ id, props }: PaneViewProps) {
 
 registerPaneView('editor', EditorPane)
 registerEditorActions({ app: store, sessions, fs, prompt: promptPath, register })
+
+// `openView('editor', …, 'auto')` reuses an open editor only when its buffer is clean.
+registerReuse('editor', (id, p) => {
+  const s = sessions.getState().sessions[id]
+  if (!s || s.dirty || typeof p.path !== 'string') return false
+  sessions.getState().navigate(id, p.path)
+  return true
+})
 
 // Closing a pane drops its session and disposes its Monaco model.
 store.subscribe((s, prev) => {

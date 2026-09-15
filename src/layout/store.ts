@@ -1,6 +1,8 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { closeLeaf, leaf, leaves, replaceRatio, splitAt, type Dir, type Node, type PaneId, type Path } from './tree'
+import { closeLeaf, leaf, leaves, replaceRatio, splitAt, type Dir, type Node, type PaneId, type Path, type Rect } from './tree'
+import { layoutRects, workspaceRect } from './rects'
+import { reuseHandler } from './reuse'
 import type { PtyClient } from '../pty/client'
 
 export type Tab = { id: string; root: Node; focused: PaneId }
@@ -16,7 +18,18 @@ export type Pane = {
   exitCode?: number | null
   error?: string
 }
-export type Place = 'tab' | 'split-row' | 'split-col'
+/** `auto`: reuse a pane of the same view in the active tab, else split right when the
+ *  focused pane is wide, else split down when it is tall, else open a tab. */
+export type Place = 'auto' | 'tab' | 'split-row' | 'split-col'
+
+/** Focused panes wider than this split right under `auto`; taller than SPLIT_MIN_H split down. */
+export const SPLIT_MIN_W = 900
+export const SPLIT_MIN_H = 600
+
+export type StoreOptions = {
+  /** The box tabs are laid out in; null when unknown (placement then opens a tab). */
+  workspace?: () => Rect | null
+}
 
 export type State = {
   tabs: Tab[]
@@ -30,9 +43,12 @@ export type State = {
 export type Actions = {
   newTab(cwd?: string): Promise<void>
   split(dir: Dir): Promise<void>
-  /** Open a non-terminal view (editor, browser, mission…) as a new tab or a split of the focused pane. */
+  /** Open a non-terminal view (editor, browser, mission…) as a new tab, a split of the focused
+   *  pane, or (`auto`) wherever it fits best. */
   openView(view: string, props: Record<string, unknown>, place: Place, title?: string): void
   closePane(): Promise<void>
+  /** Close every pane of the active tab except the focused one. */
+  closeOthers(): Promise<void>
   /** Close every pane of a tab (kills their PTYs) and the tab itself. */
   closeTab(id: string): Promise<void>
   focusPane(id: PaneId): void
@@ -51,7 +67,8 @@ export type Store = StoreApi<State & Actions>
 export const DEFAULT_COLS = 80
 export const DEFAULT_ROWS = 24
 
-export function createStore(pty: PtyClient): Store {
+export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
+  const workspace = opts.workspace ?? (() => workspaceRect())
   return createZustand<State & Actions>((set, get) => {
     const active = () => get().tabs.find((t) => t.id === get().activeTab)
     let synthetic = -1
@@ -59,6 +76,14 @@ export function createStore(pty: PtyClient): Store {
     /** Output that arrived before a TerminalPane attached its sink (the shell prompt
      *  usually lands before `pty.spawn` even resolves). Flushed by attachSink. */
     const pending = new Map<PaneId, Uint8Array[]>()
+
+    /** Hands new props to an open pane: its view's handler decides, else they replace the old ones. */
+    function reuse(id: PaneId, view: string, props: Record<string, unknown>, title?: string): boolean {
+      const handler = reuseHandler(view)
+      if (handler) return handler(id, props)
+      set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], props, ...(title === undefined ? {} : { title }) } } }))
+      return true
+    }
 
     async function spawnPane(cwd?: string): Promise<PaneId> {
       try {
@@ -139,15 +164,18 @@ export function createStore(pty: PtyClient): Store {
       },
 
       openView(view, props, place, title) {
+        const tab = active()
+        if (place === 'auto' && tab) {
+          const same = leaves(tab.root).filter((p) => get().panes[p]?.view === view)
+          const target = same.includes(tab.focused) ? tab.focused : same[0]
+          if (target !== undefined && reuse(target, view, props, title)) return get().focusPane(target)
+          const box = workspace()
+          const r = box && layoutRects(tab.root, box).get(tab.focused)
+          place = !r ? 'tab' : r.w > SPLIT_MIN_W ? 'split-row' : r.h > SPLIT_MIN_H ? 'split-col' : 'tab'
+        }
         const id = synthetic--
         set((s) => ({ panes: { ...s.panes, [id]: { id, view, props, title } } }))
-        if (place === 'tab') {
-          const tab: Tab = { id: `tab-${id}`, root: leaf(id), focused: id }
-          set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id }))
-          return
-        }
-        const tab = active()
-        if (!tab) {
+        if (place === 'tab' || place === 'auto' || !tab) {
           const t: Tab = { id: `tab-${id}`, root: leaf(id), focused: id }
           set((s) => ({ tabs: [...s.tabs, t], activeTab: t.id }))
           return
@@ -156,6 +184,23 @@ export function createStore(pty: PtyClient): Store {
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root: splitAt(t.root, tab.focused, id, dir), focused: id } : t)),
         }))
+      },
+
+      async closeOthers() {
+        const tab = active()
+        if (!tab) return
+        const keep = tab.focused
+        const ids = leaves(tab.root).filter((p) => p !== keep)
+        for (const p of ids) if (p > 0) await pty.kill(p)
+        set((s) => {
+          const panes = { ...s.panes }
+          const sinks = { ...s.sinks }
+          for (const p of ids) {
+            delete panes[p]
+            delete sinks[p]
+          }
+          return { tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root: leaf(keep), focused: keep } : t)), panes, sinks }
+        })
       },
 
       async closeTab(id) {

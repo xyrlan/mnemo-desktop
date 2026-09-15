@@ -21,7 +21,7 @@ export function openMissionPane(child: ChildSession) {
       s.focusPane(existing.id)
     }
   } else {
-    s.openView('mission', { id: child.id }, 'split-row', child.name ?? child.id)
+    s.openView('mission', { id: child.id }, 'auto', child.name ?? child.id)
   }
   void missionStore.getState().markLooked(child.id, child.timeline_len)
 }

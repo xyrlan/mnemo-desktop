@@ -1,4 +1,5 @@
 import { createStore } from './store'
+import { registerReuse } from './reuse'
 import type { PtyClient } from '../pty/client'
 
 function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean } = {}): PtyClient & { killed: number[]; outputs: Record<number, (b: Uint8Array) => void> } {
@@ -171,4 +172,125 @@ test('closeTab kills every pane of the tab and activates a neighbour', async () 
   expect(s.getState().tabs).toHaveLength(1)
   expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
   expect(s.getState().panes[1]).toBeUndefined()
+})
+
+describe('openView auto placement', () => {
+  const box = (w: number, h: number) => () => ({ x: 0, y: 0, w, h })
+
+  test('a wide focused pane splits right, a tall one splits down, a small one opens a tab', async () => {
+    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+    await s.getState().newTab()
+    s.getState().openView('editor', { path: '/a' }, 'auto')
+    let t = s.getState().tabs[0]
+    expect(t.root).toMatchObject({ kind: 'split', dir: 'row' })
+    s.getState().openView('browser', { url: 'x' }, 'auto')
+    t = s.getState().tabs[0]
+    expect(t.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ kind: 'leaf' }, { kind: 'split', dir: 'col' }] })
+    s.getState().openView('mission', { id: 'c1' }, 'auto')
+    expect(s.getState().tabs).toHaveLength(2)
+    expect(s.getState().activeTab).toBe(s.getState().tabs[1].id)
+  })
+
+  test('four successive opens in a 1280x800 window make at most two columns', async () => {
+    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+    await s.getState().newTab()
+    for (const v of ['editor', 'browser', 'mission', 'other']) s.getState().openView(v, {}, 'auto')
+    const columns = (n: import('./tree').Node): number =>
+      n.kind === 'leaf' ? 1 : n.dir === 'row' ? columns(n.children[0]) + columns(n.children[1]) : Math.max(columns(n.children[0]), columns(n.children[1]))
+    for (const t of s.getState().tabs) expect(columns(t.root)).toBeLessThanOrEqual(2)
+  })
+
+  test('unknown workspace size or no tab opens a tab', async () => {
+    const s = createStore(fakePty(), { workspace: () => null })
+    s.getState().openView('editor', {}, 'auto')
+    expect(s.getState().tabs).toHaveLength(1)
+    s.getState().openView('browser', {}, 'auto')
+    expect(s.getState().tabs).toHaveLength(2)
+  })
+
+  test('mission: a same-view pane in the active tab takes the new props and focus', async () => {
+    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+    await s.getState().newTab()
+    s.getState().openView('mission', { id: 'a' }, 'auto', 'a')
+    const mission = s.getState().tabs[0].focused
+    s.getState().focusPane(1)
+    s.getState().openView('mission', { id: 'b' }, 'auto', 'b')
+    const t = s.getState().tabs[0]
+    expect(t.focused).toBe(mission)
+    expect(s.getState().panes[mission]).toMatchObject({ view: 'mission', props: { id: 'b' }, title: 'b' })
+    expect(Object.keys(s.getState().panes)).toHaveLength(2)
+  })
+
+  test('browser: a registered handler navigates the open pane instead of replacing props', async () => {
+    const got: [number, Record<string, unknown>][] = []
+    const off = registerReuse('browser', (id, props) => (got.push([id, props]), true))
+    try {
+      const s = createStore(fakePty(), { workspace: box(1280, 800) })
+      await s.getState().newTab()
+      s.getState().openView('browser', { url: 'one' }, 'auto')
+      const pane = s.getState().tabs[0].focused
+      s.getState().focusPane(1)
+      s.getState().openView('browser', { url: 'two' }, 'auto')
+      expect(got).toEqual([[pane, { url: 'two' }]])
+      expect(s.getState().tabs[0].focused).toBe(pane)
+      expect(s.getState().panes[pane].props).toEqual({ url: 'one' })
+    } finally {
+      off()
+    }
+  })
+
+  test('editor: a declined reuse (unsaved edits) places a fresh pane by size', async () => {
+    let dirty = false
+    const off = registerReuse('editor', () => !dirty)
+    try {
+      const s = createStore(fakePty(), { workspace: box(1280, 800) })
+      await s.getState().newTab()
+      s.getState().openView('editor', { path: '/a' }, 'auto')
+      const first = s.getState().tabs[0].focused
+      s.getState().openView('editor', { path: '/b' }, 'auto')
+      expect(s.getState().tabs[0].focused).toBe(first)
+      dirty = true
+      s.getState().openView('editor', { path: '/c' }, 'auto')
+      const t = s.getState().tabs[0]
+      expect(t.focused).not.toBe(first)
+      expect(s.getState().panes[t.focused].props).toEqual({ path: '/c' })
+      // the 640px-wide editor was focused, so the fresh pane splits it downward
+      expect(t.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ kind: 'leaf' }, { kind: 'split', dir: 'col' }] })
+    } finally {
+      off()
+    }
+  })
+
+  test('reuse only looks at the active tab', async () => {
+    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+    await s.getState().newTab()
+    s.getState().openView('mission', { id: 'a' }, 'tab')
+    await s.getState().newTab()
+    s.getState().openView('mission', { id: 'b' }, 'auto')
+    const missions = Object.values(s.getState().panes).filter((p) => p.view === 'mission')
+    expect(missions).toHaveLength(2)
+  })
+
+  test('explicit places ignore reuse', async () => {
+    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+    await s.getState().newTab()
+    s.getState().openView('mission', { id: 'a' }, 'split-row')
+    s.getState().openView('mission', { id: 'b' }, 'split-col')
+    expect(Object.values(s.getState().panes).filter((p) => p.view === 'mission')).toHaveLength(2)
+  })
+})
+
+test('closeOthers keeps the focused leaf and kills the rest', async () => {
+  const pty = fakePty()
+  const s = createStore(pty)
+  await s.getState().newTab()
+  await s.getState().split('row')
+  s.getState().openView('editor', {}, 'split-col')
+  s.getState().focusPane(2)
+  await s.getState().closeOthers()
+  const t = s.getState().tabs[0]
+  expect(t.root).toEqual({ kind: 'leaf', pane: 2 })
+  expect(t.focused).toBe(2)
+  expect(pty.killed).toEqual([1])
+  expect(Object.keys(s.getState().panes).map(Number)).toEqual([2])
 })
