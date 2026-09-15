@@ -14,6 +14,9 @@ pub mod browser;
 pub mod mission;
 pub mod mission_commands;
 
+// -- voice (src/voice.rs) --
+pub mod voice;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -49,6 +52,8 @@ pub fn run() {
     env_logger::init();
     tauri::Builder::default()
         .manage(PtyState(pty::PtyManager::new()))
+        // -- voice state --
+        .manage(voice::VoiceState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
             commands::pty_write,
@@ -78,6 +83,11 @@ pub fn run() {
             mission_commands::mission_reply,
             mission_commands::mission_mark_looked,
             mission_commands::mission_looked,
+
+            // -- voice commands --
+            voice::voice_start,
+            voice::voice_stop,
+            voice::voice_set_language,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {

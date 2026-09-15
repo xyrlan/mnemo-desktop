@@ -1,0 +1,33 @@
+.voice-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 7px 14px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font: inherit;
+  font-size: 12px;
+  pointer-events: none;
+}
+.voice-listening { border-color: var(--ansi-red); }
+.voice-error { border-color: var(--ansi-red); color: var(--ansi-bright-red); }
+.voice-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voice-muted { color: var(--fg-muted); }
+.voice-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--ansi-red);
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+@keyframes voice-pulse { 50% { opacity: 0.35; } }
+.voice-progress { position: relative; margin-top: 4px; color: var(--fg-muted); font-size: 11px; }
+.voice-bar { height: 2px; margin-top: 3px; background: var(--accent); border-radius: 1px; }
