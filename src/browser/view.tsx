@@ -194,3 +194,14 @@ register({
     if (url) store.getState().openView('browser', { url }, 'auto', 'pull request')
   },
 })
+
+// -- mcp: read/snapshot bridge for the desktop MCP (src/browser/read.ts, src/mcp/) --
+// Imports are hoisted, so they sit in this block to keep the edit in one place.
+import { readPage, snapshotPage } from './read'
+import { registerBrowserBridge } from '../mcp/tools'
+registerBrowserBridge({
+  url: (id) => webviews.url(id),
+  read: (id) => readPage(invoke, id),
+  snapshot: (id) => snapshotPage(invoke, id),
+})
+// -- end mcp --

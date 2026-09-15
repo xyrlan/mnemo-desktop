@@ -9,6 +9,7 @@ import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7 } from './osc7'
 import { macChord, pasteBytes } from './keymap'
 import { holdFileDrop } from './file-drop'
+import { bufferLines, registerBuffer } from './buffer'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 
 export default function TerminalPane({ id }: PaneViewProps) {
@@ -44,6 +45,8 @@ export default function TerminalPane({ id }: PaneViewProps) {
     fit.fit()
 
     store.getState().attachSink(id, (b) => term.write(b))
+    // The desktop MCP reads what this pane shows (`desktop_terminal_read`).
+    const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
     // App chords (⌘K, ⌘W…) are handled by the window listener in the capture phase before
     // xterm sees them.
@@ -85,6 +88,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
     const releaseDrop = holdFileDrop()
 
     return () => {
+      unregisterBuffer()
       releaseDrop()
       ro.disconnect()
       data.dispose()

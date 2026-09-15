@@ -44,6 +44,7 @@ pub mod vaultmap;
 pub mod workspace;
 
 // -- mcp (src/mcp.rs) --
+pub mod mcp;
 
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
@@ -156,6 +157,11 @@ pub fn run() {
             workspace::workspace_write,
 
             // -- mcp commands --
+            mcp::mcp_socket_path,
+            mcp::mcp_answer,
+            mcp::mcp_browser_eval,
+            mcp::mcp_browser_snapshot,
+
             chrome::chrome_branch,
             chrome::chrome_repo,
 
