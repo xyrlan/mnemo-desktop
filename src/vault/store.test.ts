@@ -200,7 +200,7 @@ test('a row the tree never read can be disabled, and a success re-reads the tabl
 
 test('the latest ego read wins over a slow one, and a failing read is an error graph', async () => {
   const slow = deferred<VaultGraph>()
-  const s = createVaultStore(fake({ ego: (path, limit) => (expect(limit).toBe(30), path === '/a.md' ? slow.promise : Promise.resolve(egoOf(path))) }))
+  const s = createVaultStore(fake({ ego: (path, limit) => (expect(limit).toBe(12), path === '/a.md' ? slow.promise : Promise.resolve(egoOf(path))) }))
   const first = s.getState().loadEgo('/a.md')
   expect(s.getState()).toMatchObject({ egoLoading: true, ego: null })
   await s.getState().loadEgo('/b.md')
@@ -237,14 +237,14 @@ test('client maps to the Tauri commands', async () => {
   await c.page('/v/x.md')
   await c.run('status', [], '/repo')
   await c.rules('agent:shared', 'cargo')
-  await c.ego('/v/x.md', 30)
+  await c.ego('/v/x.md', 12)
   await c.health()
   expect(seen).toEqual([
     ['vault_tree', undefined],
     ['vault_page', { path: '/v/x.md' }],
     ['vault_run', { action: 'status', args: [], cwd: '/repo' }],
     ['vault_rules', { scope: 'agent:shared', filter: 'cargo' }],
-    ['vault_ego', { path: '/v/x.md', limit: 30 }],
+    ['vault_ego', { path: '/v/x.md', limit: 12 }],
     ['vault_health', undefined],
   ])
 })

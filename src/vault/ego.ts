@@ -4,10 +4,10 @@ import { confidenceTone } from './rules'
 import type { GraphNode, VaultGraph } from './types'
 
 /** Nodes the ego view asks for, its centre included; the Rust side never returns more. */
-export const EGO_LIMIT = 30
+export const EGO_LIMIT = 12
 
 /** The card box the layout reserves; `.gr-card` is 160–240 px wide. */
-const CARD = { width: 210, height: 52 }
+const CARD = { width: 170, height: 48 }
 
 /** Confidence colour, but a rule that never fired is grey whatever it claims. */
 export function toneFor(n: GraphNode): CardData['tone'] {

@@ -100,7 +100,7 @@ function Row({ row, selected, cwd, armed, onDisable }: { row: RuleRow; selected:
         {row.type}
         <div className="vr-agent">{row.agent}</div>
       </td>
-      <td>
+      <td className="vr-conf-cell">
         <span className={`vr-conf vr-tone-${tone}`}>
           <i className={`vg-dot gr-${tone}`} />
           {row.confidence ?? '—'}
@@ -224,7 +224,7 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
           <Chip key={`topic:${t.name}`} on={chips.topic === t.name} label={`#${t.name}`} count={t.count} onClick={() => setChip('topic', t.name)} />
         ))}
       </div>
-      <div className="vr-main">
+      <div className={`vr-main${selected ? ' vr-with-side' : ''}`}>
         <div className="vr-table">
           {loaded && shown.length === 0 && (
             <div className="vt-empty">{rules.length === 0 && !filter && !scope ? 'No rules: `mnemo status` names no vault, or it holds no pages.' : 'No rule matches.'}</div>
@@ -255,10 +255,13 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
             </button>
           )}
         </div>
-        <aside className="vr-side">
-          <PageView cwd={cwd} empty="Select a rule." />
-          {selected && <EgoView path={selected} />}
-        </aside>
+        {/* The side panel only exists once a rule is selected: the table needs the width. */}
+        {selected && (
+          <aside className="vr-side">
+            <PageView cwd={cwd} empty="Select a rule." />
+            <EgoView path={selected} />
+          </aside>
+        )}
       </div>
     </div>
   )

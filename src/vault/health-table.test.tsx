@@ -163,13 +163,14 @@ test('a row opens its page and ego graph; a neighbour selects; disable asks twic
   const { vault } = await import('./app-store')
   vault.setState({ scope: '', filter: '', rulesLoaded: false })
   const { host, root } = await mount()
-  expect(host.querySelector('.vr-side')?.textContent).toContain('Select a rule.')
+  // No side panel until a rule is selected: the table keeps the whole width.
+  expect(host.querySelector('.vr-side')).toBeNull()
   expect(host.querySelector('.stub-graph')).toBeNull()
 
   await click(byText(host, '.vr-name-main', 'Run the tests')!.closest('tr'))
   await flush()
   expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('Run the tests')
-  expect(calls.filter(([c]) => c === 'vault_ego').pop()).toEqual(['vault_ego', { path: `${dir}/run-tests.md`, limit: 30 }])
+  expect(calls.filter(([c]) => c === 'vault_ego').pop()).toEqual(['vault_ego', { path: `${dir}/run-tests.md`, limit: 12 }])
   expect([...host.querySelectorAll('.stub-node')].map((b) => [b.textContent, b.className])).toEqual([
     ['run-tests', 'stub-node ve-centre'],
     ['bare', 'stub-node'],

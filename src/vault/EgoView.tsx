@@ -90,7 +90,7 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
         {shown?.error && <pre className="vt-error ve-msg">{shown.error}</pre>}
         {!shown && <div className="vt-empty ve-msg">{loading ? 'reading the neighbourhood…' : ''}</div>}
         {shown && !shown.error && neighbours === 0 && <div className="vt-empty ve-msg">No links and no shared topics.</div>}
-        {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} onNodeClick={(id) => id !== path && void vault.getState().select(id)} />}
+        {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} fitMinZoom={0.85} onNodeClick={(id) => id !== path && void vault.getState().select(id)} />}
       </div>
     </section>
   )
