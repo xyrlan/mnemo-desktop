@@ -141,3 +141,36 @@ test('graph mode shows the agent graph with health beside it; hubs change scope,
 
   await act(async () => root.unmount())
 })
+
+test('a pulse naming a rule on the graph makes its node and edges glow for GLOW_MS', async () => {
+  const { paneView } = await import('../panes/registry')
+  const { GLOW_MS } = await import('./GraphView')
+  const { pulseStore } = await import('../pulse/app-store')
+  // Fired before the graph was shown: not replayed.
+  pulseStore.getState().push({ at: 1, kind: 'reflex', project: 'p', agent: 'p', slugs: ['bare'] })
+  const Pane = paneView('vault')!
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  await act(async () => root.render(<Pane id={-1} props={{}} />))
+  await flush()
+  await click(byText(host, '.vt-modes button', 'Graph'))
+  await flush()
+  const cls = (label: string) => [...host.querySelectorAll('.stub-node')].find((b) => b.textContent?.startsWith(label))!.className
+  expect(host.querySelectorAll('.vg-glow')).toHaveLength(0)
+
+  vi.useFakeTimers()
+  await act(async () => pulseStore.getState().push({ at: 2, kind: 'tool', project: 'p', agent: 'p', slugs: ['run-tests', 'elsewhere'], tool: 'read_mnemo_rule' }))
+  expect(cls('Run the tests')).toBe('stub-node vg-heat-3 vg-glow tone-ok')
+  expect(cls('bare')).not.toContain('vg-glow')
+
+  await act(async () => vi.advanceTimersByTime(GLOW_MS / 2))
+  await act(async () => pulseStore.getState().push({ at: 3, kind: 'enrich', project: 'p', agent: 'p', slugs: ['bare'] }))
+  await act(async () => vi.advanceTimersByTime(GLOW_MS / 2 + 1))
+  expect(cls('Run the tests')).not.toContain('vg-glow')
+  expect(cls('bare')).toContain('vg-glow')
+  await act(async () => vi.advanceTimersByTime(GLOW_MS))
+  expect(host.querySelectorAll('.vg-glow')).toHaveLength(0)
+  vi.useRealTimers()
+  await act(async () => root.unmount())
+})

@@ -1,0 +1,7 @@
+.pulse-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 30; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, calc(100vw - 32px)); }
+.pulse-toast { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 12px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--ansi-red); border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.35); animation: pulse-toast-in .18s ease-out; }
+.pulse-toast:hover { border-color: var(--ansi-bright-red); }
+.pulse-toast-head { color: var(--ansi-red); font-weight: 700; }
+.pulse-toast-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-toast-where { color: var(--fg-muted); }
+@keyframes pulse-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

@@ -1,6 +1,6 @@
 import type { Pane } from '../layout/store'
 import { snapshot } from '../mission/fixtures'
-import { barInfo, paneParent } from './info'
+import { barInfo, paneParent, pulseLabel, pulseTitle } from './info'
 
 const term = (over: Partial<Pane> = {}): Pane => ({ id: 1, view: 'terminal', ...over })
 
@@ -37,4 +37,14 @@ test('non-terminal panes use their view cwd and title', () => {
   const info = barInfo({ id: -1, view: 'editor', props: { root: '/Users/me/notes' }, title: 'todo.md' }, snapshot, { repo: null, branch: null })
   expect(info).toMatchObject({ cwd: '/Users/me/notes', place: 'notes', branch: undefined, title: 'todo.md' })
   expect(barInfo({ id: -3, view: 'cockpit' }, snapshot)).toMatchObject({ cwd: undefined, title: 'cockpit' })
+})
+
+test('a pulse label names its first rule, how many more, or the tool when no rule fired', () => {
+  const e = { at: 1, kind: 'reflex' as const, project: 'p', agent: 'p', slugs: ['run-tests'] }
+  expect(pulseLabel(e)).toBe('↯ run-tests')
+  expect(pulseLabel({ ...e, slugs: ['a', 'b', 'c'] })).toBe('↯ a +2')
+  expect(pulseLabel({ ...e, kind: 'tool', slugs: [], tool: 'session_start.inject' })).toBe('↯ session_start.inject')
+  expect(pulseLabel({ ...e, kind: 'tool', slugs: [] })).toBe('↯ tool')
+  expect(pulseTitle({ ...e, kind: 'enforce', tool: 'Bash', slugs: ['no-force-push'] })).toBe('mnemo blocked Bash: no-force-push (click to open in the vault)')
+  expect(pulseTitle({ ...e, kind: 'tool', tool: 'session_start.inject', slugs: [] })).toBe('mnemo tool call session_start.inject')
 })
