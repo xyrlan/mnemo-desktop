@@ -35,6 +35,21 @@ Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch 
 
 `~/.mnemo-desktop/settings.json`, toggled from ⌘K: `outgoing` (`en` rewrites replies and dictation in English through your own `claude -p` before they leave; `as-typed` sends verbatim), `replyLanguage` (`pt`/`en`/`unchanged`, asks a child to answer in that language), `sidebarScope` (`repo`/`all`).
 
+## Desktop MCP
+
+The app serves the Claude Code sessions it hosts an MCP server named `desktop`, so an agent can look at the other panes instead of asking you to paste them:
+
+- `desktop_list_panes`: every pane with its id, view, title, cwd, url (browser panes), tab and focus.
+- `desktop_terminal_read(pane, lines)`: the last `lines` (default 100) of a terminal, scrollback included.
+- `desktop_browser_read(pane)`: a browser pane's page as text (title, url, visible content as light markdown), logins included.
+- `desktop_pane_snapshot(pane)`: a screenshot of a browser pane (macOS).
+
+The server is a second binary, `mnemo-desktop-mcp`, that Claude Code starts over stdio; it relays each call to the running app over `~/.mnemo-desktop/mcp.sock` (owner-only). On start the app links the binary of the build you launched to `~/.mnemo-desktop/bin/mnemo-desktop-mcp`, writes `~/.mnemo-desktop/mcp.json`, and, if your Claude config has no user-scope server named `desktop`, runs the one-time equivalent of:
+
+    claude mcp add --scope user desktop -- ~/.mnemo-desktop/bin/mnemo-desktop-mcp
+
+New sessions then have the tools; `/mcp` in a session shows it. That happens once (`~/.mnemo-desktop/mcp-registered` remembers it), so `claude mcp remove --scope user desktop` sticks. To add it by hand instead, or for one project only (`--scope local`), run that line yourself; to try it without touching your Claude config, `claude --mcp-config ~/.mnemo-desktop/mcp.json`. With the app closed the tools answer "the mnemo desktop app is not running"; with several apps open, the one started last serves. `tauri dev` builds only the app binary, so run `cargo build --manifest-path src-tauri/Cargo.toml --bin mnemo-desktop-mcp` (same target dir) before trying it from a dev build.
+
 ## Shell integration
 
 ⌘D and ⌘T open the new shell where you are: the focused terminal's directory, an editor's root, a mission pane's worktree, or on Home the selected repo; otherwise your home directory. Terminals report their directory with OSC 7 at each prompt, which the app turns on for your default shell without touching your dotfiles:

@@ -3,6 +3,8 @@ name = "mnemo-desktop"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
+# Two binaries: the app, and the desktop MCP server Claude Code starts (src/bin/, see src/mcp.rs).
+default-run = "mnemo-desktop"
 
 [lib]
 name = "mnemo_desktop_lib"
@@ -28,10 +30,14 @@ ureq = "3"
 tauri-plugin-dialog = "2"
 # Vault map (vaultmap.rs): wakes the born watcher when pages appear, change or go.
 notify = "8"
+# Browser pane snapshots travel as base64 image content (mcp.rs).
+base64 = "0.22"
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# Completion handlers for WKWebView snapshots (mcp.rs).
+block2 = "0.6"
 
 [dev-dependencies]
 # Reads the voice test fixture.
