@@ -31,7 +31,6 @@ function ChildRow({ c, label }: { c: ChildSession; label?: string }) {
   const draft = useMission((s) => s.drafts[c.id] ?? '')
   const err = useMission((s) => s.replyErrors[c.id])
   const sending = useMission((s) => s.sending[c.id])
-  const translating = useMission((s) => s.translating[c.id])
   const lastSent = useMission((s) => s.sent[c.id]?.at(-1))
   const word0 = childWord(c)
   const d = delta(c, looked)
@@ -66,14 +65,11 @@ function ChildRow({ c, label }: { c: ChildSession; label?: string }) {
             <button disabled={sending || !draft.trim()} onClick={() => void missionStore.getState().sendReply(c.id)}>
               {sending ? 'sending…' : 'send ⌘↩'}
             </button>
-            <button disabled={translating || !draft.trim()} title="Rewrite the draft in English before sending" onClick={() => void missionStore.getState().translateDraft(c.id)}>
-              {translating ? '…' : '→EN'}
-            </button>
             {err && <span className="m-error">{err}</span>}
           </div>
           {lastSent && (
             <div className="m-sent">
-              sent ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · waiting for the child to pick it up… <span className="m-sent-text">{lastSent.text}</span>
+              sent ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · waiting for the child to pick it up… <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
             </div>
           )}
         </div>

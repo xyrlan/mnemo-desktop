@@ -9,6 +9,11 @@ test('⌘ arrows and backspace become readline bytes', () => {
   expect(macChord(ev('Enter'))).toEqual({ write: '\r' })
 })
 
+test('Shift+Enter becomes CSI-u so Claude Code inserts a newline', () => {
+  expect(macChord(ev('Enter', { metaKey: false, shiftKey: true }))).toEqual({ write: '\x1b[13;2u' })
+  expect(macChord(ev('Enter', { metaKey: false }))).toBeNull()
+})
+
 test('⌘C/⌘V are clipboard verbs; other chords fall through', () => {
   expect(macChord(ev('c'))).toEqual({ clipboard: 'copy' })
   expect(macChord(ev('v'))).toEqual({ clipboard: 'paste' })

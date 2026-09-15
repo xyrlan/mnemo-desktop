@@ -75,7 +75,25 @@ test('sendReply records what was sent so the UI can show it immediately', async 
   s.getState().setDraft('x', 'go')
   await s.getState().sendReply('x')
   expect(s.getState().sent.x).toHaveLength(1)
-  expect(s.getState().sent.x[0].text).toBe('go')
+  expect(s.getState().sent.x[0]).toMatchObject({ text: 'go', original: 'go' })
+})
+
+test('outgoing=en translates silently and the reply language adds a footer', async () => {
+  const c = fake()
+  const s = createMissionStore(c, () => ({ outgoing: 'en', replyLanguage: 'pt' }))
+  s.getState().setDraft('x', 'pode seguir')
+  await s.getState().sendReply('x')
+  expect(c.replies[0][1]).toBe('EN(pode seguir)\n\n(Please answer in Portuguese.)')
+  expect(s.getState().sent.x[0].original).toBe('pode seguir')
+})
+
+test('a failed translation sends the original instead of nothing', async () => {
+  const c = fake()
+  c.translate = async () => { throw new Error('claude missing') }
+  const s = createMissionStore(c, () => ({ outgoing: 'en', replyLanguage: 'unchanged' }))
+  s.getState().setDraft('x', 'oi')
+  expect(await s.getState().sendReply('x')).toBe(true)
+  expect(c.replies[0][1]).toBe('oi')
 })
 
 test('translateDraft replaces the draft and reports failures inline', async () => {

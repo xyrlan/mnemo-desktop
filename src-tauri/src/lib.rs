@@ -10,6 +10,9 @@ pub mod fs;
 // -- browser (src/browser.rs) --
 pub mod browser;
 
+// -- settings (src/settings.rs) --
+pub mod settings;
+
 // -- mission (src/mission.rs) --
 pub mod mission;
 pub mod mission_commands;
@@ -87,6 +90,8 @@ pub fn run() {
             mission_commands::mission_mark_looked,
             mission_commands::mission_looked,
             mission_commands::mission_translate,
+            settings::settings_read,
+            settings::settings_write,
 
             // -- voice commands --
             voice::voice_start,
