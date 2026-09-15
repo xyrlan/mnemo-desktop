@@ -1,115 +1,88 @@
-import { buildGraph, nodeId } from './model'
-import { snapshot, desktop } from '../mission/fixtures'
-import { withPrs, shipped } from './fixtures'
-import type { CardData } from '../graph'
+import { buildMissionMap, mapId, CARD_H, CARD_W, type MapCard } from './model'
+import { desktop } from '../mission/fixtures'
+import { shipped } from './fixtures'
+import { mnemoIssues } from '../github/fixtures'
 
-const data = (g: ReturnType<typeof buildGraph>, id: string) => g.nodes.find((n) => n.id === id)?.data as CardData | undefined
-const has = (g: ReturnType<typeof buildGraph>, s: string, t: string) => g.edges.some((e) => e.source === s && e.target === t)
+type M = ReturnType<typeof buildMissionMap>
+const data = (g: M, id: string) => g.nodes.find((n) => n.id === id)?.data as MapCard | undefined
+const has = (g: M, s: string, t: string) => g.edges.some((e) => e.source === s && e.target === t)
+const kinds = (g: M, id: string) => data(g, id)?.actions.map((a) => a.kind)
 
-test('repo → parent → mission group → children, with tone, pulse and token badges', () => {
-  const g = buildGraph(snapshot, { a43d3832: 1 }, desktop.root)
-  const repo = 'repo:/Users/me/github/mnemo-desktop'
-  const parent = 'parent:0ff9d810-aaaa'
-  const head = `mission:${desktop.missions[0].contract_path}`
-  expect(has(g, repo, parent)).toBe(true)
-  // The mission hangs off the parent that dispatched its children, not off the repo.
-  expect(has(g, parent, head)).toBe(true)
-  expect(has(g, repo, head)).toBe(false)
-  expect(has(g, head, 'child:a43d3832')).toBe(true)
-  expect(has(g, head, 'child:094c6a03')).toBe(true)
-
-  expect(data(g, repo)).toMatchObject({ label: 'mnemo-desktop', tone: 'accent', sub: '2 live · 1 parent' })
-  expect(data(g, parent)).toMatchObject({ label: 'round3 dispatch', badge: '210k', tone: 'accent' })
-  expect(data(g, parent)?.sub).toContain('children 640k')
-  expect(data(g, 'child:a43d3832')).toMatchObject({ label: 'cockpit', tone: 'accent', badge: '+3 · 320k', sub: 'writing the cockpit pane' })
-  expect(data(g, 'child:094c6a03')).toMatchObject({ label: 'vault', tone: 'bad', pulse: true, sub: 'may I add a crate?' })
-  // Unfocused repo is muted; a child with no dispatcher hangs off its repo.
-  expect(data(g, 'repo:/Users/me/github/mnemo')?.tone).toBe('muted')
-  expect(has(g, 'repo:/Users/me/github/mnemo', 'child:c0ffee01')).toBe(true)
-})
-
-test('pieces live inside their contract group, and the group comes first', () => {
-  const g = buildGraph(snapshot, {})
-  const group = nodeId.group(desktop.missions[0])
-  const gi = g.nodes.findIndex((n) => n.id === group)
-  expect(g.nodes[gi].type).toBe('group')
-  for (const id of [`mission:${desktop.missions[0].contract_path}`, 'child:a43d3832', 'child:094c6a03']) {
-    const i = g.nodes.findIndex((n) => n.id === id)
-    expect(g.nodes[i].parentId).toBe(group)
-    expect(i).toBeGreaterThan(gi)
-  }
-  expect(g.nodes.find((n) => n.id === 'child:c0ffee01')?.parentId).toBeUndefined()
-})
-
-test('child → PR → CI with CI tone; a PR without child hangs off the mission; landable contract is ok', () => {
-  const g = buildGraph(withPrs, {})
+test('contract → pieces → PR → land, with child state, CI and the actions each card offers', () => {
   const m = shipped.missions[0]
-  const head = nodeId.mission(m)
-  const pr12 = 'pr:/Users/me/github/mnemo#12'
-  const pr13 = 'pr:/Users/me/github/mnemo#13'
-  expect(has(g, 'child:beef0001', pr12)).toBe(true)
-  expect(has(g, pr12, 'ci:/Users/me/github/mnemo#12')).toBe(true)
-  expect(has(g, head, pr13)).toBe(true)
-  expect(data(g, pr12)?.tone).toBe('ok')
-  expect(data(g, pr13)?.tone).toBe('bad')
-  expect(data(g, 'ci:/Users/me/github/mnemo#13')).toMatchObject({ tone: 'bad', sub: 'fail' })
-  expect(data(g, 'child:beef0001')?.tone).toBe('ok')
-  expect(data(g, head)).toMatchObject({ tone: 'ok', sub: '2/3 PR · CI ✗ · land: ready' })
-  expect(data(g, nodeId.piece(m, 'later'))).toMatchObject({ label: 'later', sub: 'no child, no PR' })
+  const g = buildMissionMap(shipped, m, {})
+  const head = mapId.mission(m)
+  const api = mapId.piece(m, 'api')
+  const docs = mapId.piece(m, 'docs')
+  const later = mapId.piece(m, 'later')
+  const pr12 = mapId.pr(shipped, m.pieces[0].pr!)
+  const pr13 = mapId.pr(shipped, m.pieces[1].pr!)
+  const land = mapId.land(m)
 
-  expect(g.targets['child:beef0001']).toMatchObject({ kind: 'child' })
-  expect(g.targets[pr13]).toMatchObject({ kind: 'pr', pr: { number: 13 } })
-  expect(g.targets[head]).toMatchObject({ kind: 'mission' })
-  expect(g.targets['repo:/Users/me/github/mnemo']).toBeUndefined()
+  for (const p of [api, docs, later]) expect(has(g, head, p)).toBe(true)
+  expect(has(g, api, pr12)).toBe(true)
+  expect(has(g, docs, pr13)).toBe(true)
+  expect(has(g, pr12, land) && has(g, pr13, land)).toBe(true)
+  expect(g.nodes.map((n) => n.id).sort()).toEqual([head, api, docs, later, pr12, pr13, land].sort())
+
+  expect(data(g, head)).toMatchObject({ label: 'mission round4', sub: '2/3 PR · CI ✗', tone: 'ok' })
+  expect(kinds(g, head)).toEqual(['contract'])
+  expect(data(g, api)).toMatchObject({ label: 'api', tone: 'ok' })
+  expect(kinds(g, api)).toEqual(['open'])
+  expect(data(g, later)).toMatchObject({ sub: 'no child, no PR', tone: 'muted' })
+  expect(data(g, pr13)).toMatchObject({ label: 'PR #13', sub: 'open · CI ✗ fail', tone: 'bad' })
+  expect(kinds(g, pr13)).toEqual(['pr', 'job'])
+  // Landable: the green PR merges through land, not on its own.
+  expect(kinds(g, pr12)).toEqual(['pr'])
+  expect(data(g, land)).toMatchObject({ tone: 'ok' })
+  expect(kinds(g, land)).toEqual(['land'])
 })
 
-test('every edge joins two nodes and ids are unique', () => {
-  const g = buildGraph(withPrs, {})
-  const ids = g.nodes.map((n) => n.id)
-  expect(new Set(ids).size).toBe(ids.length)
-  for (const e of g.edges) {
-    expect(ids).toContain(e.source)
-    expect(ids).toContain(e.target)
+test('BLOCKED pulses and offers reply, a working edge animates, a ready PR offers merge', () => {
+  const m = {
+    ...desktop.missions[0],
+    pieces: desktop.missions[0].pieces.map((p) => (p.name === 'cockpit' ? { ...p, pr: { number: 7, url: 'u', state: 'OPEN', head: p.branch, ci: 'pass' as const } } : p)),
   }
-  expect(buildGraph({ repos: [], errors: [], at: '' }, {})).toEqual({ nodes: [], edges: [], targets: {} })
+  const g = buildMissionMap(desktop, m, { a43d3832: 1 })
+  const vault = mapId.piece(m, 'vault')
+  const cockpit = mapId.piece(m, 'cockpit')
+  expect(data(g, vault)).toMatchObject({ pulse: true, tone: 'bad', sub: 'may I add a crate?', badge: 'BLOCKED' })
+  expect(kinds(g, vault)).toEqual(['reply', 'attach'])
+  expect(data(g, cockpit)).toMatchObject({ badge: '+3 · 320k', sub: 'writing the cockpit pane' })
+  expect(kinds(g, cockpit)).toEqual(['attach', 'open'])
+  expect(g.edges.find((e) => e.target === cockpit)?.animated).toBe(true)
+  expect(g.edges.find((e) => e.target === vault)?.animated).toBeUndefined()
+  expect(kinds(g, mapId.pr(desktop, m.pieces[0].pr!))).toEqual(['pr', 'merge'])
+  expect(kinds(g, mapId.land(m))).toEqual([])
 })
 
-test('issues are roots: a dispatched child hangs off its issue, pieces and PRs are linked, the rest are recent roots', async () => {
-  const { snapWithIssues, mnemoIssues } = await import('../github/fixtures')
-  const root = '/Users/me/github/mnemo'
-  const g = buildGraph(snapWithIssues, {}, undefined, { issues: { [root]: mnemoIssues }, labels: {} })
-  const issue = (n: number) => `issue:${root}#${n}`
-  const repo = `repo:${root}`
+test('issues that feed the mission are roots on its map; the others are not drawn', () => {
+  const m = shipped.missions[0]
+  const g = buildMissionMap(shipped, m, {}, mnemoIssues)
+  const issues = g.nodes.filter((n) => n.id.startsWith('issue:')).map((n) => n.id)
+  // #41 names the api piece; #42 is closed by the docs PR; #40 is a loose child's, #43 a PR the mission lacks.
+  expect(issues.sort()).toEqual([mapId.issue(shipped, 41), mapId.issue(shipped, 42)].sort())
+  expect(has(g, mapId.issue(shipped, 41), mapId.piece(m, 'api'))).toBe(true)
+  // A closing PR with no piece naming the issue: the issue points at the PR itself.
+  expect(has(g, mapId.issue(shipped, 42), mapId.pr(shipped, m.pieces[1].pr!))).toBe(true)
+  expect(kinds(g, mapId.issue(shipped, 41))).toEqual(['issue'])
+  for (const id of issues) expect(g.edges.some((e) => e.target === id)).toBe(false)
+})
 
-  // #40: its child moves from the repo to the issue.
-  expect(has(g, issue(40), 'child:c0ffee01')).toBe(true)
-  expect(has(g, repo, 'child:c0ffee01')).toBe(false)
-  // #41 names the api piece: linked to its child (inside the group), not to that child's PR.
-  expect(has(g, issue(41), 'child:beef0001')).toBe(true)
-  expect(has(g, issue(41), `pr:${root}#12`)).toBe(false)
-  // #42 is closed by the docs PR, which has no child.
-  expect(has(g, issue(42), `pr:${root}#13`)).toBe(true)
-  expect(data(g, issue(42))).toMatchObject({ label: '#42 closed by the docs PR', badge: 'PR #13 CI ✗', tone: 'accent' })
-  expect(data(g, issue(43))?.badge).toBe('PR #99')
-
-  // Issues have no incoming edge.
-  for (const n of g.nodes.filter((x) => x.id.startsWith('issue:'))) expect(g.edges.some((e) => e.target === n.id)).toBe(false)
-  expect(g.nodes.filter((n) => n.id.startsWith('issue:')).length).toBe(14)
-  expect(data(g, issue(12))).toMatchObject({ tone: 'muted', sub: 'ui · @me' })
-  expect(data(g, issue(1))).toBeUndefined() // the 11th most recent unlinked one
-  expect(g.targets[issue(12)]).toMatchObject({ kind: 'issue', root, issue: { number: 12 } })
-
+test('laid out left to right at card size, no two cards overlapping, every edge between drawn cards', () => {
+  const m = shipped.missions[0]
+  const g = buildMissionMap(shipped, m, {}, mnemoIssues)
   const ids = g.nodes.map((n) => n.id)
   expect(new Set(ids).size).toBe(ids.length)
   for (const e of g.edges) expect(ids).toContain(e.source)
   for (const e of g.edges) expect(ids).toContain(e.target)
-})
-
-test('the label filter narrows only the recent issues; other repos and no input change nothing', async () => {
-  const { snapWithIssues, mnemoIssues } = await import('../github/fixtures')
-  const root = '/Users/me/github/mnemo'
-  const g = buildGraph(snapWithIssues, {}, undefined, { issues: { [root]: mnemoIssues }, labels: { [root]: ['ui'] } })
-  const shown = g.nodes.filter((n) => n.id.startsWith('issue:')).map((n) => Number(n.id.split('#')[1]))
-  expect(shown).toEqual([43, 42, 41, 40, 12, 10, 8, 6, 4, 2])
-  expect(buildGraph(withPrs, {}, undefined, { issues: {}, labels: {} })).toEqual(buildGraph(withPrs, {}))
+  const pos = (id: string) => g.nodes.find((n) => n.id === id)!.position
+  expect(pos(mapId.land(m)).x).toBeGreaterThan(pos(mapId.pr(shipped, m.pieces[0].pr!)).x)
+  expect(pos(mapId.piece(m, 'api')).x).toBeGreaterThan(pos(mapId.mission(m)).x)
+  for (const a of g.nodes)
+    for (const b of g.nodes) {
+      if (a.id >= b.id) continue
+      const apart = Math.abs(a.position.x - b.position.x) >= CARD_W || Math.abs(a.position.y - b.position.y) >= CARD_H
+      expect(apart, `${a.id} overlaps ${b.id}`).toBe(true)
+    }
 })

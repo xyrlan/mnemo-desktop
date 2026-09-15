@@ -1,4 +1,4 @@
-/* Scope toggle at the top of the sidebar and the cockpit, and the needs-you items both render.
+/* Scope toggle at the top of the sidebar and the cockpit, and the needs-you words both use.
    The base row and reply styles live in theme.css. */
 .m-scope { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; flex: 0 0 auto; }
 .m-scope button { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; }
@@ -16,7 +16,7 @@
 .needs-list .nd { border-left: 2px solid var(--border); padding-left: 6px; }
 .needs-list .nd-blocked { border-left-color: var(--ansi-yellow); }
 .needs-list .nd-ci { border-left-color: var(--ansi-red); }
-.needs-list .nd-land { border-left-color: var(--ansi-green); }
+.needs-list .nd-land, .needs-list .nd-ready { border-left-color: var(--ansi-green); }
 .needs-list .nd-replied { border-left-color: var(--ansi-green); }
 .nd-row { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; cursor: pointer; }
 .nd-row:hover { background: var(--bg); }
@@ -25,12 +25,7 @@
 .nd-blocked .nd-word { color: var(--bg); background: var(--ansi-yellow); }
 .nd-replied .nd-word { background: var(--ansi-green); }
 .nd-ci .nd-word { color: var(--bg); background: var(--ansi-red); }
-.nd-land .nd-word { color: var(--bg); background: var(--ansi-green); }
+.nd-land .nd-word, .nd-ready .nd-word { color: var(--bg); background: var(--ansi-green); }
 .nd-label { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .nd-repo { color: var(--fg-muted); font-size: 11px; flex: 0 0 auto; }
 .nd-sub { color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.needs-strip { display: flex; gap: 6px; overflow-x: auto; min-width: 0; }
-.needs-strip .nd { display: flex; gap: 6px; align-items: baseline; flex: 0 0 auto; max-width: 320px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; }
-.needs-strip .nd:hover { border-color: var(--accent); }
-.needs-strip .nd-blocked { border-color: var(--ansi-yellow); }

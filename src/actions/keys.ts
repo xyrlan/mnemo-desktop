@@ -18,11 +18,28 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
   }
   if (e.altKey) return null
   if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', h: 'home.show', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
+    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', h: 'home.show', b: 'cockpit.open', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `tab.go.${k}`
   const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open', b: 'mission.toggle-sidebar' }
+  return m[k] ?? null
+}
+
+export type ListKey = 'up' | 'down' | 'open' | 'reply' | 'attach' | 'close'
+
+/** Plain keys a focused list pane (the cockpit inbox) acts on: ↑↓ move, Enter opens the row's
+ *  action, `r` reply, `a` attach, Esc closes what the list opened. Never with a modifier (those
+ *  are `actionForKey`'s), never while typing, and no Enter on a button or link, which runs
+ *  itself. */
+export function listKey(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'target'>): ListKey | null {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null
+  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null
+  const tag = t?.tagName?.toUpperCase() ?? ''
+  if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || t?.isContentEditable) return null
+  const k = e.key.toLowerCase()
+  if (k === 'enter' && (tag === 'BUTTON' || tag === 'A')) return null
+  const m: Record<string, ListKey> = { arrowup: 'up', arrowdown: 'down', enter: 'open', r: 'reply', a: 'attach', escape: 'close' }
   return m[k] ?? null
 }
 
