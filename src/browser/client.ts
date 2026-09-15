@@ -1,5 +1,7 @@
 export type Bounds = { x: number; y: number; w: number; h: number }
 export type PageState = { url: string; loading: boolean }
+/** Whether logins done in a pane survive restarts (`browser_data_store`). */
+export type DataStore = 'persistent' | 'ephemeral'
 type Unlisten = () => void
 
 export type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
@@ -15,6 +17,9 @@ export interface BrowserClient {
   reload(id: number): Promise<void>
   /** URL of the open PR for the branch in `cwd`, or null (no `gh`, no PR). */
   prUrl(cwd?: string): Promise<string | null>
+  /** Opens `url` in Google Chrome, else the default browser. */
+  openExternal(url: string): Promise<void>
+  dataStore(): Promise<DataStore>
   onState(id: number, cb: (s: PageState) => void): Promise<Unlisten>
   onTitle(id: number, cb: (title: string) => void): Promise<Unlisten>
 }
@@ -46,6 +51,8 @@ export function makeBrowserClient(invoke: Invoke, listen: Listen): BrowserClient
     forward: (id) => queued(id, 'browser_forward'),
     reload: (id) => queued(id, 'browser_reload'),
     prUrl: (cwd) => invoke<string | null>('browser_pr_url', { cwd: cwd ?? null }),
+    openExternal: (url) => invoke<void>('browser_open_external', { url }),
+    dataStore: () => invoke<DataStore>('browser_data_store'),
     onState: (id, cb) => listen<PageState>(`browser://state/${id}`, cb),
     onTitle: (id, cb) => listen<{ title: string }>(`browser://title/${id}`, (p) => cb(p.title)),
   }

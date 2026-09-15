@@ -9,3 +9,6 @@
 @keyframes browser-loading { to { background-position: 130% 100%; } }
 /* The native webview covers this box; what shows here is the gap while it loads or hides. */
 .browser-page { flex: 1; min-height: 0; position: relative; background: var(--bg-elev); }
+.browser-bar button:disabled { color: var(--fg-muted); background: transparent; opacity: 0.4; }
+.browser-bar .browser-external { margin-left: 2px; }
+.browser-store { flex: none; margin-left: 4px; padding: 0 6px; height: 20px; line-height: 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }

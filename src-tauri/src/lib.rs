@@ -109,6 +109,8 @@ pub fn run() {
             browser::browser_forward,
             browser::browser_reload,
             browser::browser_pr_url,
+            browser::browser_open_external,
+            browser::browser_data_store,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
