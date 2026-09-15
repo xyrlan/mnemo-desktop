@@ -4,7 +4,10 @@ import SplitView from './layout/SplitView'
 import Palette from './palette/Palette'
 import { installKeys } from './actions/keys'
 import { registerBuiltins } from './actions/registry'
-import './terminal/TerminalPane'
+
+// Every `src/<view>/view.tsx` registers its pane view on import. A new pane kind
+// (editor, browser, mission) therefore needs no edit here.
+import.meta.glob('./*/view.tsx', { eager: true })
 
 registerBuiltins(store)
 
