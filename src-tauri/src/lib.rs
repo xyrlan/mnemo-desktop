@@ -123,6 +123,7 @@ pub fn run() {
                     ("pane.split.row", "Split Right", "CmdOrCtrl+D"),
                     ("pane.split.col", "Split Down", "CmdOrCtrl+Shift+D"),
                     ("pane.close", "Close Pane", "CmdOrCtrl+W"),
+                    ("tab.close", "Close Tab", "CmdOrCtrl+Shift+W"),
                     ("focus.left", "Focus Pane Left", "CmdOrCtrl+Alt+Left"),
                     ("focus.right", "Focus Pane Right", "CmdOrCtrl+Alt+Right"),
                     ("focus.up", "Focus Pane Up", "CmdOrCtrl+Alt+Up"),

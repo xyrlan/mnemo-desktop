@@ -18,7 +18,7 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
   }
   if (e.altKey) return null
   if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
+    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `tab.go.${k}`

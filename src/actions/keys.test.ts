@@ -8,6 +8,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('t', { metaKey: true }), 'mac')).toBe('tab.new')
   expect(actionForKey(ev('d', { metaKey: true }), 'mac')).toBe('pane.split.row')
   expect(actionForKey(ev('D', { metaKey: true, shiftKey: true }), 'mac')).toBe('pane.split.col')
+  expect(actionForKey(ev('W', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.close')
   expect(actionForKey(ev('w', { metaKey: true }), 'mac')).toBe('pane.close')
   expect(actionForKey(ev('ArrowLeft', { metaKey: true, altKey: true }), 'mac')).toBe('focus.left')
   expect(actionForKey(ev('3', { metaKey: true }), 'mac')).toBe('tab.go.3')
@@ -146,7 +147,7 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(new Set(ids).size).toBe(ids.length)
   expect(ids.sort()).toEqual(
     [
-      'tab.new', 'tab.prev', 'tab.next', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
+      'tab.new', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
       'mission.toggle-sidebar', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `tab.go.${n}`),
     ].sort(),

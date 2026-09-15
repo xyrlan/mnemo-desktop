@@ -154,7 +154,7 @@ function MarketplacePane(_: PaneViewProps) {
 
 registerPaneView('marketplace', MarketplacePane)
 
-const openMarketplace = () => store.getState().openView('marketplace', {}, 'split-row', 'marketplace')
+const openMarketplace = () => store.getState().openView('marketplace', {}, 'auto', 'marketplace')
 
 register({ id: 'marketplace.open', title: 'Open marketplace', run: openMarketplace })
 
