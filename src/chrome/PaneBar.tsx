@@ -5,6 +5,7 @@ import type { PaneId } from '../layout/tree'
 import { tauriChrome, type ChromeClient } from './client'
 import { barInfo, FLASH_MS, pulseLabel, pulseTitle } from './info'
 import { startPaneDrag } from './drag'
+import { tauriSession, useSessionLearn, type SessionClient } from './session'
 import { pulseStore, usePulse } from '../pulse/app-store'
 import type { Pulse } from '../pulse/store'
 import { openRule } from '../pulse/open'
@@ -52,9 +53,11 @@ function usePulseFlash(place: string | undefined): { live: Pulse | undefined; co
 }
 
 /** The header of every pane: drag handle, repo · branch, Claude tokens, close. Pressing it
- *  focuses the pane without taking keyboard focus from a terminal that already has it. */
-export default function PaneBar({ id, client = tauriChrome }: { id: PaneId; client?: ChromeClient }) {
+ *  focuses the pane without taking keyboard focus from a terminal that already has it. It also
+ *  learns the Claude session a terminal runs (`useSessionLearn`). */
+export default function PaneBar({ id, client = tauriChrome, sessions = tauriSession }: { id: PaneId; client?: ChromeClient; sessions?: SessionClient }) {
   const ref = useRef<HTMLDivElement>(null)
+  useSessionLearn(id, sessions)
   const pane = useApp((s) => s.panes[id])
   const snap = useMission((s) => s.snapshot)
   const cwd = barInfo(pane, snap).cwd

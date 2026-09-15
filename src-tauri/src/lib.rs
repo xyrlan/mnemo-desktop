@@ -137,6 +137,8 @@ pub fn run() {
             home_commands::home_resolve_repo,
 
             // -- chrome commands --
+            chrome::chrome_session,
+            commands::pty_pid,
 
             // -- vaultmap commands --
 

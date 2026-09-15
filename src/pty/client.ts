@@ -22,3 +22,7 @@ export const tauriPty: PtyClient = {
   kill: (id) => invoke('pty_kill', { id }),
   onExit: (id, cb) => listen<{ code: number | null }>(`pty://exit/${id}`, (e) => cb(e.payload.code)),
 }
+
+/** The pid of the shell a terminal pane runs, null once it has exited. Kept off `PtyClient`:
+ *  only the chrome's session lookup needs it. */
+export const ptyPid = (id: PaneId) => invoke<number | null>('pty_pid', { id })

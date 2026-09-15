@@ -1,0 +1,23 @@
+# A process table that `pgrep -P` answers from in the chrome tests: `pid ppid command`.
+# Agent pids come from agents.json (9101, 9102, 9103, 17759 are interactive, 20147 background).
+5000   1     mnemo-desktop
+# A pane whose zsh runs `claude` by hand; that session's Bash tool runs another claude.
+5001   5000  -zsh
+9102   5001  claude
+9200   9102  node mcp-server
+9201   9102  /bin/zsh -c claude -p hi
+9103   9201  claude
+# A pane that runs claude through a wrapper script.
+5002   5000  -zsh
+5300   5002  bash ./run-claude.sh
+5301   5300  npx claude
+9101   5301  claude
+# Another pane with claude typed by hand, started later than the first.
+5004   5000  -zsh
+17759  5004  claude
+# An idle pane with an editor open.
+5003   5000  -zsh
+5400   5003  vim README.md
+# A background session owned by the daemon, under no pane.
+7000   1     claude bg-pty-host
+20147  7000  claude bg-spare
