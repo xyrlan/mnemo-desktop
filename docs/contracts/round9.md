@@ -13,7 +13,7 @@ pnpm tauri dev --port 17xx`), kill any leftover `vite` first, and look at the re
 ## cockpit
 
 - **files:** src/cockpit/, src/mission/rows.tsx, src/mission/mission.css
-- **exposes:** nothing new
+- **exposes:** nothing
 - **consumes:** nothing
 
 Issue #67 (all three points). Needs-you and ready-to-merge rows come only from
@@ -26,7 +26,7 @@ has a red rollup and assert it produces no row.
 ## vault
 
 - **files:** src/vault/, src-tauri/src/vault.rs, src-tauri/fixtures/vault/
-- **exposes:** `vault_ego(path, limit)` unchanged signature, ranked as the issue says
+- **exposes:** `vault_ego(path: String, limit: u32) -> VaultGraph`
 - **consumes:** nothing
 
 Issue #68. Only the `// -- vault` anchor blocks of `lib.rs` if anything there
