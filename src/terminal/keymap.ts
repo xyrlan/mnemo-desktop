@@ -23,3 +23,30 @@ export function macChord(e: KeyLike): ChordResult {
     default: return null
   }
 }
+
+/** The parts of `navigator.clipboard` a paste needs, so the decision is testable. */
+export type ClipboardLike = {
+  read?: () => Promise<ReadonlyArray<{ types: ReadonlyArray<string>; getType: (type: string) => Promise<{ text: () => Promise<string> }> }>>
+  readText: () => Promise<string>
+}
+
+/** Bytes ⌘V writes to the PTY. An image on the clipboard becomes a bare Ctrl+V: Claude Code
+ *  reads the system clipboard itself on that key and attaches the image, which no text paste
+ *  can carry. Otherwise the clipboard's text, or null when there is nothing to paste. The
+ *  clipboard is read once when `read()` works (WebKit may ask the user per read). */
+export async function pasteBytes(clip: ClipboardLike): Promise<string | null> {
+  let items
+  try {
+    items = clip.read ? await clip.read() : undefined
+  } catch {
+    // read() refused: fall back to text, as ⌘V always did.
+  }
+  try {
+    if (!items) return (await clip.readText()) || null
+    if (items.some((i) => i.types.some((t) => t.startsWith('image/')))) return '\x16'
+    const item = items.find((i) => i.types.includes('text/plain'))
+    return (item && (await (await item.getType('text/plain')).text())) || null
+  } catch {
+    return null
+  }
+}

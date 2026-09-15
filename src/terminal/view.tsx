@@ -7,7 +7,8 @@ import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7 } from './osc7'
-import { macChord } from './keymap'
+import { macChord, pasteBytes } from './keymap'
+import { holdFileDrop } from './file-drop'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 
 export default function TerminalPane({ id }: PaneViewProps) {
@@ -43,8 +44,9 @@ export default function TerminalPane({ id }: PaneViewProps) {
     fit.fit()
 
     store.getState().attachSink(id, (b) => term.write(b))
-    // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard. App chords (⌘K, ⌘W…)
-    // are handled by the window listener in the capture phase before xterm sees them.
+    // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
+    // App chords (⌘K, ⌘W…) are handled by the window listener in the capture phase before
+    // xterm sees them.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       const r = macChord(e)
@@ -59,8 +61,8 @@ export default function TerminalPane({ id }: PaneViewProps) {
         void navigator.clipboard.writeText(sel)
         return false
       }
-      void navigator.clipboard.readText().then((t) => {
-        if (t) void tauriPty.write(id, t)
+      void pasteBytes(navigator.clipboard).then((b) => {
+        if (b) void tauriPty.write(id, b)
       })
       return false
     })
@@ -80,8 +82,10 @@ export default function TerminalPane({ id }: PaneViewProps) {
     })
     ro.observe(el)
     void tauriPty.resize(id, term.cols, term.rows)
+    const releaseDrop = holdFileDrop()
 
     return () => {
+      releaseDrop()
       ro.disconnect()
       data.dispose()
       title.dispose()

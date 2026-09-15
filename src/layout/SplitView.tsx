@@ -4,12 +4,16 @@ import { store, useApp } from './app-store'
 import { paneView } from '../panes/registry'
 import PaneBar from '../chrome/PaneBar'
 import { useDrag } from '../chrome/drag'
+import { useFileDrop } from '../terminal/drop'
 import { boxStyle, flatLayout, ratioAt, resolve, type Box, type DividerBox } from '../chrome/geometry'
 
 function Leaf({ id, box }: { id: PaneId; box: Box }) {
   const pane = useApp((s) => s.panes[id])
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
-  const target = useDrag((s) => s.from !== null && s.over === id)
+  // Highlighted as a drop target while a pane bar or a file from Finder is dragged over it.
+  const paneTarget = useDrag((s) => s.from !== null && s.over === id)
+  const fileTarget = useFileDrop((s) => s.over === id)
+  const target = paneTarget || fileTarget
   const source = useDrag((s) => s.from === id)
   const View = paneView(pane?.view ?? 'terminal')
   const cls = `pane${focused ? ' focused' : ''}${target ? ' drop-target' : ''}${source ? ' drag-source' : ''}`
