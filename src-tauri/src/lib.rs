@@ -40,6 +40,7 @@ pub mod chrome;
 // -- vaultmap (src/vaultmap.rs) --
 
 // -- workspace (src/workspace.rs) --
+pub mod workspace;
 
 // -- mcp (src/mcp.rs) --
 
@@ -147,6 +148,8 @@ pub fn run() {
             // -- vaultmap commands --
 
             // -- workspace commands --
+            workspace::workspace_read,
+            workspace::workspace_write,
 
             // -- mcp commands --
             chrome::chrome_branch,

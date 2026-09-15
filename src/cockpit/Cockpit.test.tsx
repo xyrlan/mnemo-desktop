@@ -40,7 +40,7 @@ beforeEach(() => {
   document.body.appendChild(host)
   root = createRoot(host)
   missionStore.setState({ snapshot: withPrs, lastError: null, looked: {}, drafts: {}, sent: {} })
-  settingsStore.setState({ sidebarScope: 'all', issueLabels: {} })
+  settingsStore.setState({ issueLabels: {} })
   gh.auth = {}
   gh.issues = []
   githubStore.setState({ auth: null, issues: {}, boards: {} })
@@ -193,8 +193,7 @@ test('a blocked card on the map opens its reply under the canvas', async () => {
   expect(host.querySelector<HTMLTextAreaElement>('.mm-reply textarea')?.value).toBe('yes')
 })
 
-test('"este repo" names the focused repo and branch, and says nada pendente with who is working', async () => {
-  settingsStore.setState({ sidebarScope: 'repo' })
+test('every repo is listed, the focused one first, and the head names it with its branch', async () => {
   await act(async () => {
     await appStore.getState().newTab()
   })
@@ -202,15 +201,19 @@ test('"este repo" names the focused repo and branch, and says nada pendente with
   act(() => appStore.getState().setCwd(tab.focused, '/Users/me/github/mnemo-issue-40'))
   missionStore.setState({ snapshot })
   await render()
-  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main')
-  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
-  expect(host.querySelector('.ck-fold')?.textContent).toBe('▾ andando: 1')
-  expect(rows('.ck-working').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['#40'])
-  expect(host.querySelector('.nd-repo')).toBeNull()
+  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main · 3 repos')
+  // No scope toggle any more: what needs you elsewhere is still here.
+  expect(host.querySelector('.m-scope')).toBeNull()
+  expect(rows().map((r) => r.dataset.key)).toEqual(['blocked:094c6a03'])
+  expect(host.querySelector('.ck-fold')?.textContent).toBe('▸ andando: 2')
+  act(() => host.querySelector<HTMLButtonElement>('.ck-fold')!.click())
+  expect(rows('.ck-working').map((r) => [r.querySelector('.ck-label')?.textContent, r.querySelector('.nd-repo')?.textContent])).toEqual([
+    ['#40', 'mnemo'],
+    ['cockpit', 'mnemo-desktop'],
+  ])
 })
 
-test('opened in a tab of its own, "este repo" is the repo you just left', async () => {
-  settingsStore.setState({ sidebarScope: 'repo' })
+test('opened in a tab of its own, the repo you just left comes first', async () => {
   await act(async () => {
     await appStore.getState().newTab()
   })
@@ -220,8 +223,38 @@ test('opened in a tab of its own, "este repo" is the repo you just left', async 
   expect(appStore.getState().activeTab).not.toBe(tab.id)
   missionStore.setState({ snapshot: withPrs })
   await render()
-  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main')
-  expect(rows().map((r) => r.dataset.key)).toEqual(['ci:/Users/me/github/mnemo#13', `land:${shipped.missions[0].contract_path}`])
+  expect(host.querySelector('.ck-where')?.textContent).toBe('mnemo · main · 3 repos')
+  expect(rows().map((r) => r.dataset.key)).toEqual(['ci:/Users/me/github/mnemo#13', `land:${shipped.missions[0].contract_path}`, 'blocked:094c6a03'])
+})
+
+test('a row whose session runs in a tab of this window jumps to that tab, by session id or else by cwd', async () => {
+  const leaf = (pane: number) => ({ kind: 'leaf' as const, pane })
+  const worktree = '/Users/me/github/mnemo-desktop-wt-c-vault'
+  appStore.setState({
+    tabs: [{ id: 'tab-5', root: leaf(5), focused: 5 }, { id: 'tab-6', root: leaf(6), focused: 6 }],
+    activeTab: '',
+    panes: { 5: { id: 5, view: 'terminal', cwd: '/elsewhere' }, 6: { id: 6, view: 'terminal', cwd: `${worktree}/` } },
+  })
+  await render()
+  const blocked = row('blocked:094c6a03')
+  expect(blocked.className).toContain('ck-here')
+  expect(blocked.querySelector('.ck-tab-link')?.textContent).toBe('↗ tab')
+  act(() => (blocked.querySelector('.ck-label') as HTMLElement).click())
+  expect(appStore.getState().activeTab).toBe('tab-6')
+  expect(opened('mission')).toEqual([])
+
+  // A pane tagged with the child's session wins over the cwd.
+  const m = desktop.missions[0]
+  const tagged = { ...desktop, missions: [{ ...m, pieces: [m.pieces[0], { ...m.pieces[1], child: { ...m.pieces[1].child!, session_id: 'sess-vault' } }] }] }
+  missionStore.setState({ snapshot: { ...withPrs, repos: [tagged, ...withPrs.repos.slice(1)] } })
+  act(() => appStore.getState().setSessionId(5, 'sess-vault'))
+  act(() => appStore.setState({ activeTab: '' }))
+  host.querySelector<HTMLElement>('.cockpit')!.focus()
+  key('Enter')
+  expect(appStore.getState().activeTab).toBe('tab-5')
+
+  // Not open here: the row opens its mission pane as before.
+  expect(row('ci:/Users/me/github/mnemo#13').className).not.toContain('ck-here')
 })
 
 test('a merged PR with a red last rollup is not a row', async () => {

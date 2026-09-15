@@ -359,3 +359,23 @@ test('setSessionId tags an existing pane and ignores unknown ids', async () => {
   s.getState().setSessionId(99, 'zzz')
   expect(s.getState().panes[99]).toBeUndefined()
 })
+
+test('goToPane shows the tab holding a pane with it focused; renameTab sets and clears a name', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().newTab()
+  s.getState().goToPane(1)
+  expect(s.getState().activeTab).toBe('tab-1')
+  expect(s.getState().tabs[0].focused).toBe(1)
+  s.getState().goToPane(99)
+  expect(s.getState().activeTab).toBe('tab-1')
+
+  s.getState().renameTab('tab-3', '  build ')
+  expect(s.getState().tabs[1].name).toBe('build')
+  s.getState().renameTab('tab-3', '')
+  expect(s.getState().tabs[1]).not.toHaveProperty('name')
+  s.getState().renameTab('tab-3', 'x')
+  s.getState().renameTab('tab-3', undefined)
+  expect(s.getState().tabs[1]).not.toHaveProperty('name')
+})

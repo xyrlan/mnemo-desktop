@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMission } from '../mission/app-store'
-import { useApp } from '../layout/app-store'
-import { settingsStore, useSettings } from '../settings/app-store'
+import { store as appStore, useApp } from '../layout/app-store'
 import { childWord, delta, pruneSnapshot, type Mission } from '../mission/types'
-import { focusedCwd, repoOfCwd, scopeRepos } from '../mission/scope'
+import { focusedCwd, focusedFirst, repoOfCwd } from '../mission/scope'
+import { paneForSession } from '../layout/tabs'
 import { fmtTokens } from '../mission/tokens'
 import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import { githubStore, useGithub } from '../github/app-store'
 import { tauriChrome } from '../chrome/client'
 import { listKey } from '../actions/keys'
 import { pruneGone } from './needs'
-import { buildInbox, rowChild, type Row } from './inbox'
+import { buildInbox, rowChild, type Inbox, type Row } from './inbox'
+import type { RepoGroup } from '../mission/types'
 import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
 import MissionMap from './MissionMap'
 import { lastCwd } from './where'
@@ -41,8 +42,23 @@ function useBranch(cwd: string | undefined): string | null {
 const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'abrir job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
 const armKey = (r: Row) => `${r.kind === 'ready' ? 'merge' : r.kind === 'land' ? 'land' : 'stop'}:${r.key}`
 
+/** The pane of this window the row's child runs in, if it is open here. */
+function rowPane(r: Row): number | null {
+  const c = rowChild(r)
+  return c ? paneForSession(appStore.getState(), c) : null
+}
+
+/** Each list grouped by repo in `repos` order (the focused repo first), urgency kept inside a repo. */
+function byRepo(inbox: Inbox, repos: RepoGroup[]): Inbox {
+  const at = new Map(repos.map((r, i) => [r.root, i]))
+  const sort = <T extends Row>(list: T[]) => list.map((r, i) => [r, i] as const).sort(([a, i], [b, j]) => (at.get(a.repo.root) ?? 0) - (at.get(b.repo.root) ?? 0) || i - j).map(([r]) => r)
+  return { needs: sort(inbox.needs), working: sort(inbox.working), done: sort(inbox.done) }
+}
+
 function runPrimary(r: Row, fire: (key: string) => boolean) {
-  if (r.kind === 'ci') openJob(r.pr)
+  const here = rowPane(r)
+  if (here !== null && (r.kind === 'blocked' || r.kind === 'working' || r.kind === 'done')) appStore.getState().goToPane(here)
+  else if (r.kind === 'ci') openJob(r.pr)
   else if (r.kind === 'ready') fire(armKey(r)) && mergePr(r.repo.root, r.pr)
   else if (r.kind === 'land') fire(armKey(r)) && landMission(r.repo.root, r.mission)
   else openMissionPane(r.child)
@@ -50,7 +66,9 @@ function runPrimary(r: Row, fire: (key: string) => boolean) {
 
 /** A click on the row itself opens what it is about, never anything that cannot be undone. */
 function openRow(r: Row) {
-  if (r.kind === 'ci' || r.kind === 'ready') openPr(r.pr)
+  const here = rowPane(r)
+  if (here !== null) appStore.getState().goToPane(here)
+  else if (r.kind === 'ci' || r.kind === 'ready') openPr(r.pr)
   else if (r.kind === 'land') openContract(r.mission)
   else openMissionPane(r.child)
 }
@@ -70,6 +88,8 @@ function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMa
   const lastSent = useMission((s) => (row.kind === 'blocked' ? s.sent[row.child.id]?.at(-1)?.at : undefined))
   const replied = row.kind === 'blocked' && Date.now() - (lastSent ?? 0) < 60_000
   const child = rowChild(row)
+  // Open in this window: the row is a link to its tab.
+  const here = useApp((s) => (child ? paneForSession(s, child) : null))
   const d = child ? delta(child, looked) : 0
   const isArmed = armed === armKey(row)
 
@@ -95,17 +115,18 @@ function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMa
   )
 
   return (
-    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}`} data-key={row.key}>
+    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}${here !== null ? ' ck-here' : ''}`} data-key={row.key}>
       <div
         className="ck-row-head"
         onClick={() => {
           onSelect()
           openRow(row)
         }}
-        title={child?.cwd ?? row.repo.root}
+        title={here !== null ? `Go to its tab · ${child?.cwd}` : (child?.cwd ?? row.repo.root)}
       >
         <span className="nd-word">{word}</span>
         <span className="ck-label">{label}</span>
+        {here !== null && <span className="ck-tab-link">↗ tab</span>}
         {detail && <span className="ck-detail">{detail}</span>}
         <span className="ck-spacer" />
         {showRepo && <span className="nd-repo">{row.repo.name}</span>}
@@ -125,17 +146,17 @@ function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMa
   )
 }
 
-/** What needs you, across repos or in the focused one: blocked children with their reply,
- *  red CI, PRs ready to merge, contracts ready to land; then who is still working and who
- *  finished today, collapsed. A row's mission opens as a map beside the list. Reads the
- *  snapshot the sidebar polls; it never polls it itself. */
+/** What needs you in every repo, grouped by repo with the focused one first: blocked children
+ *  with their reply, red CI, PRs ready to merge, contracts ready to land; then who is still
+ *  working and who finished today, collapsed. A row whose session runs in a tab of this window
+ *  jumps to that tab. A row's mission opens as a map beside the list. Reads the snapshot the
+ *  sidebar polls; it never polls it itself. */
 export default function Cockpit() {
   const raw = useMission((s) => s.snapshot)
   const err = useMission((s) => s.lastError)
   const tabs = useApp((s) => s.tabs)
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
-  const scope = useSettings((s) => s.sidebarScope)
   const logged = useGithub((s) => s.auth?.logged)
   // A tab with nothing that has a cwd (the cockpit alone, a browser) is still about the last repo you were in.
   const cwd = focusedCwd({ tabs, activeTab, panes }, raw) ?? lastCwd()
@@ -143,11 +164,11 @@ export default function Cockpit() {
   const focused = repoOfCwd(raw, cwd)
   const branch = useBranch(cwd)
 
-  const { snap, repos, effective, inbox } = useMemo(() => {
+  const { snap, repos, inbox } = useMemo(() => {
     const snap = pruneGone(pruneSnapshot(raw))
-    const { repos, effective } = scopeRepos(snap, scope, focused?.root)
-    return { snap, repos, effective, inbox: buildInbox({ ...snap, repos }) }
-  }, [raw, scope, focused?.root])
+    const repos = focusedFirst(snap, focused?.root)
+    return { snap, repos, inbox: byRepo(buildInbox({ ...snap, repos }), repos) }
+  }, [raw, focused?.root])
 
   const [open, setOpen] = useState<{ working?: boolean; done?: boolean }>({})
   // Nothing pending: who is working is the whole story, so it starts open.
@@ -178,8 +199,7 @@ export default function Cockpit() {
   }, [logged, mapRoot])
 
   const at = raw.at && Number.isFinite(Date.parse(raw.at)) ? new Date(raw.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null
-  const setScope = (v: 'repo' | 'all') => void settingsStore.getState().set('sidebarScope', v)
-  const showRepo = effective === 'all'
+  const showRepo = repos.length > 1
 
   const rowEl = (key: string) => [...(body.current?.querySelectorAll<HTMLElement>('.ck-row') ?? [])].find((el) => el.dataset.key === key)
   const select = (i: number) => {
@@ -241,25 +261,17 @@ export default function Cockpit() {
       />
     ))
 
-  const where = effective === 'repo' && focused ? [focused.name, branch].filter(Boolean).join(' · ') : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}`
+  const count = `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}`
+  const where = focused ? [focused.name, branch, repos.length > 1 ? count : ''].filter(Boolean).join(' · ') : count
 
   return (
     <div className="pane-body cockpit" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="ck-head">
         <span className="ck-title">cockpit</span>
-        <span className="ck-where" title={effective === 'repo' ? focused?.root : undefined}>
+        <span className="ck-where" title={focused?.root}>
           {where}
         </span>
         {at && <span>updated {at}</span>}
-        <span className="ck-spacer" />
-        <span className="m-scope ck-scope">
-          <button className={scope === 'repo' ? 'on' : ''} onClick={() => setScope('repo')} title="Only the repo of the focused pane">
-            este repo
-          </button>
-          <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')} title="Every repo with a recent session">
-            todos
-          </button>
-        </span>
       </div>
       {(err || snap.errors.length > 0) && (
         <div className="ck-errors">
@@ -276,7 +288,7 @@ export default function Cockpit() {
           {inbox.needs.length > 0 ? (
             <div className="ck-needs">{renderRows(inbox.needs)}</div>
           ) : (
-            !err && <div className="ck-empty">{repos.length === 0 && effective === 'repo' && focused ? `nada pendente em ${focused.name}` : 'nada pendente'}</div>
+            !err && <div className="ck-empty">nada pendente</div>
           )}
           {inbox.working.length > 0 && (
             <div className="ck-section">

@@ -1,16 +1,10 @@
-/* Scope toggle at the top of the sidebar and the cockpit, and the needs-you words both use.
+/* The needs-you head and words the sidebar and the cockpit both use.
    The base row and reply styles live in theme.css. */
-.m-scope { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; flex: 0 0 auto; }
-.m-scope button { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; }
-.m-scope button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
-.m-scope button:hover:not(.on) { color: var(--fg); }
-.m-scope-hint { flex: 1 1 0; min-width: 0; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m-scope .m-scope-open { border: 0; padding: 0 4px; font-size: 13px; }
-
 .m-needs-head { display: flex; align-items: center; gap: 6px; color: var(--fg-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
 .m-needs-count { background: var(--ansi-yellow); color: var(--bg); border-radius: 8px; padding: 0 6px; font-weight: 700; }
-.m-live { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--fg-muted); font-size: 11px; cursor: pointer; }
-.m-live:hover { color: var(--fg); }
+.m-needs-spacer { flex: 1; }
+.m-cockpit { background: transparent; border: 0; padding: 0 2px; color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.m-cockpit:hover { color: var(--fg); }
 
 .needs-list { display: flex; flex-direction: column; gap: 6px; }
 .needs-list .nd { border-left: 2px solid var(--border); padding-left: 6px; }
