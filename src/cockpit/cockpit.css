@@ -1,9 +1,18 @@
 .cockpit { display: flex; flex-direction: column; font-size: 12px; line-height: 1.5; }
-.ck-head { display: flex; align-items: baseline; gap: 12px; padding: 2px 4px 6px; color: var(--fg-muted); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.ck-head { display: flex; align-items: center; gap: 12px; padding: 2px 4px 6px; color: var(--fg-muted); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
 .ck-title { color: var(--fg); font-weight: 700; }
+.ck-spacer { flex: 1; }
+.ck-head .ck-scope { border: 0; padding: 0; }
 .ck-errors { flex: 0 0 auto; padding: 0 4px; }
-.ck-columns { flex: 1; min-height: 0; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-top: 8px; }
-.ck-column { flex: 0 0 380px; min-width: 0; overflow-y: auto; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
-.ck-column.focused { border-color: var(--accent); }
-.ck-column .m-repo { margin-bottom: 0; border-left: 0; padding-left: 0; }
+.ck-strip { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--border); min-width: 0; }
+.ck-strip-title { color: var(--fg-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; flex: 0 0 auto; }
+.ck-quiet { color: var(--fg-muted); }
+.ck-canvas { position: relative; flex: 1; min-height: 0; }
 .ck-empty { color: var(--fg-muted); padding: 12px 4px; }
+.ck-hint { flex: 0 0 auto; color: var(--fg-muted); font-size: 10px; padding: 2px 4px 0; }
+
+/* Cards sized to what layoutGrouped assumes, so dagre's spacing holds. */
+.cockpit .gr-card { width: 220px; min-width: 220px; max-width: 220px; min-height: 52px; box-sizing: border-box; cursor: pointer; }
+.cockpit .react-flow__node-group.ck-group { background: color-mix(in srgb, var(--accent) 5%, transparent); border: 1px dashed var(--border); border-radius: 8px; box-shadow: none; padding: 0; }
+.cockpit .react-flow__node-group.ck-group.selected, .cockpit .react-flow__node-group.ck-group:hover { box-shadow: none; }
+.cockpit .react-flow__edge.animated .react-flow__edge-path { stroke: var(--accent); }

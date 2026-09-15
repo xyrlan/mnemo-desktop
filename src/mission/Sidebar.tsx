@@ -2,12 +2,18 @@ import { useEffect, useRef } from 'react'
 import { missionStore, useMission } from './app-store'
 import { store as appStore, useApp } from '../layout/app-store'
 import { settingsStore, useSettings } from '../settings/app-store'
-import { pruneSnapshot } from './types'
+import { allChildren, pruneSnapshot } from './types'
 import { focusedCwd, repoOfCwd, scopeRepos } from './scope'
-import { RepoBlock } from './rows'
+import { needsYou } from '../cockpit/needs'
+import NeedsList from '../cockpit/NeedsList'
 
 export { openMissionPane } from './rows'
 
+const openCockpit = () => appStore.getState().openView('cockpit', {}, 'auto', 'cockpit')
+
+/** What needs you, narrow and always there: blocked children with their reply field, red CI,
+ *  contracts ready to land. The whole picture is the cockpit canvas (⌘⇧B). This component
+ *  owns the snapshot poll every mission surface reads. */
 export default function Sidebar() {
   const open = useMission((s) => s.sidebarOpen)
   const width = useMission((s) => s.sidebarWidth)
@@ -39,6 +45,8 @@ export default function Sidebar() {
   // Resolve against the unpruned snapshot: a finished child's worktree still names its repo.
   const focused = repoOfCwd(raw, focusedCwd({ tabs, activeTab, panes }, raw))
   const { repos, effective } = scopeRepos(snap, scope, focused?.root)
+  const needs = needsYou({ ...snap, repos })
+  const live = allChildren({ ...snap, repos }).filter((c) => c.live).length
   const setScope = (v: 'repo' | 'all') => void settingsStore.getState().set('sidebarScope', v)
 
   const onDown = (e: React.MouseEvent) => {
@@ -65,7 +73,7 @@ export default function Sidebar() {
         <span className="m-scope-hint" title={focused?.root}>
           {scope === 'repo' && effective === 'all' ? 'no repo in focus, showing all' : focused && scope === 'repo' ? focused.name : ''}
         </span>
-        <button className="m-scope-open" onClick={() => appStore.getState().openView('cockpit', {}, 'auto', 'cockpit')} title="Open the cockpit pane (every repo, full size)">
+        <button className="m-scope-open" onClick={openCockpit} title="Open the cockpit canvas (⌘⇧B)">
           ⤢
         </button>
       </div>
@@ -74,12 +82,20 @@ export default function Sidebar() {
         {snap.errors.map((e, i) => (
           <div key={i} className="m-error">{e}</div>
         ))}
-        {repos.length === 0 && !err && (
-          <div className="m-empty">{effective === 'repo' && focused ? `nothing recent in ${focused.name}` : 'no live sessions'}</div>
+        <div className="m-needs-head">
+          <span>needs you</span>
+          {needs.length > 0 && <span className="m-needs-count">{needs.length}</span>}
+        </div>
+        {needs.length > 0 ? (
+          <NeedsList needs={needs} variant="list" showRepo={effective === 'all'} />
+        ) : (
+          !err && <div className="m-empty">{repos.length === 0 ? (effective === 'repo' && focused ? `nothing recent in ${focused.name}` : 'no live sessions') : 'nothing needs you'}</div>
         )}
-        {repos.map((r) => (
-          <RepoBlock key={r.root} r={r} focused={r.root === focused?.root} />
-        ))}
+        {repos.length > 0 && (
+          <div className="m-live" onClick={openCockpit} title="Open the cockpit canvas (⌘⇧B)">
+            {live} live{effective === 'all' ? ` in ${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}` : ''} · graph ⤢
+          </div>
+        )}
       </div>
     </div>
   )

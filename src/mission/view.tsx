@@ -4,21 +4,15 @@ import { register, registerProvider } from '../actions/registry'
 import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
-import { allChildren, childWord, isRecent, type ChildSession, type TimelineLine } from './types'
-import { openMissionPane } from './rows'
+import { allChildren, childWord, isRecent, type TimelineLine } from './types'
+import { attachChild, openMissionPane, ReplyBox } from './rows'
 import { estimateUsd, fmtUsd } from './cost'
 import { settingsStore } from '../settings/app-store'
-
-function findChild(id: string): ChildSession | undefined {
-  return allChildren(missionStore.getState().snapshot).find((c) => c.id === id)
-}
 
 function MissionPane({ id: paneId, props }: PaneViewProps) {
   const id = String(props.id ?? '')
   const child = useMission((s) => allChildren(s.snapshot).find((c) => c.id === id))
   const looked = useMission((s) => s.looked[id])
-  const draft = useMission((s) => s.drafts[id] ?? '')
-  const err = useMission((s) => s.replyErrors[id])
   const sentList = useMission((s) => s.sent[id] ?? [])
   const [lines, setLines] = useState<TimelineLine[]>([])
   const [confirmStop, setConfirmStop] = useState(false)
@@ -47,11 +41,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
     bottom.current?.scrollIntoView({ block: 'end' })
   }, [lines.length])
 
-  const attach = () => {
-    const c = findChild(id)
-    appStore.getState().openView('terminal-cmd', { cmd: `claude attach ${id}` }, 'split-col', `attach ${id}`)
-    void c
-  }
+  const attach = () => attachChild(id, 'split-col')
 
   const word = child ? childWord(child) : 'stopped'
   const final = [...lines].reverse().find((l) => l.text)
@@ -110,24 +100,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
         )}
         <div ref={bottom} />
       </div>
-      {child && word === 'BLOCKED' && (
-        <div className="m-reply mission-reply">
-          <div className="m-needs">{child.needs}</div>
-          <textarea
-            value={draft}
-            rows={3}
-            placeholder="reply…"
-            onChange={(e) => missionStore.getState().setDraft(id, e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void missionStore.getState().sendReply(id)
-            }}
-          />
-          <div className="m-reply-actions">
-            <button onClick={() => void missionStore.getState().sendReply(id)}>send ⌘↩</button>
-            {err && <span className="m-error">{err}</span>}
-          </div>
-        </div>
-      )}
+      {child && <ReplyBox c={child} rows={3} className="mission-reply" />}
     </div>
   )
 }
@@ -156,7 +129,7 @@ register({
   title: 'Reply to the first blocked child',
   run: () => {
     const c = allChildren(missionStore.getState().snapshot).find((x) => childWord(x) === 'BLOCKED')
-    if (c) document.querySelector<HTMLTextAreaElement>('.m-blocked textarea')?.focus()
+    if (c) document.querySelector<HTMLTextAreaElement>('.m-reply textarea')?.focus()
   },
 })
 

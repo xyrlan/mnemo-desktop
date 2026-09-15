@@ -2,9 +2,13 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 import { snapshot } from './fixtures'
+import { withPrs } from '../cockpit/fixtures'
+import type { Snapshot } from './types'
 
+// The sidebar polls on mount; it gets whatever snapshot the test serves.
+const served = vi.hoisted(() => ({ snap: null as unknown }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string) => (cmd === 'mission_snapshot' ? snapshot : {})),
+  invoke: vi.fn(async (cmd: string) => (cmd === 'mission_snapshot' ? served.snap : {})),
 }))
 
 import Sidebar from './Sidebar'
@@ -21,7 +25,7 @@ beforeEach(async () => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  missionStore.setState({ snapshot, lastError: null, sidebarOpen: true })
+  serve(snapshot)
   settingsStore.setState({ sidebarScope: 'repo' })
 })
 
@@ -30,16 +34,36 @@ afterEach(() => {
   host.remove()
 })
 
+function serve(snap: Snapshot) {
+  served.snap = snap
+  missionStore.setState({ snapshot: snap, lastError: null, sidebarOpen: true, drafts: {}, sent: {} })
+}
+
 async function render() {
   await act(async () => root.render(<Sidebar />))
 }
 
-const repoNames = () => [...host.querySelectorAll('.m-repo-head .m-label')].map((e) => e.textContent)
+const needs = () => [...host.querySelectorAll('.needs-list .nd-label')].map((e) => e.textContent)
 
-test('"this repo" with nothing focused falls back to all and says so', async () => {
+test('"this repo" with nothing focused falls back to all and lists what needs you', async () => {
+  serve(withPrs)
   await render()
-  expect(repoNames()).toEqual(['mnemo-desktop', 'mnemo', 'notes'])
   expect(host.querySelector('.m-scope-hint')?.textContent).toBe('no repo in focus, showing all')
+  expect(needs()).toEqual(['vault', 'docs · PR #13', 'mission round4'])
+  expect(host.querySelector('.m-needs-count')?.textContent).toBe('3')
+  // The old per-repo blocks are gone; working children are only on the canvas.
+  expect(host.querySelector('.m-repo')).toBeNull()
+  expect(host.textContent).not.toContain('writing the cockpit pane')
+  expect(host.querySelector('.m-live')?.textContent).toContain('in 3 repos')
+})
+
+test('a blocked child keeps its reply field, prefilled; clicking it opens the mission pane', async () => {
+  await render()
+  const blocked = host.querySelector('.nd-blocked')!
+  expect(blocked.querySelector('.m-needs')?.textContent).toBe('may I add a crate?')
+  expect(blocked.querySelector('textarea')?.value).toBe('yes')
+  await act(async () => (blocked.querySelector('.nd-row') as HTMLElement).click())
+  expect(Object.values(appStore.getState().panes).find((p) => p.view === 'mission')?.props).toEqual({ id: '094c6a03' })
 })
 
 test('"this repo" narrows to the focused terminal\'s repo; "all" widens and persists', async () => {
@@ -47,17 +71,23 @@ test('"this repo" narrows to the focused terminal\'s repo; "all" widens and pers
     await appStore.getState().newTab()
   })
   const tab = appStore.getState().tabs.at(-1)!
-  act(() => appStore.getState().setCwd(tab.focused, '/Users/me/github/mnemo-desktop-wt-c-cockpit'))
+  act(() => appStore.getState().setCwd(tab.focused, '/Users/me/github/mnemo-issue-40'))
   await render()
-  expect(repoNames()).toEqual(['mnemo-desktop'])
-  expect(host.querySelector('.m-scope-hint')?.textContent).toBe('mnemo-desktop')
-  expect(host.textContent).toContain('parent 210k · children 640k')
+  expect(host.querySelector('.m-scope-hint')?.textContent).toBe('mnemo')
+  expect(needs()).toEqual([])
+  expect(host.querySelector('.m-empty')?.textContent).toBe('nothing needs you')
 
   const allButton = [...host.querySelectorAll('.m-scope button')].find((b) => b.textContent === 'all') as HTMLButtonElement
   await act(async () => allButton.click())
   expect(settingsStore.getState().sidebarScope).toBe('all')
-  expect(repoNames()).toEqual(['mnemo-desktop', 'mnemo', 'notes'])
-  expect(host.querySelector('.m-repo.focused .m-label')?.textContent).toBe('mnemo-desktop')
+  expect(needs()).toEqual(['vault'])
+  expect(host.querySelector('.nd-repo')?.textContent).toBe('mnemo-desktop')
+})
+
+test('no sessions at all says so', async () => {
+  serve({ repos: [], errors: [], at: '' })
+  await render()
+  expect(host.querySelector('.m-empty')?.textContent).toBe('no live sessions')
 })
 
 test('the expand button opens the cockpit pane', async () => {
