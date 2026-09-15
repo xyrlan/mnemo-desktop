@@ -1,8 +1,50 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Graph } from '../graph'
 import { useVault, vault } from './app-store'
-import { hubTopic, scopeOptions, toFlow } from './graph'
+import { firedIds, hubTopic, scopeOptions, toFlow, withGlow } from './graph'
 import { HealthPanel } from './HealthPanel'
+import { pulseStore } from '../pulse/app-store'
+import type { PulseStore } from '../pulse/store'
+import type { VaultGraph } from './types'
+
+/** How long a node a pulse names glows. */
+export const GLOW_MS = 2000
+const NONE: ReadonlySet<string> = new Set()
+
+/** Ids of the nodes of `graph` that a pulse named in the last `GLOW_MS`. Only pulses that
+ *  arrive while the graph is shown count: opening it later does not replay them. */
+function useGlow(graph: VaultGraph | null, pulses: PulseStore): ReadonlySet<string> {
+  const [glow, setGlow] = useState(NONE)
+  useEffect(() => {
+    if (!graph) return
+    const until = new Map<string, number>()
+    const timers = new Set<ReturnType<typeof setTimeout>>()
+    const expire = () => {
+      const now = Date.now()
+      for (const [id, t] of until) if (t <= now) until.delete(id)
+      setGlow(until.size ? new Set(until.keys()) : NONE)
+    }
+    let seen = pulses.getState().log.at(-1)?.id ?? 0
+    const unsubscribe = pulses.subscribe((s) => {
+      const ids = s.log.filter((p) => p.id > seen).flatMap((p) => firedIds(graph, p.event.slugs))
+      seen = s.log.at(-1)?.id ?? seen
+      if (ids.length === 0) return
+      for (const id of ids) until.set(id, Date.now() + GLOW_MS)
+      setGlow(new Set(until.keys()))
+      const timer = setTimeout(() => {
+        timers.delete(timer)
+        expire()
+      }, GLOW_MS)
+      timers.add(timer)
+    })
+    return () => {
+      unsubscribe()
+      timers.forEach(clearTimeout)
+      setGlow(NONE)
+    }
+  }, [graph, pulses])
+  return glow
+}
 
 const LEGEND = [
   ['ok', 'verified'],
@@ -14,7 +56,7 @@ const LEGEND = [
 
 /** Obsidian-style graph of one agent or one topic, with the health panel (or the clicked
  *  page, rendered by `page`) beside it. */
-export function GraphView({ cwd, current, page }: { cwd: string | undefined; current: string | undefined; page: ReactNode }) {
+export function GraphView({ cwd, current, page, pulses = pulseStore }: { cwd: string | undefined; current: string | undefined; page: ReactNode; pulses?: PulseStore }) {
   const tree = useVault((s) => s.tree)
   const scope = useVault((s) => s.scope)
   const graph = useVault((s) => s.graph)
@@ -27,7 +69,9 @@ export function GraphView({ cwd, current, page }: { cwd: string | undefined; cur
     if (vault.getState().scope === null) void vault.getState().loadGraph(fallback)
   }, [fallback])
 
-  const flow = useMemo(() => (graph ? toFlow(graph) : { nodes: [], edges: [] }), [graph])
+  const laidOut = useMemo(() => (graph ? toFlow(graph) : { nodes: [], edges: [] }), [graph])
+  const glow = useGlow(graph, pulses)
+  const flow = useMemo(() => withGlow(laidOut, glow), [laidOut, glow])
   const rules = graph?.nodes.filter((n) => n.kind === 'rule').length ?? 0
   const topicScope = scope?.startsWith('topic:') ? scope.slice('topic:'.length) : null
 

@@ -2,6 +2,7 @@ import type { Pane } from '../layout/store'
 import type { ParentSession, Snapshot } from '../mission/types'
 import { parentTokenLine } from '../mission/tokens'
 import { paneCwd, repoOfCwd } from '../mission/scope'
+import type { PulseEvent } from '../pulse/types'
 
 const trimSlash = (p: string) => p.replace(/\/+$/, '') || '/'
 const basename = (p: string) => trimSlash(p).split('/').pop() || p
@@ -43,4 +44,23 @@ export function barInfo(pane: Pane | undefined, snap: Snapshot, git: { repo?: st
     tokens: (parent && parentTokenLine(parent)) || undefined,
     title: pane?.title || pane?.view || '',
   }
+}
+
+/** How long the bar shows a pulse after it arrives. */
+export const FLASH_MS = 3000
+
+/** `↯ slug`, `↯ slug +2` when several rules fired, `↯ tool` when none did. */
+export function pulseLabel(e: PulseEvent): string {
+  const [first, ...rest] = e.slugs
+  if (!first) return `↯ ${e.tool ?? e.kind}`
+  return rest.length ? `↯ ${first} +${rest.length}` : `↯ ${first}`
+}
+
+const KIND: Record<PulseEvent['kind'], string> = { reflex: 'injected', tool: 'tool call', enrich: 'enriched', enforce: 'blocked' }
+
+/** The badge tooltip: what happened, the rules, and where a click goes. */
+export function pulseTitle(e: PulseEvent): string {
+  const what = [KIND[e.kind], e.tool].filter(Boolean).join(' ')
+  const rules = e.slugs.length ? `: ${e.slugs.join(', ')} (click to open in the vault)` : ''
+  return `mnemo ${what}${rules}`
 }

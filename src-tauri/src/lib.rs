@@ -38,6 +38,7 @@ pub mod chrome;
 // -- graph: no Rust --
 
 // -- pulse (src/pulse.rs) --
+pub mod pulse;
 
 // -- github (src/github.rs) --
 
@@ -134,6 +135,7 @@ pub fn run() {
             chrome::chrome_repo,
 
             // -- pulse commands --
+            pulse::pulse_start,
 
             // -- github commands --
 

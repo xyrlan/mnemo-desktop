@@ -77,6 +77,18 @@ body.resizing-col, body.resizing-col * { cursor: row-resize !important; user-sel
 .pane-bar-title { flex: 1 1 0; min-width: 0; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; }
 .pane-bar-tokens { flex: 0 0 auto; color: var(--ansi-cyan); }
 .pane-bar .pane-close { flex: 0 0 auto; }
+/* pulse (#44): a mnemo event in this pane's repo glows the bar and names the rule for ~3 s */
+.pane-bar { position: relative; }
+.pane-bar-glow { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pulse-tone, var(--accent)) 28%, transparent), transparent); background-size: 200% 100%; animation: pane-bar-glow 3s ease-out forwards; }
+.pane-bar.pulse-enforce { --pulse-tone: var(--ansi-red); }
+.pane-bar.pulse-enrich { --pulse-tone: var(--ansi-cyan); }
+.pane-bar.pulse-tool { --pulse-tone: var(--ansi-magenta); }
+@keyframes pane-bar-glow { 0% { opacity: 0; background-position: 100% 0; } 12% { opacity: 1; } 100% { opacity: 0; background-position: -100% 0; } }
+.pane-bar-pulse { position: relative; flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; max-width: 45%; padding: 0 5px; height: 18px; background: transparent; border: 1px solid transparent; border-radius: 9px; color: var(--fg-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.pane-bar-pulse:hover { color: var(--fg); border-color: var(--border); }
+.pane-bar-pulse.live { color: var(--pulse-tone, var(--accent)); border-color: color-mix(in srgb, var(--pulse-tone, var(--accent)) 55%, transparent); }
+.pane-bar-pulse-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar-pulse-count { flex: 0 0 auto; opacity: .8; }
 .pane-bar .pane-close:hover { color: var(--fg); background: var(--bg); }
 body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-select: none; }
 .pane.drag-source { opacity: .6; }

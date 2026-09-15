@@ -66,3 +66,20 @@ export function scopeOptions(tree: Agent[], maxTopics = 80): { agents: string[];
   const topics = [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
   return { agents: live.map((a) => a.name), topics: topics.slice(0, maxTopics) }
 }
+
+/** The rule nodes of `g` that the pulse slugs name (by slug, or by name as MCP reads may). */
+export function firedIds(g: VaultGraph, slugs: readonly string[]): string[] {
+  if (slugs.length === 0) return []
+  const want = new Set(slugs)
+  return g.nodes.filter((n) => n.kind === 'rule' && (want.has(n.slug) || want.has(n.label))).map((n) => n.id)
+}
+
+/** `vg-glow` on the glowing nodes and `vg-edge-glow` on their edges. Positions are
+ *  untouched and every other node and edge is the same object, so nothing is laid out again. */
+export function withGlow(flow: { nodes: CardNode[]; edges: Edge[] }, ids: ReadonlySet<string>): { nodes: CardNode[]; edges: Edge[] } {
+  if (ids.size === 0) return flow
+  return {
+    nodes: flow.nodes.map((n) => (ids.has(n.id) ? { ...n, className: `${n.className ?? ''} vg-glow`.trim() } : n)),
+    edges: flow.edges.map((e) => (ids.has(e.source) || ids.has(e.target) ? { ...e, className: `${e.className ?? ''} vg-edge-glow`.trim(), animated: true } : e)),
+  }
+}

@@ -1,4 +1,4 @@
-import { heat, hubTopic, scopeOptions, toFlow, toneFor } from './graph'
+import { firedIds, heat, hubTopic, scopeOptions, toFlow, toneFor, withGlow } from './graph'
 import type { Agent, GraphNode, PageInfo, VaultGraph } from './types'
 
 const rule = (over: Partial<GraphNode> = {}): GraphNode => ({
@@ -81,4 +81,36 @@ test('scope options are live agents, then topics by page count with noise left o
     ],
   })
   expect(scopeOptions(tree, 1).topics).toHaveLength(1)
+})
+
+test('firedIds finds the rule nodes a pulse names, by slug or name; hubs never', () => {
+  const g: VaultGraph = {
+    scope: 'agent:shared',
+    total: 2,
+    error: null,
+    nodes: [rule(), rule({ id: '/v/b.md', slug: 'b', label: 'Rule B' }), rule({ id: 'topic:a', kind: 'topic', slug: '', label: 'a' })],
+    edges: [],
+  }
+  expect(firedIds(g, ['a', 'Rule B', 'nope'])).toEqual(['/v/shared/feedback/a.md', '/v/b.md'])
+  expect(firedIds(g, [])).toEqual([])
+})
+
+test('withGlow marks glowing nodes and their edges and leaves everything else as it was', () => {
+  const flow = {
+    nodes: [
+      { id: 'a', type: 'card' as const, position: { x: 1, y: 2 }, className: 'vg-heat-2', data: { label: 'a' } },
+      { id: 'b', type: 'card' as const, position: { x: 3, y: 4 }, data: { label: 'b' } },
+    ],
+    edges: [
+      { id: 'ab', source: 'a', target: 'b', className: 'vg-edge-link' },
+      { id: 'bc', source: 'b', target: 'c' },
+    ],
+  }
+  expect(withGlow(flow, new Set())).toBe(flow)
+  const out = withGlow(flow, new Set(['a']))
+  expect(out.nodes[0]).toEqual({ ...flow.nodes[0], className: 'vg-heat-2 vg-glow' })
+  expect(out.nodes[1]).toBe(flow.nodes[1])
+  expect(out.edges[0]).toEqual({ ...flow.edges[0], className: 'vg-edge-link vg-edge-glow', animated: true })
+  expect(out.edges[1]).toBe(flow.edges[1])
+  expect(withGlow(flow, new Set(['b'])).nodes[1].className).toBe('vg-glow')
 })

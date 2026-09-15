@@ -127,3 +127,8 @@
 .vh-text summary { cursor: pointer; color: var(--fg-muted); }
 .vh-text pre { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 4px 0; max-height: 300px; overflow: auto; }
 .vh-fail { color: var(--ansi-red); }
+/* pulse (#44): a rule mnemo just used glows, its edges run toward it */
+@keyframes vg-glow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); } 35% { box-shadow: 0 0 14px 6px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.vg-canvas .react-flow__node.vg-glow { z-index: 10 !important; }
+.vg-canvas .react-flow__node.vg-glow .gr-card { border-color: var(--accent); animation: vg-glow 2s ease-out; }
+.vg-canvas .react-flow__edge.vg-edge-glow .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; opacity: 1; }
