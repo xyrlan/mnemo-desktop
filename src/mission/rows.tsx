@@ -128,6 +128,9 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
         )}
         {err && <span className="m-error">{err}</span>}
       </div>
+      {/* Claude Code delivers socket writes as another session's message, which it tells
+          the child is never user approval (#84); only the child's own terminal is the user. */}
+      <div className="m-reply-note">arrives as a message from another session: it cannot approve anything, attach to approve</div>
       {lastSent && (
         <div className="m-sent">
           sent ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · waiting for the child to pick it up… <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
