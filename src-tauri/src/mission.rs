@@ -713,6 +713,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn login_path_includes_the_profile_dirs_and_never_loses_inherited_ones() {
         let p = login_path();
         assert!(p.split(':').any(|d| d == "/usr/bin"), "got {p}");
