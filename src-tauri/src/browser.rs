@@ -46,6 +46,36 @@ pub fn parse(url: &str) -> Result<Url, String> {
     }
 }
 
+/// Where a pane keeps cookies and site storage. Persistent is the platform's default store
+/// (on macOS `WKWebsiteDataStore.defaultDataStore`, under `~/Library/WebKit/<app>`), so a
+/// login done once in a pane survives restarts. `MNEMO_BROWSER_EPHEMERAL=1` in the app's
+/// environment gives every pane a private in-memory store instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataStore {
+    Persistent,
+    Ephemeral,
+}
+
+impl DataStore {
+    pub fn from_env(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some(v) if !v.is_empty() && v != "0" => DataStore::Ephemeral,
+            _ => DataStore::Persistent,
+        }
+    }
+
+    pub fn current() -> Self {
+        Self::from_env(std::env::var("MNEMO_BROWSER_EPHEMERAL").ok().as_deref())
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DataStore::Persistent => "persistent",
+            DataStore::Ephemeral => "ephemeral",
+        }
+    }
+}
+
 /// A zero-area rectangle means "not on screen" (inactive tab, palette open).
 pub fn visible(w: f64, h: f64) -> bool {
     w > 0.0 && h > 0.0
@@ -163,6 +193,7 @@ pub async fn browser_create<R: Runtime>(
     let popup_app = app.clone();
     let popup_label = label.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
+        .incognito(DataStore::current() == DataStore::Ephemeral)
         .on_navigation(move |url| navigable(url, app_url.as_ref()))
         .on_page_load(move |_, payload| {
             let loading = matches!(payload.event(), PageLoadEvent::Started);
@@ -232,6 +263,85 @@ pub async fn browser_forward<R: Runtime>(app: AppHandle<R>, id: BrowserId) -> Re
 #[tauri::command]
 pub async fn browser_reload<R: Runtime>(app: AppHandle<R>, id: BrowserId) -> Result<(), String> {
     find(&app, id)?.reload().map_err(|e| e.to_string())
+}
+
+/// `persistent` or `ephemeral`: whether logins done in a pane outlive the app (see `DataStore`).
+#[tauri::command]
+pub fn browser_data_store() -> String {
+    DataStore::current().as_str().to_string()
+}
+
+/// Opens `url` in Google Chrome, else the default browser, for pages that need the user's
+/// own browser identity. Web pages only: the URL is re-serialised after parsing and passed
+/// as a plain argument, never through a shell.
+#[tauri::command]
+pub async fn browser_open_external(url: String) -> Result<(), String> {
+    let target = external(&url)?;
+    let launches = external_launches(&target, std::env::consts::OS);
+    tauri::async_runtime::spawn_blocking(move || run_launches(&launches))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// What may leave the app for the system browser: http(s) pages, not `about:blank`.
+pub fn external(url: &str) -> Result<Url, String> {
+    let parsed = Url::parse(url.trim()).map_err(|e| format!("invalid url {url:?}: {e}"))?;
+    if matches!(parsed.scheme(), "http" | "https") {
+        Ok(parsed)
+    } else {
+        Err(format!("refusing to open {url:?} outside the app: only http(s) urls are allowed"))
+    }
+}
+
+/// One way to hand a URL to a browser, tried in order until one works. A `wait` launch
+/// reports failure through its exit status (`open -a` exits 1 when the app is missing);
+/// the others become the browser process, so they only fail when the program cannot start.
+#[derive(Debug, PartialEq)]
+pub struct Launch {
+    pub program: &'static str,
+    pub args: Vec<String>,
+    pub wait: bool,
+}
+
+pub fn external_launches(url: &Url, os: &str) -> Vec<Launch> {
+    let url = url.to_string();
+    let launch = |program, args: &[&str], wait| Launch {
+        program,
+        args: args.iter().map(|a| a.to_string()).chain([url.clone()]).collect(),
+        wait,
+    };
+    match os {
+        // Absolute path: apps started from Finder or the Dock get a bare PATH.
+        "macos" => vec![launch("/usr/bin/open", &["-a", "Google Chrome"], true), launch("/usr/bin/open", &[], true)],
+        "windows" => vec![launch("rundll32", &["url.dll,FileProtocolHandler"], false)],
+        _ => vec![launch("google-chrome", &[], false), launch("xdg-open", &[], false)],
+    }
+}
+
+fn run_launches(launches: &[Launch]) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    let mut failures = Vec::new();
+    for l in launches {
+        let mut cmd = Command::new(l.program);
+        cmd.args(&l.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        if l.wait {
+            match cmd.status() {
+                Ok(s) if s.success() => return Ok(()),
+                Ok(s) => failures.push(format!("{} exited with {s}", l.program)),
+                Err(e) => failures.push(format!("{}: {e}", l.program)),
+            }
+        } else {
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    // Reap it whenever it exits, so a long-lived browser leaves no zombie.
+                    std::thread::spawn(move || child.wait());
+                    return Ok(());
+                }
+                Err(e) => failures.push(format!("{}: {e}", l.program)),
+            }
+        }
+    }
+    Err(format!("could not open a browser: {}", failures.join("; ")))
 }
 
 /// The open PR for the branch checked out in `cwd`, via `gh pr view`. `None` when `gh` is
@@ -315,6 +425,60 @@ mod tests {
         assert!(visible(10.0, 10.0));
         assert!(!visible(0.0, 10.0));
         assert!(!visible(10.0, 0.0));
+    }
+
+    #[test]
+    fn logins_persist_unless_asked_not_to() {
+        assert_eq!(DataStore::from_env(None), DataStore::Persistent);
+        assert_eq!(DataStore::from_env(Some("")), DataStore::Persistent);
+        assert_eq!(DataStore::from_env(Some("0")), DataStore::Persistent);
+        assert_eq!(DataStore::from_env(Some("1")), DataStore::Ephemeral);
+        assert_eq!(DataStore::Persistent.as_str(), "persistent");
+        assert_eq!(DataStore::Ephemeral.as_str(), "ephemeral");
+    }
+
+    #[test]
+    fn only_web_pages_leave_the_app() {
+        assert_eq!(external(" https://github.com/o/r/pull/4 ").unwrap().as_str(), "https://github.com/o/r/pull/4");
+        assert!(external("http://localhost:3000/").is_ok());
+        assert!(external("about:blank").is_err());
+        assert!(external("file:///etc/passwd").is_err());
+        assert!(external("javascript:alert(1)").is_err());
+        assert!(external("x-apple.systempreferences:").is_err());
+        assert!(external("github.com").is_err());
+    }
+
+    #[test]
+    fn chrome_first_then_the_default_browser() {
+        let url = Url::parse("https://github.com/o/r/pull/4?x=1&y=2").unwrap();
+        let mac = external_launches(&url, "macos");
+        assert_eq!(
+            mac,
+            vec![
+                Launch {
+                    program: "/usr/bin/open",
+                    args: vec!["-a".into(), "Google Chrome".into(), url.to_string()],
+                    wait: true
+                },
+                Launch { program: "/usr/bin/open", args: vec![url.to_string()], wait: true },
+            ]
+        );
+        let linux = external_launches(&url, "linux");
+        assert_eq!(linux.iter().map(|l| l.program).collect::<Vec<_>>(), ["google-chrome", "xdg-open"]);
+        assert!(linux.iter().all(|l| !l.wait && l.args == [url.to_string()]));
+        assert_eq!(external_launches(&url, "windows").len(), 1);
+    }
+
+    #[test]
+    fn a_failed_launch_falls_through_and_reports_every_attempt() {
+        let missing = |p| Launch { program: p, args: vec![], wait: false };
+        let err = run_launches(&[missing("/nonexistent/chrome"), missing("/nonexistent/open")]).unwrap_err();
+        assert!(err.contains("/nonexistent/chrome") && err.contains("/nonexistent/open"), "{err}");
+        #[cfg(unix)]
+        {
+            let exits = |p| Launch { program: p, args: vec![], wait: true };
+            assert!(run_launches(&[exits("/usr/bin/false"), exits("/usr/bin/true")]).is_ok());
+        }
     }
 
     #[test]

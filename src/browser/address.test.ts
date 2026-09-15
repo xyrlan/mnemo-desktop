@@ -1,4 +1,7 @@
-import { barReducer, initialBar, type Bar } from './address'
+import { act, createElement, createRef } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { AddressBar, barReducer, initialBar, type AddressBarProps, type Bar } from './address'
+import type { DataStore } from './client'
 
 const at = (url: string): Bar => ({ ...initialBar(url), loading: false })
 
@@ -36,4 +39,92 @@ test('blur stops editing so the next load wins', () => {
   b = barReducer(b, { type: 'blur' })
   expect(b.input).toBe('half')
   expect(barReducer(b, { type: 'page', url: 'https://x.dev/', loading: false }).input).toBe('https://x.dev/')
+})
+
+describe('AddressBar', () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  let host: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+  })
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+  })
+
+  function fakeClient(store: DataStore = 'persistent') {
+    return {
+      back: vi.fn(async () => {}),
+      forward: vi.fn(async () => {}),
+      reload: vi.fn(async () => {}),
+      openExternal: vi.fn(async (_url: string) => {}),
+      dataStore: vi.fn(async () => store),
+    }
+  }
+
+  async function render(props: Partial<AddressBarProps> & Pick<AddressBarProps, 'client'>) {
+    const all: AddressBarProps = {
+      id: -1,
+      bar: at('https://github.com/o/r/pull/4'),
+      dispatch: () => {},
+      input: createRef<HTMLInputElement>(),
+      onSubmit: (e) => e.preventDefault(),
+      onError: () => {},
+      ...props,
+    }
+    await act(async () => root.render(createElement(AddressBar, all)))
+  }
+  const chrome = () => host.querySelector<HTMLButtonElement>('button[aria-label="Abrir no Chrome"]')!
+
+  test('"Abrir no Chrome" hands the loaded page, not the half-typed text, to Chrome', async () => {
+    const client = fakeClient()
+    const bar = barReducer(at('https://github.com/o/r/pull/4'), { type: 'edit', input: 'githu' })
+    await render({ client, bar })
+    await act(async () => chrome().click())
+    expect(client.openExternal).toHaveBeenCalledWith('https://github.com/o/r/pull/4')
+  })
+
+  test('a blank page has nothing to open', async () => {
+    const client = fakeClient()
+    await render({ client, bar: at('about:blank') })
+    expect(chrome().disabled).toBe(true)
+  })
+
+  test('a failed launch reaches the pane error line', async () => {
+    const client = fakeClient()
+    client.openExternal.mockRejectedValueOnce('could not open a browser')
+    const onError = vi.fn()
+    await render({ client, onError })
+    await act(async () => chrome().click())
+    expect(onError).toHaveBeenCalledWith('could not open a browser')
+  })
+
+  test('persistent logins show nothing; ephemeral ones say so', async () => {
+    await render({ client: fakeClient('persistent') })
+    expect(host.querySelector('.browser-store')).toBeNull()
+    await act(async () => root.unmount())
+    root = createRoot(host)
+    await render({ client: fakeClient('ephemeral') })
+    expect(host.querySelector('.browser-store')?.textContent).toBe('sem login salvo')
+  })
+
+  test('navigation buttons and Escape still work from the bar', async () => {
+    const client = fakeClient()
+    const dispatch = vi.fn()
+    await render({ client, dispatch })
+    const buttons = host.querySelectorAll('button')
+    await act(async () => {
+      buttons[0].click()
+      buttons[1].click()
+      buttons[2].click()
+    })
+    expect([client.back, client.forward, client.reload].map((f) => f.mock.calls)).toEqual([[[-1]], [[-1]], [[-1]]])
+    const field = host.querySelector('input')!
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(dispatch).toHaveBeenCalledWith({ type: 'cancel' })
+  })
 })
