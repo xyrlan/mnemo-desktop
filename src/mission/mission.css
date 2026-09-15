@@ -1,5 +1,5 @@
-/* Scope toggle at the top of the sidebar, and the rows' full-size variant (cockpit pane).
-   The base row styles live in theme.css. */
+/* Scope toggle at the top of the sidebar and the cockpit, and the needs-you items both render.
+   The base row and reply styles live in theme.css. */
 .m-scope { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; flex: 0 0 auto; }
 .m-scope button { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; }
 .m-scope button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
@@ -7,11 +7,30 @@
 .m-scope-hint { flex: 1 1 0; min-width: 0; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-scope .m-scope-open { border: 0; padding: 0 4px; font-size: 13px; }
 
-.m-tokens { color: var(--ansi-cyan); font-size: 11px; flex: 0 0 auto; }
-.m-sub { color: var(--fg-muted); font-size: 11px; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-needs-head { display: flex; align-items: center; gap: 6px; color: var(--fg-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.m-needs-count { background: var(--ansi-yellow); color: var(--bg); border-radius: 8px; padding: 0 6px; font-weight: 700; }
+.m-live { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--fg-muted); font-size: 11px; cursor: pointer; }
+.m-live:hover { color: var(--fg); }
 
-.m-full .m-row { white-space: normal; flex-wrap: wrap; overflow: visible; }
-.m-full .m-label { max-width: none; }
-.m-full .m-detail { overflow: visible; white-space: pre-wrap; word-break: break-word; flex: 1 1 100%; }
-.m-full .m-repo-head .m-detail, .m-full .m-mission-head .m-detail { flex: 1 1 auto; }
-.m-full .m-sub { white-space: normal; word-break: break-all; }
+.needs-list { display: flex; flex-direction: column; gap: 6px; }
+.needs-list .nd { border-left: 2px solid var(--border); padding-left: 6px; }
+.needs-list .nd-blocked { border-left-color: var(--ansi-yellow); }
+.needs-list .nd-ci { border-left-color: var(--ansi-red); }
+.needs-list .nd-land { border-left-color: var(--ansi-green); }
+.needs-list .nd-replied { border-left-color: var(--ansi-green); }
+.nd-row { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; cursor: pointer; }
+.nd-row:hover { background: var(--bg); }
+.needs-list .m-reply { margin: 2px 0 2px 0; }
+.nd-word { font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px; flex: 0 0 auto; }
+.nd-blocked .nd-word { color: var(--bg); background: var(--ansi-yellow); }
+.nd-replied .nd-word { background: var(--ansi-green); }
+.nd-ci .nd-word { color: var(--bg); background: var(--ansi-red); }
+.nd-land .nd-word { color: var(--bg); background: var(--ansi-green); }
+.nd-label { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nd-repo { color: var(--fg-muted); font-size: 11px; flex: 0 0 auto; }
+.nd-sub { color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.needs-strip { display: flex; gap: 6px; overflow-x: auto; min-width: 0; }
+.needs-strip .nd { display: flex; gap: 6px; align-items: baseline; flex: 0 0 auto; max-width: 320px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.needs-strip .nd:hover { border-color: var(--accent); }
+.needs-strip .nd-blocked { border-color: var(--ansi-yellow); }
