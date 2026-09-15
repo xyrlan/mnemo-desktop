@@ -7,6 +7,7 @@ import { store as appStore } from '../layout/app-store'
 import { allChildren, childWord, isRecent, type ChildSession, type TimelineLine } from './types'
 import { openMissionPane } from './Sidebar'
 import { estimateUsd, fmtUsd } from './cost'
+import { settingsStore } from '../settings/app-store'
 
 function findChild(id: string): ChildSession | undefined {
   return allChildren(missionStore.getState().snapshot).find((c) => c.id === id)
@@ -18,6 +19,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   const looked = useMission((s) => s.looked[id])
   const draft = useMission((s) => s.drafts[id] ?? '')
   const err = useMission((s) => s.replyErrors[id])
+  const sentList = useMission((s) => s.sent[id] ?? [])
   const [lines, setLines] = useState<TimelineLine[]>([])
   const [confirmStop, setConfirmStop] = useState(false)
   const seenAtOpen = useRef<number | undefined>(looked)
@@ -93,6 +95,13 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
             </div>
           )
         })}
+        {sentList.map((m, i) => (
+          <div key={`you-${i}`} className="tl-line fresh tl-you">
+            <span className="tl-at">{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            <span className="tl-state">you</span>
+            <span className="tl-detail" title={m.original !== m.text ? `typed: ${m.original}` : undefined}>{m.text}</span>
+          </div>
+        ))}
         {final && (
           <div className="tl-final">
             <div className="tl-final-head">report</div>
@@ -125,6 +134,22 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
 
 registerPaneView('mission', MissionPane)
 
+void settingsStore.getState().load()
+registerProvider(() => {
+  const s = settingsStore.getState()
+  return [
+    {
+      id: 'settings.outgoing',
+      title: `Outgoing text: ${s.outgoing === 'en' ? 'rewrite in English' : 'send as typed'} (toggle)`,
+      run: () => settingsStore.getState().set('outgoing', s.outgoing === 'en' ? 'as-typed' : 'en'),
+    },
+    {
+      id: 'settings.reply-language',
+      title: `Children answer in: ${s.replyLanguage} (cycle)`,
+      run: () => settingsStore.getState().set('replyLanguage', s.replyLanguage === 'unchanged' ? 'pt' : s.replyLanguage === 'pt' ? 'en' : 'unchanged'),
+    },
+  ]
+})
 register({ id: 'mission.toggle-sidebar', title: 'Toggle mission sidebar', shortcut: '⌘B', run: () => missionStore.getState().toggleSidebar() })
 register({
   id: 'mission.reply-blocked',

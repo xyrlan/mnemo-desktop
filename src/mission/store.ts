@@ -1,6 +1,8 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { MissionClient } from './client'
 import type { Snapshot } from './types'
+import type { Settings } from '../settings/store'
+import { replyLanguageFooter } from '../settings/store'
 
 export type MissionState = {
   snapshot: Snapshot
@@ -13,6 +15,9 @@ export type MissionState = {
   drafts: Record<string, string>
   replyErrors: Record<string, string>
   sending: Record<string, boolean>
+  /** Replies that left this app, newest last; `text` is what went out, `original` what was typed. */
+  sent: Record<string, { at: number; text: string; original: string }[]>
+  translating: Record<string, boolean>
 }
 
 export type MissionActions = {
@@ -23,13 +28,17 @@ export type MissionActions = {
   setSidebarWidth(w: number): void
   setDraft(id: string, text: string): void
   sendReply(id: string): Promise<boolean>
+  /** Replace the draft with its English translation (via `claude -p`). */
+  translateDraft(id: string): Promise<boolean>
 }
 
 export type MissionStore = StoreApi<MissionState & MissionActions>
 
 const EMPTY: Snapshot = { repos: [], errors: [], at: '' }
 
-export function createMissionStore(client: MissionClient): MissionStore {
+export type OutgoingPolicy = () => Pick<Settings, 'outgoing' | 'replyLanguage'>
+
+export function createMissionStore(client: MissionClient, policy: OutgoingPolicy = () => ({ outgoing: 'as-typed', replyLanguage: 'unchanged' })): MissionStore {
   return createZustand<MissionState & MissionActions>((set, get) => ({
     snapshot: EMPTY,
     looked: {},
@@ -40,6 +49,8 @@ export function createMissionStore(client: MissionClient): MissionStore {
     drafts: {},
     replyErrors: {},
     sending: {},
+    sent: {},
+    translating: {},
 
     async refresh(focusedCwd, withPrs) {
       if (get().polling) return
@@ -86,14 +97,45 @@ export function createMissionStore(client: MissionClient): MissionStore {
       if (!text) return false
       set((s) => ({ sending: { ...s.sending, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
       try {
-        await client.reply(id, text)
-        set((s) => ({ drafts: { ...s.drafts, [id]: '' } }))
+        const p = policy()
+        let outgoing = text
+        if (p.outgoing === 'en') {
+          // Silent rewrite; on failure the original goes out rather than nothing.
+          try {
+            const t = (await client.translate(text)).trim()
+            if (t) outgoing = t
+          } catch {
+            /* fall through with the original */
+          }
+        }
+        outgoing += replyLanguageFooter(p.replyLanguage)
+        await client.reply(id, outgoing)
+        set((s) => ({
+          drafts: { ...s.drafts, [id]: '' },
+          sent: { ...s.sent, [id]: [...(s.sent[id] ?? []), { at: Date.now(), text: outgoing, original: text }] },
+        }))
         return true
       } catch (e) {
         set((s) => ({ replyErrors: { ...s.replyErrors, [id]: String(e) } }))
         return false
       } finally {
         set((s) => ({ sending: { ...s.sending, [id]: false } }))
+      }
+    },
+
+    async translateDraft(id) {
+      const text = (get().drafts[id] ?? '').trim()
+      if (!text) return false
+      set((s) => ({ translating: { ...s.translating, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
+      try {
+        const out = await client.translate(text)
+        if (out.trim()) set((s) => ({ drafts: { ...s.drafts, [id]: out.trim() } }))
+        return true
+      } catch (e) {
+        set((s) => ({ replyErrors: { ...s.replyErrors, [id]: String(e) } }))
+        return false
+      } finally {
+        set((s) => ({ translating: { ...s.translating, [id]: false } }))
       }
     },
   }))

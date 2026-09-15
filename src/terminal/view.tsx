@@ -7,6 +7,7 @@ import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7 } from './osc7'
+import { macChord } from './keymap'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 
 export default function TerminalPane({ id }: PaneViewProps) {
@@ -42,6 +43,27 @@ export default function TerminalPane({ id }: PaneViewProps) {
     fit.fit()
 
     store.getState().attachSink(id, (b) => term.write(b))
+    // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard. App chords (⌘K, ⌘W…)
+    // are handled by the window listener in the capture phase before xterm sees them.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+      const r = macChord(e)
+      if (!r) return true
+      if ('write' in r) {
+        void tauriPty.write(id, r.write)
+        return false
+      }
+      if (r.clipboard === 'copy') {
+        const sel = term.getSelection()
+        if (!sel) return true // no selection: let ⌘C reach the shell as nothing (matches Terminal.app)
+        void navigator.clipboard.writeText(sel)
+        return false
+      }
+      void navigator.clipboard.readText().then((t) => {
+        if (t) void tauriPty.write(id, t)
+      })
+      return false
+    })
     const data = term.onData((d) => {
       void tauriPty.write(id, d)
     })

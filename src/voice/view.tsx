@@ -9,6 +9,8 @@ import { detectPlatform } from '../actions/keys'
 import { tauriVoice, type Language } from './client'
 import { createVoice, LANGUAGES, nextLanguage } from './controller'
 import { insert, resolveTarget, withSeparator } from './route'
+import { settingsStore } from '../settings/app-store'
+import { tauriMission } from '../mission/client'
 import { installChord } from './chord'
 import Pill from './Pill'
 import './voice.css'
@@ -29,7 +31,18 @@ async function typeInMonaco(el: HTMLElement, text: string): Promise<boolean> {
 const voice = createVoice({
   client: tauriVoice,
   target: () => resolveTarget(document.activeElement, store.getState()),
-  insert: (target, text) => insert(target, text, { writePty: (id, t) => tauriPty.write(id, t), typeInMonaco }),
+  insert: async (target, text) => {
+    let out = text
+    if (settingsStore.getState().outgoing === 'en') {
+      try {
+        const t = (await tauriMission.translate(text)).trim()
+        if (t) out = t
+      } catch {
+        /* dictation still lands, untranslated */
+      }
+    }
+    return insert(target, out, { writePty: (id, t) => tauriPty.write(id, t), typeInMonaco })
+  },
 })
 
 const LANGUAGE_KEY = 'mnemo.voice.language'

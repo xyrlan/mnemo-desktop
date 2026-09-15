@@ -126,3 +126,8 @@ body { font-family: var(--font-mono); font-size: var(--font-size); font-variant-
 .tl-final-head { color: var(--ansi-magenta); margin-bottom: 4px; }
 .tl-final pre { white-space: pre-wrap; font: inherit; margin: 0; color: var(--fg); }
 .mission-reply { margin: 0; border-left: 0; border-top: 2px solid var(--ansi-yellow); }
+
+.m-sent { margin-top: 4px; color: var(--ansi-green); font-size: 11px; }
+.m-sent-text { color: var(--fg-muted); }
+.m-replied .m-word { color: var(--bg); background: var(--ansi-green); }
+.tl-you .tl-state { color: var(--ansi-green); }

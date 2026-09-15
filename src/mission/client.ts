@@ -7,6 +7,7 @@ export interface MissionClient {
   reply(id: string, text: string): Promise<void>
   markLooked(id: string, timelineLen: number): Promise<void>
   looked(): Promise<Record<string, number>>
+  translate(text: string): Promise<string>
 }
 
 export const tauriMission: MissionClient = {
@@ -15,4 +16,5 @@ export const tauriMission: MissionClient = {
   reply: (id, text) => invoke('mission_reply', { id, text }),
   markLooked: (id, timelineLen) => invoke('mission_mark_looked', { id, timelineLen }),
   looked: () => invoke('mission_looked'),
+  translate: (text) => invoke('mission_translate', { text }),
 }
