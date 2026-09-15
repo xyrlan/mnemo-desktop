@@ -1,0 +1,2 @@
+- [Shared target dir](shared-target-dir.md) — worktrees share one cargo target
+- [Contract signatures](no-silent-contract-changes.md) — stop instead of changing them
