@@ -646,6 +646,9 @@ mod tests {
                 s.elapsed()
             }
         );
+        if let Some(out) = std::env::var_os("VAULTMAP_DUMP") {
+            std::fs::write(out, serde_json::to_string(&m).unwrap()).unwrap();
+        }
         assert!(m.nodes.len() > 100);
     }
 

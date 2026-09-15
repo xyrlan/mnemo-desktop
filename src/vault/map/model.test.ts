@@ -1,4 +1,4 @@
-import { agentsOf, applyMap, buildGraph, edgeKey, firedIds, hash01, MAX_SIZE, MIN_SIZE, mix, needsLayout, positionsOf, readPalette, sizeFor, slugIndex, toneOf, withAlpha } from './model'
+import { agentsOf, applyMap, buildGraph, edgeKey, firedIds, hash01, MAX_SIZE, MIN_SIZE, faint, mix, needsLayout, positionsOf, readPalette, sizeFor, slugIndex, toneOf } from './model'
 import type { MapEdge, MapNode, VaultMap } from './types'
 
 const palette = readPalette(() => '')
@@ -27,11 +27,11 @@ test('the palette reads the theme and falls back per variable', () => {
   expect(p.bg).toBe('#101010')
 })
 
-test('colours mix and take an alpha sigma reads', () => {
+test('colours mix, and faint ones are opaque over the background', () => {
   expect(mix('#000000', '#ffffff', 0.5)).toBe('#808080')
   expect(mix('#102030', '#ffffff', -1)).toBe('#102030')
-  expect(withAlpha('#abcdef', 0.5)).toBe('#abcdef80')
-  expect(withAlpha('#abcdefff', 0)).toBe('#abcdef00')
+  expect(faint('#ffffff', { bg: '#000000' }, 0.25)).toBe('#404040')
+  expect(faint('#ffffff', { bg: '#000000' }, 1)).toBe('#ffffff')
 })
 
 test('tone is confidence, grey when never fired; size grows with heat and stops', () => {

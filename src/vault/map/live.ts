@@ -1,4 +1,4 @@
-import { mix, withAlpha, type EdgeAttrs, type NodeAttrs, type Palette, type Recolour } from './model'
+import { faint, mix, type EdgeAttrs, type NodeAttrs, type Palette, type Recolour } from './model'
 
 /** A fired rule flashes this long, as in the ego view. */
 export const FIRE_MS = 2000
@@ -83,11 +83,9 @@ export class Effects {
     const born = this.born.get(source) ?? this.born.get(target)
     if (!fire && !born) return null
     if (born) {
-      const t = progress(now, born.at, Math.min(BORN_MS, 1200))
-      const alpha = parseInt(a.color.slice(7, 9) || 'ff', 16) / 255
-      return { color: withAlpha(a.color, alpha * t) }
+      return { color: mix(p.bg, a.color, progress(now, born.at, Math.min(BORN_MS, 1200))) }
     }
     const k = pulse(progress(now, fire!.at, FIRE_MS))
-    return { color: withAlpha(p.glow, 0.25 + 0.6 * k), size: a.size + 1.5 * k, zIndex: 1 }
+    return { color: faint(p.glow, p, 0.35 + 0.6 * k), size: a.size + 1.5 * k, zIndex: 1 }
   }
 }

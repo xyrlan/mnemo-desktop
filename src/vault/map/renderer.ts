@@ -115,7 +115,7 @@ class SigmaRenderer implements Renderer {
     const [s, t] = this.graph.extremities(id)
     if (this.hovered && s !== this.hovered && t !== this.hovered) return { ...a, hidden: true }
     // Hovered: the node's own edges, topic ones brought up to readable.
-    if (this.hovered) return { ...a, color: a.kind === 'topic' ? mix(a.color.slice(0, 7), this.opts.palette.label, 0.3) : a.color, size: a.size + 0.5 }
+    if (this.hovered) return { ...a, color: a.kind === 'topic' ? mix(a.color, this.opts.palette.label, 0.45) : a.color, size: a.size + 0.5 }
     const fx = this.effects.edge(s, t, a, performance.now(), this.opts.palette)
     return fx ? { ...a, ...fx } : a
   }
@@ -209,7 +209,10 @@ class SigmaRenderer implements Renderer {
     this.stopLayout(false)
     if (this.graph.order < 2) return
     this.sigma.setCustomBBox(null)
-    const settings = { ...inferSettings(this.graph), barnesHutOptimize: this.graph.order > 300, slowDown: 3 }
+    void this.sigma.getCamera().animatedReset({ duration: 300 })
+    // Inferred settings, a little faster: in 3 s on the real vault (2.3k pages) they already pull
+    // each repo into its own region. linLog and weak gravity left an unconverged hairball.
+    const settings = { ...inferSettings(this.graph), slowDown: 3 }
     this.layout = new FA2Layout(this.graph, { settings, getEdgeWeight: (_e, a) => (a.kind === 'topic' ? 0.3 : 1) })
     this.layout.start()
     this.opts.onLayout?.(true)

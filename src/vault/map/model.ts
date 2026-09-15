@@ -66,8 +66,10 @@ export function mix(a: string, b: string, t: number): string {
   return toHex(x.map((c, i) => c + (y[i] - c) * k))
 }
 
-/** `#rrggbb` → `#rrggbbaa`, which sigma reads. */
-export const withAlpha = (h: string, alpha: number) => h.slice(0, 7) + Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0')
+/** `color` at `strength` over the map's background, opaque. Sigma blends WebGL colours as
+ *  premultiplied, so a colour with a low alpha comes out brighter where it should be fainter:
+ *  thousands of `#rrggbb24` topic edges drew a white hairball. */
+export const faint = (color: string, p: Pick<Palette, 'bg'>, strength: number) => mix(p.bg, color, strength)
 
 /** Confidence colour, but a rule that never fired is grey whatever it claims (as in the ego view). */
 export const toneOf = (n: MapNode): Tone => (n.fires === 0 && !n.ghost ? 'muted' : confidenceTone(n.confidence))
@@ -98,9 +100,9 @@ export type MapGraph = Graph<NodeAttrs, EdgeAttrs>
 export const edgeKey = (e: MapEdge) => `${e.kind}:${e.source}->${e.target}`
 
 export function edgeAttrs(kind: MapEdgeKind, p: Palette): EdgeAttrs {
-  if (kind === 'link') return { kind, color: withAlpha(p.link, 0.55), size: 1 }
-  if (kind === 'rewrite') return { kind, color: withAlpha(p.rewrite, 0.7), size: 1 }
-  return { kind, color: withAlpha(p.edge, 0.14), size: 0.5 }
+  if (kind === 'link') return { kind, color: faint(p.link, p, 0.5), size: 1 }
+  if (kind === 'rewrite') return { kind, color: faint(p.rewrite, p, 0.7), size: 1 }
+  return { kind, color: faint(p.edge, p, 0.22), size: 0.5 }
 }
 
 function nodeAttrs(n: MapNode, p: Palette): Omit<NodeAttrs, 'x' | 'y'> {
