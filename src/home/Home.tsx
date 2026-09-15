@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { homeStore, useHome } from './app-store'
 import { relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
 import { store as layout, useApp } from '../layout/app-store'
+import { Wordmark } from '../brand/Wordmark'
 import './home.css'
 
 const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~')
@@ -107,7 +108,7 @@ export default function Home() {
   return (
     <div className="hm">
       <header className="hm-head">
-        <span className="hm-title">mnemo</span>
+        <Wordmark />
         {tabs.length > 0 && (
           <button className="hm-btn hm-back" onClick={() => layout.getState().goToTab(0)}>
             ← voltar

@@ -49,7 +49,8 @@ export type Actions = {
   /** New terminal tab in `cwd` that types `cmd` once the shell prompt is up; `sessionId`
    *  marks the pane as running that Claude session so Home can focus it instead of forking. */
   openCommandTab(cwd: string | undefined, cmd: string, sessionId?: string): Promise<void>
-  split(dir: Dir): Promise<void>
+  /** cwd: where the new pane starts; defaults to the focused pane's OSC 7 cwd. */
+  split(dir: Dir, cwd?: string): Promise<void>
   /** Open a non-terminal view (editor, browser, mission…) as a new tab, a split of the focused
    *  pane, or (`auto`) wherever it fits best. */
   openView(view: string, props: Record<string, unknown>, place: Place, title?: string): void
@@ -152,10 +153,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         if (pane > 0) setTimeout(() => void pty.write(pane, cmd + '\n'), PROMPT_DELAY_MS)
       },
 
-      async split(dir) {
+      async split(dir, cwd) {
         const tab = active()
         if (!tab) return
-        const cwd = get().panes[tab.focused]?.cwd
+        cwd = cwd ?? get().panes[tab.focused]?.cwd
         const fresh = await spawnPane(cwd)
         set((s) => ({
           tabs: s.tabs.map((t) =>
