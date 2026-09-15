@@ -497,10 +497,14 @@ pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
 
 // ------------------------------------------------------------------ io --
 
-/// PATH as the user's login shell sees it. An app launched from the Dock or Finder
-/// inherits launchd's minimal PATH, which has neither `~/.local/bin` (claude, mnemo)
-/// nor Homebrew (gh); the terminal panes are fine because they run a login shell,
-/// but every `Command` here must be given the same PATH explicitly.
+/// PATH as the user's *interactive* login shell sees it. An app launched from the Dock or
+/// Finder inherits launchd's minimal PATH, which has neither `~/.local/bin` (claude, mnemo)
+/// nor Homebrew (gh); the terminal panes are fine because they run a login shell, but
+/// every `Command` here must be given the same PATH explicitly. The probe is `-lic`, not
+/// `-lc`: a non-interactive login zsh never reads `.zshrc`, which is where most people
+/// (this user included) export `~/.local/bin`, so `-lc` found no `claude` at all.
+/// Between markers, because an interactive rc may print. Well-known tool dirs are
+/// appended as a last resort when the shell probe misses them.
 pub fn login_path() -> String {
     static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     CACHE
@@ -510,28 +514,70 @@ pub fn login_path() -> String {
                 return inherited;
             }
             let shell = crate::pty::default_shell();
-            let out = Command::new(&shell)
-                .args(["-lc", "printf %s \"$PATH\""])
+            let probed = Command::new(&shell)
+                .args(["-lic", "printf '\\037MNEMO_PATH=%s\\037' \"$PATH\""])
+                .env("TERM", "dumb")
+                .env("MNEMO_NO_SHELL_INTEGRATION", "1")
                 .stdin(std::process::Stdio::null())
                 .output()
                 .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .and_then(|o| extract_marked_path(&String::from_utf8_lossy(&o.stdout)))
+                .or_else(|| {
+                    // A broken interactive rc: fall back to the plain login probe.
+                    Command::new(&shell)
+                        .args(["-lc", "printf %s \"$PATH\""])
+                        .stdin(std::process::Stdio::null())
+                        .output()
+                        .ok()
+                        .filter(|o| o.status.success())
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        .filter(|p| !p.is_empty())
+                })
                 .unwrap_or_default();
-            if out.is_empty() {
-                inherited
-            } else {
-                // Keep anything launchd gave us that the profile did not, at the end.
-                let mut parts: Vec<&str> = out.split(':').collect();
-                for p in inherited.split(':') {
-                    if !parts.contains(&p) && !p.is_empty() {
-                        parts.push(p);
-                    }
-                }
-                parts.join(":")
-            }
+            merge_paths(&probed, &inherited, &well_known_dirs())
         })
         .clone()
+}
+
+/// The PATH printed between `\x1f` markers by the interactive probe, or None.
+pub fn extract_marked_path(out: &str) -> Option<String> {
+    let start = out.find("\x1fMNEMO_PATH=")? + "\x1fMNEMO_PATH=".len();
+    let end = out[start..].find('\x1f')? + start;
+    let p = out[start..end].trim();
+    (!p.is_empty()).then(|| p.to_string())
+}
+
+/// Tool dirs an app must find even when the shell probe missed them.
+fn well_known_dirs() -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        .iter()
+        .map(|d| d.to_string())
+        .chain([".local/bin", ".bun/bin", ".cargo/bin"].iter().map(|d| format!("{home}/{d}")))
+        .collect()
+}
+
+/// `probed` first, then anything in `inherited` it lacks, then any `extra` dir that exists
+/// on disk and is still missing. Order is preserved, duplicates and empties dropped.
+pub fn merge_paths(probed: &str, inherited: &str, extra: &[String]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut push = |p: &str| {
+        if !p.is_empty() && !parts.iter().any(|q| q == p) {
+            parts.push(p.to_string());
+        }
+    };
+    for p in probed.split(':') {
+        push(p);
+    }
+    for p in inherited.split(':') {
+        push(p);
+    }
+    for p in extra {
+        if Path::new(p).is_dir() {
+            push(p);
+        }
+    }
+    parts.join(":")
 }
 
 pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
@@ -1141,6 +1187,23 @@ mod tests {
         let b = worktree_branches(main.to_str().unwrap());
         assert_eq!(b.get(&canon(&wt)).map(String::as_str), Some("feat/x/y"), "keys: {:?}", b.keys().collect::<Vec<_>>());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn marked_path_is_read_between_markers_even_with_rc_noise() {
+        assert_eq!(extract_marked_path("banner\nmotd\x1fMNEMO_PATH=/a:/b\x1f\nprompt%").as_deref(), Some("/a:/b"));
+        assert_eq!(extract_marked_path("\x1fMNEMO_PATH=\x1f"), None);
+        assert_eq!(extract_marked_path("no markers"), None);
+    }
+
+    #[test]
+    fn merge_paths_keeps_order_dedupes_and_adds_only_existing_extras() {
+        let tmp = std::env::temp_dir();
+        let existing = tmp.to_string_lossy().to_string();
+        let missing = tmp.join("definitely-missing-dir-xyz").to_string_lossy().to_string();
+        let merged = merge_paths("/a:/b", "/b:/c:", &[existing.clone(), missing.clone()]);
+        assert_eq!(merged, format!("/a:/b:/c:{existing}"));
+        assert!(!merged.contains(&missing));
     }
 
     #[test]
