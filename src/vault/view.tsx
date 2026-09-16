@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
@@ -8,13 +8,9 @@ import { agentForCwd, filterTree, orderAgents, pageCount, terms } from './search
 import { decisionsFor, parseWhy } from './why'
 import { HealthTable } from './HealthTable'
 import { PageView, short } from './PageView'
-import { mapStore, useMap } from './map/store'
 import type { LogEntry } from './store'
 import type { Agent } from './types'
 import './vault.css'
-
-/** The living map (#71) loads with its tab: sigma and the layout worker stay out of the first paint. */
-const MapPane = lazy(() => import('./map/MapPane'))
 
 /** `expanded` key of the folded `other` section; `/` never occurs in an agent name. */
 const OTHER = '/other'
@@ -151,7 +147,6 @@ function VaultPane(_: PaneViewProps) {
   const agents = useVault((s) => s.agents)
   const query = useVault((s) => s.query)
   const mode = useVault((s) => s.mode)
-  const mapOpen = useMap((s) => s.open)
   const cwd = useApp(importCwd)
   // The table never reads the tree: its agents, as `repo`, name the current repo too.
   const current = agentForCwd(cwd, tree.length ? tree : agents.map((name) => ({ name, kind: name === 'shared' ? 'shared' : 'repo' })))
@@ -166,21 +161,14 @@ function VaultPane(_: PaneViewProps) {
         {(['health', 'pages'] as const).map((m) => (
           <button
             key={m}
-            className={!mapOpen && mode === m ? 'vt-mode-on' : ''}
-            onClick={() => (mapStore.getState().setOpen(false), vault.getState().setMode(m))}
+            className={mode === m ? 'vt-mode-on' : ''}
+            onClick={() => vault.getState().setMode(m)}
           >
             {m === 'health' ? 'Health' : 'Pages'}
           </button>
         ))}
-        <button className={mapOpen ? 'vt-mode-on' : ''} title="Every rule as a point: links, rare topics, rules firing and being born" onClick={() => mapStore.getState().setOpen(true)}>
-          Mapa
-        </button>
       </div>
-      {mapOpen ? (
-        <Suspense fallback={<div className="vt-empty">loading the map…</div>}>
-          <MapPane cwd={cwd} current={current} />
-        </Suspense>
-      ) : mode === 'health' ? (
+      {mode === 'health' ? (
         <HealthTable cwd={cwd} current={current} />
       ) : (
         <div className="vt-main">
@@ -216,13 +204,11 @@ function VaultPane(_: PaneViewProps) {
 
 registerPaneView('vault', VaultPane)
 
-const open = (mode?: 'health' | 'pages' | 'map') => () => {
-  if (mode) mapStore.getState().setOpen(mode === 'map')
-  if (mode && mode !== 'map') vault.getState().setMode(mode)
+const open = (mode?: 'health' | 'pages') => () => {
+  if (mode) vault.getState().setMode(mode)
   store.getState().openView('vault', {}, 'auto', 'vault')
 }
 
 register({ id: 'vault.open', title: 'Open vault', run: open() })
 register({ id: 'vault.health', title: 'Open vault health: rules by heat, what needs review', run: open('health') })
 register({ id: 'vault.pages', title: 'Open vault pages by agent', run: open('pages') })
-register({ id: 'vault.map', title: 'Open vault map: every rule, live', run: open('map') })
