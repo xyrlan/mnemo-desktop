@@ -45,13 +45,14 @@ export const HEALTH_ORANGE = 0.3
  *  (`RECENT_FIRE_DAYS` in `vault.rs`): sustained use, not one lucky afternoon. */
 export const FIRE_MIN_RECENT = 25
 
-/** Halo: one band of dots per this many pages, `HALO_PER_BAND` dots a band. The ceiling is
- *  what a 160px square still reads as separate marks — a live 2,413-page vault sits at 128,
- *  so the halo is still growing rather than saturated. */
-export const HALO_BAND_PAGES = 120
-export const HALO_PER_BAND = 5
-export const HALO_MIN_DOTS = 12
-export const HALO_MAX_DOTS = 160
+/** The library: one book per this many pages, so the shelves fill as the vault grows. A live
+ *  2,413-page vault shelves 34 of the 90 the wall holds: a third full, with room to keep
+ *  filling to 6,300 pages. Three shelves, so the top of the square stays clear for the
+ *  librarian rather than crowded with a fourth row. */
+export const PAGES_PER_BOOK = 70
+/** Shelf rows behind the octopus, and how many books one row holds at the square's base width. */
+export const SHELF_ROWS = 3
+export const BOOKS_PER_ROW = 30
 /* ------------------------------------------------------------------------------- */
 
 export function xpOf(v: Pick<VaultLevel, 'pages' | 'rules_fired' | 'fires'>): number {
@@ -108,48 +109,48 @@ export function onFire(health: number, firedRecent: number): boolean {
   return health >= HEALTH_GREEN && firedRecent >= FIRE_MIN_RECENT
 }
 
-/** How many dots the halo draws for `pages`: grows a band at a time, never per page. */
-export function haloDots(pages: number): number {
-  const bands = Math.floor(Math.max(0, pages) / HALO_BAND_PAGES)
-  return Math.min(HALO_MAX_DOTS, HALO_MIN_DOTS + bands * HALO_PER_BAND)
+/** How many books `pages` puts on the shelves: one per `PAGES_PER_BOOK`, capped at what the
+ *  shelves hold. Never per page — a book is a band, the way the halo's dots were. */
+export function bookCount(pages: number, perRow = BOOKS_PER_ROW): number {
+  return Math.min(SHELF_ROWS * perRow, Math.floor(Math.max(0, pages) / PAGES_PER_BOOK))
 }
 
-/** A fragment of memory: a small tilted square, the way a note looks from across the room.
- *  `w`/`h` are its size, `a` its rotation in degrees. */
-export type Dot = { x: number; y: number; w: number; h: number; a: number }
+/** One book on a shelf: `x` and `row` place it, `w`/`h` size it, `lean` tilts it the way a book
+ *  leans when its neighbour is missing, and `shade` varies its colour within the tone.
+ *  `last` marks the final book of a partly filled row — the one the librarian is carrying, so
+ *  it appears on the shelf as the one in his hand disappears. */
+export type Book = { x: number; row: number; w: number; h: number; lean: number; shade: number; last: boolean }
 
-const GOLDEN = Math.PI * (3 - Math.sqrt(5))
-
-/** `n` fragments on a sunflower spiral inside a `size` square, clear of the centre where the
- *  octopus sits. Deterministic, so a re-render never reshuffles them: the same vault always
- *  draws the same halo. Sizes and tilts vary by index so the field reads as scattered notes
- *  rather than a printed pattern. */
-export function haloLayout(n: number, size: number): Dot[] {
-  const c = size / 2
-  const inner = size * 0.19
-  const outer = size * 0.485
-  return Array.from({ length: n }, (_, i) => {
-    const t = Math.sqrt((i + 0.5) / Math.max(1, n))
-    const rad = inner + (outer - inner) * t
-    const a = i * GOLDEN
-    // Three sizes in a fixed rotation: a few larger notes carry the field, the rest fill it.
-    const side = i % 7 === 0 ? 3.4 : i % 3 === 0 ? 2.6 : 2
-    return {
-      x: c + rad * Math.cos(a) - side / 2,
-      y: c + rad * Math.sin(a) - side / 2,
-      w: side,
-      // Slightly off-square: a note is taller than it is wide.
-      h: side * 1.15,
-      a: ((i * 37) % 4) * 11 - 16,
-    }
-  })
-}
-
-/** Which dots a pulse lights: a few, picked from its id so each pulse flashes a different patch. */
-export function flashed(id: number, n: number, count = 5): Set<number> {
-  const out = new Set<number>()
-  if (n <= 0) return out
-  const start = (id * 7919) % n
-  for (let k = 0; k < Math.min(count, n); k++) out.add((start + k * 3) % n)
+/** `n` books filling `SHELF_ROWS` shelves bottom-up across a `width`-wide square: the bottom
+ *  shelf fills first, so a growing vault visibly stacks up rather than thinning out everywhere.
+ *  Deterministic — the same vault always draws the same library. */
+export function shelfBooks(n: number, width: number): Book[] {
+  const perRow = booksPerRow(width)
+  const out: Book[] = []
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / perRow)
+    if (row >= SHELF_ROWS) break
+    const slot = i % perRow
+    // Widths vary so the spines do not read as a barcode; the row's slot pitch stays fixed.
+    const pitch = width / perRow
+    const w = pitch * (0.42 + ((i * 7) % 5) * 0.09)
+    out.push({
+      x: slot * pitch + (pitch - w) / 2,
+      row,
+      w,
+      // Shorter books sit lower on the shelf, as they do on a real one.
+      h: 15 + ((i * 11) % 6),
+      // The last book of a partly filled row leans, the rest stand.
+      lean: i === n - 1 && n % perRow !== 0 ? 12 : 0,
+      shade: ((i * 13) % 7) / 6,
+      last: i === n - 1,
+    })
+  }
   return out
 }
+
+/** How many books a row holds at `width`: the pitch stays readable as the sidebar is dragged. */
+export function booksPerRow(width: number): number {
+  return Math.max(6, Math.round(BOOKS_PER_ROW * (width / 160)))
+}
+

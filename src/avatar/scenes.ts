@@ -158,6 +158,17 @@ export const POSES = {
   poor: { className: 'av-idle av-poor', tone: 'accent', rects: [...RING, ...BODY, ...ARMS_POOR] },
 } as const satisfies Record<string, Scene>
 
+/** The book the librarian is holding, and the arm that lifts it. Drawn after the body so it
+ *  reads as held in front rather than as stripes between the arms. `vaultlevel.css` moves both
+ *  together: up to the shelf, a beat, and back down for the next one. */
+export const SHELVING: Rect[] = [
+  // the lifting arm, reaching out to the right
+  r(21, 16, 2, 5, 'arm'),
+  // the book
+  r(22, 13, 5, 7, 'object'),
+  r(23, 14, 3, 1, 'object'),
+]
+
 /** Pairs each rect with its index *within its own part*, so `avatar.css` can address
  *  "the third arm" as `.av-arm-2` regardless of where the arms sit in the list. Numbering
  *  by position in the whole list would silently break every stagger the moment a scene

@@ -58,7 +58,8 @@ test('the square shows the level from the best xp, tinted by health', async () =
   expect(host.querySelector('.vl-square')?.classList.contains('vl-green')).toBe(true)
   expect(host.querySelector('.vl-square')?.classList.contains('vl-on-fire')).toBe(true)
   expect(host.querySelector('.av-idle')).not.toBeNull()
-  expect(host.querySelectorAll('.vl-dot').length).toBeGreaterThan(0)
+  // 1000 pages shelves 14 books.
+  expect(host.querySelectorAll('.vl-book').length).toBe(14)
   unmount()
 })
 
@@ -97,7 +98,7 @@ test('an empty vault reads as neutral, not as a sick one', async () => {
   unmount()
 })
 
-test('a pulse sends the octopus away, flashes the halo, and it returns when the scene ends', async () => {
+test('a pulse sends the octopus away, lights the shelves, and he returns when the scene ends', async () => {
   vi.useFakeTimers()
   const pulses = createPulseStore()
   const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
@@ -106,12 +107,12 @@ test('a pulse sends the octopus away, flashes the halo, and it returns when the 
 
   await act(async () => pulses.getState().push(ev()))
   expect(octo().classList.contains('vl-away')).toBe(true)
-  expect(host.querySelectorAll('.vl-lit').length).toBeGreaterThan(0)
-  // The halo stays while he is away.
-  expect(host.querySelectorAll('.vl-dot').length).toBeGreaterThan(0)
+  // The lamp comes on over the shelves, and the library stays while he is away.
+  expect(host.querySelector('.vl-shelves')!.classList.contains('vl-lit')).toBe(true)
+  expect(host.querySelectorAll('.vl-book').length).toBe(14)
 
   await act(async () => vi.advanceTimersByTime(FLASH_MS))
-  expect(host.querySelectorAll('.vl-lit')).toHaveLength(0)
+  expect(host.querySelector('.vl-shelves')!.classList.contains('vl-lit')).toBe(false)
   await act(async () => vi.advanceTimersByTime(OVERLAY_MS - FLASH_MS - 10))
   expect(octo().classList.contains('vl-away')).toBe(true)
   await act(async () => vi.advanceTimersByTime(20))
@@ -166,3 +167,23 @@ test('a second pulse keeps him away for a full scene', async () => {
   unmount()
 })
 
+
+test('the last book slots in with the gesture, and only while he is shelving', async () => {
+  const shelving = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} />)
+  // One book is the one in his hands, landing as it leaves them.
+  expect(shelving.host.querySelectorAll('.vl-slotting')).toHaveLength(1)
+  expect(shelving.host.querySelector('.vl-shelving')).not.toBeNull()
+  shelving.unmount()
+
+  // A sick vault stops working, so nothing is being slotted either.
+  const sick = await render(<Square client={fakeClient([vault({ rules_fired: 20, dormant: 900 })])} pulses={createPulseStore()} />)
+  expect(sick.host.querySelector('.vl-shelving')).toBeNull()
+  expect(sick.host.querySelectorAll('.vl-slotting')).toHaveLength(0)
+  sick.unmount()
+
+  // An empty vault has nothing to shelve and no books at all.
+  const empty = await render(<Square client={fakeClient([vault({ pages: 0 })])} pulses={createPulseStore()} />)
+  expect(empty.host.querySelector('.vl-shelving')).toBeNull()
+  expect(empty.host.querySelectorAll('.vl-book')).toHaveLength(0)
+  empty.unmount()
+})

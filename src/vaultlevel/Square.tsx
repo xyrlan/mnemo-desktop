@@ -4,12 +4,12 @@
  *  One octopus on screen: when a pulse arrives it shrinks out of the square while the
  *  presence overlay plays, and comes back when the scene ends. The halo stays. */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { POSES, SCENES, withPartIndex } from '../avatar/scenes'
+import { POSES, SCENES, SHELVING, withPartIndex } from '../avatar/scenes'
 import { OVERLAY_MS } from '../pulse/Overlay'
 import type { PulseStore } from '../pulse/store'
 import type { PulseKind } from '../pulse/types'
 import type { LevelClient } from './client'
-import { flashed, haloDots, haloLayout, healthOf, levelOf, onFire, poseOf, toneOf, xpOf } from './level'
+import { SHELF_ROWS, bookCount, booksPerRow, healthOf, levelOf, onFire, poseOf, shelfBooks, toneOf, xpOf } from './level'
 import type { VaultLevel } from './types'
 import '../avatar/avatar.css'
 import './vaultlevel.css'
@@ -38,7 +38,8 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
   const [best, setBest] = useState(0)
   const [away, setAway] = useState(false)
   const [eating, setEating] = useState(false)
-  const [lit, setLit] = useState<Set<number>>(new Set())
+  // A pulse lights the books, the way a lamp comes on over the desk.
+  const [lit, setLit] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -74,11 +75,13 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     return () => ro.disconnect()
   }, [])
 
-  // The halo orbits in a fixed 160-unit box: `haloLayout` uses one `size` for both axes, so
-  // handing it the width would centre the orbit off the bottom of a wide square. The group
-  // below shifts that box to the middle of whatever width the slot gives us.
-  const dots = useMemo(() => haloLayout(haloDots(vault?.pages ?? 0), SQUARE), [vault?.pages])
-  const dotCount = dots.length
+  // The library grows sideways with the sidebar: a wider square holds more books a row, the way
+  // a wider wall holds more shelf.
+  const books = useMemo(() => {
+    const wall = Math.max(0, width - WALL_PAD * 2)
+    const perRow = booksPerRow(wall)
+    return shelfBooks(bookCount(vault?.pages ?? 0, perRow), wall)
+  }, [vault?.pages, width])
 
   // The octopus leaves for as long as a scene plays, with the overlay's own throttle.
   const played = useRef<Partial<Record<PulseKind, number>>>({})
@@ -96,7 +99,7 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
       if (gap > 0 && last.received - (played.current[kind] ?? 0) < gap) return
       played.current[kind] = last.received
       setAway(true)
-      setLit(flashed(last.id, dotCount))
+      setLit(true)
       clearTimeout(back)
       clearTimeout(unflash)
       back = setTimeout(() => {
@@ -109,7 +112,7 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
           done = setTimeout(() => setEating(false), EAT_MS)
         }
       }, OVERLAY_MS)
-      unflash = setTimeout(() => setLit(new Set()), FLASH_MS)
+      unflash = setTimeout(() => setLit(false), FLASH_MS)
     })
     return () => {
       unsub()
@@ -117,7 +120,7 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
       clearTimeout(unflash)
       clearTimeout(done)
     }
-  }, [pulses, dotCount])
+  }, [pulses])
 
   const ok = !!vault && !vault.error
   // Two different questions. A vault with no pages is not a sick vault, it is an empty one:
@@ -134,37 +137,52 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     : ok
       ? 'the vault is empty'
       : vault?.error ?? 'reading the vault'
+  // He only works when there is a library to work on and the health to do it.
+  const shelving = pose !== POSES.poor && books.length > 0
   const detail = rated
     ? `${vault.pages} pages · ${vault.rules_fired} fired (${vault.fired_recent} this week) · ${vault.dormant} dormant · ${vault.inbox} in inbox`
     : label
 
   return (
     <div ref={box} className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
-      <svg className="vl-halo" width={width} height={SQUARE} viewBox={`0 0 ${width} ${SQUARE}`} aria-hidden="true">
-        <g transform={`translate(${(width - SQUARE) / 2} 0)`}>
-          {dots.map((d, i) => (
+      <svg className={`vl-shelves${lit ? ' vl-lit' : ''}`} width={width} height={SQUARE} viewBox={`0 0 ${width} ${SQUARE}`} aria-hidden="true">
+        {Array.from({ length: SHELF_ROWS }, (_, row) => (
+          <rect key={`s${row}`} className="vl-plank" x={WALL_PAD} y={shelfY(row) + 1} width={Math.max(0, width - WALL_PAD * 2)} height={2} />
+        ))}
+        {books.map((b, i) => (
+          // The lean goes on a wrapper: `vl-slotting` animates `transform`, and both on one
+          // element means the animation wins and the tilt is lost.
+          <g key={i} transform={b.lean ? `rotate(${b.lean} ${b.x + WALL_PAD + b.w / 2} ${shelfY(b.row)})` : undefined}>
             <rect
-              key={i}
-              className={lit.has(i) ? 'vl-dot vl-lit' : 'vl-dot'}
-              x={d.x}
-              y={d.y}
-              width={d.w}
-              height={d.h}
-              transform={`rotate(${d.a} ${d.x + d.w / 2} ${d.y + d.h / 2})`}
-              style={{ animationDelay: `${(i % 9) * 0.35}s` }}
+              className={b.last && shelving ? 'vl-book vl-slotting' : 'vl-book'}
+              x={b.x + WALL_PAD}
+              y={shelfY(b.row) - b.h}
+              width={b.w}
+              height={b.h}
+              style={{ '--vl-shade': b.shade.toFixed(2) } as React.CSSProperties}
             />
-          ))}
-        </g>
+          </g>
+        ))}
       </svg>
       <div className={`vl-octo${away ? ' vl-away' : ''}${eating ? ' vl-eating' : ''}`}>
         {fire && <Flames />}
         {eating && <Morsel />}
         {/* No `av-<tone>` class: `avatar.css` only defines four of them, so lime and orange
             would fall back to the accent. The square paints from its own five-step ramp. */}
-        <svg className={`av vl-body ${pose.className}`} width={80} height={80} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
+        <svg className={`av vl-body ${pose.className}`} width={58} height={58} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
           {withPartIndex(pose.rects).map(([rect, n], i) => (
             <rect key={i} className={`av-${rect.part} av-${rect.part}-${n}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
           ))}
+          {/* The librarian's own arm and book, shelving on a loop. Drawn last so the book reads
+              as held in front of the body. A sick vault stops working, and an empty one has
+              nothing to shelve. */}
+          {shelving && (
+            <g className="vl-shelving">
+              {withPartIndex(SHELVING).map(([rect, n], i) => (
+                <rect key={`k${i}`} className={`av-${rect.part} av-${rect.part}-${n}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
+              ))}
+            </g>
+          )}
         </svg>
       </div>
       {openVault && (
@@ -182,11 +200,22 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
   )
 }
 
+/** The baseline of shelf `row`, counting from the bottom of the square upward: row 0 is the
+ *  lowest shelf, which is the one that fills first. */
+function shelfY(row: number): number {
+  return SQUARE - HUD_H - row * 34
+}
+
+/** Room at the foot for the level and its bar, so the bottom shelf is not read through them. */
+const HUD_H = 22
+/** Side margin, so the wall does not run into the sidebar's edges. */
+const WALL_PAD = 8
+
 /** The fragment a `learned` scene leaves behind: it drifts up to the head and is gone.
  *  Same mark as a halo note, so what he eats is visibly one of them. */
 function Morsel() {
   return (
-    <svg className="vl-morsel" width={80} height={80} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
+    <svg className="vl-morsel" width={58} height={58} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
       <rect x={14.6} y={26} width={3.4} height={3.9} transform="rotate(-12 16.3 28)" />
     </svg>
   )
@@ -195,7 +224,7 @@ function Morsel() {
 /** Three pixel flames under the octopus, flickering out of step. */
 function Flames() {
   return (
-    <svg className="vl-fire" width={80} height={24} viewBox="0 0 32 10" shapeRendering="crispEdges" aria-hidden="true">
+    <svg className="vl-fire" width={58} height={18} viewBox="0 0 32 10" shapeRendering="crispEdges" aria-hidden="true">
       {[11, 16, 21].map((x, i) => (
         <g key={x} className={`vl-flame vl-flame-${i}`}>
           {/* A tongue tapering to one pixel. Three of them, and no shared base: five wide-based
