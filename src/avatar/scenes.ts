@@ -128,6 +128,36 @@ export const STATE_SCENES: Record<ChildWord, Scene> = {
  *  one of those) does not render it; `src/vaultlevel/` does, and its keyframes live there. */
 export const IDLE: Scene = { className: 'av-idle', tone: 'accent', rects: [...RING, ...BODY, ...ARMS] }
 
+/** Arms gathered tight and short: a narrow, compact silhouette against `ARMS_POOR`'s wide flat
+ *  one. Kept to five straight runs — an earlier version curled the outer tips with an L of
+ *  rects, and at 80px that read as loose pixels stuck to the body rather than a curl. */
+const ARMS_WELL: Rect[] = [
+  r(11, 16, 2, 4, 'arm'),
+  r(14, 16, 2, 6, 'arm'),
+  r(17, 16, 2, 6, 'arm'),
+  r(20, 16, 2, 4, 'arm'),
+]
+
+/** Arms splayed wide and drooping outward, the outer pair falling away from the body: the
+ *  silhouette widens and flattens, which is what reads as "sagging" at this size. Length alone
+ *  does not — a first attempt only lengthened the arms and the pose was indistinguishable from
+ *  `fair` on screen. */
+const ARMS_POOR: Rect[] = [
+  r(5, 18, 2, 6, 'arm'),
+  r(10, 17, 2, 9, 'arm'),
+  r(15, 17, 2, 10, 'arm'),
+  r(20, 17, 2, 9, 'arm'),
+  r(25, 18, 2, 6, 'arm'),
+]
+
+/** The three poses the vault square wears, keyed by `poseOf(tone)` in `src/vaultlevel/level.ts`.
+ *  Five tones, three silhouettes: colour carries the fine slide, the pose carries the verdict. */
+export const POSES = {
+  well: { className: 'av-idle av-well', tone: 'accent', rects: [...RING, ...BODY, ...ARMS_WELL] },
+  fair: IDLE,
+  poor: { className: 'av-idle av-poor', tone: 'accent', rects: [...RING, ...BODY, ...ARMS_POOR] },
+} as const satisfies Record<string, Scene>
+
 /** Pairs each rect with its index *within its own part*, so `avatar.css` can address
  *  "the third arm" as `.av-arm-2` regardless of where the arms sit in the list. Numbering
  *  by position in the whole list would silently break every stagger the moment a scene

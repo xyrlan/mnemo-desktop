@@ -11,7 +11,7 @@ import Avatar from '../avatar/Avatar'
 import './overlay.css'
 
 /** How long one scene is on screen, in + hold + out. */
-export const OVERLAY_MS = 1500
+export const OVERLAY_MS = 2500
 
 export default function Overlay({ place, store = pulseStore }: { place: string | undefined; store?: PulseStore }) {
   const latest = useStore(store, (s) => (place ? s.latestFor(place) : undefined))
