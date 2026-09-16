@@ -10,12 +10,22 @@ Desktop shell for the mnemo agentic development environment. Sub-project 1: a te
     pnpm install
     pnpm tauri dev
 
-Release build + install on macOS:
-
-    pnpm tauri build --bundles app
-    rm -rf /Applications/mnemo.app && cp -R ../.mnemo-desktop-target/release/bundle/macos/mnemo.app /Applications/
-
 Run your parent Claude Code session inside the app from the repo whose project memory you want (`cd ~/github/mnemo && claude --continue`); dispatch children then appear in the mission sidebar.
+
+## Install
+
+    pnpm run install-app
+
+Builds the release bundle, quits the running app, swaps it into `/Applications/mnemo.app` and relaunches it — one command, and the one to run after every merge. Safe to run from a pane of the app it is replacing: the swap runs detached, so quitting the app cannot kill the install halfway. `--no-launch` leaves the app closed.
+
+The app then says which commit it is: the short sha and the build time are stamped in at build time, and shown in the command palette's about line and by `mnemo-desktop --version`.
+
+    /Applications/mnemo.app/Contents/MacOS/mnemo-desktop --version
+    mnemo-desktop 0.1.0 (948abbe, built 2026-09-15 16:41 UTC)
+
+So a bundle from before the merge reads as old instead of looking like a missing feature. After a merge, `pnpm run install-app:check` prints one line when the installed app is behind `main`, and nothing at all when it is current or not installed — a merge routine (`mnemo land --merge`, say, which lives in the `mnemo` repo) can call it unconditionally:
+
+    bundle installed at 2026-09-15 10:49 is behind main (6 commits); run `pnpm run install-app`
 
 ## Test
 

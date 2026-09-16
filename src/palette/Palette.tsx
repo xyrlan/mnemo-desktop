@@ -1,10 +1,19 @@
 import { Command } from 'cmdk'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { store, useApp } from '../layout/app-store'
 import { all, run } from '../actions/registry'
+import { aboutLine, buildInfo, type BuildInfo } from '../about/info'
 
 export default function Palette() {
   const open = useApp((s) => s.paletteOpen)
+  const [build, setBuild] = useState<BuildInfo | null>(null)
+  useEffect(() => {
+    let live = true
+    void buildInfo().then((b) => live && setBuild(b))
+    return () => {
+      live = false
+    }
+  }, [])
   useEffect(() => {
     if (!open) return
     const esc = (e: KeyboardEvent) => {
@@ -36,6 +45,7 @@ export default function Palette() {
               </Command.Item>
             ))}
         </Command.List>
+        {aboutLine(build) && <div className="palette-about">{aboutLine(build)}</div>}
       </Command>
     </div>
   )

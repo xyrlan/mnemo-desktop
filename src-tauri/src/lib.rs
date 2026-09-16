@@ -52,6 +52,9 @@ pub mod pulse;
 // -- github (src/github.rs) --
 pub mod github;
 
+// -- build info (src/build_info.rs) --
+pub mod build_info;
+
 use commands::PtyState;
 use tauri::Manager;
 
@@ -173,6 +176,9 @@ pub fn run() {
             github::gh_auth,
             github::gh_issues,
             github::gh_project,
+
+            // -- build info commands --
+            build_info::app_build_info,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
