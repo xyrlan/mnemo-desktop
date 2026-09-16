@@ -9,6 +9,7 @@ import { openIssue } from '../github/actions'
 import { allChildren, type Mission, type RepoGroup } from '../mission/types'
 import { buildMissionMap, type MapAction, type MapCard } from './model'
 import { landMission, mergePr, openJob, useArm } from './actions'
+import Avatar from '../avatar/Avatar'
 
 const WORD: Record<MapAction['kind'], string> = { contract: 'contract', open: 'open', reply: 'reply', attach: 'attach', pr: 'PR', job: 'abrir job', merge: 'merge', land: 'land', issue: 'GitHub' }
 const CONFIRM: Partial<Record<MapAction['kind'], string>> = { merge: 'confirm merge?', land: 'confirm land?' }
@@ -29,6 +30,11 @@ function ActionCard({ data }: NodeProps<Node<MapCard, 'action'>>) {
         <span className="mm-label">{data.label}</span>
         {data.badge && <span className="gr-badge">{data.badge}</span>}
       </div>
+      {data.word && (
+        <span className="mm-avatar">
+          <Avatar state={data.word} size={30} />
+        </span>
+      )}
       {data.sub && (
         <div className="gr-sub" title={data.sub}>
           {data.sub}

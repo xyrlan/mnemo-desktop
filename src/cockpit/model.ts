@@ -16,7 +16,7 @@ export type MapAction =
   | { kind: 'land'; mission: Mission }
   | { kind: 'issue'; issue: Issue }
 
-export type MapCard = CardData & { actions: MapAction[] }
+export type MapCard = CardData & { actions: MapAction[]; word?: ReturnType<typeof childWord> }
 /** `width`/`height`: the box the laid-out cards span, at 100%. */
 export type MissionMap = { nodes: Node<MapCard>[]; edges: Edge[]; width: number; height: number }
 
@@ -69,6 +69,7 @@ export function buildMissionMap(repo: RepoGroup, m: Mission, looked: Record<stri
         badge: [word === 'BLOCKED' ? 'BLOCKED' : '', d > 0 ? `+${d}` : '', c.tokens > 0 ? fmtTokens(c.tokens) : ''].filter(Boolean).join(' · ') || undefined,
         tone: CHILD_TONE[word],
         pulse: word === 'BLOCKED',
+        word,
         actions,
       })
       link(head, id, word === 'active')
