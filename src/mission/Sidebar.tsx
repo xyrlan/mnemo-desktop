@@ -10,6 +10,7 @@ import NeedsList from '../cockpit/NeedsList'
 import CockpitBody from '../cockpit/CockpitBody'
 import InboxRow from '../cockpit/InboxRow'
 import { VaultLevelSlot } from '../cockpit/VaultLevelSlot'
+import VaultSquare from '../vaultlevel/VaultSquare'
 import { useArm } from '../cockpit/actions'
 import { cwdForNewShell } from '../layout/cwd'
 import { sessionTitle, tabLabel, type Git, type TabLabel } from '../layout/tabs'
@@ -219,7 +220,9 @@ export default function Sidebar({ chrome = tauriChrome }: { chrome?: ChromeClien
           renderRows={renderRows}
         />
       </div>
-      <VaultLevelSlot className="sidebar-vault" />
+      <VaultLevelSlot className="sidebar-vault">
+        <VaultSquare />
+      </VaultLevelSlot>
     </div>
   )
 }

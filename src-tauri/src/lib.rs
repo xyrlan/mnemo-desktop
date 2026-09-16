@@ -139,6 +139,10 @@ pub fn run() {
             vault::vault_ego,
             vault::vault_health,
 
+            // -- vaultlevel commands --
+            vault::vault_level,
+            vault::vault_level_best,
+
             // -- home commands --
             home_commands::home_snapshot,
             home_commands::home_register_repo,

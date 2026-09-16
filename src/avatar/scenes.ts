@@ -123,6 +123,11 @@ export const STATE_SCENES: Record<ChildWord, Scene> = {
   stopped: { className: 'av-stopped', tone: 'muted', rects: [...BODY, ...ARMS] },
 }
 
+/** mnemo at rest, breathing: the sidebar's vault square shows it between scenes. Not a
+ *  `PulseKind` and not a child state, so it is its own export, and `Avatar` (which takes
+ *  one of those) does not render it; `src/vaultlevel/` does, and its keyframes live there. */
+export const IDLE: Scene = { className: 'av-idle', tone: 'accent', rects: [...RING, ...BODY, ...ARMS] }
+
 /** Pairs each rect with its index *within its own part*, so `avatar.css` can address
  *  "the third arm" as `.av-arm-2` regardless of where the arms sit in the list. Numbering
  *  by position in the whole list would silently break every stagger the moment a scene

@@ -1070,6 +1070,77 @@ pub fn health_at(root: &Path, fires: &Fires, now: u64) -> Health {
     }
 }
 
+// ---------------------------------------------------------------- level --
+
+/// A page counts toward `fired_recent` when it fired within this many days.
+pub const RECENT_FIRE_DAYS: u64 = 7;
+
+/// What the sidebar square renders: `health_at`'s counts without its lists, plus the fire
+/// totals the xp formula reads. No subprocess, so the square can poll it.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct VaultLevel {
+    pub root: Option<String>,
+    /// Shared and project pages, noise left out.
+    pub pages: usize,
+    /// Pages that fired at least once.
+    pub rules_fired: usize,
+    /// Every fire of those pages on record (the logs are a window, so this can fall).
+    pub fires: usize,
+    /// Pages that fired within `RECENT_FIRE_DAYS`.
+    pub fired_recent: usize,
+    pub dormant: usize,
+    pub label_only: usize,
+    /// Proposals staged in `_inbox` folders, rejected ones not counted.
+    pub inbox: usize,
+    pub error: Option<String>,
+}
+
+/// The square's numbers over `pages`, as of `now`.
+pub fn level_of(pages: &[LivePage], fires: &Fires, inbox: usize, now: u64) -> VaultLevel {
+    let cutoff = now.saturating_sub(RECENT_FIRE_DAYS * DAY_MS);
+    let mut out = VaultLevel { pages: pages.len(), inbox, ..Default::default() };
+    for p in pages {
+        let page = &p.page;
+        let fire = fire_of(fires, &page.info);
+        if fire.count > 0 {
+            out.rules_fired += 1;
+            out.fires += fire.count as usize;
+        }
+        if fire.last.is_some_and(|t| t >= cutoff) {
+            out.fired_recent += 1;
+        }
+        if is_label_only(page) {
+            out.label_only += 1;
+        }
+        if dormant_reason(page, &fire, now).is_some() {
+            out.dormant += 1;
+        }
+    }
+    out
+}
+
+fn level_best_path() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("vault-level.json")
+}
+
+/// The highest xp in the file at `path` after offering `xp`; written only when `xp` beats it.
+/// An unreadable file counts as 0, so the worst case is a level that restarts, never a crash.
+pub fn record_best(path: &Path, xp: u64) -> u64 {
+    let best = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("best_xp")?.as_u64())
+        .unwrap_or(0);
+    if xp <= best {
+        return best;
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, serde_json::json!({ "best_xp": xp }).to_string());
+    xp
+}
+
 // ------------------------------------------------------------ allowlist --
 
 /// The subcommands the pane may run, and nothing else.
@@ -1322,6 +1393,27 @@ pub async fn vault_health() -> Health {
     })
     .await
     .unwrap_or_else(|e| Health { error: Some(e.to_string()), ..Default::default() })
+}
+
+/// The square's numbers: the page walk and the fire logs (cached like the table), no `mnemo`.
+#[tauri::command]
+pub async fn vault_level() -> VaultLevel {
+    tauri::async_runtime::spawn_blocking(|| match vault_root() {
+        Some(root) => {
+            let (pages, _, fires) = snapshot(&root);
+            VaultLevel { root: Some(root.to_string_lossy().replace('\\', "/")), ..level_of(&pages, &fires, count_inbox(&root), now_ms()) }
+        }
+        None => VaultLevel { error: Some(NO_VAULT.into()), ..Default::default() },
+    })
+    .await
+    .unwrap_or_else(|e| VaultLevel { error: Some(e.to_string()), ..Default::default() })
+}
+
+/// Offers `xp` as the highest ever seen; returns the highest ever seen. The level reads this,
+/// so a rule retired by the friction loop moves the colour and not the bar.
+#[tauri::command]
+pub async fn vault_level_best(xp: u64) -> u64 {
+    tauri::async_runtime::spawn_blocking(move || record_best(&level_best_path(), xp)).await.unwrap_or(xp)
 }
 
 #[cfg(test)]
@@ -1832,6 +1924,18 @@ mod tests {
         assert!(v["error"].is_null());
     }
 
+    /// The square's numbers on the real vault, to calibrate `src/vaultlevel/level.ts`:
+    /// `cargo test --lib level_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn level_live() {
+        let root = vault_root().expect("a mnemo vault");
+        let t = std::time::Instant::now();
+        let (pages, _, fires) = snapshot(&root);
+        let l = level_of(&pages, &fires, count_inbox(&root), now_ms());
+        println!("{l:?} in {:?}", t.elapsed());
+    }
+
     /// Against the real vault: `cargo test --lib vault_live -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -1893,6 +1997,33 @@ mod tests {
         assert_eq!((h.pages, h.never_fired, h.inbox), (5, 1, 1));
         assert_eq!(h.root.as_deref(), Some(FIXTURE.replace('\\', "/").as_str()));
         assert_eq!(h.error, None);
+    }
+
+    #[test]
+    fn level_counts_fired_recent_dormant_and_label_only_without_a_subprocess() {
+        let root = Path::new(FIXTURE);
+        let fires = fixture_fires();
+        let l = level_of(&live_pages(root), &fires, count_inbox(root), NOW);
+        let h = health_at(root, &fires, NOW);
+        // The same page walk as `health_at`, so the counts agree with the health pane.
+        assert_eq!((l.pages, l.rules_fired, l.dormant, l.label_only, l.inbox), (h.pages, h.pages - h.never_fired, h.dormant.len(), h.label_only.len(), h.inbox));
+        assert!(l.fires >= l.rules_fired);
+        assert!(l.fired_recent <= l.rules_fired);
+        // Far enough in the future, nothing is recent.
+        assert_eq!(level_of(&live_pages(root), &fires, 0, NOW + 10_000 * DAY_MS).fired_recent, 0);
+    }
+
+    #[test]
+    fn the_best_xp_only_climbs() {
+        let dir = std::env::temp_dir().join(format!("mnemo-level-{}", std::process::id()));
+        let path = dir.join("nested").join("vault-level.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(record_best(&path, 120), 120);
+        assert_eq!(record_best(&path, 90), 120);
+        assert_eq!(record_best(&path, 300), 300);
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(record_best(&path, 5), 5);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
