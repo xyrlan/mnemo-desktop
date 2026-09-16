@@ -56,7 +56,17 @@ export function pulseLabel(e: PulseEvent): string {
   return rest.length ? `↯ ${first} +${rest.length}` : `↯ ${first}`
 }
 
-const KIND: Record<PulseEvent['kind'], string> = { reflex: 'injected', tool: 'tool call', enrich: 'enriched', enforce: 'blocked' }
+const KIND: Record<PulseEvent['kind'], string> = {
+  reflex: 'injected',
+  tool: 'tool call',
+  enrich: 'enriched',
+  enforce: 'blocked',
+  catchup: 'caught you up',
+  briefing: 'saved a briefing',
+  learned: 'learned',
+  friction: 'noted friction',
+  dispatch: 'dispatched',
+}
 
 /** The badge tooltip: what happened, the rules, and where a click goes. */
 export function pulseTitle(e: PulseEvent): string {
