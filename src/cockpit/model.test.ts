@@ -38,7 +38,7 @@ test('contract → pieces → PR → land, with child state, CI and the actions 
   expect(kinds(g, land)).toEqual(['land'])
 })
 
-test('BLOCKED pulses and offers reply, a working edge animates, a ready PR offers merge', () => {
+test('BLOCKED wears its scene and offers reply, a working edge animates, a ready PR offers merge', () => {
   const m = {
     ...desktop.missions[0],
     pieces: desktop.missions[0].pieces.map((p) => (p.name === 'cockpit' ? { ...p, pr: { number: 7, url: 'u', state: 'OPEN', head: p.branch, ci: 'pass' as const } } : p)),
@@ -46,7 +46,7 @@ test('BLOCKED pulses and offers reply, a working edge animates, a ready PR offer
   const g = buildMissionMap(desktop, m, { a43d3832: 1 })
   const vault = mapId.piece(m, 'vault')
   const cockpit = mapId.piece(m, 'cockpit')
-  expect(data(g, vault)).toMatchObject({ pulse: true, tone: 'bad', sub: 'may I add a crate?', badge: 'BLOCKED' })
+  expect(data(g, vault)).toMatchObject({ word: 'BLOCKED', tone: 'bad', sub: 'may I add a crate?', badge: 'BLOCKED' })
   expect(kinds(g, vault)).toEqual(['reply', 'attach'])
   expect(data(g, cockpit)).toMatchObject({ badge: '+3 · 320k', sub: 'writing the cockpit pane' })
   expect(kinds(g, cockpit)).toEqual(['attach', 'open'])

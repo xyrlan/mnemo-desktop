@@ -68,7 +68,6 @@ export function buildMissionMap(repo: RepoGroup, m: Mission, looked: Record<stri
         sub: word === 'BLOCKED' ? (c.needs ?? 'blocked') : c.detail || word,
         badge: [word === 'BLOCKED' ? 'BLOCKED' : '', d > 0 ? `+${d}` : '', c.tokens > 0 ? fmtTokens(c.tokens) : ''].filter(Boolean).join(' · ') || undefined,
         tone: CHILD_TONE[word],
-        pulse: word === 'BLOCKED',
         word,
         actions,
       })

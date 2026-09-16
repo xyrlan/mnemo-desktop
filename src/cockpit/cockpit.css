@@ -71,6 +71,9 @@
 .mm-act.mm-armed { background: var(--ansi-red); border-color: var(--ansi-red); color: var(--bg); font-weight: 700; }
 .cockpit .react-flow__edge.animated .react-flow__edge-path { stroke: var(--accent); }
 
-/* The child's state as the octopus, in the corner of its card. */
+/* The child's state as the octopus. Top-right, clear of `.mm-actions`, which `margin-top:
+   auto` pins to the bottom of the 78px card — the octopus there would sit on the buttons. */
 .mm-card { position: relative; }
-.mm-avatar { position: absolute; right: 6px; bottom: 4px; opacity: .9; pointer-events: none; }
+.mm-avatar { position: absolute; right: 5px; top: 3px; opacity: .9; pointer-events: none; }
+/* The label must not run under it. */
+.mm-card .gr-label { padding-right: 32px; }

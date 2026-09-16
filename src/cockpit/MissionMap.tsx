@@ -24,7 +24,7 @@ function ActionCard({ data }: NodeProps<Node<MapCard, 'action'>>) {
   const { run, armed } = useContext(Run)
   const tone = data.tone ?? 'muted'
   return (
-    <div className={`gr-card mm-card gr-${tone}${data.pulse ? ' gr-pulse' : ''}`}>
+    <div className={`gr-card mm-card gr-${tone}`}>
       <Handle type="target" position={Position.Left} className="gr-handle" />
       <div className="gr-label" title={data.label}>
         <span className="mm-label">{data.label}</span>
