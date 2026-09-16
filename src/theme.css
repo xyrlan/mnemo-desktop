@@ -91,11 +91,12 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 .palette-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 10; }
 .palette { width: 520px; max-height: 60vh; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font: inherit; }
 .palette [cmdk-input] { width: 100%; padding: 12px 14px; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--fg); font: inherit; outline: none; }
-.palette [cmdk-list] { max-height: calc(60vh - 48px); overflow: auto; padding: 6px; }
+.palette [cmdk-list] { max-height: calc(60vh - 78px); overflow: auto; padding: 6px; }
 .palette [cmdk-item] { padding: 8px 10px; border-radius: 4px; display: flex; justify-content: space-between; color: var(--fg); }
 .palette [cmdk-item][data-selected='true'] { background: var(--bg); color: var(--accent); }
 .palette [cmdk-empty] { padding: 8px 10px; color: var(--fg-muted); }
 .palette .shortcut { color: var(--fg-muted); }
+.palette-about { padding: 7px 14px; border-top: 1px solid var(--border); color: var(--fg-muted); font-size: 11px; user-select: text; }
 
 /* ---- mission sidebar ---- */
 .sidebar { position: relative; flex: 0 0 auto; background: var(--bg-elev); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
