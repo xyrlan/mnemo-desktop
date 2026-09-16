@@ -567,9 +567,9 @@ export type Scene = {
   /** Theme token for the body. The object's own colour is baked into `avatar.css`. */
   tone: 'accent' | 'green' | 'yellow' | 'red' | 'muted'
   rects: Rect[]
-  /** Shortest gap between two overlays of this kind, in ms. `0` means every event plays.
-   *  The rate of `tool` is unknown until real use (spec §9.1); this is the dial, left at
-   *  zero so the first run measures the unthrottled truth. */
+  /** Shortest gap between two overlays of this kind, in ms. Absent (or `0`) means every
+   *  event plays. The rate of `tool` is unknown until real use (spec §9.1); this is the
+   *  dial, left unset so the first run measures the unthrottled truth. */
   minIntervalMs?: number
 }
 
@@ -1179,6 +1179,8 @@ git commit -m "feat(pulse): an overlay plays one scene over the pane that caused
 - Test: `src/chrome/pane-bar-pulse.test.tsx`
 
 The pane bar already computes `info.place` and already receives every pulse. The overlay mounts beside the bar, positioned against the pane.
+
+`.pv-overlay` is `position: absolute; inset: 0`, so it fills its nearest *positioned* ancestor. That is `.pane` (`theme.css:52`, `position: absolute`) — verified, so the overlay covers exactly the pane it belongs to. If `.pane` ever loses its positioning, every overlay would silently jump to the viewport.
 
 - [ ] **Step 1: Write the failing test**
 
