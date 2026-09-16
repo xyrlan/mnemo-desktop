@@ -56,22 +56,56 @@ const RING: Rect[] = [
   r(8, 17, 2, 2, 'node'),
 ]
 
-const pages: Rect[] = [r(14, 17, 5, 4, 'object'), r(14, 17, 5, 4, 'object'), r(14, 17, 5, 4, 'object')]
-const scroll: Rect[] = [r(11, 16, 10, 7, 'object'), r(13, 18, 6, 1, 'object'), r(13, 20, 5, 1, 'object')]
-const sign: Rect[] = [r(10, 17, 12, 9, 'object'), r(12, 20, 8, 2, 'object')]
+/* Objects. Three rules learned from looking at the gallery:
+   1. An object behind the arms reads as stripes between them, not as a thing being held.
+      Anything meant to be recognised sits clear of the arm band (y < 16) or beside it.
+   2. Three scenes sharing one object array are three identical pictures with different
+      timings. `enrich`, `briefing` and `catchup` are all about a document, so each gets
+      its own silhouette: pinned note, rolled bundle, open page.
+   3. A single filled rect is a box, whatever you call it. A sign needs a stem and a
+      light centre bar to read as a sign. */
+
+/** reflex — loose pages falling in. Three identical rects; the CSS staggers them apart. */
+const pages: Rect[] = [r(13, 3, 6, 4, 'object'), r(13, 3, 6, 4, 'object'), r(13, 3, 6, 4, 'object')]
+
+/** enrich — a note pinned above the head: the rule mnemo remembered before the edit.
+ *  Pin, then the note body, then two text lines. */
+const note: Rect[] = [r(15, 1, 2, 2, 'object'), r(11, 3, 10, 7, 'object'), r(13, 5, 6, 1, 'object'), r(13, 7, 4, 1, 'object')]
+
+/** briefing — a rolled bundle: two end caps and a tight middle, being tucked away. */
+const bundle: Rect[] = [r(10, 4, 2, 6, 'object'), r(20, 4, 2, 6, 'object'), r(12, 5, 8, 4, 'object')]
+
+/** catchup — an open page, wider than it is tall, with three lines of text. */
+const openPage: Rect[] = [r(8, 2, 16, 9, 'object'), r(10, 4, 12, 1, 'object'), r(10, 6, 12, 1, 'object'), r(10, 8, 8, 1, 'object')]
+
+/** enforce — an octagonal STOP sign on a stem, with a white bar across it. */
+const sign: Rect[] = [
+  r(13, 1, 6, 2, 'object'),
+  r(11, 3, 10, 2, 'object'),
+  r(10, 5, 12, 4, 'object'),
+  r(11, 9, 10, 2, 'object'),
+  r(13, 11, 6, 2, 'object'),
+  r(12, 6, 8, 2, 'object'),
+]
+
+/** dispatch — three little ones. Identical rects; the CSS fans them out. */
 const kids: Rect[] = [r(14, 19, 4, 4, 'object'), r(14, 19, 4, 4, 'object'), r(14, 19, 4, 4, 'object')]
-const hook: Rect[] = [r(16, 18, 2, 5, 'object'), r(13, 22, 4, 2, 'object')]
+
+/** friction — a barbed hook one arm snagged, hanging clear of the arm band. */
+const hook: Rect[] = [r(24, 14, 2, 7, 'object'), r(21, 20, 4, 2, 'object'), r(25, 12, 3, 2, 'object')]
+
+/** learned — one new node, brighter than the ring it joins. */
 const newNode: Rect[] = [r(15, 2, 2, 2, 'object')]
 
 /** What mnemo is doing. The object carries the meaning; the movement carries the life —
  *  gesture alone was tested and the nine could not be told apart. */
 export const SCENES: Record<PulseKind, Scene> = {
-  reflex: { className: 'av-injecting', tone: 'accent', rects: [...pages, ...BODY, ...ARMS] },
+  reflex: { className: 'av-injecting', tone: 'accent', rects: [...BODY, ...ARMS, ...pages] },
   tool: { className: 'av-reading', tone: 'accent', rects: [...RING, ...BODY, ...ARMS] },
-  enrich: { className: 'av-remembering', tone: 'accent', rects: [...BODY, ...scroll, ...ARMS] },
+  enrich: { className: 'av-remembering', tone: 'accent', rects: [...BODY, ...ARMS, ...note] },
   enforce: { className: 'av-blocked', tone: 'red', rects: [...BODY, ...ARMS, ...sign] },
-  briefing: { className: 'av-saving', tone: 'accent', rects: [...BODY, ...scroll, ...ARMS] },
-  catchup: { className: 'av-catchup', tone: 'accent', rects: [...BODY, ...scroll, ...ARMS] },
+  briefing: { className: 'av-saving', tone: 'accent', rects: [...BODY, ...ARMS, ...bundle] },
+  catchup: { className: 'av-catchup', tone: 'accent', rects: [...BODY, ...ARMS, ...openPage] },
   learned: { className: 'av-learned', tone: 'green', rects: [...RING, ...newNode, ...BODY, ...ARMS] },
   friction: { className: 'av-friction', tone: 'yellow', rects: [...BODY, ...ARMS, ...hook] },
   dispatch: { className: 'av-dispatching', tone: 'accent', rects: [...BODY, ...ARMS, ...kids] },
