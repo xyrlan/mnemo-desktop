@@ -96,7 +96,13 @@ Three consequences the `Row` struct must absorb:
 
 A dispatch row is `{"short_id","parent_session"}` and nothing else, so `pulseMatches` can never match it to a pane and the event would silently vanish.
 
-**Resolution:** the Rust side resolves `parent_session` → project by reading `<vault>/.mnemo/session-queue.json`, which is already on disk and already keyed by session. The lookup is cached in the `Pulse` struct and refreshed when a `parent_session` misses. A row whose session cannot be resolved is dropped rather than shown in the wrong pane.
+**Rejected: `session-queue.json`.** It is keyed by **short_id**, and its values hold `last_tempo` / `unblocks` / `last_needs` — no project, no cwd. It cannot perform this lookup.
+
+**Rejected: `briefing-log.jsonl`.** It does map `session_id` → `project`, but a briefing is written when a session *ends*, so at dispatch time the row usually does not exist yet. Measured against the live vault: **4 of 8** dispatch parent sessions resolvable.
+
+**Resolution: an in-memory session→project map built from the rows already being tailed.** `reflex-log.jsonl` carries both `session_id` and `project` and is written *live* throughout a session. The `Pulse` struct keeps a `HashMap<String, String>` and records the pair every time any parsed row carries both fields — reflex rows mostly, but briefing and friction rows feed it too. `dispatch` rows then resolve `parent_session` against it. Measured against the live vault: **8 of 8** dispatch parent sessions resolvable this way.
+
+A dispatch whose parent session is not yet in the map is **dropped**, not guessed. This costs the first dispatch of a session that has not yet triggered any reflex injection; that is accepted, and preferred to showing the scene over an unrelated pane.
 
 ### 4.3 Counting children
 
@@ -182,11 +188,12 @@ Once the mission map renders scenes, a BLOCKED card no longer carries `.gr-pulse
 ## 8. Testing
 
 **Rust (`src-tauri/src/pulse.rs`)**
-- `parse_line` for each new log, against a fixture copied from real vault rows. `src-tauri/fixtures/pulse/` holds four today (`reflex`, `mcp-access`, `enrichment`, `denial`); this adds `briefing-log.jsonl`, `learned.jsonl`, `friction-ledger.jsonl`, `dispatch-parents.jsonl` and a `session-queue.json` stub. Rows are copied from the live vault and scrubbed of paths outside the repo — a fixture whose shape is invented rather than observed is a known way to ship bugs that the suite cannot see.
+- `parse_line` for each new log, against a fixture copied from real vault rows. `src-tauri/fixtures/pulse/` holds four today (`reflex`, `mcp-access`, `enrichment`, `denial`); this adds `briefing-log.jsonl`, `learned.jsonl`, `friction-ledger.jsonl`, `dispatch-parents.jsonl`. Rows are copied from the live vault and scrubbed of paths outside the repo — a fixture whose shape is invented rather than observed is a known way to ship bugs that the suite cannot see.
 - `learned.jsonl`: `projects[0]` names the pane; an empty array yields `None`.
 - `friction-ledger.jsonl`: `backfilled: true` yields `None`.
 - `mcp-access-log.jsonl`: `session_start.inject` yields `catchup`, never `tool`; `llm.*` still yields `None`.
-- `dispatch-parents.jsonl`: resolves via a stub queue; an unresolvable session yields `None`; two rows in one `poll()` coalesce to one event with `hits: 2`.
+- `dispatch-parents.jsonl`: a session already in the map resolves to its project; an unseen session yields `None`; two rows in one `poll()` coalesce to one event with `hits: 2`.
+- The session→project map records a pair from any row carrying both `session_id` and `project`, and a later `dispatch` row resolves against it.
 - The existing tail tests (rotation, truncation, partial lines, no history replay) keep passing unchanged.
 
 **TypeScript**
@@ -201,7 +208,7 @@ Once the mission map renders scenes, a BLOCKED card no longer carries `.gr-pulse
 ## 9. Risks
 
 1. **Frequency — deferred by decision, not resolved.** `mcp-access-log.jsonl` is 983KB and `tool` is the most common kind; a 1.5s centred overlay on every MCP call may prove unbearable. The control point is built but left off: `scenes.ts` carries a `minIntervalMs` per scene, defaulting to 0. Turning it on is a one-line change per kind once real use shows the rate.
-2. **`dispatch` project resolution** (§4.2) is the one piece depending on a file this codebase does not yet read. If `session-queue.json` proves unreliable, `dispatch` ships without an overlay rather than appearing in the wrong pane.
+2. **`dispatch` project resolution** (§4.2) depends on the parent session having been seen in an earlier tailed row. The map is built from live data and measured at 8/8 on the current vault, but a dispatch fired before the parent's first reflex injection is dropped. If this proves common in use, the fallback is to read the session's cwd from `claude agents --json`, which `src/mission/` already shells out to.
 3. **`enforce` unverifiable** (§4.5) until a real denial occurs.
 4. **`reading` / `remembering` legibility** (§6) — re-judge on screen.
 5. **Nine tails at 1s** versus four today. All tailed files are small (largest 983KB) and reads are incremental by byte offset, so no file is re-read; the added cost is five `stat` calls per second.
