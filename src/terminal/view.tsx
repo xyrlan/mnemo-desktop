@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
@@ -11,6 +12,8 @@ import { macChord, pasteBytes } from './keymap'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
+import { openUrl } from '../github/actions'
+import { openTerminalLink } from './links'
 
 export default function TerminalPane({ id }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -22,6 +25,8 @@ export default function TerminalPane({ id }: PaneViewProps) {
   useEffect(() => {
     if (broken) return
     const el = host.current!
+    // Bare URLs (the addon) and OSC-8 hyperlinks (linkHandler) share one click path.
+    const openLink = (_: MouseEvent, uri: string) => void openTerminalLink(uri, term.hasSelection(), openUrl)
     const term = new Terminal({
       theme: xtermTheme(),
       fontFamily: cssVar('--font-mono'),
@@ -30,10 +35,12 @@ export default function TerminalPane({ id }: PaneViewProps) {
       allowProposedApi: true,
       scrollback: 10_000,
       macOptionIsMeta: true,
+      linkHandler: { activate: openLink },
     })
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
+    term.loadAddon(new WebLinksAddon(openLink))
     term.open(el)
     try {
       const webgl = new WebglAddon()
