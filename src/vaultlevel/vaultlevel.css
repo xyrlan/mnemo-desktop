@@ -71,7 +71,9 @@
   100% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
 }
 .vl-shelving { transform-box: fill-box; transform-origin: 20% 10%; animation: vl-shelve 5.5s ease-in-out infinite; }
-.vl-shelving .av-object { fill: color-mix(in srgb, var(--vl-tone) 85%, var(--fg)); }
+/* The book in his hands is one of the shelf's own, so it takes the library's blue rather than
+   the health tone — a shade above the brightest spine, since it is the one being looked at. */
+.vl-shelving .av-object { fill: color-mix(in srgb, var(--accent) 90%, var(--fg)); }
 
 /* The other half of the loop: the book he is carrying lands on the shelf at the exact moment
    it leaves his hand, and is gone again when he picks up the next one. Same 5.5s clock as
