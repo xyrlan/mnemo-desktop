@@ -100,7 +100,9 @@ A dispatch row is `{"short_id","parent_session"}` and nothing else, so `pulseMat
 
 **Rejected: `briefing-log.jsonl`.** It does map `session_id` → `project`, but a briefing is written when a session *ends*, so at dispatch time the row usually does not exist yet. Measured against the live vault: **4 of 8** dispatch parent sessions resolvable.
 
-**Resolution: an in-memory session→project map built from the rows already being tailed.** `reflex-log.jsonl` carries both `session_id` and `project` and is written *live* throughout a session. The `Pulse` struct keeps a `HashMap<String, String>` and records the pair every time any parsed row carries both fields — reflex rows mostly, but briefing and friction rows feed it too. `dispatch` rows then resolve `parent_session` against it. Measured against the live vault: **8 of 8** dispatch parent sessions resolvable this way.
+**Resolution: an in-memory session→project map built from the rows already being tailed.** The `Pulse` struct keeps a `HashMap<String, String>` and records the pair every time any parsed row carries both a `session_id` and a non-empty `project`. `dispatch` rows then resolve `parent_session` against it. Measured against the live vault: **8 of 8** dispatch parent sessions resolvable this way.
+
+Which log feeds the map varies by session. `reflex-log.jsonl` is written live throughout a session and is the widest contributor, but it only feeds the map when a prompt actually *injected* — a reflex row that emitted nothing is not an event and `poll` never sees it. `briefing-log.jsonl` and `friction-ledger.jsonl` also carry both fields and fill the gaps. The unit test exercises exactly this: the fixture's dispatch parent is named by the briefing row, while the reflex rows name three unrelated sessions and must not lend their project.
 
 A dispatch whose parent session is not yet in the map is **dropped**, not guessed. This costs the first dispatch of a session that has not yet triggered any reflex injection; that is accepted, and preferred to showing the scene over an unrelated pane.
 

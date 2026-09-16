@@ -303,8 +303,11 @@ Add three fields to `Row`:
 ```rust
     projects: Option<Vec<String>>,
     backfilled: Option<bool>,
-    name: Option<String>,
 ```
+
+(Do **not** add a `name` field. `learned.jsonl` carries one, but nothing reads it — every other
+field in `Row` is consumed by some arm, and a decorative one the next reader cannot distinguish
+from a live one is worse than the missing documentation.)
 
 Add three arms to `parse_line`'s `match`:
 
@@ -356,23 +359,29 @@ Add to the `tests` module:
 fn dispatch_resolves_its_project_from_a_session_seen_earlier_and_coalesces() {
     let dir = scratch("dispatch");
     // The parent session becomes known through any row carrying session_id + project.
-    append(&dir.join(Log::Reflex.file()), &fixture("reflex-log.jsonl"));
+    // In these fixtures that is the briefing row for `e7fb983c`; the reflex rows name
+    // three other sessions, and must not lend their project to a dispatch.
+    append(&dir.join(Log::Briefing.file()), &fixture("briefing-log.jsonl"));
     let mut pulse = Pulse::new(&dir);
     assert!(pulse.poll(7).is_empty(), "history is not replayed");
 
     append(&dir.join(Log::Reflex.file()), &fixture("reflex-log.jsonl"));
+    append(&dir.join(Log::Briefing.file()), &fixture("briefing-log.jsonl"));
     append(&dir.join(Log::Dispatch.file()), &fixture("dispatch-parents.jsonl"));
     let events = pulse.poll(7);
 
     let dispatch: Vec<_> = events.iter().filter(|e| e.kind == "dispatch").collect();
     assert_eq!(dispatch.len(), 1, "two rows for one parent coalesce into one event");
-    assert_eq!(dispatch[0].project, "mnemo", "resolved from the reflex row's session");
+    assert_eq!(dispatch[0].project, "mnemo", "resolved from the briefing row's session");
+    assert_eq!(dispatch[0].agent, "mnemo", "the resolved project stands in as the agent");
     assert_eq!(dispatch[0].hits, Some(2), "it names how many children");
     let _ = std::fs::remove_dir_all(&dir);
 }
 ```
 
 This fixture's third row uses an unseen session, so it must be dropped — that is what makes `len() == 1` with `hits == 2` rather than two events.
+
+**The resolver is the briefing row, not reflex.** `reflex-log.jsonl` names three sessions, none of which is the fixture's dispatch parent `e7fb983c`; `briefing-log.jsonl` names it with `project: "mnemo"`. Reflex is still appended so the test proves unrelated sessions do not lend their project. Add a second test, `a_dispatch_for_an_unknown_session_is_dropped_not_guessed`, pinning the drop rule.
 
 - [ ] **Step 2: Run it to make sure it fails**
 
