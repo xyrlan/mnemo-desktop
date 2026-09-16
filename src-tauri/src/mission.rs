@@ -56,6 +56,15 @@ pub struct ChildSession {
     /// prompt`); None while it is not waiting or when `claude agents` does not list it.
     #[serde(default)]
     pub waiting_for: Option<String>,
+    /// The model Claude Code respawns the child with, as `mnemo sessions` reads it from
+    /// `respawnFlags`. None is a real answer, not a failed read: a lean child passes its
+    /// own `--settings`, so no `--model` is resolved and it runs on its settings' default.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// `--effort` the child was dispatched with; None means it runs at the default, since
+    /// Claude Code never resolves an unpassed effort into `respawnFlags`.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,6 +173,8 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 timeline_len: 0,
                 parent_session: s(r.get("parent_session")),
                 waiting_for: None,
+                model: s(r.get("model")),
+                effort: s(r.get("effort")),
             })
         })
         .collect())
@@ -989,6 +1000,21 @@ mod tests {
     }
 
     #[test]
+    fn sessions_carry_model_and_effort_and_keep_none_as_default() {
+        let c = parse_sessions(SESSIONS).unwrap();
+        let by = |id: &str| c.iter().find(|x| x.id == id).unwrap().clone();
+        let explicit = by("095ef1c4");
+        assert_eq!(explicit.model.as_deref(), Some("opus[1m]"));
+        assert_eq!(explicit.effort.as_deref(), Some("high"));
+        // A lean child: mnemo emits null for both, which reads as None, not an error.
+        let lean = by("a43d3832");
+        assert_eq!((lean.model, lean.effort), (None, None));
+        let json = serde_json::to_value(by("04082ea7")).unwrap();
+        assert_eq!(json["model"], "claude-fable-5-1[1m]");
+        assert!(json["effort"].is_null());
+    }
+
+    #[test]
     fn a_child_parked_on_a_permission_prompt_carries_what_it_waits_for() {
         let waiting = parse_agent_waiting(AGENTS);
         assert_eq!(waiting.get("987fb657-a6c1-4319-8547-49167aa01a65").map(String::as_str), Some("permission prompt"));
@@ -1134,6 +1160,7 @@ mod tests {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
+            model: None, effort: None,
         }];
         let empty = HashMap::new();
         let groups = join(JoinInput {

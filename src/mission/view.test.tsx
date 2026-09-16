@@ -66,3 +66,31 @@ test('a poll that changes nothing about the child does not re-mark it as looked'
   }
   expect(markLooked).toHaveBeenCalledTimes(1)
 })
+
+test('the pane shows the child model and prices it at that model, and says default when there is none', async () => {
+  const [first, second] = allChildren(snapshot)
+  const haiku = { ...first, model: 'haiku', effort: 'high', tokens: 1_000_000 }
+  const lean = { ...second, model: null, effort: null, tokens: 1_000_000 }
+  const swap = (c: typeof first) => (c.id === haiku.id ? haiku : c.id === lean.id ? lean : c)
+  missionStore.setState({
+    snapshot: {
+      ...snapshot,
+      repos: snapshot.repos.map((r) => ({
+        ...r,
+        children: r.children.map(swap),
+        missions: r.missions.map((m) => ({ ...m, pieces: m.pieces.map((p) => ({ ...p, child: p.child && swap(p.child) })) })),
+      })),
+    },
+  })
+  const Pane = paneView('mission')!
+  await act(async () => {
+    root.render(<Pane id={1} props={{ id: haiku.id }} />)
+  })
+  expect(host.querySelector('.m-model')?.textContent).toBe('haiku · high effort')
+  expect(host.textContent).toContain('~$2.50')
+  await act(async () => {
+    root.render(<Pane id={2} props={{ id: lean.id }} />)
+  })
+  expect(host.querySelector('.m-model')?.textContent).toBe('default model · default effort')
+  expect(host.textContent).toContain('~$30.00')
+})
