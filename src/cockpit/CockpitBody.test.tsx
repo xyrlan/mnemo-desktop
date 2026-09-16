@@ -9,6 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import Sidebar from '../mission/Sidebar'
+import VaultLevelSlot from './VaultLevelSlot'
 import { missionStore } from '../mission/app-store'
 import { store as appStore } from '../layout/app-store'
 import { homeStore } from '../home/app-store'
@@ -98,19 +99,23 @@ test('a fold clicked in one surface is the fold in the other', async () => {
   expect(missionStore.getState().folds).toEqual({ working: false })
 })
 
-test('the vault slot docks after the body with its placeholder and the hook vault-level fills', async () => {
+test('the vault slot docks after the body and holds a placeholder until something fills it', async () => {
   await renderBoth()
   const bar = side.querySelector('.sidebar')!
   const slot = bar.lastElementChild as HTMLElement
-  expect(slot.hasAttribute('data-vault-level-slot')).toBe(true)
   expect(slot.className).toBe('vault-level-slot sidebar-vault')
   expect(slot.previousElementSibling?.className).toBe('sidebar-body')
   expect(slot.querySelector('.vault-level-placeholder')).not.toBeNull()
-  // vault-level marks the slot filled; a re-render of the sidebar leaves the mark alone.
-  slot.classList.add('vl-filled')
-  await act(async () => missionStore.getState().setFold('done', true))
-  await act(async () => serve({ ...snapshot, at: new Date().toISOString() }))
-  expect(slot.classList.contains('vl-filled')).toBe(true)
+})
+
+test('children replace the placeholder', () => {
+  const host = document.createElement('div')
+  const root = createRoot(host)
+  act(() => root.render(<VaultLevelSlot className="sidebar-vault"><b className="square" /></VaultLevelSlot>))
+  const slot = host.querySelector('.vault-level-slot')!
+  expect(slot.querySelector('.square')).not.toBeNull()
+  expect(slot.querySelector('.vault-level-placeholder')).toBeNull()
+  act(() => root.unmount())
 })
 
 test('⤢ still expands into the cockpit pane', async () => {
