@@ -4,6 +4,7 @@ import { vi } from 'vitest'
 import {
   FIRE_MIN_RECENT,
   HALO_MAX_DOTS,
+  HALO_BAND_PAGES,
   HALO_MIN_DOTS,
   HEALTH_GREEN,
   HEALTH_WEIGHTS,
@@ -95,8 +96,10 @@ test('tone and fire follow their thresholds', () => {
 
 test('the halo grows in bands and stays within its bounds', () => {
   expect(haloDots(0)).toBe(HALO_MIN_DOTS)
-  expect(haloDots(249)).toBe(HALO_MIN_DOTS)
-  expect(haloDots(250)).toBeGreaterThan(HALO_MIN_DOTS)
+  expect(haloDots(HALO_BAND_PAGES - 1)).toBe(HALO_MIN_DOTS)
+  expect(haloDots(HALO_BAND_PAGES)).toBeGreaterThan(HALO_MIN_DOTS)
+  // A real vault is still climbing, not pinned at the ceiling.
+  expect(haloDots(2_413)).toBeLessThan(HALO_MAX_DOTS)
   expect(haloDots(1_000_000)).toBe(HALO_MAX_DOTS)
   for (let p = 0; p < 20_000; p += 137) expect(haloDots(p + 137)).toBeGreaterThanOrEqual(haloDots(p))
 })

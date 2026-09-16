@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { vi } from 'vitest'
-import Square, { FLASH_MS } from './Square'
+import Square, { EAT_MS, FLASH_MS } from './Square'
 import { OVERLAY_MS } from '../pulse/Overlay'
 import { createPulseStore } from '../pulse/store'
 import type { LevelClient } from './client'
@@ -70,7 +70,10 @@ test('a retired rule moves the colour and not the level', async () => {
   await act(async () => vi.advanceTimersByTime(1000))
   expect(client.offered[1]).toBeLessThan(client.offered[0])
   expect(host.querySelector('.vl-level')?.textContent).toBe('lv 23')
-  expect(host.querySelector('.vl-square')?.classList.contains('vl-red')).toBe(true)
+  // Health 0.335 lands in the orange band: five tones report the slide before it is red.
+  expect(host.querySelector('.vl-square')?.classList.contains('vl-orange')).toBe(true)
+  // Orange wears the poor pose.
+  expect(host.querySelector('.av-poor')).not.toBeNull()
   unmount()
 })
 
@@ -80,6 +83,17 @@ test('no vault reads as such and records nothing', async () => {
   expect(host.querySelector('.vl-level')?.textContent).toBe('no vault')
   expect(host.querySelector('.vl-muted')).not.toBeNull()
   expect(client.offered).toEqual([])
+  unmount()
+})
+
+test('an empty vault reads as neutral, not as a sick one', async () => {
+  const { host, unmount } = await render(<Square client={fakeClient([vault({ pages: 0, rules_fired: 0, fires: 0 })])} pulses={createPulseStore()} />)
+  const square = host.querySelector('.vl-square')!
+  // healthOf floors at 0 for an empty vault, which as a tone would be red.
+  expect(square.classList.contains('vl-muted')).toBe(true)
+  expect(square.classList.contains('vl-red')).toBe(false)
+  expect(host.querySelector('.av-poor')).toBeNull()
+  expect(square.getAttribute('aria-label')).toBe('the vault is empty')
   unmount()
 })
 
@@ -103,6 +117,39 @@ test('a pulse sends the octopus away, flashes the halo, and it returns when the 
   await act(async () => vi.advanceTimersByTime(20))
   expect(octo().classList.contains('vl-away')).toBe(false)
   unmount()
+})
+
+test('a learned pulse is eaten on the way back, and only that kind is', async () => {
+  vi.useFakeTimers()
+  const pulses = createPulseStore()
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
+
+  await act(async () => pulses.getState().push(ev({ kind: 'learned' })))
+  // Nothing to eat while the scene is still playing over the pane.
+  expect(host.querySelector('.vl-morsel')).toBeNull()
+  await act(async () => vi.advanceTimersByTime(OVERLAY_MS))
+  expect(host.querySelector('.vl-morsel')).not.toBeNull()
+  expect(host.querySelector('.vl-octo')?.classList.contains('vl-eating')).toBe(true)
+  await act(async () => vi.advanceTimersByTime(EAT_MS))
+  expect(host.querySelector('.vl-morsel')).toBeNull()
+
+  // A rule firing is using memory, not absorbing it.
+  await act(async () => pulses.getState().push(ev({ kind: 'reflex' })))
+  await act(async () => vi.advanceTimersByTime(OVERLAY_MS + EAT_MS))
+  expect(host.querySelector('.vl-morsel')).toBeNull()
+  unmount()
+})
+
+test('the ▤ button opens the vault, and is absent when nothing can open it', async () => {
+  const open = vi.fn()
+  const withButton = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} openVault={open} />)
+  withButton.host.querySelector<HTMLButtonElement>('.vl-open')!.click()
+  expect(open).toHaveBeenCalledTimes(1)
+  withButton.unmount()
+
+  const without = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} />)
+  expect(without.host.querySelector('.vl-open')).toBeNull()
+  without.unmount()
 })
 
 test('a second pulse keeps him away for a full scene', async () => {

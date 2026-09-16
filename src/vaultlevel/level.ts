@@ -35,18 +35,23 @@ export const DORMANT_CEILING = 0.5
 export const LABEL_ONLY_CEILING = 0.1
 /** This many staged proposals scores zero. */
 export const INBOX_CEILING = 200
-/** Health at or above this is green; at or above `HEALTH_YELLOW` yellow; below, red. */
+/** Five tones so the slide is legible before it is bad, each the floor of its band.
+ *  Three poses group them (`POSE_OF`): the eye reads colour better than silhouette at 160px. */
 export const HEALTH_GREEN = 0.7
+export const HEALTH_LIME = 0.58
 export const HEALTH_YELLOW = 0.45
+export const HEALTH_ORANGE = 0.3
 /** The fire lights at green health *and* at least this many pages fired in the last 7 days
  *  (`RECENT_FIRE_DAYS` in `vault.rs`): sustained use, not one lucky afternoon. */
 export const FIRE_MIN_RECENT = 25
 
-/** Halo: one band of dots per this many pages, `HALO_PER_BAND` dots a band. */
-export const HALO_BAND_PAGES = 250
-export const HALO_PER_BAND = 4
-export const HALO_MIN_DOTS = 8
-export const HALO_MAX_DOTS = 64
+/** Halo: one band of dots per this many pages, `HALO_PER_BAND` dots a band. The ceiling is
+ *  what a 160px square still reads as separate marks — a live 2,413-page vault sits at 128,
+ *  so the halo is still growing rather than saturated. */
+export const HALO_BAND_PAGES = 120
+export const HALO_PER_BAND = 5
+export const HALO_MIN_DOTS = 12
+export const HALO_MAX_DOTS = 160
 /* ------------------------------------------------------------------------------- */
 
 export function xpOf(v: Pick<VaultLevel, 'pages' | 'rules_fired' | 'fires'>): number {
@@ -75,11 +80,29 @@ export function healthOf(v: Pick<VaultLevel, 'pages' | 'rules_fired' | 'dormant'
   return w.reach * reach + w.dormant * awake + w.labelOnly * grounded + w.inbox * triaged
 }
 
-export type Tone = 'green' | 'yellow' | 'red'
+export type Tone = 'green' | 'lime' | 'yellow' | 'orange' | 'red'
 
 export function toneOf(health: number): Tone {
-  return health >= HEALTH_GREEN ? 'green' : health >= HEALTH_YELLOW ? 'yellow' : 'red'
+  if (health >= HEALTH_GREEN) return 'green'
+  if (health >= HEALTH_LIME) return 'lime'
+  if (health >= HEALTH_YELLOW) return 'yellow'
+  if (health >= HEALTH_ORANGE) return 'orange'
+  return 'red'
 }
+
+/** Which of the three poses a tone wears. Five silhouettes would be indistinguishable in a
+ *  160px square; five colours are not. */
+export type Pose = 'well' | 'fair' | 'poor'
+
+export const POSE_OF: Record<Tone, Pose> = {
+  green: 'well',
+  lime: 'well',
+  yellow: 'fair',
+  orange: 'poor',
+  red: 'poor',
+}
+
+export const poseOf = (tone: Tone): Pose => POSE_OF[tone]
 
 export function onFire(health: number, firedRecent: number): boolean {
   return health >= HEALTH_GREEN && firedRecent >= FIRE_MIN_RECENT
@@ -91,21 +114,34 @@ export function haloDots(pages: number): number {
   return Math.min(HALO_MAX_DOTS, HALO_MIN_DOTS + bands * HALO_PER_BAND)
 }
 
-export type Dot = { x: number; y: number; r: number }
+/** A fragment of memory: a small tilted square, the way a note looks from across the room.
+ *  `w`/`h` are its size, `a` its rotation in degrees. */
+export type Dot = { x: number; y: number; w: number; h: number; a: number }
 
 const GOLDEN = Math.PI * (3 - Math.sqrt(5))
 
-/** `n` dots on a sunflower spiral inside a `size` square, clear of the centre where the
- *  octopus sits. Deterministic, so a re-render never reshuffles them. */
+/** `n` fragments on a sunflower spiral inside a `size` square, clear of the centre where the
+ *  octopus sits. Deterministic, so a re-render never reshuffles them: the same vault always
+ *  draws the same halo. Sizes and tilts vary by index so the field reads as scattered notes
+ *  rather than a printed pattern. */
 export function haloLayout(n: number, size: number): Dot[] {
   const c = size / 2
-  const inner = size * 0.2
-  const outer = size * 0.48
+  const inner = size * 0.19
+  const outer = size * 0.485
   return Array.from({ length: n }, (_, i) => {
     const t = Math.sqrt((i + 0.5) / Math.max(1, n))
     const rad = inner + (outer - inner) * t
     const a = i * GOLDEN
-    return { x: c + rad * Math.cos(a), y: c + rad * Math.sin(a), r: i % 3 === 0 ? 1.6 : 1.1 }
+    // Three sizes in a fixed rotation: a few larger notes carry the field, the rest fill it.
+    const side = i % 7 === 0 ? 3.4 : i % 3 === 0 ? 2.6 : 2
+    return {
+      x: c + rad * Math.cos(a) - side / 2,
+      y: c + rad * Math.sin(a) - side / 2,
+      w: side,
+      // Slightly off-square: a note is taller than it is wide.
+      h: side * 1.15,
+      a: ((i * 37) % 4) * 11 - 16,
+    }
   })
 }
 

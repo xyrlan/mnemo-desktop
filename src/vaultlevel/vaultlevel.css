@@ -1,19 +1,32 @@
 /* The vault square. Every colour is a theme token; the slot around it belongs to the sidebar. */
-.vl-square { position: relative; width: 160px; height: 160px; flex: 0 0 auto; overflow: hidden; --vl-tone: var(--accent); }
+/* Fills the slot's width; the height is fixed. The rain spans it, the octopus is centred. */
+.vl-square { position: relative; width: 100%; height: 160px; flex: 1 1 auto; overflow: hidden; --vl-tone: var(--accent); }
+/* Five tones down one ramp. The ansi tokens alone do not make a ramp — this theme's
+   `--ansi-red` is a pink (#f7768e) that reads as decorative next to the green, so the two ends
+   are deepened and the middles mixed, keeping the theme's hues but widening the distance the
+   eye has to travel between bands. */
 .vl-green { --vl-tone: var(--ansi-green); }
+.vl-lime { --vl-tone: color-mix(in oklab, var(--ansi-green) 40%, var(--ansi-yellow)); }
 .vl-yellow { --vl-tone: var(--ansi-yellow); }
-.vl-red { --vl-tone: var(--ansi-red); }
+.vl-orange { --vl-tone: color-mix(in oklab, var(--ansi-yellow) 30%, #e05a3a); }
+.vl-red { --vl-tone: color-mix(in oklab, var(--ansi-red) 62%, #7d1d2e); }
 .vl-muted { --vl-tone: var(--fg-muted); }
 
-/* Layer 1 — the halo. It never leaves. */
+/* Layer 1 — the halo: one tilted note per band of pages. It never leaves. */
 .vl-halo { position: absolute; inset: 0; }
-@keyframes vl-twinkle { 0%, 100% { opacity: .22; } 50% { opacity: .5; } }
-.vl-dot { fill: var(--vl-tone); opacity: .3; animation: vl-twinkle 3.2s ease-in-out infinite; transition: fill .15s; }
-@keyframes vl-flash { 0% { opacity: 1; r: 2.6px; } 100% { opacity: .3; } }
+@keyframes vl-twinkle { 0%, 100% { opacity: .5; } 50% { opacity: .78; } }
+.vl-dot { fill: var(--vl-tone); opacity: .62; animation: vl-twinkle 3.2s ease-in-out infinite; transition: fill .15s; }
+@keyframes vl-flash { 0% { opacity: 1; } 100% { opacity: .62; } }
 .vl-dot.vl-lit { fill: var(--fg); animation: vl-flash .7s ease-out 1; }
 
+/* The body takes the square's own tone, so all five bands colour it, not just the four
+   `avatar.css` happens to define. */
+.vl-body .av-head, .vl-body .av-node { fill: var(--vl-tone); }
+.vl-body .av-arm { fill: color-mix(in srgb, var(--vl-tone) 60%, var(--bg)); }
+.vl-body .av-eye { fill: var(--bg); }
+
 /* Layer 2 — the octopus, which leaves the square while a scene plays. */
-.vl-octo { position: absolute; left: 40px; top: 30px; width: 80px; height: 80px; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; }
+.vl-octo { position: absolute; left: 50%; margin-left: -40px; top: 30px; width: 80px; height: 80px; z-index: 1; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; }
 .vl-octo.vl-away { transform: scale(0); opacity: 0; }
 
 /* idle — the octopus at rest, breathing. Its scene is in `src/avatar/scenes.ts` (IDLE);
@@ -25,11 +38,36 @@
 .av-idle .av-arm-1, .av-idle .av-arm-3 { animation-delay: .7s; }
 .av-idle .av-node { opacity: .55; }
 
+/* The two poses either side of `fair`. Geometry is in `scenes.ts`; these carry the bearing. */
+.av-well { transform: translateY(-3px); }
+.av-well .av-node { opacity: .9; }
+/* Sunk into its own arms, and the ring has all but gone out. */
+.av-poor { transform: translateY(4px); }
+.av-poor .av-node { opacity: .18; }
+.av-poor .av-eye { opacity: .55; }
+/* Slower and shallower: a vault in trouble does not bustle. */
+.av-poor, .av-poor .av-arm { animation-duration: 6.5s; }
+
+/* Eating: a fragment drifts up into the head and is gone, and he dips to take it. */
+@keyframes vl-morsel-up { 0% { transform: translateY(0) scale(1); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-30px) scale(.6); opacity: 0; } }
+.vl-morsel { position: absolute; inset: 0; fill: var(--vl-tone); animation: vl-morsel-up 1.4s ease-in 1; }
+@keyframes vl-gulp { 0%, 100% { transform: translateY(0); } 55% { transform: translateY(2px); } }
+.vl-octo.vl-eating .av { animation: vl-gulp 1.4s ease-in-out 1; }
+
+/* The discreet way into the vault: only on hover, and never over the octopus. */
+.vl-open { position: absolute; right: 4px; top: 4px; z-index: 2; opacity: 0; transition: opacity .12s; background: none; border: 0; color: var(--fg-muted); font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+.vl-square:hover .vl-open { opacity: .7; }
+.vl-open:hover { opacity: 1; color: var(--fg); background: var(--bg); }
+.vl-open:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+
 /* The fire: sustained good health. */
-.vl-fire { position: absolute; left: 0; top: 60px; }
+.vl-fire { position: absolute; left: 0; top: 52px; }  /* inside .vl-octo, so it follows the centring */
 @keyframes vl-flicker { 0%, 100% { transform: scaleY(1); opacity: .9; } 50% { transform: scaleY(.7); opacity: .6; } }
-.vl-flame { fill: var(--ansi-yellow); transform-box: fill-box; transform-origin: 50% 100%; animation: vl-flicker .5s ease-in-out infinite; }
-.vl-flame rect:last-child { fill: var(--ansi-red); }
+/* Hot at the base, pale at the tip. The base rect keeps the theme's red only as a tint: on its
+   own that token is a pink and reads as confetti under a green octopus. */
+.vl-flame { transform-box: fill-box; transform-origin: 50% 100%; animation: vl-flicker .5s ease-in-out infinite; }
+.vl-flame rect:nth-child(1) { fill: color-mix(in oklab, var(--ansi-red) 50%, #c2410c); }
+.vl-flame rect:nth-child(2) { fill: color-mix(in oklab, var(--ansi-yellow) 70%, #fff); }
 .vl-flame-1 { animation-delay: .17s; }
 .vl-flame-2 { animation-delay: .34s; }
 
