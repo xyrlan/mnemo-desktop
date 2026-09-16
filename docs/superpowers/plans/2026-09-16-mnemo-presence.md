@@ -115,6 +115,7 @@ The Rust `kind` is a `&'static str`; the TS union must match it exactly or the o
 
 **Files:**
 - Modify: `src/pulse/types.ts:3`
+- Modify: `src/chrome/info.ts:59` (the `KIND` record must stay exhaustive)
 - Test: `src-tauri/src/pulse.rs` (existing test module)
 
 - [ ] **Step 1: Widen the TS union**
@@ -128,7 +129,32 @@ export type PulseKind = 'reflex' | 'tool' | 'enrich' | 'enforce' | 'catchup' | '
 - [ ] **Step 2: Verify types still compile**
 
 Run: `pnpm exec tsc --noEmit`
-Expected: no output (exit 0). The four existing kinds are a subset, so nothing breaks yet.
+Expected: **one error**, which this task also fixes:
+
+```
+src/chrome/info.ts(59,7): error TS2739: Type '{ reflex: …; tool: …; enrich: …; enforce: … }' is missing
+the following properties from type 'Record<PulseKind, string>': catchup, briefing, learned, friction, dispatch
+```
+
+`KIND` in `src/chrome/info.ts:59` is a `Record<PulseEvent['kind'], string>`, and TypeScript requires such a
+record to be exhaustive — so widening the union breaks it. Add the five entries (these are the pane-bar badge
+tooltips, not the overlay captions, which live in `scenes.ts`):
+
+```ts
+const KIND: Record<PulseEvent['kind'], string> = {
+  reflex: 'injected',
+  tool: 'tool call',
+  enrich: 'enriched',
+  enforce: 'blocked',
+  catchup: 'caught you up',
+  briefing: 'saved a briefing',
+  learned: 'learned',
+  friction: 'noted friction',
+  dispatch: 'dispatched',
+}
+```
+
+Then re-run `pnpm exec tsc --noEmit`: no output (exit 0), and `pnpm test` stays at 490 passing.
 
 - [ ] **Step 3: Commit**
 
