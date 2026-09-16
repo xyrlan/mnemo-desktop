@@ -46,7 +46,7 @@ beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  missionStore.setState({ snapshot: withPrs, lastError: null, looked: {}, drafts: {}, sent: {} })
+  missionStore.setState({ snapshot: withPrs, lastError: null, looked: {}, drafts: {}, sent: {}, folds: {} })
   settingsStore.setState({ issueLabels: {} })
   gh.auth = {}
   gh.issues = []

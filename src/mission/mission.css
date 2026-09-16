@@ -5,6 +5,13 @@
 .m-needs-spacer { flex: 1; }
 .m-cockpit { background: transparent; border: 0; padding: 0 2px; color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .m-cockpit:hover { color: var(--fg); }
+.m-needs-head .m-cockpit { font-size: 14px; line-height: 1; }
+
+/* The cockpit body's folds in the sidebar: rows are titles, what a row runs stays one click
+   away in the pane. */
+.sidebar-body .ck-section { margin-top: 10px; }
+.sidebar-body .ck-row .ck-detail { display: none; }
+.sidebar-body .ck-row .ck-act { font-size: 10px; padding: 0 5px; }
 
 .needs-list { display: flex; flex-direction: column; gap: 6px; }
 .needs-list .nd { border-left: 2px solid var(--border); padding-left: 6px; }

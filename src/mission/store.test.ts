@@ -1,4 +1,4 @@
-import { createMissionStore } from './store'
+import { createMissionStore, foldsOpen } from './store'
 import type { MissionClient } from './client'
 import type { Snapshot } from './types'
 
@@ -145,4 +145,22 @@ test('replyAsMe failure keeps the draft and shows why, without the Error prefix'
   expect(s.getState().replyErrors.x).toBe('x\'s input already holds "hm"')
   expect(s.getState().sent.x).toBeUndefined()
   expect(await s.getState().replyAsMe('empty')).toBe(false)
+})
+
+test('folds: andando opens by itself only when nothing needs you, feito starts collapsed', () => {
+  expect(foldsOpen({}, 0)).toEqual({ working: true, done: false })
+  expect(foldsOpen({}, 2)).toEqual({ working: false, done: false })
+  // A click wins over the default, either way.
+  expect(foldsOpen({ working: false }, 0)).toEqual({ working: false, done: false })
+  expect(foldsOpen({ working: true, done: true }, 2)).toEqual({ working: true, done: true })
+})
+
+test('setFold keeps one fold state for every surface, and leaves the other fold alone', () => {
+  const s = createMissionStore(fake())
+  expect(s.getState().folds).toEqual({})
+  s.getState().setFold('done', true)
+  s.getState().setFold('working', false)
+  expect(s.getState().folds).toEqual({ done: true, working: false })
+  s.getState().setFold('done', false)
+  expect(s.getState().folds).toEqual({ done: false, working: false })
 })

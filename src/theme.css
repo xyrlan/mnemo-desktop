@@ -102,6 +102,10 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 .sidebar { position: relative; flex: 0 0 auto; background: var(--bg-elev); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
 .sidebar-grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
 .sidebar-body { overflow: auto; padding: 8px 10px; font-size: 12px; line-height: 1.5; flex: 1 1 auto; min-height: 0; }
+/* The vault's square, docked under the cockpit body. `vault-level` passes its square as the
+   slot's children; with none, an empty bordered square holds the place. */
+.vault-level-slot { flex: 0 0 auto; height: 160px; position: relative; display: flex; align-items: center; justify-content: center; border-top: 1px solid var(--border); overflow: hidden; }
+.vault-level-placeholder { width: 144px; height: 144px; box-sizing: border-box; border: 1px dashed var(--border); border-radius: 6px; }
 
 /* ---- workspace column: Home, the tabs, new tab ---- */
 .ws-tabs { flex: 0 1 auto; max-height: 55%; overflow-y: auto; padding: 4px 0; border-bottom: 1px solid var(--border); user-select: none; font-size: 12px; line-height: 1.35; }

@@ -4,8 +4,13 @@ import { store as appStore, useApp } from '../layout/app-store'
 import { homeStore, useHome } from '../home/app-store'
 import { pruneSnapshot } from './types'
 import { focusedCwd, paneCwd } from './scope'
-import { needsYou, pruneGone } from '../cockpit/needs'
+import { pruneGone } from '../cockpit/needs'
+import { buildInbox, type ChildRow } from '../cockpit/inbox'
 import NeedsList from '../cockpit/NeedsList'
+import CockpitBody from '../cockpit/CockpitBody'
+import InboxRow from '../cockpit/InboxRow'
+import { VaultLevelSlot } from '../cockpit/VaultLevelSlot'
+import { useArm } from '../cockpit/actions'
 import { cwdForNewShell } from '../layout/cwd'
 import { sessionTitle, tabLabel, type Git, type TabLabel } from '../layout/tabs'
 import { tauriChrome, type ChromeClient } from '../chrome/client'
@@ -105,8 +110,10 @@ function TabRow({ tab, index, label, active }: { tab: Tab; index: number; label:
 }
 
 /** The workspace column: Home and the tabs of this window (named by what runs in them, with a
- *  dot while Claude Code runs there), then what needs you in any repo, then a way to the cockpit.
- *  This component owns the snapshot poll every mission surface reads. */
+ *  dot while Claude Code runs there), then the cockpit body for every repo — what needs you,
+ *  who is working, what finished today — with `⤢` to expand it into the pane, then the vault's
+ *  slot. A surface for reading and clicking: the keyboard stays the pane's. This component owns
+ *  the snapshot poll every mission surface reads. */
 export default function Sidebar({ chrome = tauriChrome }: { chrome?: ChromeClient }) {
   const open = useMission((s) => s.sidebarOpen)
   const width = useMission((s) => s.sidebarWidth)
@@ -136,6 +143,8 @@ export default function Sidebar({ chrome = tauriChrome }: { chrome?: ChromeClien
   const cwds = tabs.map((t) => paneCwd(panes[t.focused], raw)).filter((c): c is string => !!c)
   const git = useGitFor(cwds, chrome)
   const snap = useMemo(() => pruneGone(pruneSnapshot(raw)), [raw])
+  const inbox = useMemo(() => buildInbox(snap), [snap])
+  const { armed, fire } = useArm()
 
   // A tab running Claude is named by Home's title for the session. A restored workspace never
   // showed Home, and a session started by hand is newer than its snapshot: read it again, rarely.
@@ -151,7 +160,9 @@ export default function Sidebar({ chrome = tauriChrome }: { chrome?: ChromeClien
   }, [unknown, tabs, panes])
 
   if (!open) return null
-  const needs = needsYou(snap)
+  const needs = inbox.needs
+  const renderRows = (rows: ChildRow[]) =>
+    rows.map((r) => <InboxRow key={r.key} row={r} selected={false} showRepo narrow armed={armed} fire={fire} onSelect={() => {}} />)
 
   const onDown = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -197,16 +208,18 @@ export default function Sidebar({ chrome = tauriChrome }: { chrome?: ChromeClien
           <span>needs you</span>
           {needs.length > 0 && <span className="m-needs-count">{needs.length}</span>}
           <span className="m-needs-spacer" />
-          <button className="m-cockpit" onClick={openCockpit} title="Open the cockpit (⌘⇧B)">
-            cockpit ⤢
+          <button className="m-cockpit" onClick={openCockpit} title="Expand into the cockpit pane, with the mission map (⌘⇧B)">
+            ⤢
           </button>
         </div>
-        {needs.length > 0 ? (
-          <NeedsList needs={needs} showRepo />
-        ) : (
-          !err && <div className="m-empty">{snap.repos.length === 0 ? 'no live sessions' : 'nothing needs you'}</div>
-        )}
+        <CockpitBody
+          inbox={inbox}
+          needs={<NeedsList needs={needs} showRepo />}
+          empty={!err && <div className="m-empty">{snap.repos.length === 0 ? 'no live sessions' : 'nothing needs you'}</div>}
+          renderRows={renderRows}
+        />
       </div>
+      <VaultLevelSlot className="sidebar-vault" />
     </div>
   )
 }
