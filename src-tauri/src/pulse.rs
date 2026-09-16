@@ -21,7 +21,7 @@ const NO_VAULT_RETRY: Duration = Duration::from_secs(30);
 pub struct PulseEvent {
     /// ms since the epoch, from the log row (the time it was read when the row has none).
     pub at: u64,
-    /// `reflex`, `tool`, `catchup`, `enrich` or `enforce`.
+    /// `reflex`, `tool`, `catchup`, `enrich`, `enforce`, `briefing`, `learned` or `friction`.
     pub kind: &'static str,
     pub project: String,
     /// The row's agent, else its project.
@@ -47,9 +47,15 @@ pub enum Log {
     Enrich,
     /// `denial-log.jsonl`: commands enforcement blocked.
     Denial,
+    /// `briefing-log.jsonl`: one row per briefing written at session end.
+    Briefing,
+    /// `learned.jsonl`: one row per rule the vault learned.
+    Learned,
+    /// `friction-ledger.jsonl`: one row per correction the user made.
+    Friction,
 }
 
-pub const LOGS: [Log; 4] = [Log::Reflex, Log::Access, Log::Enrich, Log::Denial];
+pub const LOGS: [Log; 7] = [Log::Reflex, Log::Access, Log::Enrich, Log::Denial, Log::Briefing, Log::Learned, Log::Friction];
 
 impl Log {
     pub fn file(self) -> &'static str {
@@ -58,6 +64,9 @@ impl Log {
             Log::Access => ".mnemo/mcp-access-log.jsonl",
             Log::Enrich => ".mnemo/enrichment-log.jsonl",
             Log::Denial => ".mnemo/denial-log.jsonl",
+            Log::Briefing => ".mnemo/briefing-log.jsonl",
+            Log::Learned => ".mnemo/learned.jsonl",
+            Log::Friction => ".mnemo/friction-ledger.jsonl",
         }
     }
 }
@@ -77,6 +86,9 @@ struct Row {
     hit_slugs: Option<Vec<String>>,
     result_count: Option<u32>,
     slug: Option<String>,
+    projects: Option<Vec<String>>,
+    backfilled: Option<bool>,
+    name: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -114,6 +126,20 @@ pub fn parse_line(log: Log, line: &str, now: u64) -> Option<PulseEvent> {
         Log::Denial => {
             let slug = row.slug.as_deref().map(rule_slug).filter(|s| !s.is_empty())?;
             Some(PulseEvent { kind: "enforce", tool: row.tool, hits: Some(1), slugs: vec![slug.to_string()], ..base })
+        }
+        Log::Briefing => Some(PulseEvent { kind: "briefing", hits: Some(1), ..base }),
+        Log::Learned => {
+            // `learned.jsonl` carries `projects` (an array), not `project`.
+            let project = row.projects.as_deref().unwrap_or_default().first()?.clone();
+            let slugs = row.slug.as_deref().map(rule_slug).map(str::to_string).into_iter().collect();
+            Some(PulseEvent { kind: "learned", project: project.clone(), agent: project, hits: Some(1), slugs, ..base })
+        }
+        Log::Friction => {
+            // A `mnemo friction backfill` run appends hundreds of rows at once.
+            if row.backfilled.unwrap_or(false) {
+                return None;
+            }
+            Some(PulseEvent { kind: "friction", hits: Some(1), ..base })
         }
     }
 }
@@ -343,6 +369,31 @@ mod tests {
         append(&later, "first\n");
         assert_eq!(tail.read(), ["first"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn briefing_rows_are_events() {
+        let e = events(Log::Briefing, "briefing-log.jsonl");
+        assert_eq!(e.len(), 2, "the junk line is not an event");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("briefing", "mnemo"));
+        assert_eq!(e[0].session_id.as_deref(), Some("e7fb983c-6dc5-4d69-91b3-dce4ad7682da"));
+        assert_eq!(e[1].project, "mnemo-desktop");
+    }
+
+    #[test]
+    fn learned_rows_take_their_first_project_and_need_one() {
+        let e = events(Log::Learned, "learned.jsonl");
+        assert_eq!(e.len(), 2, "a row with an empty projects array is not an event");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("learned", "mnemo"));
+        assert_eq!(e[0].slugs, ["activate-learned-behavior-immediately"]);
+        assert_eq!(e[1].project, "mnemo-desktop", "the first project names the pane");
+    }
+
+    #[test]
+    fn friction_rows_skip_the_backfill() {
+        let e = events(Log::Friction, "friction-ledger.jsonl");
+        assert_eq!(e.len(), 1, "backfilled rows would stampede the overlay");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("friction", "mnemo"));
     }
 
     #[test]
