@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-16
 **Status:** designed, not built
-**Depends on:** mission cockpit (PR #6, shipped), pulse (#44, shipped), **mnemo presence** (`feat/mnemo-presence`, designed not merged) for piece 3 only.
+**Depends on:** mission cockpit (PR #6, shipped), pulse (#44, shipped), **mnemo presence** (#90, merged as `15b2c63` on 2026-09-16 — `src/avatar/` and the 9-kind `PulseKind` are on `main`, so piece 3 is no longer blocked).
+
+**Contract:** `docs/superpowers/contracts/2026-09-16-sidebar-cockpit-vault-level.md`
 
 ## Problem
 
@@ -190,14 +192,21 @@ The first is cleaner and probably smaller. Neither changes this design.
 
 | # | Piece | Blocked by |
 |---|---|---|
-| 1 | Cockpit into the sidebar | nothing — touches `src/cockpit/*`, `src/mission/Sidebar.tsx` |
-| 2 | Map removal | nothing — touches `src/vault/*`, `src-tauri/` |
-| 3 | The square | **`feat/mnemo-presence` merging to main** |
+| 1 | Cockpit into the sidebar (`cockpit-body`) | nothing |
+| 2 | Map removal (`map-removal`) | nothing |
+| 3 | The square (`vault-level`) | `cockpit-body`'s `VaultLevelSlot` **signature** only |
 
-1 and 2 are independent of each other and of the presence branch; either can go first. 3 depends
-on `src/avatar/*` and on `PulseKind` growing from 4 kinds to 9 — both are being written right now
-in the `mnemo-desktop-wt-presence` worktree. Building 3 before that merges means two sessions
-editing one module.
+All three run in parallel. Piece 3's original blocker — `src/avatar/*` and the 9-kind
+`PulseKind` — cleared when presence merged as #90 (`15b2c63`).
+
+The one file pieces 1 and 3 would share is `src/mission/Sidebar.tsx`. The contract resolves it by
+giving the Sidebar a single owner: `cockpit-body` mounts `VaultLevelSlot` with a placeholder and
+publishes its signature; `vault-level` fills the slot and never opens the Sidebar. They depend on
+a signature, not on each other's interior.
+
+`src-tauri/src/lib.rs` is named by both `vault-level` (adds `vault_level`) and `map-removal`
+(drops three `vault_map*` commands). Both touch only the `// -- vault` anchor block; one merge
+hunk to resolve.
 
 ## 5. Open question: the XP formula
 
