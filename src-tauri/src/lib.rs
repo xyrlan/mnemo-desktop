@@ -37,9 +37,6 @@ pub mod chrome;
 
 // -- graph: no Rust --
 
-// -- vaultmap (src/vaultmap.rs) --
-pub mod vaultmap;
-
 // -- workspace (src/workspace.rs) --
 pub mod workspace;
 
@@ -151,11 +148,6 @@ pub fn run() {
             chrome::chrome_session,
             commands::pty_pid,
 
-            // -- vaultmap commands --
-            vaultmap::vault_map,
-            vaultmap::vault_map_positions_read,
-            vaultmap::vault_map_positions_write,
-
             // -- workspace commands --
             workspace::workspace_read,
             workspace::workspace_write,
@@ -195,10 +187,6 @@ pub fn run() {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
                 run_smoke(app)?;
             }
-
-            // -- vaultmap watcher --
-            // `mnemo://vault-born` for whoever listens, map open or not.
-            vaultmap::watch_start(app.handle().clone());
 
             // -- menu --
             // App chords as native menu accelerators, so they reach the app while a browser
