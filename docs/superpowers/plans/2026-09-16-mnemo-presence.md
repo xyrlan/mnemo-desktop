@@ -553,6 +553,7 @@ Create `src/avatar/scenes.ts`:
  *  arm *is* a run of addressable rects, and a new pose is moving cells. The mark stays the
  *  logo (`src/brand/Wordmark.tsx`); this is the character. */
 import type { PulseEvent, PulseKind } from '../pulse/types'
+import type { childWord } from '../mission/types'
 
 /** One pixel: x, y, width, height on a 32×32 grid, and which part it belongs to.
  *  The part decides its colour and which keyframe moves it. */
@@ -624,8 +625,9 @@ export const SCENES: Record<PulseKind, Scene> = {
   dispatch: { className: 'av-dispatching', tone: 'accent', rects: [...BODY, ...ARMS, ...kids] },
 }
 
-/** What a dispatched child is doing. Mirrors `childWord` in `src/mission/types.ts`. */
-export type ChildWord = 'active' | 'BLOCKED' | 'stalled' | 'done' | 'stopped'
+/** What a dispatched child is doing. Derived from `childWord` rather than restated, so a
+ *  new child state makes `STATE_SCENES` a build error instead of a silently missing scene. */
+export type ChildWord = ReturnType<typeof childWord>
 
 export const STATE_SCENES: Record<ChildWord, Scene> = {
   active: { className: 'av-active', tone: 'accent', rects: [...BODY, ...ARMS] },
