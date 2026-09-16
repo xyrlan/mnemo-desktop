@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>mnemo avatar — every scene</title>
+<link rel="stylesheet" href="../theme.css">
+<style>
+  body { background: var(--bg, #0d1117); color: var(--fg, #c9d1d9); font: 12px ui-monospace, Menlo, monospace; margin: 0; padding: 28px; }
+  h1 { font-size: 14px; font-weight: 700; margin: 0 0 4px; }
+  p.lede { color: var(--fg-muted, #8b949e); margin: 0 0 26px; max-width: 70ch; line-height: 1.6; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-muted, #8b949e); margin: 30px 0 14px; border-bottom: 1px solid var(--border, #2a3038); padding-bottom: 6px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 22px; }
+  figure { margin: 0; text-align: center; width: 156px; }
+  .stage { background: var(--bg-elev, #161b22); border: 1px solid var(--border, #2a3038); border-radius: 8px; height: 148px; display: grid; place-items: center; }
+  figcaption { margin-top: 9px; color: var(--accent, #a371f7); font-size: 11px; }
+  .kind { color: var(--fg-muted, #8b949e); font-size: 10px; margin-top: 2px; }
+  .hide figcaption, .hide .kind { visibility: hidden; }
+  button { font: inherit; background: var(--bg-elev, #161b22); color: var(--fg, #c9d1d9); border: 1px solid var(--border, #2a3038); border-radius: 5px; padding: 5px 11px; cursor: pointer; }
+  button:hover { border-color: var(--accent, #a371f7); }
+</style>
+
+<h1>mnemo avatar — every scene</h1>
+<p class="lede">
+  The judgement this page exists for: <strong>hide the captions and see whether the gesture still says which action it is</strong>.
+  Two pairs are the risk — <code>reading</code> vs <code>remembering</code> (adjacent concepts), and among the child states,
+  whether <code>BLOCKED</code> is still the one your eye goes to when all five loop at once.
+</p>
+<p><button id="toggle">Hide captions</button></p>
+
+<h2>Actions — what mnemo just did</h2>
+<div class="grid" id="actions"></div>
+
+<h2>Child states — what a dispatched child is doing (these loop forever on the cockpit)</h2>
+<div class="grid" id="states"></div>
+
+<script type="module">
+  import { SCENES, STATE_SCENES, withPartIndex, caption } from './scenes.ts'
+  import './avatar.css'
+
+  const svg = (scene) => {
+    const rects = withPartIndex(scene.rects)
+      .map(([r, n]) => `<rect class="av-${r.part} av-${r.part}-${n}" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>`)
+      .join('')
+    return `<svg class="av av-${scene.tone} ${scene.className}" width="112" height="112" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`
+  }
+
+  const draw = (host, scene, label, sub) =>
+    host.insertAdjacentHTML('beforeend', `<figure><div class="stage">${svg(scene)}</div><figcaption>${label}</figcaption><div class="kind">${sub}</div></figure>`)
+
+  const ev = (kind, hits) => ({ kind, hits, at: 0, project: '', agent: '', slugs: [] })
+  const HITS = { reflex: 2, dispatch: 3 }
+
+  for (const [kind, scene] of Object.entries(SCENES)) {
+    draw(document.getElementById('actions'), scene, caption(ev(kind, HITS[kind])), kind)
+  }
+  for (const [state, scene] of Object.entries(STATE_SCENES)) {
+    draw(document.getElementById('states'), scene, state, scene.className)
+  }
+
+  const btn = document.getElementById('toggle')
+  btn.onclick = () => {
+    const hidden = document.body.classList.toggle('hide')
+    btn.textContent = hidden ? 'Show captions' : 'Hide captions'
+  }
+</script>
+</html>
