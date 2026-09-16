@@ -9,6 +9,7 @@ import { openIssue } from '../github/actions'
 import { allChildren, type Mission, type RepoGroup } from '../mission/types'
 import { buildMissionMap, type MapAction, type MapCard } from './model'
 import { landMission, mergePr, openJob, useArm } from './actions'
+import Avatar from '../avatar/Avatar'
 
 const WORD: Record<MapAction['kind'], string> = { contract: 'contract', open: 'open', reply: 'reply', attach: 'attach', pr: 'PR', job: 'abrir job', merge: 'merge', land: 'land', issue: 'GitHub' }
 const CONFIRM: Partial<Record<MapAction['kind'], string>> = { merge: 'confirm merge?', land: 'confirm land?' }
@@ -23,12 +24,17 @@ function ActionCard({ data }: NodeProps<Node<MapCard, 'action'>>) {
   const { run, armed } = useContext(Run)
   const tone = data.tone ?? 'muted'
   return (
-    <div className={`gr-card mm-card gr-${tone}${data.pulse ? ' gr-pulse' : ''}`}>
+    <div className={`gr-card mm-card gr-${tone}`}>
       <Handle type="target" position={Position.Left} className="gr-handle" />
       <div className="gr-label" title={data.label}>
         <span className="mm-label">{data.label}</span>
         {data.badge && <span className="gr-badge">{data.badge}</span>}
       </div>
+      {data.word && (
+        <span className="mm-avatar">
+          <Avatar state={data.word} size={30} />
+        </span>
+      )}
       {data.sub && (
         <div className="gr-sub" title={data.sub}>
           {data.sub}

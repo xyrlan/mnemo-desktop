@@ -1,0 +1,3 @@
+{"seq": 343, "ts": "2026-09-16T11:14:50", "run_id": "2026-09-16T11:14:28", "slug": "activate-learned-behavior-immediately", "type": "reference", "name": "Activate learned behavior immediately", "projects": ["mnemo"], "confidence": "inferred", "quote": null}
+{"seq": 344, "ts": "2026-09-16T11:15:02", "run_id": "2026-09-16T11:14:28", "slug": "two-projects", "type": "reference", "name": "Two projects", "projects": ["mnemo-desktop", "mnemo"], "confidence": "stated", "quote": null}
+{"seq": 345, "ts": "2026-09-16T11:16:00", "run_id": "2026-09-16T11:14:28", "slug": "no-project", "type": "reference", "name": "No project", "projects": [], "confidence": "inferred", "quote": null}

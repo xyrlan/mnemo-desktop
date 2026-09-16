@@ -94,3 +94,13 @@ test('a pulse that arrived before the bar mounted does not flash, but counts', a
   expect(bar().classList).not.toContain('pane-bar-pulsing')
   expect(badge()!.textContent).toBe('↯ 1')
 })
+
+test('a pulse from the pane repo also plays the overlay scene', async () => {
+  await push(ev({ kind: 'learned' }))
+  expect(host.querySelector('.pv-caption')?.textContent).toBe('learned something')
+})
+
+test('a pulse from another repo plays no overlay', async () => {
+  await push(ev({ project: 'clubinho', agent: 'clubinho' }))
+  expect(host.querySelector('.pv-overlay')).toBeNull()
+})

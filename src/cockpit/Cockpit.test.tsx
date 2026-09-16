@@ -195,9 +195,17 @@ test('a blocked card on the map opens its reply under the canvas', async () => {
   await render()
   await act(async () => button(rows()[0], '⤢ round3')!.click())
   const vault = [...host.querySelectorAll<HTMLElement>('.ck-map .react-flow__node')].find((n) => n.dataset.id === `piece:${desktop.missions[0].contract_path}#vault`)!
-  expect(vault.querySelector('.gr-pulse')).not.toBeNull()
+  expect(vault.querySelector('.av-blocked-state')).not.toBeNull()
   act(() => button(vault, 'reply')!.click())
   expect(host.querySelector<HTMLTextAreaElement>('.mm-reply textarea')?.value).toBe('yes')
+})
+
+test('every child card on the map wears its state as a scene', async () => {
+  await render()
+  await act(async () => button(rows()[0], '⤢ round3')!.click())
+  const map = host.querySelector('.ck-map')!
+  expect(map.querySelector('.av-blocked-state'), 'a blocked child waves').not.toBeNull()
+  expect(map.querySelector('.av-active, .av-done, .av-stalled, .av-stopped'), 'the others carry theirs too').not.toBeNull()
 })
 
 test('every repo is listed, the focused one first, and the head names it with its branch', async () => {

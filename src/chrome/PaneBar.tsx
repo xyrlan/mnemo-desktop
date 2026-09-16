@@ -9,6 +9,7 @@ import { tauriSession, useSessionLearn, type SessionClient } from './session'
 import { pulseStore, usePulse } from '../pulse/app-store'
 import type { Pulse } from '../pulse/store'
 import { openRule } from '../pulse/open'
+import Overlay from '../pulse/Overlay'
 
 /** How often a visible bar asks git again (a `git switch` in the pane shows up this late). */
 export const POLL_MS = 5000
@@ -91,40 +92,43 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
   }
 
   return (
-    <div ref={ref} className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap'}>
-      <span className="pane-bar-grip" aria-hidden>
-        ⠿
-      </span>
-      {info.place && <span className="pane-bar-repo">{info.place}</span>}
-      {info.branch && <span className="pane-bar-branch">{info.branch}</span>}
-      <span className="pane-bar-title">{info.title}</span>
-      {live && <span key={live.id} className="pane-bar-glow" aria-hidden />}
-      {count > 0 && (
+    <>
+      <div ref={ref} className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap'}>
+        <span className="pane-bar-grip" aria-hidden>
+          ⠿
+        </span>
+        {info.place && <span className="pane-bar-repo">{info.place}</span>}
+        {info.branch && <span className="pane-bar-branch">{info.branch}</span>}
+        <span className="pane-bar-title">{info.title}</span>
+        {live && <span key={live.id} className="pane-bar-glow" aria-hidden />}
+        {count > 0 && (
+          <button
+            className={`pane-bar-pulse${live ? ' live' : ''}`}
+            title={live ? pulseTitle(live.event) : `${count} mnemo event${count === 1 ? '' : 's'} in ${info.place} since launch`}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onClick={openPulse}
+          >
+            {live && <span className="pane-bar-pulse-label">{pulseLabel(live.event)}</span>}
+            <span className="pane-bar-pulse-count">{live ? count : `↯ ${count}`}</span>
+          </button>
+        )}
+        {info.tokens && <span className="pane-bar-tokens">{info.tokens}</span>}
         <button
-          className={`pane-bar-pulse${live ? ' live' : ''}`}
-          title={live ? pulseTitle(live.event) : `${count} mnemo event${count === 1 ? '' : 's'} in ${info.place} since launch`}
+          className="pane-close"
+          title="Close pane (⌘W)"
           onMouseDown={(e) => {
             e.preventDefault()
             e.stopPropagation()
           }}
-          onClick={openPulse}
+          onClick={close}
         >
-          {live && <span className="pane-bar-pulse-label">{pulseLabel(live.event)}</span>}
-          <span className="pane-bar-pulse-count">{live ? count : `↯ ${count}`}</span>
+          ×
         </button>
-      )}
-      {info.tokens && <span className="pane-bar-tokens">{info.tokens}</span>}
-      <button
-        className="pane-close"
-        title="Close pane (⌘W)"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-        }}
-        onClick={close}
-      >
-        ×
-      </button>
-    </div>
+      </div>
+      <Overlay place={info.place} />
+    </>
   )
 }

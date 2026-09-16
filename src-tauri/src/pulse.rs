@@ -21,7 +21,8 @@ const NO_VAULT_RETRY: Duration = Duration::from_secs(30);
 pub struct PulseEvent {
     /// ms since the epoch, from the log row (the time it was read when the row has none).
     pub at: u64,
-    /// `reflex`, `tool`, `enrich` or `enforce`.
+    /// `reflex`, `tool`, `catchup`, `enrich`, `enforce`, `briefing`, `learned`, `friction`
+    /// or `dispatch`.
     pub kind: &'static str,
     pub project: String,
     /// The row's agent, else its project.
@@ -47,9 +48,17 @@ pub enum Log {
     Enrich,
     /// `denial-log.jsonl`: commands enforcement blocked.
     Denial,
+    /// `briefing-log.jsonl`: one row per briefing written at session end.
+    Briefing,
+    /// `learned.jsonl`: one row per rule the vault learned.
+    Learned,
+    /// `friction-ledger.jsonl`: one row per correction the user made.
+    Friction,
+    /// `dispatch-parents.jsonl`: one row per child a dispatch spawned.
+    Dispatch,
 }
 
-pub const LOGS: [Log; 4] = [Log::Reflex, Log::Access, Log::Enrich, Log::Denial];
+pub const LOGS: [Log; 8] = [Log::Reflex, Log::Access, Log::Enrich, Log::Denial, Log::Briefing, Log::Learned, Log::Friction, Log::Dispatch];
 
 impl Log {
     pub fn file(self) -> &'static str {
@@ -58,6 +67,10 @@ impl Log {
             Log::Access => ".mnemo/mcp-access-log.jsonl",
             Log::Enrich => ".mnemo/enrichment-log.jsonl",
             Log::Denial => ".mnemo/denial-log.jsonl",
+            Log::Briefing => ".mnemo/briefing-log.jsonl",
+            Log::Learned => ".mnemo/learned.jsonl",
+            Log::Friction => ".mnemo/friction-ledger.jsonl",
+            Log::Dispatch => ".mnemo/dispatch-parents.jsonl",
         }
     }
 }
@@ -77,6 +90,9 @@ struct Row {
     hit_slugs: Option<Vec<String>>,
     result_count: Option<u32>,
     slug: Option<String>,
+    projects: Option<Vec<String>>,
+    backfilled: Option<bool>,
+    parent_session: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -104,7 +120,8 @@ pub fn parse_line(log: Log, line: &str, now: u64) -> Option<PulseEvent> {
         Log::Access => {
             let tool = row.tool.filter(|t| !t.is_empty() && !t.starts_with("llm."))?;
             let slugs = slugs(row.hit_slugs.as_deref().unwrap_or_default());
-            Some(PulseEvent { kind: "tool", tool: Some(tool), hits: row.result_count, slugs, ..base })
+            let kind = if tool == "session_start.inject" { "catchup" } else { "tool" };
+            Some(PulseEvent { kind, tool: Some(tool), hits: row.result_count, slugs, ..base })
         }
         Log::Enrich => {
             let slugs = slugs(row.hit_slugs.as_deref().unwrap_or_default());
@@ -114,6 +131,22 @@ pub fn parse_line(log: Log, line: &str, now: u64) -> Option<PulseEvent> {
             let slug = row.slug.as_deref().map(rule_slug).filter(|s| !s.is_empty())?;
             Some(PulseEvent { kind: "enforce", tool: row.tool, hits: Some(1), slugs: vec![slug.to_string()], ..base })
         }
+        Log::Briefing => Some(PulseEvent { kind: "briefing", hits: Some(1), ..base }),
+        Log::Learned => {
+            // `learned.jsonl` carries `projects` (an array), not `project`.
+            let project = row.projects.as_deref().unwrap_or_default().first()?.clone();
+            let slugs = row.slug.as_deref().map(rule_slug).map(str::to_string).into_iter().collect();
+            Some(PulseEvent { kind: "learned", project: project.clone(), agent: project, hits: Some(1), slugs, ..base })
+        }
+        Log::Friction => {
+            // A `mnemo friction backfill` run appends hundreds of rows at once.
+            if row.backfilled.unwrap_or(false) {
+                return None;
+            }
+            Some(PulseEvent { kind: "friction", hits: Some(1), ..base })
+        }
+        // The row names no project; `Pulse::poll` resolves it from a session seen earlier.
+        Log::Dispatch => Some(PulseEvent { kind: "dispatch", session_id: row.parent_session.clone(), hits: Some(1), ..base }),
     }
 }
 
@@ -178,16 +211,42 @@ impl Tail {
 /// Every log of one vault, bookmarked at its end.
 pub struct Pulse {
     tails: Vec<(Log, Tail)>,
+    /// `session_id` → project, learned from any tailed row carrying both. `dispatch` rows
+    /// name only their parent session, and a row for an unknown session is dropped rather
+    /// than shown over an unrelated pane.
+    seen: std::collections::HashMap<String, String>,
 }
 
 impl Pulse {
     pub fn new(root: &Path) -> Pulse {
-        Pulse { tails: LOGS.iter().map(|&l| (l, Tail::at_end(root.join(l.file())))).collect() }
+        Pulse { tails: LOGS.iter().map(|&l| (l, Tail::at_end(root.join(l.file())))).collect(), seen: std::collections::HashMap::new() }
     }
 
     /// The events written since the last poll, log by log in file order.
     pub fn poll(&mut self, now: u64) -> Vec<PulseEvent> {
-        self.tails.iter_mut().flat_map(|(log, tail)| tail.read().into_iter().filter_map(|l| parse_line(*log, &l, now)).collect::<Vec<_>>()).collect()
+        let raw: Vec<PulseEvent> = self
+            .tails
+            .iter_mut()
+            .flat_map(|(log, tail)| tail.read().into_iter().filter_map(|l| parse_line(*log, &l, now)).collect::<Vec<_>>())
+            .collect();
+
+        let mut out: Vec<PulseEvent> = Vec::with_capacity(raw.len());
+        for event in raw {
+            if event.kind == "dispatch" {
+                // One dispatch spawns several children in one burst: one scene, N children.
+                let Some(project) = event.session_id.as_ref().and_then(|s| self.seen.get(s)).cloned() else { continue };
+                match out.iter_mut().find(|e| e.kind == "dispatch" && e.project == project) {
+                    Some(prior) => prior.hits = Some(prior.hits.unwrap_or(0) + 1),
+                    None => out.push(PulseEvent { project: project.clone(), agent: project, ..event }),
+                }
+                continue;
+            }
+            if let (Some(session), false) = (event.session_id.as_ref(), event.project.is_empty()) {
+                self.seen.insert(session.clone(), event.project.clone());
+            }
+            out.push(event);
+        }
+        out
     }
 }
 
@@ -258,9 +317,21 @@ mod tests {
         let e = events(Log::Access, "mcp-access-log.jsonl");
         let tools: Vec<_> = e.iter().map(|e| (e.tool.as_deref().unwrap(), e.slugs.len(), e.hits)).collect();
         assert_eq!(tools, [("session_start.inject", 0, Some(1)), ("list_rules_by_topic", 2, Some(2)), ("read_mnemo_rule", 1, Some(1))]);
-        assert!(e.iter().all(|e| e.kind == "tool" && e.session_id.is_none()));
+        assert!(e.iter().all(|e| e.session_id.is_none()));
+        assert_eq!(e[0].kind, "catchup");
+        assert!(e[1..].iter().all(|e| e.kind == "tool"));
         // Inject rows carry their agent; MCP calls only a project, which stands in.
         assert_eq!((e[0].agent.as_str(), e[2].agent.as_str()), ("sg-imports", "mnemo-desktop"));
+    }
+
+    #[test]
+    fn session_start_inject_is_catchup_not_tool() {
+        let e = events(Log::Access, "mcp-access-log.jsonl");
+        let kinds: Vec<_> = e.iter().map(|e| (e.kind, e.tool.as_deref().unwrap())).collect();
+        assert_eq!(
+            kinds,
+            [("catchup", "session_start.inject"), ("tool", "list_rules_by_topic"), ("tool", "read_mnemo_rule")]
+        );
     }
 
     #[test]
@@ -333,6 +404,31 @@ mod tests {
     }
 
     #[test]
+    fn briefing_rows_are_events() {
+        let e = events(Log::Briefing, "briefing-log.jsonl");
+        assert_eq!(e.len(), 2, "the junk line is not an event");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("briefing", "mnemo"));
+        assert_eq!(e[0].session_id.as_deref(), Some("e7fb983c-6dc5-4d69-91b3-dce4ad7682da"));
+        assert_eq!(e[1].project, "mnemo-desktop");
+    }
+
+    #[test]
+    fn learned_rows_take_their_first_project_and_need_one() {
+        let e = events(Log::Learned, "learned.jsonl");
+        assert_eq!(e.len(), 2, "a row with an empty projects array is not an event");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("learned", "mnemo"));
+        assert_eq!(e[0].slugs, ["activate-learned-behavior-immediately"]);
+        assert_eq!(e[1].project, "mnemo-desktop", "the first project names the pane");
+    }
+
+    #[test]
+    fn friction_rows_skip_the_backfill() {
+        let e = events(Log::Friction, "friction-ledger.jsonl");
+        assert_eq!(e.len(), 1, "backfilled rows would stampede the overlay");
+        assert_eq!((e[0].kind, e[0].project.as_str()), ("friction", "mnemo"));
+    }
+
+    #[test]
     fn pulse_emits_only_what_was_written_after_it_started() {
         let dir = scratch("poll");
         for log in LOGS {
@@ -349,6 +445,49 @@ mod tests {
         let kinds: Vec<_> = pulse.poll(7).iter().map(|e| e.kind).collect();
         assert_eq!(kinds, ["reflex", "reflex", "enforce"]);
         assert!(pulse.poll(7).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dispatch_resolves_its_project_from_a_session_seen_earlier_and_coalesces() {
+        let dir = scratch("dispatch");
+        // The parent session becomes known through any row carrying session_id + project.
+        // In these fixtures that is the briefing row for `e7fb983c`; the reflex rows name
+        // three other sessions, and must not lend their project to a dispatch.
+        append(&dir.join(Log::Briefing.file()), &fixture("briefing-log.jsonl"));
+        let mut pulse = Pulse::new(&dir);
+        assert!(pulse.poll(7).is_empty(), "history is not replayed");
+
+        append(&dir.join(Log::Reflex.file()), &fixture("reflex-log.jsonl"));
+        append(&dir.join(Log::Briefing.file()), &fixture("briefing-log.jsonl"));
+        append(&dir.join(Log::Dispatch.file()), &fixture("dispatch-parents.jsonl"));
+        let events = pulse.poll(7);
+
+        let dispatch: Vec<_> = events.iter().filter(|e| e.kind == "dispatch").collect();
+        assert_eq!(dispatch.len(), 1, "two rows for one parent coalesce into one event");
+        assert_eq!(dispatch[0].project, "mnemo", "resolved from the briefing row's session");
+        assert_eq!(dispatch[0].agent, "mnemo", "the resolved project stands in as the agent");
+        assert_eq!(dispatch[0].hits, Some(2), "it names how many children");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dispatch_for_an_unknown_session_is_dropped_not_guessed() {
+        let dir = scratch("dispatch-unknown");
+        let mut pulse = Pulse::new(&dir);
+        // Only sessions unrelated to any dispatch parent are ever seen.
+        append(&dir.join(Log::Reflex.file()), &fixture("reflex-log.jsonl"));
+        append(&dir.join(Log::Dispatch.file()), &fixture("dispatch-parents.jsonl"));
+        let events = pulse.poll(7);
+        assert!(events.iter().all(|e| e.kind != "dispatch"), "a scene over an unrelated pane is worse than none");
+
+        // The map is fed by any later row naming the parent, and a dispatch after it resolves.
+        append(&dir.join(Log::Friction.file()), &fixture("friction-ledger.jsonl"));
+        append(&dir.join(Log::Dispatch.file()), &fixture("dispatch-parents.jsonl"));
+        let events = pulse.poll(7);
+        let dispatch: Vec<_> = events.iter().filter(|e| e.kind == "dispatch").collect();
+        assert_eq!(dispatch.len(), 1);
+        assert_eq!((dispatch[0].project.as_str(), dispatch[0].hits), ("mnemo", Some(2)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
