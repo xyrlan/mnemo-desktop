@@ -14,6 +14,9 @@ import type { VaultLevel } from './types'
 import '../avatar/avatar.css'
 import './vaultlevel.css'
 
+/** The square's height, and the width it falls back to before it has been measured. The width
+ *  is whatever the sidebar's slot gives it, however wide the user has dragged the sidebar; only
+ *  the octopus stays a fixed 80px, because pixel art does not stretch. */
 export const SQUARE = 160
 /** `vault_level` is cached 10s on the Rust side; the square has no reason to ask faster. */
 export const POLL_MS = 30_000
@@ -59,6 +62,21 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     }
   }, [client, pollMs])
 
+  // The square fills its slot rather than sitting in a 160px column with empty margins, so it
+  // has to know how wide that slot actually is.
+  const box = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(SQUARE)
+  useEffect(() => {
+    const el = box.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(SQUARE, Math.round(e.contentRect.width))))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // The halo orbits in a fixed 160-unit box: `haloLayout` uses one `size` for both axes, so
+  // handing it the width would centre the orbit off the bottom of a wide square. The group
+  // below shifts that box to the middle of whatever width the slot gives us.
   const dots = useMemo(() => haloLayout(haloDots(vault?.pages ?? 0), SQUARE), [vault?.pages])
   const dotCount = dots.length
 
@@ -121,20 +139,22 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     : label
 
   return (
-    <div className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
-      <svg className="vl-halo" width={SQUARE} height={SQUARE} viewBox={`0 0 ${SQUARE} ${SQUARE}`} aria-hidden="true">
-        {dots.map((d, i) => (
-          <rect
-            key={i}
-            className={lit.has(i) ? 'vl-dot vl-lit' : 'vl-dot'}
-            x={d.x}
-            y={d.y}
-            width={d.w}
-            height={d.h}
-            transform={`rotate(${d.a} ${d.x + d.w / 2} ${d.y + d.h / 2})`}
-            style={{ animationDelay: `${(i % 9) * 0.35}s` }}
-          />
-        ))}
+    <div ref={box} className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
+      <svg className="vl-halo" width={width} height={SQUARE} viewBox={`0 0 ${width} ${SQUARE}`} aria-hidden="true">
+        <g transform={`translate(${(width - SQUARE) / 2} 0)`}>
+          {dots.map((d, i) => (
+            <rect
+              key={i}
+              className={lit.has(i) ? 'vl-dot vl-lit' : 'vl-dot'}
+              x={d.x}
+              y={d.y}
+              width={d.w}
+              height={d.h}
+              transform={`rotate(${d.a} ${d.x + d.w / 2} ${d.y + d.h / 2})`}
+              style={{ animationDelay: `${(i % 9) * 0.35}s` }}
+            />
+          ))}
+        </g>
       </svg>
       <div className={`vl-octo${away ? ' vl-away' : ''}${eating ? ' vl-eating' : ''}`}>
         {fire && <Flames />}
