@@ -1,0 +1,45 @@
+/* The vault square. Every colour is a theme token; the slot around it belongs to the sidebar. */
+.vl-host { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; }
+.vl-square { position: relative; width: 160px; height: 160px; flex: 0 0 auto; overflow: hidden; --vl-tone: var(--accent); }
+.vl-green { --vl-tone: var(--ansi-green); }
+.vl-yellow { --vl-tone: var(--ansi-yellow); }
+.vl-red { --vl-tone: var(--ansi-red); }
+.vl-muted { --vl-tone: var(--fg-muted); }
+
+/* Layer 1 — the halo. It never leaves. */
+.vl-halo { position: absolute; inset: 0; }
+@keyframes vl-twinkle { 0%, 100% { opacity: .22; } 50% { opacity: .5; } }
+.vl-dot { fill: var(--vl-tone); opacity: .3; animation: vl-twinkle 3.2s ease-in-out infinite; transition: fill .15s; }
+@keyframes vl-flash { 0% { opacity: 1; r: 2.6px; } 100% { opacity: .3; } }
+.vl-dot.vl-lit { fill: var(--fg); animation: vl-flash .7s ease-out 1; }
+
+/* Layer 2 — the octopus, which leaves the square while a scene plays. */
+.vl-octo { position: absolute; left: 40px; top: 30px; width: 80px; height: 80px; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; }
+.vl-octo.vl-away { transform: scale(0); opacity: 0; }
+
+/* idle — the octopus at rest, breathing. Its scene is in `src/avatar/scenes.ts` (IDLE);
+   the keyframes are here because `avatar.css` is read-only for this feature. */
+@keyframes av-idle-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes av-idle-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+.av-idle { transform-origin: 50% 40%; animation: av-idle-breathe 4.2s ease-in-out infinite; }
+.av-idle .av-arm { animation: av-idle-drift 4.2s ease-in-out infinite; }
+.av-idle .av-arm-1, .av-idle .av-arm-3 { animation-delay: .7s; }
+.av-idle .av-node { opacity: .55; }
+
+/* The fire: sustained good health. */
+.vl-fire { position: absolute; left: 0; top: 60px; }
+@keyframes vl-flicker { 0%, 100% { transform: scaleY(1); opacity: .9; } 50% { transform: scaleY(.7); opacity: .6; } }
+.vl-flame { fill: var(--ansi-yellow); transform-box: fill-box; transform-origin: 50% 100%; animation: vl-flicker .5s ease-in-out infinite; }
+.vl-flame rect:last-child { fill: var(--ansi-red); }
+.vl-flame-1 { animation-delay: .17s; }
+.vl-flame-2 { animation-delay: .34s; }
+
+/* Layer 3 — the HUD. */
+.vl-hud { position: absolute; left: 16px; right: 16px; bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fg-muted); }
+.vl-level { color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vl-bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.vl-fill { display: block; height: 100%; background: var(--vl-tone); transition: width .4s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vl-square *, .vl-octo { animation: none !important; transition: none !important; }
+}

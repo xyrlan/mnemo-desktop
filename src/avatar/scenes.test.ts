@@ -1,4 +1,4 @@
-import { SCENES, STATE_SCENES, caption, withPartIndex } from './scenes'
+import { IDLE, SCENES, STATE_SCENES, caption, withPartIndex } from './scenes'
 import type { PulseEvent } from '../pulse/types'
 
 const ev = (over: Partial<PulseEvent>): PulseEvent => ({ at: 1, kind: 'reflex', project: 'mnemo', agent: 'mnemo', slugs: [], ...over })
@@ -43,4 +43,12 @@ test('parts are numbered within their own part, not by position in the list', ()
   // reflex lists its pages *first* — same numbers, different position.
   const pages = withPartIndex(SCENES.reflex.rects).filter(([rect]) => rect.part === 'object')
   expect(pages.map(([, n]) => n)).toEqual([0, 1, 2])
+})
+
+test('idle is the plain body at rest, apart from every action and every child state', () => {
+  expect(IDLE.className).toBe('av-idle')
+  expect(IDLE.rects.some((r) => r.part === 'object')).toBe(false)
+  expect(IDLE.rects.some((r) => r.part === 'head')).toBe(true)
+  const taken = Object.values({ ...SCENES, ...STATE_SCENES }).map((s) => s.className)
+  expect(taken).not.toContain(IDLE.className)
 })
