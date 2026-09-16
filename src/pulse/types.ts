@@ -1,6 +1,6 @@
 /** Mirrors `PulseEvent` in `src-tauri/src/pulse.rs`, emitted as `mnemo://pulse`. */
 
-export type PulseKind = 'reflex' | 'tool' | 'enrich' | 'enforce'
+export type PulseKind = 'reflex' | 'tool' | 'enrich' | 'enforce' | 'catchup' | 'briefing' | 'learned' | 'friction' | 'dispatch'
 
 export type PulseEvent = {
   /** ms since the epoch, from the log row. */
