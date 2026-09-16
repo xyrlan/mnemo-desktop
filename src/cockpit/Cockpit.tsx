@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMission } from '../mission/app-store'
-import { store as appStore, useApp } from '../layout/app-store'
-import { childWord, delta, needKind, pruneSnapshot, type Mission } from '../mission/types'
+import { useApp } from '../layout/app-store'
+import { pruneSnapshot } from '../mission/types'
 import { focusedCwd, focusedFirst, repoOfCwd } from '../mission/scope'
-import { paneForSession } from '../layout/tabs'
-import { fmtTokens } from '../mission/tokens'
-import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
+import { foldsOpen } from '../mission/store'
+import { attachChild } from '../mission/rows'
 import { githubStore, useGithub } from '../github/app-store'
 import { tauriChrome } from '../chrome/client'
 import { listKey } from '../actions/keys'
 import { pruneGone } from './needs'
 import { buildInbox, rowChild, type Inbox, type Row } from './inbox'
 import type { RepoGroup } from '../mission/types'
-import { landMission, mergePr, openJob, stopChild, useArm } from './actions'
-import { answerPane, answerPrompt, detachAnswer, useAnswer, type Choice } from './approve'
+import { useArm } from './actions'
+import { answerPrompt, type Choice } from './approve'
 import MissionMap from './MissionMap'
+import InboxRow, { isPermission, PRIMARY, runPrimary } from './InboxRow'
+import CockpitBody from './CockpitBody'
 import { lastCwd } from './where'
 import './cockpit.css'
 
@@ -39,13 +40,6 @@ function useBranch(cwd: string | undefined): string | null {
   return git.cwd === cwd ? git.branch : null
 }
 
-/** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
-const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'abrir job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
-const armKey = (r: Row) => `${r.kind === 'ready' ? 'merge' : r.kind === 'land' ? 'land' : 'stop'}:${r.key}`
-
-/** A blocked row whose child is parked on a permission prompt: Aprovar / Negar, not a reply. */
-const isPermission = (r: Row | undefined) => r?.kind === 'blocked' && needKind(r.child) === 'permission'
-
 /** `y` / `n` (⇧Y: and do not ask again) on the selected row. Never with ⌘/⌃/⌥ or while typing. */
 export function answerKey(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'target'>): Choice | null {
   if (e.metaKey || e.ctrlKey || e.altKey) return null
@@ -56,112 +50,11 @@ export function answerKey(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' |
   return k === 'y' ? (e.shiftKey ? 'always' : 'yes') : k === 'n' && !e.shiftKey ? 'no' : null
 }
 
-/** The pane of this window the row's child runs in, if it is open here. */
-function rowPane(r: Row): number | null {
-  const c = rowChild(r)
-  return c ? paneForSession(appStore.getState(), c) : null
-}
-
 /** Each list grouped by repo in `repos` order (the focused repo first), urgency kept inside a repo. */
 function byRepo(inbox: Inbox, repos: RepoGroup[]): Inbox {
   const at = new Map(repos.map((r, i) => [r.root, i]))
   const sort = <T extends Row>(list: T[]) => list.map((r, i) => [r, i] as const).sort(([a, i], [b, j]) => (at.get(a.repo.root) ?? 0) - (at.get(b.repo.root) ?? 0) || i - j).map(([r]) => r)
   return { needs: sort(inbox.needs), working: sort(inbox.working), done: sort(inbox.done) }
-}
-
-function runPrimary(r: Row, fire: (key: string) => boolean) {
-  const here = rowPane(r)
-  if (here !== null && (r.kind === 'blocked' || r.kind === 'working' || r.kind === 'done')) appStore.getState().goToPane(here)
-  else if (r.kind === 'ci') openJob(r.pr)
-  else if (r.kind === 'ready') fire(armKey(r)) && mergePr(r.repo.root, r.pr)
-  else if (r.kind === 'land') fire(armKey(r)) && landMission(r.repo.root, r.mission)
-  else openMissionPane(r.child)
-}
-
-/** A click on the row itself opens what it is about, never anything that cannot be undone. */
-function openRow(r: Row) {
-  const here = rowPane(r)
-  if (here !== null) appStore.getState().goToPane(here)
-  else if (r.kind === 'ci' || r.kind === 'ready') openPr(r.pr)
-  else if (r.kind === 'land') openContract(r.mission)
-  else openMissionPane(r.child)
-}
-
-function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMap }: {
-  row: Row
-  selected: boolean
-  showRepo: boolean
-  /** The map is open beside the list: the row is its title, the map button just `⤢`. */
-  narrow: boolean
-  armed: string | null
-  fire: (key: string) => boolean
-  onSelect: () => void
-  onMap: (m: Mission) => void
-}) {
-  const looked = useMission((s) => s.looked)
-  const lastSent = useMission((s) => (row.kind === 'blocked' ? s.sent[row.child.id]?.at(-1)?.at : undefined))
-  const replied = row.kind === 'blocked' && Date.now() - (lastSent ?? 0) < 60_000
-  const child = rowChild(row)
-  // Open in this window: the row is a link to its tab.
-  const here = useApp((s) => (child ? paneForSession(s, child) : null))
-  const d = child ? delta(child, looked) : 0
-  const isArmed = armed === armKey(row)
-  // The attach an Aprovar / Negar opened, while its pane is still open here.
-  const answer = useAnswer(child?.id ?? '')
-  const answered = useApp(() => (child && answer ? answerPane(child.id) : null))
-
-  const [word, label, detail] =
-    row.kind === 'blocked' ? [replied ? 'replied' : 'BLOCKED', row.label, '']
-    : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, row.pr.head]
-    : row.kind === 'ready' ? ['ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
-    : row.kind === 'land' ? ['land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
-    : [childWord(row.child), row.label, row.child.detail]
-
-  const btn = (text: string, run: () => void, cls = '', title?: string) => (
-    <button
-      className={`ck-act${cls ? ` ${cls}` : ''}`}
-      title={title}
-      onClick={(e) => {
-        e.stopPropagation()
-        onSelect()
-        run()
-      }}
-    >
-      {text}
-    </button>
-  )
-
-  return (
-    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}${here !== null ? ' ck-here' : ''}`} data-key={row.key}>
-      <div
-        className="ck-row-head"
-        onClick={() => {
-          onSelect()
-          openRow(row)
-        }}
-        title={here !== null ? `Go to its tab · ${child?.cwd}` : (child?.cwd ?? row.repo.root)}
-      >
-        <span className="nd-word">{word}</span>
-        <span className="ck-label">{label}</span>
-        {here !== null && <span className="ck-tab-link">↗ tab</span>}
-        {detail && <span className="ck-detail">{detail}</span>}
-        <span className="ck-spacer" />
-        {showRepo && <span className="nd-repo">{row.repo.name}</span>}
-        {d > 0 && <span className="m-delta">+{d}</span>}
-        {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
-        {row.mission && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
-        {row.kind === 'ci' && btn('abrir job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
-        {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
-        {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
-        {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
-        {child && answered !== null && btn('detach', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
-        {child && answered === null && (row.kind === 'blocked' || child.live) && btn('attach', () => attachChild(child.id), '', `claude attach ${child.id}`)}
-        {row.kind === 'blocked' &&
-          btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
-      </div>
-      {row.kind === 'blocked' && <ReplyBox c={row.child} />}
-    </div>
-  )
 }
 
 /** What needs you in every repo, grouped by repo with the focused one first: blocked children
@@ -188,10 +81,9 @@ export default function Cockpit() {
     return { snap, repos, inbox: byRepo(buildInbox({ ...snap, repos }), repos) }
   }, [raw, focused?.root])
 
-  const [open, setOpen] = useState<{ working?: boolean; done?: boolean }>({})
-  // Nothing pending: who is working is the whole story, so it starts open.
-  const workingOpen = open.working ?? inbox.needs.length === 0
-  const doneOpen = open.done ?? false
+  // The same folds the sidebar shows: open one here and it is open there.
+  const folds = useMission((s) => s.folds)
+  const { working: workingOpen, done: doneOpen } = foldsOpen(folds, inbox.needs.length)
   const rows: Row[] = [...inbox.needs, ...(workingOpen ? inbox.working : []), ...(doneOpen ? inbox.done : [])]
 
   const [selKey, setSelKey] = useState<string | null>(null)
@@ -311,27 +203,12 @@ export default function Cockpit() {
       )}
       <div className={`ck-body${mapAt ? ' ck-mapped' : ''}`}>
         <div className="ck-inbox" ref={body}>
-          {inbox.needs.length > 0 ? (
-            <div className="ck-needs">{renderRows(inbox.needs)}</div>
-          ) : (
-            !err && <div className="ck-empty">nada pendente</div>
-          )}
-          {inbox.working.length > 0 && (
-            <div className="ck-section">
-              <button className="ck-fold" aria-expanded={workingOpen} onClick={() => setOpen((o) => ({ ...o, working: !workingOpen }))}>
-                {workingOpen ? '▾' : '▸'} andando: {inbox.working.length}
-              </button>
-              {workingOpen && renderRows(inbox.working)}
-            </div>
-          )}
-          {inbox.done.length > 0 && (
-            <div className="ck-section">
-              <button className="ck-fold" aria-expanded={doneOpen} onClick={() => setOpen((o) => ({ ...o, done: !doneOpen }))}>
-                {doneOpen ? '▾' : '▸'} feito hoje: {inbox.done.length}
-              </button>
-              {doneOpen && renderRows(inbox.done)}
-            </div>
-          )}
+          <CockpitBody
+            inbox={inbox}
+            needs={<div className="ck-needs">{renderRows(inbox.needs)}</div>}
+            empty={!err && <div className="ck-empty">nada pendente</div>}
+            renderRows={renderRows}
+          />
         </div>
         {mapAt && (
           <div className="ck-map">

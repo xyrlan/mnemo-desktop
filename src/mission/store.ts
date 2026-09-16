@@ -21,6 +21,18 @@ export type MissionState = {
    *  `asMe` when it was typed into the child's terminal instead of posted to its inbox. */
   sent: Record<string, Sent[]>
   translating: Record<string, boolean>
+  /** The cockpit body's folds, shared by the sidebar and the pane. Unset follows `foldsOpen`'s
+   *  defaults; set, it is what the user last clicked. */
+  folds: Folds
+}
+
+export type Fold = 'working' | 'done'
+export type Folds = Partial<Record<Fold, boolean>>
+
+/** Which cockpit sections are open: `needs` always is; `andando` opens by itself when nothing
+ *  needs you (who is working is then the whole story); `feito` starts collapsed. */
+export function foldsOpen(folds: Folds, needs: number): Record<Fold, boolean> {
+  return { working: folds.working ?? needs === 0, done: folds.done ?? false }
 }
 
 export type Sent = { at: number; text: string; original: string; asMe?: boolean }
@@ -39,6 +51,7 @@ export type MissionActions = {
   replyAsMe(id: string, suggested?: string | null): Promise<boolean>
   /** Replace the draft with its English translation (via `claude -p`). */
   translateDraft(id: string): Promise<boolean>
+  setFold(fold: Fold, open: boolean): void
 }
 
 export type MissionStore = StoreApi<MissionState & MissionActions>
@@ -61,6 +74,7 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
     typing: {},
     sent: {},
     translating: {},
+    folds: {},
 
     async refresh(focusedCwd, withPrs) {
       if (get().polling) return
@@ -97,6 +111,9 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
     },
     setSidebarWidth(w) {
       set({ sidebarWidth: Math.min(720, Math.max(240, w)) })
+    },
+    setFold(fold, open) {
+      set((s) => ({ folds: { ...s.folds, [fold]: open } }))
     },
     setDraft(id, text) {
       set((s) => ({ drafts: { ...s.drafts, [id]: text } }))
