@@ -29,7 +29,7 @@ const badge = () => host.querySelector<HTMLButtonElement>('.pane-bar-pulse')
 
 beforeEach(async () => {
   vi.useFakeTimers()
-  pulseStore.setState({ log: [], counts: {} })
+  pulseStore.setState({ log: [], counts: {}, claims: [] })
   missionStore.setState({ snapshot })
   store.setState({ tabs: [], activeTab: '', panes: {} })
   store.getState().openView('editor', { root: '/Users/me/github/mnemo-desktop-wt-c-pulse' }, 'tab', 'notes.md')
@@ -68,7 +68,7 @@ test('a pulse from the pane repo flashes the rule for FLASH_MS and leaves a coun
   expect(bar().classList).not.toContain('pane-bar-pulsing')
   expect(bar().querySelector('.pane-bar-glow')).toBeNull()
   expect(badge()!.textContent).toBe('↯ 2')
-  expect(badge()!.title).toBe('2 mnemo events in mnemo-desktop since launch')
+  expect(badge()!.title).toBe('2 mnemo events in this pane since launch')
 })
 
 test('clicking the badge opens the rule; after a briefing it opens the last rule that fired', async () => {
@@ -85,9 +85,9 @@ test('clicking the badge opens the rule; after a briefing it opens the last rule
   expect(store.getState().tabs[0].focused).toBe(focused)
 })
 
-test('a pulse that arrived before the bar mounted does not flash, but counts', async () => {
-  act(() => root.unmount())
+test('a bar mounted again does not flash an old pulse, but keeps its count', async () => {
   await push(ev())
+  act(() => root.unmount())
   await act(async () => vi.advanceTimersByTime(FLASH_MS + 1))
   root = createRoot(host)
   await act(async () => root.render(<PaneBar id={store.getState().tabs[0].focused} client={git} />))
@@ -103,4 +103,37 @@ test('a pulse from the pane repo also plays the overlay scene', async () => {
 test('a pulse from another repo plays no overlay', async () => {
   await push(ev({ project: 'clubinho', agent: 'clubinho' }))
   expect(host.querySelector('.pv-overlay')).toBeNull()
+})
+
+test('two panes on one repo: each flashes and counts its own session, a sessionless pulse lands in one', async () => {
+  const first = store.getState().tabs[0].focused
+  store.getState().openView('editor', { root: '/Users/me/github/mnemo-desktop-wt-c-pulse' }, 'split-row', 'other.md')
+  const second = store.getState().tabs[0].focused
+  expect(second).not.toBe(first)
+  store.getState().setSessionId(first, 'sa')
+  store.getState().setSessionId(second, 'sb')
+  const other = document.createElement('div')
+  document.body.appendChild(other)
+  const otherRoot = createRoot(other)
+  await act(async () => otherRoot.render(<PaneBar id={second} client={git} />))
+  const badgeOf = (h: HTMLElement) => h.querySelector('.pane-bar-pulse')?.textContent ?? null
+  const scene = (h: HTMLElement) => h.querySelector('.pv-overlay') !== null
+
+  await push(ev({ session_id: 'sa', slugs: ['for-a'] }))
+  expect([badgeOf(host), badgeOf(other)]).toEqual(['↯ for-a1', null])
+  expect([scene(host), scene(other)]).toEqual([true, false])
+
+  await act(async () => vi.advanceTimersByTime(FLASH_MS + 1))
+  await push(ev({ session_id: 'sb', slugs: ['for-b'] }))
+  expect([badgeOf(host), badgeOf(other)]).toEqual(['↯ 1', '↯ for-b1'])
+
+  // No session: the focused pane (the second) takes it, and only it.
+  await act(async () => vi.advanceTimersByTime(FLASH_MS + 1))
+  await push(ev({ kind: 'learned', slugs: ['learnt'] }))
+  expect([badgeOf(host), badgeOf(other)]).toEqual(['↯ 1', '↯ learnt2'])
+  expect([scene(host), scene(other)]).toEqual([false, true])
+
+  act(() => otherRoot.unmount())
+  other.remove()
+  expect(pulseStore.getState().claims.map((c) => c.pane)).toEqual([first])
 })

@@ -38,10 +38,17 @@ function useGit(cwd: string | undefined, client: ChromeClient, bar: React.RefObj
   return git.cwd === cwd ? git : {}
 }
 
-/** The newest pulse of `place` while it is under `FLASH_MS` old, and how many it has had. */
-function usePulseFlash(place: string | undefined): { live: Pulse | undefined; count: number } {
-  const latest = usePulse((s) => (place ? s.latestFor(place) : undefined))
-  const count = usePulse((s) => (place ? s.countFor(place) : 0))
+/** Claims pane `id` for the pulses of its session and repo (see `routePulse`) while mounted. */
+function usePulseClaim(id: PaneId, place: string | undefined, sessionId: string | undefined) {
+  const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
+  useEffect(() => pulseStore.getState().claim({ pane: id, place, sessionId, focused }), [id, place, sessionId, focused])
+  useEffect(() => () => pulseStore.getState().release(id), [id])
+}
+
+/** The newest pulse of pane `id` while it is under `FLASH_MS` old, and how many it has had. */
+function usePulseFlash(id: PaneId): { live: Pulse | undefined; count: number } {
+  const latest = usePulse((s) => s.latestFor(id))
+  const count = usePulse((s) => s.countFor(id))
   const [live, setLive] = useState<Pulse>()
   useEffect(() => {
     const left = latest ? latest.received + FLASH_MS - Date.now() : 0
@@ -64,7 +71,8 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
   const cwd = barInfo(pane, snap).cwd
   const git = useGit(cwd, client, ref)
   const info = barInfo(pane, snap, git)
-  const { live, count } = usePulseFlash(info.place)
+  usePulseClaim(id, info.place, pane?.sessionId)
+  const { live, count } = usePulseFlash(id)
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return
@@ -87,7 +95,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
   const openPulse = (e: React.MouseEvent) => {
     e.stopPropagation()
     // The rule of the flash, else the last rule that fired here (a briefing names none).
-    const hit = live?.event.slugs.length ? live.event : info.place && pulseStore.getState().recentFor(info.place).find((x) => x.slugs.length)
+    const hit = live?.event.slugs.length ? live.event : pulseStore.getState().recentFor(id).find((x) => x.slugs.length)
     if (hit) void openRule(hit.slugs[0], hit.agent || hit.project)
   }
 
@@ -104,7 +112,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
         {count > 0 && (
           <button
             className={`pane-bar-pulse${live ? ' live' : ''}`}
-            title={live ? pulseTitle(live.event) : `${count} mnemo event${count === 1 ? '' : 's'} in ${info.place} since launch`}
+            title={live ? pulseTitle(live.event) : `${count} mnemo event${count === 1 ? '' : 's'} in this pane since launch`}
             onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -128,7 +136,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
           ×
         </button>
       </div>
-      <Overlay place={info.place} />
+      <Overlay pane={id} />
     </>
   )
 }
