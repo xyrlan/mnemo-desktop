@@ -99,13 +99,14 @@ test('a fold clicked in one surface is the fold in the other', async () => {
   expect(missionStore.getState().folds).toEqual({ working: false })
 })
 
-test('the vault slot docks after the body and holds a placeholder until something fills it', async () => {
+test('the vault slot docks after the body, holding the square', async () => {
   await renderBoth()
   const bar = side.querySelector('.sidebar')!
   const slot = bar.lastElementChild as HTMLElement
   expect(slot.className).toBe('vault-level-slot sidebar-vault')
   expect(slot.previousElementSibling?.className).toBe('sidebar-body')
-  expect(slot.querySelector('.vault-level-placeholder')).not.toBeNull()
+  expect(slot.querySelector('.vl-square')).not.toBeNull()
+  expect(slot.querySelector('.vault-level-placeholder')).toBeNull()
 })
 
 test('children replace the placeholder', () => {
