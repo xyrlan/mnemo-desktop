@@ -21,7 +21,7 @@ const NO_VAULT_RETRY: Duration = Duration::from_secs(30);
 pub struct PulseEvent {
     /// ms since the epoch, from the log row (the time it was read when the row has none).
     pub at: u64,
-    /// `reflex`, `tool`, `enrich` or `enforce`.
+    /// `reflex`, `tool`, `catchup`, `enrich` or `enforce`.
     pub kind: &'static str,
     pub project: String,
     /// The row's agent, else its project.
@@ -104,7 +104,8 @@ pub fn parse_line(log: Log, line: &str, now: u64) -> Option<PulseEvent> {
         Log::Access => {
             let tool = row.tool.filter(|t| !t.is_empty() && !t.starts_with("llm."))?;
             let slugs = slugs(row.hit_slugs.as_deref().unwrap_or_default());
-            Some(PulseEvent { kind: "tool", tool: Some(tool), hits: row.result_count, slugs, ..base })
+            let kind = if tool == "session_start.inject" { "catchup" } else { "tool" };
+            Some(PulseEvent { kind, tool: Some(tool), hits: row.result_count, slugs, ..base })
         }
         Log::Enrich => {
             let slugs = slugs(row.hit_slugs.as_deref().unwrap_or_default());
@@ -258,9 +259,21 @@ mod tests {
         let e = events(Log::Access, "mcp-access-log.jsonl");
         let tools: Vec<_> = e.iter().map(|e| (e.tool.as_deref().unwrap(), e.slugs.len(), e.hits)).collect();
         assert_eq!(tools, [("session_start.inject", 0, Some(1)), ("list_rules_by_topic", 2, Some(2)), ("read_mnemo_rule", 1, Some(1))]);
-        assert!(e.iter().all(|e| e.kind == "tool" && e.session_id.is_none()));
+        assert!(e.iter().all(|e| e.session_id.is_none()));
+        assert_eq!(e[0].kind, "catchup");
+        assert!(e[1..].iter().all(|e| e.kind == "tool"));
         // Inject rows carry their agent; MCP calls only a project, which stands in.
         assert_eq!((e[0].agent.as_str(), e[2].agent.as_str()), ("sg-imports", "mnemo-desktop"));
+    }
+
+    #[test]
+    fn session_start_inject_is_catchup_not_tool() {
+        let e = events(Log::Access, "mcp-access-log.jsonl");
+        let kinds: Vec<_> = e.iter().map(|e| (e.kind, e.tool.as_deref().unwrap())).collect();
+        assert_eq!(
+            kinds,
+            [("catchup", "session_start.inject"), ("tool", "list_rules_by_topic"), ("tool", "read_mnemo_rule")]
+        );
     }
 
     #[test]
