@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>mission map card — every child state</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../graph/graph.css">
+<link rel="stylesheet" href="./cockpit.css">
+<style>
+  body { background: var(--bg); color: var(--fg); font: 12px ui-monospace, Menlo, monospace; margin: 0; padding: 28px; }
+  h1 { font-size: 14px; margin: 0 0 4px; }
+  p.lede { color: var(--fg-muted); margin: 0 0 24px; max-width: 74ch; line-height: 1.6; }
+  .row { display: flex; flex-wrap: wrap; gap: 18px; }
+  figure { margin: 0; }
+  figcaption { margin-top: 7px; color: var(--fg-muted); font-size: 10px; text-align: center; }
+</style>
+
+<h1>mission map card — every child state</h1>
+<p class="lede">
+  The real <code>.mm-card</code> at its real size (200×78), with the real actions row. The question:
+  does the octopus sit clear of the buttons, and is <strong>BLOCKED</strong> still the one your eye lands on?
+</p>
+
+<div class="cockpit"><div class="row" id="row"></div></div>
+
+<script type="module">
+  import { STATE_SCENES, withPartIndex } from '../avatar/scenes.ts'
+  import '../avatar/avatar.css'
+
+  const TONE = { active: 'accent', BLOCKED: 'bad', stalled: 'warn', done: 'ok', stopped: 'muted' }
+  const SUB = {
+    active: 'writing the cockpit pane',
+    BLOCKED: 'may I add a crate?',
+    stalled: 'no move for 14 min',
+    done: 'PR #352 open',
+    stopped: 'stopped',
+  }
+  const BADGE = { active: '+3 · 320k', BLOCKED: 'BLOCKED', stalled: '', done: '', stopped: '' }
+  const ACTS = {
+    active: ['attach', 'open'],
+    BLOCKED: ['reply', 'attach'],
+    stalled: ['attach', 'open'],
+    done: ['open'],
+    stopped: ['open'],
+  }
+
+  const svg = (scene) => {
+    const rects = withPartIndex(scene.rects)
+      .map(([r, n]) => `<rect class="av-${r.part} av-${r.part}-${n}" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>`)
+      .join('')
+    return `<svg class="av av-${scene.tone} ${scene.className}" width="30" height="30" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`
+  }
+
+  const row = document.getElementById('row')
+  for (const [state, scene] of Object.entries(STATE_SCENES)) {
+    const badge = BADGE[state] ? `<span class="gr-badge">${BADGE[state]}</span>` : ''
+    const acts = ACTS[state].map((w) => `<button class="mm-act mm-act-${w}">${w}</button>`).join('')
+    row.insertAdjacentHTML(
+      'beforeend',
+      `<figure>
+         <div class="gr-card mm-card gr-${TONE[state]}">
+           <div class="gr-label"><span class="mm-label">vault</span>${badge}</div>
+           <span class="mm-avatar">${svg(scene)}</span>
+           <div class="gr-sub">${SUB[state]}</div>
+           <div class="mm-actions">${acts}</div>
+         </div>
+         <figcaption>${state}</figcaption>
+       </figure>`,
+    )
+  }
+</script>
+</html>
