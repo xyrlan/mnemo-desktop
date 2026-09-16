@@ -124,18 +124,30 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     <div className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
       <svg className="vl-halo" width={SQUARE} height={SQUARE} viewBox={`0 0 ${SQUARE} ${SQUARE}`} aria-hidden="true">
         {dots.map((d, i) => (
-          <rect
-            key={i}
-            className={lit.has(i) ? 'vl-dot vl-lit' : 'vl-dot'}
-            x={d.x}
-            y={d.y}
-            width={d.w}
-            height={d.h}
-            transform={`rotate(${d.a} ${d.x + d.w / 2} ${d.y + d.h / 2})`}
-            style={{ animationDelay: `${(i % 9) * 0.35}s` }}
-          />
+          // The climb owns `transform`, so the tilt goes on a wrapper: put both on one element
+          // and the animation wins and the tilt is lost. Each fragment starts at the bottom
+          // edge; `vl-rain` carries it past the top.
+          <g key={i} transform={`rotate(${d.a} ${d.x + d.w / 2} ${SQUARE})`}>
+            <rect
+              className={lit.has(i) ? 'vl-dot vl-lit' : 'vl-dot'}
+              x={d.x}
+              y={SQUARE}
+              width={d.w}
+              height={d.h}
+              style={
+                {
+                  '--vl-depth': d.depth.toFixed(3),
+                  '--vl-sway': `${d.sway}px`,
+                  animationDuration: `${d.rise}s`,
+                  animationDelay: `${d.delay}s`,
+                } as React.CSSProperties
+              }
+            />
+          </g>
         ))}
       </svg>
+      {/* The vent the fragments come out of, lit in their own colour. */}
+      <div className="vl-glow" aria-hidden="true" />
       <div className={`vl-octo${away ? ' vl-away' : ''}${eating ? ' vl-eating' : ''}`}>
         {fire && <Flames />}
         {eating && <Morsel />}

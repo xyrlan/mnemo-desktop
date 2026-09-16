@@ -114,33 +114,44 @@ export function haloDots(pages: number): number {
   return Math.min(HALO_MAX_DOTS, HALO_MIN_DOTS + bands * HALO_PER_BAND)
 }
 
-/** A fragment of memory: a small tilted square, the way a note looks from across the room.
- *  `w`/`h` are its size, `a` its rotation in degrees. */
-export type Dot = { x: number; y: number; w: number; h: number; a: number }
+/** A fragment of memory rising through the square: it appears at the bottom edge and fades out
+ *  at the top. `x` is its column and `w`/`h` its size; `a` is its tilt in degrees; `depth` 0
+ *  (near) to 1 (far) makes the far ones smaller, dimmer, softer and slower. `rise` is the
+ *  seconds one climb takes and `delay` where in that climb it starts, so the rain is already
+ *  falling when the square mounts rather than starting as one flat wave. `sway` is how far it
+ *  drifts sideways on the way up. */
+export type Dot = { x: number; w: number; h: number; a: number; depth: number; rise: number; delay: number; sway: number }
 
-const GOLDEN = Math.PI * (3 - Math.sqrt(5))
+/** The golden ratio's fractional part: stepping by it spreads a sequence evenly across [0, 1)
+ *  without ever repeating, which is what keeps the columns and the start times from banding. */
+const PHI = 0.6180339887
 
-/** `n` fragments on a sunflower spiral inside a `size` square, clear of the centre where the
- *  octopus sits. Deterministic, so a re-render never reshuffles them: the same vault always
- *  draws the same halo. Sizes and tilts vary by index so the field reads as scattered notes
- *  rather than a printed pattern. */
+/** `n` fragments raining upward through a `size` square. Deterministic, so a re-render never
+ *  reshuffles them: the same vault always draws the same rain.
+ *
+ *  Only `x` is a position — `y` belongs to the animation, which carries each fragment from
+ *  below the bottom edge to above the top one. */
 export function haloLayout(n: number, size: number): Dot[] {
-  const c = size / 2
-  const inner = size * 0.19
-  const outer = size * 0.485
   return Array.from({ length: n }, (_, i) => {
-    const t = Math.sqrt((i + 0.5) / Math.max(1, n))
-    const rad = inner + (outer - inner) * t
-    const a = i * GOLDEN
-    // Three sizes in a fixed rotation: a few larger notes carry the field, the rest fill it.
-    const side = i % 7 === 0 ? 3.4 : i % 3 === 0 ? 2.6 : 2
+    // Depth cycles rather than ramping, so near and far fragments are interleaved across the
+    // width instead of the near ones all landing on one side.
+    const depth = ((i * 7) % 11) / 10
+    const side = (5.4 - 3.9 * depth) * (i % 7 === 0 ? 1.2 : i % 3 === 0 ? 1 : 0.78)
+    const rise = 7 + depth * 9
     return {
-      x: c + rad * Math.cos(a) - side / 2,
-      y: c + rad * Math.sin(a) - side / 2,
+      // Golden-ratio columns, inset so nothing clips the sides.
+      x: size * 0.04 + ((i * PHI) % 1) * size * 0.92,
       w: side,
       // Slightly off-square: a note is taller than it is wide.
       h: side * 1.15,
       a: ((i * 37) % 4) * 11 - 16,
+      depth,
+      // Near fragments rise faster than far ones (7s to 16s): parallax, not a uniform curtain.
+      rise,
+      // A negative delay starts the fragment mid-climb, so the rain is already underway.
+      delay: -((i * PHI * 3) % 1) * rise,
+      // Sideways drift on the way up, alternating, larger for the near ones.
+      sway: (i % 2 ? 1 : -1) * (2 + (1 - depth) * 6),
     }
   })
 }

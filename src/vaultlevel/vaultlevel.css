@@ -11,12 +11,44 @@
 .vl-red { --vl-tone: color-mix(in oklab, var(--ansi-red) 62%, #7d1d2e); }
 .vl-muted { --vl-tone: var(--fg-muted); }
 
-/* Layer 1 — the halo: one tilted note per band of pages. It never leaves. */
+/* Layer 1 — memory, raining upward. Fragments appear at the bottom edge and fade out past
+   the top; the vault breathes them out. Each rises on its own clock, at a speed set by how far
+   away it is, so the field has parallax rather than one uniform curtain. */
 .vl-halo { position: absolute; inset: 0; }
-@keyframes vl-twinkle { 0%, 100% { opacity: .5; } 50% { opacity: .78; } }
-.vl-dot { fill: var(--vl-tone); opacity: .62; animation: vl-twinkle 3.2s ease-in-out infinite; transition: fill .15s; }
-@keyframes vl-flash { 0% { opacity: 1; } 100% { opacity: .62; } }
-.vl-dot.vl-lit { fill: var(--fg); animation: vl-flash .7s ease-out 1; }
+@keyframes vl-rain {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+  /* Fade in just clear of the edge, so nothing pops into existence mid-square. */
+  9% { opacity: calc(.34 + (1 - var(--vl-depth)) * .46); }
+  78% { opacity: calc(.3 + (1 - var(--vl-depth)) * .4); }
+  /* -174 clears the 160-unit viewBox plus the fragment's own height. */
+  100% { transform: translate(var(--vl-sway), -174px) rotate(9deg); opacity: 0; }
+}
+.vl-dot {
+  fill: var(--vl-tone);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: vl-rain 11s linear infinite;
+  transition: fill .15s;
+  will-change: transform, opacity;
+  /* Depth of field: the far ones go soft, the near ones stay crisp. */
+  filter: blur(calc(var(--vl-depth, 0) * .55px));
+}
+/* A pulse lights whatever is in the air: they flare white without leaving their climb. */
+.vl-dot.vl-lit { fill: var(--fg); }
+
+/* The vent: fragments are lit from the edge they come out of. */
+.vl-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46px;
+  pointer-events: none;
+  background: linear-gradient(to top, color-mix(in oklab, var(--vl-tone) 78%, transparent), color-mix(in oklab, var(--vl-tone) 22%, transparent) 42%, transparent);
+  animation: vl-vent 5.5s ease-in-out infinite;
+}
+@keyframes vl-vent { 0%, 100% { opacity: .62; } 50% { opacity: 1; } }
 
 /* The body takes the square's own tone, so all five bands colour it, not just the four
    `avatar.css` happens to define. */
@@ -25,7 +57,7 @@
 .vl-body .av-eye { fill: var(--bg); }
 
 /* Layer 2 — the octopus, which leaves the square while a scene plays. */
-.vl-octo { position: absolute; left: 40px; top: 30px; width: 80px; height: 80px; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; }
+.vl-octo { position: absolute; left: 40px; top: 30px; width: 80px; height: 80px; z-index: 1; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; }
 .vl-octo.vl-away { transform: scale(0); opacity: 0; }
 
 /* idle — the octopus at rest, breathing. Its scene is in `src/avatar/scenes.ts` (IDLE);

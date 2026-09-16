@@ -104,16 +104,19 @@ test('the halo grows in bands and stays within its bounds', () => {
   for (let p = 0; p < 20_000; p += 137) expect(haloDots(p + 137)).toBeGreaterThanOrEqual(haloDots(p))
 })
 
-test('halo dots are deterministic and sit inside the square, clear of the centre', () => {
+test('the rain is deterministic and every fragment starts on the bottom edge', () => {
   const dots = haloLayout(40, 160)
   expect(dots).toEqual(haloLayout(40, 160))
   for (const d of dots) {
-    const off = Math.hypot(d.x - 80, d.y - 80)
-    expect(off).toBeGreaterThanOrEqual(160 * 0.2 - 0.01)
-    expect(off).toBeLessThanOrEqual(80)
+    // `y` belongs to the animation; only the column is laid out, and it stays inside the square.
+    expect(d.x).toBeGreaterThanOrEqual(0)
+    expect(d.x + d.w).toBeLessThanOrEqual(160)
+    expect(d.rise).toBeGreaterThan(0)
+    // A negative delay starts the climb part-way through, so the rain is already underway.
+    expect(d.delay).toBeLessThanOrEqual(0)
+    expect(Math.abs(d.delay)).toBeLessThanOrEqual(d.rise)
   }
 })
-
 test('a pulse flashes a few distinct dots, and never one that does not exist', () => {
   expect(flashed(3, 0).size).toBe(0)
   const f = flashed(12, 40)
@@ -138,4 +141,18 @@ test('every command the client invokes is registered in the vaultlevel block of 
   await Promise.all([c.level(), c.best(1)])
   expect(registered.sort()).toEqual(invoked.sort())
   for (const cmd of invoked) expect(vaultRs).toContain(`pub async fn ${cmd}(`)
+})
+
+test('fragments carry depth: the near ones are bigger and faster than the far ones', () => {
+  const dots = haloLayout(60, 160)
+  // Depth is interleaved across the width, not ramped, so near and far fragments mix.
+  const byDepth = [...dots].sort((a, b) => a.depth - b.depth)
+  expect(byDepth[0].depth).toBeLessThan(byDepth[byDepth.length - 1].depth)
+  // The near ones are bigger and faster than the far ones.
+  const near = byDepth.slice(0, 10)
+  const far = byDepth.slice(-10)
+  expect(near.reduce((a, d) => a + d.w, 0)).toBeGreaterThan(far.reduce((a, d) => a + d.w, 0))
+  expect(near.reduce((a, d) => a + d.rise, 0)).toBeLessThan(far.reduce((a, d) => a + d.rise, 0))
+  // Every fragment climbs on its own clock: no two start the same wave.
+  expect(new Set(dots.map((d) => d.delay)).size).toBeGreaterThan(dots.length / 2)
 })
