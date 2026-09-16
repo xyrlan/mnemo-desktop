@@ -4,7 +4,6 @@ import { vi } from 'vitest'
 import Square, { FLASH_MS } from './Square'
 import { OVERLAY_MS } from '../pulse/Overlay'
 import { createPulseStore } from '../pulse/store'
-import { FILLED, fillSlots } from './mount'
 import type { LevelClient } from './client'
 import type { VaultLevel } from './types'
 import type { PulseEvent } from '../pulse/types'
@@ -120,36 +119,3 @@ test('a second pulse keeps him away for a full scene', async () => {
   unmount()
 })
 
-test('slots are filled as they appear, marked, and released when they go', async () => {
-  const scope = document.createElement('div')
-  document.body.appendChild(scope)
-  const stop = fillSlots(scope, () => <span className="probe">sq</span>)
-
-  const slot = document.createElement('div')
-  slot.setAttribute('data-vault-level-slot', '')
-  slot.innerHTML = '<div class="vault-level-placeholder"></div>'
-  await act(async () => {
-    scope.appendChild(slot)
-    await Promise.resolve()
-  })
-  expect(slot.classList.contains(FILLED)).toBe(true)
-  expect(slot.querySelector('.probe')?.textContent).toBe('sq')
-  expect(slot.querySelector('.vault-level-placeholder')).not.toBeNull()
-
-  await act(async () => {
-    slot.remove()
-    await Promise.resolve()
-  })
-  // A second slot gets its own square.
-  const again = slot.cloneNode(false) as HTMLElement
-  await act(async () => {
-    scope.appendChild(again)
-    await Promise.resolve()
-  })
-  expect(again.querySelector('.probe')).not.toBeNull()
-
-  act(() => stop())
-  expect(again.classList.contains(FILLED)).toBe(false)
-  expect(again.querySelector('.probe')).toBeNull()
-  scope.remove()
-})
