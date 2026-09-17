@@ -61,7 +61,10 @@ const RING: Rect[] = [
       Anything meant to be recognised sits clear of the arm band (y < 16) or beside it.
    2. Three scenes sharing one object array are three identical pictures with different
       timings. `enrich`, `briefing` and `catchup` are all about a document, so each gets
-      its own silhouette: pinned note, rolled bundle, open page.
+      its own silhouette: pinned note, floppy disk, speech bubble.
+   4. The vault square wears a scene until the next pulse, so the frame that matters is the
+      one at rest, not the animation. An object over the face beheads him, and an object
+      sitting on the head is a hat: only `enrich`'s pinned note is allowed to touch it.
    3. A single filled rect is a box, whatever you call it. A sign needs a stem and a
       light centre bar to read as a sign. */
 
@@ -72,11 +75,15 @@ const pages: Rect[] = [r(13, 3, 6, 4, 'object'), r(13, 3, 6, 4, 'object'), r(13,
  *  Pin, then the note body, then two text lines. */
 const note: Rect[] = [r(15, 1, 2, 2, 'object'), r(11, 3, 10, 7, 'object'), r(13, 5, 6, 1, 'object'), r(13, 7, 4, 1, 'object')]
 
-/** briefing — a rolled bundle: two end caps and a tight middle, being tucked away. */
-const bundle: Rect[] = [r(10, 4, 2, 6, 'object'), r(20, 4, 2, 6, 'object'), r(12, 5, 8, 4, 'object')]
+/** briefing — a floppy disk held at his side, being tucked away: body with the corner cut,
+ *  then a light label and a light shutter slot. It used to be a rolled bundle above the head,
+ *  and at rest that was a yellow cap; the save glyph says "saved" without the animation. */
+const disk: Rect[] = [r(0, 9, 7, 8, 'object'), r(7, 10, 1, 7, 'object'), r(1, 10, 5, 3, 'object'), r(4, 14, 2, 2, 'object')]
 
-/** catchup — an open page, wider than it is tall, with three lines of text. */
-const openPage: Rect[] = [r(8, 2, 16, 9, 'object'), r(10, 4, 12, 1, 'object'), r(10, 6, 12, 1, 'object'), r(10, 8, 8, 1, 'object')]
+/** catchup — a speech bubble off his shoulder: him telling you what you missed. Body and
+ *  stepped corners, a tail down to the head, then two text lines, last so they paint on top.
+ *  It used to be an open page across the face, which drew a headless octopus. */
+const bubble: Rect[] = [r(21, 1, 9, 7, 'object'), r(20, 2, 11, 5, 'object'), r(22, 8, 2, 1, 'object'), r(22, 9, 1, 1, 'object'), r(22, 3, 7, 1, 'object'), r(22, 5, 5, 1, 'object')]
 
 /** enforce — an octagonal STOP sign on a stem, with a white bar across it. */
 const sign: Rect[] = [
@@ -102,8 +109,10 @@ const reach: Rect[] = [r(21, 16, 2, 5, 'arm'), r(23, 14, 2, 3, 'arm')]
 /** Listed nearest the arm first, so `av-object-0` is the node about to reach the head. */
 const thread: Rect[] = [r(25, 11, 2, 2, 'object'), r(24, 9, 2, 2, 'object'), r(22, 7, 2, 2, 'object')]
 
-/** learned — one new node, brighter than the ring it joins. */
-const newNode: Rect[] = [r(15, 2, 2, 2, 'object')]
+/** learned — a new node joining the ring, drawn as a plus three times a node's size: a 2×2
+ *  node was one dot among six once the pop had settled. Both bars share a centre, so the
+ *  per-rect pop scales them as one. */
+const newNode: Rect[] = [r(26, 1, 2, 6, 'object'), r(24, 3, 6, 2, 'object')]
 
 /** What mnemo is doing. The object carries the meaning; the movement carries the life —
  *  gesture alone was tested and the nine could not be told apart. */
@@ -112,8 +121,8 @@ export const SCENES: Record<PulseKind, Scene> = {
   tool: { className: 'av-reading', tone: 'accent', rects: [...RING, ...BODY, ...ARMS.slice(0, 4), ...reach, ...thread] },
   enrich: { className: 'av-remembering', tone: 'accent', rects: [...BODY, ...ARMS, ...note] },
   enforce: { className: 'av-blocked', tone: 'red', rects: [...BODY, ...ARMS, ...sign] },
-  briefing: { className: 'av-saving', tone: 'accent', rects: [...BODY, ...ARMS, ...bundle] },
-  catchup: { className: 'av-catchup', tone: 'accent', rects: [...BODY, ...ARMS, ...openPage] },
+  briefing: { className: 'av-saving', tone: 'accent', rects: [...BODY, ...ARMS, ...disk] },
+  catchup: { className: 'av-catchup', tone: 'accent', rects: [...BODY, ...ARMS, ...bubble] },
   learned: { className: 'av-learned', tone: 'green', rects: [...RING, ...newNode, ...BODY, ...ARMS] },
   friction: { className: 'av-friction', tone: 'yellow', rects: [...BODY, ...ARMS, ...hook] },
   dispatch: { className: 'av-dispatching', tone: 'accent', rects: [...BODY, ...ARMS, ...kids] },
