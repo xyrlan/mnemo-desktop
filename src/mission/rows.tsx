@@ -132,7 +132,7 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
         </button>
         {attach && (
           <button className="m-attach-link" title={`claude attach ${c.id}`} onClick={() => attachChild(c.id)}>
-            attach
+            Take over
           </button>
         )}
         {err && <span className="m-error">{err}</span>}
