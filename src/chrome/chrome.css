@@ -1,0 +1,20 @@
+/* The edge strip a dragged pane bar would graft into. `.pane.drop-target` (theme.css)
+ * already covers the center-zone (swap) case with a whole-pane highlight. */
+.pane-drop-zone {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 2px solid var(--accent);
+  animation: pane-drop-zone-in 120ms ease-out;
+}
+.pane-drop-zone.zone-left { inset: 0 75% 0 0; border-width: 0 2px 0 0; }
+.pane-drop-zone.zone-right { inset: 0 0 0 75%; border-width: 0 0 0 2px; }
+.pane-drop-zone.zone-up { inset: 0 0 75% 0; border-width: 0 0 2px 0; }
+.pane-drop-zone.zone-down { inset: 75% 0 0 0; border-width: 2px 0 0 0; }
+
+@keyframes pane-drop-zone-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-drop-zone { animation: none; }
+}

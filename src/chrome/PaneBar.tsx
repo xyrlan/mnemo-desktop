@@ -10,6 +10,8 @@ import { pulseStore, usePulse } from '../pulse/app-store'
 import type { Pulse } from '../pulse/store'
 import { openRule } from '../pulse/open'
 import Overlay from '../pulse/Overlay'
+import DropZoneOverlay from './DropZoneOverlay'
+import './chrome.css'
 
 /** How often a visible bar asks git again (a `git switch` in the pane shows up this late). */
 export const POLL_MS = 5000
@@ -137,6 +139,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
         </button>
       </div>
       <Overlay pane={id} />
+      <DropZoneOverlay pane={id} />
     </>
   )
 }
