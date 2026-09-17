@@ -1,45 +1,47 @@
-/** The vault as a creature, at the foot of the sidebar: a halo of dots that grows with the
- *  vault, the octopus tinted by its health, and a level that never walks backwards.
+/** The vault square at the foot of the sidebar. The octopus wears the scene of the last thing
+ *  mnemo did, and keeps wearing it until the next pulse; a caption names that action, a trail
+ *  records the kinds of thing done lately, and the HUD carries the vault's level and health.
  *
- *  One octopus on screen: when a pulse arrives it shrinks out of the square while the
- *  presence overlay plays, and comes back when the scene ends. The halo stays. */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { POSES, SCENES, SHELVING, withPartIndex } from '../avatar/scenes'
-import { OVERLAY_MS } from '../pulse/Overlay'
+ *  Three sources, three surfaces: the last pulse dresses the octopus and the caption, the last
+ *  few pulses draw the trail, and `client.level()` fills the HUD. The scene owns the octopus's
+ *  colour — a blocked command is red on a green vault. Health paints him only before the first
+ *  pulse, when there is nothing else to wear. */
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { POSES, SCENES, withPartIndex, type Scene } from '../avatar/scenes'
 import type { PulseStore } from '../pulse/store'
-import type { PulseKind } from '../pulse/types'
+import { squareCaption } from './caption'
 import type { LevelClient } from './client'
-import { SHELF_ROWS, bookCount, booksPerRow, healthOf, levelOf, onFire, poseOf, shelfBooks, toneOf, xpOf } from './level'
+import { healthOf, levelOf, onFire, poseOf, toneOf, xpOf } from './level'
+import { recentPulses } from './recent'
 import type { VaultLevel } from './types'
 import '../avatar/avatar.css'
 import './vaultlevel.css'
 
-/** The square's height, and the width it falls back to before it has been measured. The width
- *  is whatever the sidebar's slot gives it, however wide the user has dragged the sidebar; only
- *  the octopus stays a fixed 80px, because pixel art does not stretch. */
-export const SQUARE = 160
+/** The square's height. Its width is whatever the sidebar's slot gives it; the octopus stays a
+ *  fixed `OCTO`, because pixel art does not stretch. */
+export const SQUARE = 176
+/** Big enough that a scene's object — a few grid cells — reads as a thing and not a smudge. */
+export const OCTO = 104
 /** `vault_level` is cached 10s on the Rust side; the square has no reason to ask faster. */
 export const POLL_MS = 30_000
-/** How long the dots a pulse lit stay lit. */
-export const FLASH_MS = 700
-/** How long the octopus takes to eat a fragment after a `learned` scene ends. */
-export const EAT_MS = 1400
+/** How often the caption's age recounts itself. Its own timer: the same period as the poll
+ *  today, but a different reason to change. */
+export const AGE_MS = 30_000
+/** Dots in the trail. */
+export const TRAIL = 5
 
 type Props = {
   client: LevelClient
   pulses: PulseStore
   pollMs?: number
+  ageMs?: number
   /** What the ▤ button does. Injected so the square stays free of the layout store. */
   openVault?: () => void
 }
 
-export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: Props) {
+export default function Square({ client, pulses, pollMs = POLL_MS, ageMs = AGE_MS, openVault }: Props) {
   const [vault, setVault] = useState<VaultLevel>()
   const [best, setBest] = useState(0)
-  const [away, setAway] = useState(false)
-  const [eating, setEating] = useState(false)
-  // A pulse lights the books, the way a lamp comes on over the desk.
-  const [lit, setLit] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -63,128 +65,74 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
     }
   }, [client, pollMs])
 
-  // The square fills its slot rather than sitting in a 160px column with empty margins, so it
-  // has to know how wide that slot actually is.
-  const box = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(SQUARE)
-  useEffect(() => {
-    const el = box.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(([e]) => setWidth(Math.max(SQUARE, Math.round(e.contentRect.width))))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  // The whole log, every pane's: the square reports on mnemo, not on the focused pane.
+  const log = useSyncExternalStore(pulses.subscribe, () => pulses.getState().log)
+  const last = log.at(-1)
+  const trail = useMemo(() => recentPulses(log, TRAIL), [log])
 
-  // The library grows sideways with the sidebar: a wider square holds more books a row, the way
-  // a wider wall holds more shelf.
-  const books = useMemo(() => {
-    const wall = Math.max(0, width - WALL_PAD * 2)
-    const perRow = booksPerRow(wall)
-    return shelfBooks(bookCount(vault?.pages ?? 0, perRow), wall)
-  }, [vault?.pages, width])
-
-  // The octopus leaves for as long as a scene plays, with the overlay's own throttle.
-  const played = useRef<Partial<Record<PulseKind, number>>>({})
+  // A new pulse resets the clock too, so it never reads as older than it is.
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    let seen = pulses.getState().log.at(-1)?.id ?? 0
-    let back: ReturnType<typeof setTimeout> | undefined
-    let unflash: ReturnType<typeof setTimeout> | undefined
-    let done: ReturnType<typeof setTimeout> | undefined
-    const unsub = pulses.subscribe((s) => {
-      const last = s.log.at(-1)
-      if (!last || last.id === seen) return
-      seen = last.id
-      const kind = last.event.kind
-      const gap = SCENES[kind]?.minIntervalMs ?? 0
-      if (gap > 0 && last.received - (played.current[kind] ?? 0) < gap) return
-      played.current[kind] = last.received
-      setAway(true)
-      setLit(true)
-      clearTimeout(back)
-      clearTimeout(unflash)
-      back = setTimeout(() => {
-        setAway(false)
-        // A rule was born while he was out: he comes back and takes it in. Only `learned`,
-        // and only after the scene — eating during it would fight the overlay for the same
-        // moment. Firing a rule is using memory, not absorbing it, so it never eats.
-        if (kind === 'learned') {
-          setEating(true)
-          done = setTimeout(() => setEating(false), EAT_MS)
-        }
-      }, OVERLAY_MS)
-      unflash = setTimeout(() => setLit(false), FLASH_MS)
-    })
-    return () => {
-      unsub()
-      clearTimeout(back)
-      clearTimeout(unflash)
-      clearTimeout(done)
-    }
-  }, [pulses])
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), ageMs)
+    return () => clearInterval(timer)
+  }, [ageMs, last?.id])
 
   const ok = !!vault && !vault.error
   // Two different questions. A vault with no pages is not a sick vault, it is an empty one:
-  // `healthOf` floors at 0 for it, which as a tone would paint it red and sink its pose as
-  // though something were wrong. It has a level and a HUD; it has no health yet.
+  // `healthOf` floors at 0 for it, which as a tone would paint the bar red.
   const rated = ok && vault.pages > 0
   const health = rated ? healthOf(vault) : 0
   const tone = rated ? toneOf(health) : 'muted'
-  const pose = POSES[rated ? poseOf(toneOf(health)) : 'fair']
   const fire = rated && onFire(health, vault.fired_recent)
   const { level, fraction } = levelOf(best)
-  const label = rated
+
+  const scene: Scene | undefined = last && SCENES[last.event.kind]
+  const cap = last && scene ? squareCaption(last.event, now) : undefined
+
+  const state = rated
     ? `vault level ${level}, health ${Math.round(health * 100)}%${fire ? ', on fire' : ''}`
     : ok
       ? 'the vault is empty'
       : vault?.error ?? 'reading the vault'
-  // He only works when there is a library to work on and the health to do it.
-  const shelving = pose !== POSES.poor && books.length > 0
+  const label = cap ? `${state}; last: ${[cap.verb, cap.target].filter(Boolean).join(' ')}, ${cap.where}` : state
   const detail = rated
     ? `${vault.pages} pages · ${vault.rules_fired} fired (${vault.fired_recent} this week) · ${vault.dormant} dormant · ${vault.inbox} in inbox`
-    : label
+    : state
 
   return (
-    <div ref={box} className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
-      <svg className={`vl-shelves${lit ? ' vl-lit' : ''}`} width={width} height={SQUARE} viewBox={`0 0 ${width} ${SQUARE}`} aria-hidden="true">
-        {Array.from({ length: SHELF_ROWS }, (_, row) => (
-          <rect key={`s${row}`} className="vl-plank" x={WALL_PAD} y={shelfY(row) + 1} width={Math.max(0, width - WALL_PAD * 2)} height={2} />
-        ))}
-        {books.map((b, i) => (
-          // The lean goes on a wrapper: `vl-slotting` animates `transform`, and both on one
-          // element means the animation wins and the tilt is lost.
-          <g key={i} transform={b.lean ? `rotate(${b.lean} ${b.x + WALL_PAD + b.w / 2} ${shelfY(b.row)})` : undefined}>
-            <rect
-              className={b.last && shelving ? 'vl-book vl-slotting' : 'vl-book'}
-              x={b.x + WALL_PAD}
-              y={shelfY(b.row) - b.h}
-              width={b.w}
-              height={b.h}
-              style={{ '--vl-shade': b.shade.toFixed(2) } as React.CSSProperties}
-            />
-          </g>
-        ))}
-      </svg>
-      <div className={`vl-octo${away ? ' vl-away' : ''}${eating ? ' vl-eating' : ''}`}>
-        {fire && <Flames />}
-        {eating && <Morsel />}
-        {/* No `av-<tone>` class: `avatar.css` only defines four of them, so lime and orange
-            would fall back to the accent. The square paints from its own five-step ramp. */}
-        <svg className={`av vl-body ${pose.className}`} width={58} height={58} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
-          {withPartIndex(pose.rects).map(([rect, n], i) => (
-            <rect key={i} className={`av-${rect.part} av-${rect.part}-${n}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
-          ))}
-          {/* The librarian's own arm and book, shelving on a loop. Drawn last so the book reads
-              as held in front of the body. A sick vault stops working, and an empty one has
-              nothing to shelve. */}
-          {shelving && (
-            <g className="vl-shelving">
-              {withPartIndex(SHELVING).map(([rect, n], i) => (
-                <rect key={`k${i}`} className={`av-${rect.part} av-${rect.part}-${n}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
-              ))}
-            </g>
-          )}
-        </svg>
+    <div className={`vl-square vl-${tone}${fire ? ' vl-on-fire' : ''}`} role="img" aria-label={label} title={detail}>
+      <div className="vl-stage">
+        {scene ? (
+          <div className={`vl-octo vl-kind-${scene.tone}`}>
+            <Octopus scene={scene} className={`av av-${scene.tone}`} />
+          </div>
+        ) : (
+          // Nothing has happened yet: he wears the vault's health. No `av-<tone>` class —
+          // `avatar.css` only defines four, so the square paints from its own five-step ramp.
+          <div className="vl-octo vl-at-rest">
+            <Octopus scene={POSES[rated ? poseOf(toneOf(health)) : 'fair']} className="av vl-body" />
+          </div>
+        )}
       </div>
+      <div className="vl-caption">
+        {cap && (
+          <>
+            <div className="vl-what">
+              <span className="vl-verb">{cap.verb}</span>
+              {cap.target && <span className="vl-target"> {cap.target}</span>}
+            </div>
+            <div className="vl-where">{cap.where}</div>
+          </>
+        )}
+      </div>
+      <ol className="vl-trail" aria-hidden="true">
+        {trail.map((t, i) => (
+          <li key={i} className={`vl-dot vl-kind-${SCENES[t.kind]?.tone ?? 'muted'}${i === trail.length - 1 ? ' vl-now' : ''}`} title={t.kind}>
+            {t.count > 1 && <span className="vl-count">{t.count}</span>}
+          </li>
+        ))}
+      </ol>
       {openVault && (
         <button className="vl-open" onClick={openVault} title="Open the vault" aria-label="Open the vault">
           ▤
@@ -195,36 +143,26 @@ export default function Square({ client, pulses, pollMs = POLL_MS, openVault }: 
         <span className="vl-bar" aria-hidden="true">
           <span className="vl-fill" style={{ width: `${Math.round(fraction * 100)}%` }} />
         </span>
+        {fire && <Flames />}
       </div>
     </div>
   )
 }
 
-/** The baseline of shelf `row`, counting from the bottom of the square upward: row 0 is the
- *  lowest shelf, which is the one that fills first. */
-function shelfY(row: number): number {
-  return SQUARE - HUD_H - row * 34
-}
-
-/** Room at the foot for the level and its bar, so the bottom shelf is not read through them. */
-const HUD_H = 22
-/** Side margin, so the wall does not run into the sidebar's edges. */
-const WALL_PAD = 8
-
-/** The fragment a `learned` scene leaves behind: it drifts up to the head and is gone.
- *  Same mark as a halo note, so what he eats is visibly one of them. */
-function Morsel() {
+function Octopus({ scene, className }: { scene: Scene; className: string }) {
   return (
-    <svg className="vl-morsel" width={58} height={58} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
-      <rect x={14.6} y={26} width={3.4} height={3.9} transform="rotate(-12 16.3 28)" />
+    <svg className={`${className} ${scene.className}`} width={OCTO} height={OCTO} viewBox="0 0 32 32" shapeRendering="crispEdges" aria-hidden="true">
+      {withPartIndex(scene.rects).map(([rect, n], i) => (
+        <rect key={i} className={`av-${rect.part} av-${rect.part}-${n}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
+      ))}
     </svg>
   )
 }
 
-/** Three pixel flames under the octopus, flickering out of step. */
+/** Three pixel flames at the end of the bar, flickering out of step: sustained good health. */
 function Flames() {
   return (
-    <svg className="vl-fire" width={58} height={18} viewBox="0 0 32 10" shapeRendering="crispEdges" aria-hidden="true">
+    <svg className="vl-fire" width={20} height={12} viewBox="9 1 15 9" shapeRendering="crispEdges" aria-hidden="true">
       {[11, 16, 21].map((x, i) => (
         <g key={x} className={`vl-flame vl-flame-${i}`}>
           {/* A tongue tapering to one pixel. Three of them, and no shared base: five wide-based

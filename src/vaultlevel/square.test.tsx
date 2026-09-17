@@ -1,8 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { vi } from 'vitest'
-import Square, { EAT_MS, FLASH_MS } from './Square'
-import { OVERLAY_MS } from '../pulse/Overlay'
+import Square, { AGE_MS, OCTO, SQUARE } from './Square'
 import { createPulseStore } from '../pulse/store'
 import type { LevelClient } from './client'
 import type { VaultLevel } from './types'
@@ -22,7 +21,7 @@ const vault = (over: Partial<VaultLevel> = {}): VaultLevel => ({
   error: null,
   ...over,
 })
-const ev = (over: Partial<PulseEvent> = {}): PulseEvent => ({ at: 1, kind: 'reflex', project: 'x', agent: 'x', slugs: [], ...over })
+const ev = (over: Partial<PulseEvent> = {}): PulseEvent => ({ at: Date.now(), kind: 'reflex', project: 'x', agent: 'x', slugs: [], ...over })
 
 /** A client whose best-ever xp is whatever it was offered highest, like the Rust side. */
 function fakeClient(levels: VaultLevel[]): LevelClient & { offered: number[] } {
@@ -57,9 +56,10 @@ test('the square shows the level from the best xp, tinted by health', async () =
   expect(host.querySelector('.vl-level')?.textContent).toBe('lv 23')
   expect(host.querySelector('.vl-square')?.classList.contains('vl-green')).toBe(true)
   expect(host.querySelector('.vl-square')?.classList.contains('vl-on-fire')).toBe(true)
-  expect(host.querySelector('.av-idle')).not.toBeNull()
-  // 1000 pages shelves 14 books.
-  expect(host.querySelectorAll('.vl-book').length).toBe(14)
+  // No pulse yet: he wears the health pose, with nothing to say and no trail.
+  expect(host.querySelector('.av-idle.vl-body')).not.toBeNull()
+  expect(host.querySelector('.vl-verb')).toBeNull()
+  expect(host.querySelectorAll('.vl-dot')).toHaveLength(0)
   unmount()
 })
 
@@ -98,49 +98,6 @@ test('an empty vault reads as neutral, not as a sick one', async () => {
   unmount()
 })
 
-test('a pulse sends the octopus away, lights the shelves, and he returns when the scene ends', async () => {
-  vi.useFakeTimers()
-  const pulses = createPulseStore()
-  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
-  const octo = () => host.querySelector('.vl-octo')!
-  expect(octo().classList.contains('vl-away')).toBe(false)
-
-  await act(async () => pulses.getState().push(ev()))
-  expect(octo().classList.contains('vl-away')).toBe(true)
-  // The lamp comes on over the shelves, and the library stays while he is away.
-  expect(host.querySelector('.vl-shelves')!.classList.contains('vl-lit')).toBe(true)
-  expect(host.querySelectorAll('.vl-book').length).toBe(14)
-
-  await act(async () => vi.advanceTimersByTime(FLASH_MS))
-  expect(host.querySelector('.vl-shelves')!.classList.contains('vl-lit')).toBe(false)
-  await act(async () => vi.advanceTimersByTime(OVERLAY_MS - FLASH_MS - 10))
-  expect(octo().classList.contains('vl-away')).toBe(true)
-  await act(async () => vi.advanceTimersByTime(20))
-  expect(octo().classList.contains('vl-away')).toBe(false)
-  unmount()
-})
-
-test('a learned pulse is eaten on the way back, and only that kind is', async () => {
-  vi.useFakeTimers()
-  const pulses = createPulseStore()
-  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
-
-  await act(async () => pulses.getState().push(ev({ kind: 'learned' })))
-  // Nothing to eat while the scene is still playing over the pane.
-  expect(host.querySelector('.vl-morsel')).toBeNull()
-  await act(async () => vi.advanceTimersByTime(OVERLAY_MS))
-  expect(host.querySelector('.vl-morsel')).not.toBeNull()
-  expect(host.querySelector('.vl-octo')?.classList.contains('vl-eating')).toBe(true)
-  await act(async () => vi.advanceTimersByTime(EAT_MS))
-  expect(host.querySelector('.vl-morsel')).toBeNull()
-
-  // A rule firing is using memory, not absorbing it.
-  await act(async () => pulses.getState().push(ev({ kind: 'reflex' })))
-  await act(async () => vi.advanceTimersByTime(OVERLAY_MS + EAT_MS))
-  expect(host.querySelector('.vl-morsel')).toBeNull()
-  unmount()
-})
-
 test('the ▤ button opens the vault, and is absent when nothing can open it', async () => {
   const open = vi.fn()
   const withButton = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} openVault={open} />)
@@ -153,37 +110,94 @@ test('the ▤ button opens the vault, and is absent when nothing can open it', a
   without.unmount()
 })
 
-test('a second pulse keeps him away for a full scene', async () => {
+const svgOf = (host: HTMLElement) => host.querySelector('.vl-octo svg')!
+
+test('the first pulse dresses him in its scene, and he keeps wearing it', async () => {
   vi.useFakeTimers()
   const pulses = createPulseStore()
   const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
-  await act(async () => pulses.getState().push(ev()))
-  await act(async () => vi.advanceTimersByTime(OVERLAY_MS / 2))
-  await act(async () => pulses.getState().push(ev({ kind: 'learned' })))
-  await act(async () => vi.advanceTimersByTime(OVERLAY_MS - 10))
-  expect(host.querySelector('.vl-octo')?.classList.contains('vl-away')).toBe(true)
-  await act(async () => vi.advanceTimersByTime(20))
-  expect(host.querySelector('.vl-octo')?.classList.contains('vl-away')).toBe(false)
+  expect(svgOf(host).getAttribute('width')).toBe(String(OCTO))
+
+  await act(async () => pulses.getState().push(ev({ kind: 'enforce', tool: 'git push --force', project: 'mnemo' })))
+  expect(svgOf(host).classList.contains('av-blocked')).toBe(true)
+  expect(host.querySelector('.av-idle')).toBeNull()
+  expect(host.querySelector('.vl-what')?.textContent).toBe('blocked git push --force')
+  expect(host.querySelector('.vl-where')?.textContent).toBe('mnemo · 0s')
+  expect(host.querySelector('.vl-square')?.getAttribute('aria-label')).toContain('last: blocked git push --force, mnemo · 0s')
+
+  // No overlay timer sends him back to rest: an hour on, he still wears it.
+  await act(async () => vi.advanceTimersByTime(60 * 60_000))
+  expect(svgOf(host).classList.contains('av-blocked')).toBe(true)
   unmount()
 })
 
+test('the scene owns the colour: a blocked command is red on a green vault', async () => {
+  const pulses = createPulseStore()
+  pulses.getState().push(ev({ kind: 'enforce' }))
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
+  expect(host.querySelector('.vl-square')?.classList.contains('vl-green')).toBe(true)
+  const svg = svgOf(host)
+  expect(svg.classList.contains('av-red')).toBe(true)
+  // The health tint is the at-rest skin only.
+  expect(svg.classList.contains('vl-body')).toBe(false)
+  unmount()
+})
 
-test('the last book slots in with the gesture, and only while he is shelving', async () => {
-  const shelving = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} />)
-  // One book is the one in his hands, landing as it leaves them.
-  expect(shelving.host.querySelectorAll('.vl-slotting')).toHaveLength(1)
-  expect(shelving.host.querySelector('.vl-shelving')).not.toBeNull()
-  shelving.unmount()
+test('the age recounts itself on its own clock', async () => {
+  vi.useFakeTimers()
+  const pulses = createPulseStore()
+  // A slow poll, so only the age timer can be what moves the caption.
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} pollMs={10 * 60_000} />)
+  await act(async () => pulses.getState().push(ev({ kind: 'tool', slugs: ['git-rules'] })))
+  expect(host.querySelector('.vl-what')?.textContent).toBe('read git-rules')
+  await act(async () => vi.advanceTimersByTime(4 * 60_000 + AGE_MS))
+  expect(host.querySelector('.vl-where')?.textContent).toBe('x · 4m')
+  unmount()
+})
 
-  // A sick vault stops working, so nothing is being slotted either.
-  const sick = await render(<Square client={fakeClient([vault({ rules_fired: 20, dormant: 900 })])} pulses={createPulseStore()} />)
-  expect(sick.host.querySelector('.vl-shelving')).toBeNull()
-  expect(sick.host.querySelectorAll('.vl-slotting')).toHaveLength(0)
-  sick.unmount()
+test('the trail keeps the last five kinds, folds repeats, and rings the newest', async () => {
+  const pulses = createPulseStore()
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
+  const kinds = ['learned', 'reflex', 'tool', 'tool', 'tool', 'enrich', 'enforce', 'friction'] as const
+  await act(async () => kinds.forEach((kind) => pulses.getState().push(ev({ kind }))))
+  const dots = [...host.querySelectorAll('.vl-dot')]
+  expect(dots.map((d) => d.getAttribute('title'))).toEqual(['reflex', 'tool', 'enrich', 'enforce', 'friction'])
+  expect(dots[1].textContent).toBe('3')
+  expect(dots[0].textContent).toBe('')
+  expect(dots.map((d) => d.classList.contains('vl-now'))).toEqual([false, false, false, false, true])
+  // Each dot takes its scene's tone.
+  expect(dots[3].classList.contains('vl-kind-red')).toBe(true)
+  expect(dots[4].classList.contains('vl-kind-yellow')).toBe(true)
+  unmount()
+})
 
-  // An empty vault has nothing to shelve and no books at all.
-  const empty = await render(<Square client={fakeClient([vault({ pages: 0 })])} pulses={createPulseStore()} />)
-  expect(empty.host.querySelector('.vl-shelving')).toBeNull()
-  expect(empty.host.querySelectorAll('.vl-book')).toHaveLength(0)
-  empty.unmount()
+test('the octopus ignores which pane a pulse was routed to', async () => {
+  const pulses = createPulseStore()
+  pulses.getState().claim({ pane: 1, place: 'x', focused: false })
+  pulses.getState().claim({ pane: 2, place: 'other', focused: true })
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
+  await act(async () => pulses.getState().push(ev({ kind: 'learned', slugs: ['a-rule'] })))
+  expect(pulses.getState().log.at(-1)?.pane).toBe(1)
+  expect(svgOf(host).classList.contains('av-learned')).toBe(true)
+  unmount()
+})
+
+test('the octopus keeps wearing pulses when the vault cannot be read', async () => {
+  const pulses = createPulseStore()
+  pulses.getState().push(ev({ kind: 'dispatch', hits: 3 }))
+  const client = fakeClient([vault({ error: 'no mnemo vault found', pages: 0 })])
+  const { host, unmount } = await render(<Square client={client} pulses={pulses} />)
+  expect(host.querySelector('.vl-level')?.textContent).toBe('no vault')
+  expect(svgOf(host).classList.contains('av-dispatching')).toBe(true)
+  expect(host.querySelector('.vl-what')?.textContent).toBe('dispatched 3 children')
+  unmount()
+})
+
+test('the square is its four bands tall, and the library is gone', async () => {
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} />)
+  expect(SQUARE).toBe(113 + 26 + 15 + 22)
+  expect(host.querySelector('.vl-shelves, .vl-book, .vl-shelving, .vl-morsel')).toBeNull()
+  // The fire moved to the HUD.
+  expect(host.querySelector('.vl-hud .vl-fire')).not.toBeNull()
+  unmount()
 })

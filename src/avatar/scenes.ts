@@ -94,6 +94,14 @@ const kids: Rect[] = [r(14, 19, 4, 4, 'object'), r(14, 19, 4, 4, 'object'), r(14
 /** friction — a barbed hook one arm snagged, hanging clear of the arm band. */
 const hook: Rect[] = [r(24, 14, 2, 7, 'object'), r(21, 20, 4, 2, 'object'), r(25, 12, 3, 2, 'object')]
 
+/** tool — an arm reaching up to the ring and pulling a thread of three nodes down from it.
+ *  The scene's only difference from `IDLE` used to be its timing, which is fatal on the vault
+ *  square: `tool` is the most frequent pulse, and it would read as having done nothing. The
+ *  reaching arm replaces the fifth arm, so the silhouette is asymmetric, right of centre. */
+const reach: Rect[] = [r(21, 16, 2, 5, 'arm'), r(23, 14, 2, 3, 'arm')]
+/** Listed nearest the arm first, so `av-object-0` is the node about to reach the head. */
+const thread: Rect[] = [r(25, 11, 2, 2, 'object'), r(24, 9, 2, 2, 'object'), r(22, 7, 2, 2, 'object')]
+
 /** learned — one new node, brighter than the ring it joins. */
 const newNode: Rect[] = [r(15, 2, 2, 2, 'object')]
 
@@ -101,7 +109,7 @@ const newNode: Rect[] = [r(15, 2, 2, 2, 'object')]
  *  gesture alone was tested and the nine could not be told apart. */
 export const SCENES: Record<PulseKind, Scene> = {
   reflex: { className: 'av-injecting', tone: 'accent', rects: [...BODY, ...ARMS, ...pages] },
-  tool: { className: 'av-reading', tone: 'accent', rects: [...RING, ...BODY, ...ARMS] },
+  tool: { className: 'av-reading', tone: 'accent', rects: [...RING, ...BODY, ...ARMS.slice(0, 4), ...reach, ...thread] },
   enrich: { className: 'av-remembering', tone: 'accent', rects: [...BODY, ...ARMS, ...note] },
   enforce: { className: 'av-blocked', tone: 'red', rects: [...BODY, ...ARMS, ...sign] },
   briefing: { className: 'av-saving', tone: 'accent', rects: [...BODY, ...ARMS, ...bundle] },
@@ -123,7 +131,7 @@ export const STATE_SCENES: Record<ChildWord, Scene> = {
   stopped: { className: 'av-stopped', tone: 'muted', rects: [...BODY, ...ARMS] },
 }
 
-/** mnemo at rest, breathing: the sidebar's vault square shows it between scenes. Not a
+/** mnemo at rest, breathing: the sidebar's vault square wears it before the first pulse. Not a
  *  `PulseKind` and not a child state, so it is its own export, and `Avatar` (which takes
  *  one of those) does not render it; `src/vaultlevel/` does, and its keyframes live there. */
 export const IDLE: Scene = { className: 'av-idle', tone: 'accent', rects: [...RING, ...BODY, ...ARMS] }
@@ -150,24 +158,14 @@ const ARMS_POOR: Rect[] = [
   r(25, 18, 2, 6, 'arm'),
 ]
 
-/** The three poses the vault square wears, keyed by `poseOf(tone)` in `src/vaultlevel/level.ts`.
+/** The three poses the vault square wears while its pulse log is empty, keyed by `poseOf(tone)`
+ *  in `src/vaultlevel/level.ts`. The first pulse dresses it in a scene instead.
  *  Five tones, three silhouettes: colour carries the fine slide, the pose carries the verdict. */
 export const POSES = {
   well: { className: 'av-idle av-well', tone: 'accent', rects: [...RING, ...BODY, ...ARMS_WELL] },
   fair: IDLE,
   poor: { className: 'av-idle av-poor', tone: 'accent', rects: [...RING, ...BODY, ...ARMS_POOR] },
 } as const satisfies Record<string, Scene>
-
-/** The book the librarian is holding, and the arm that lifts it. Drawn after the body so it
- *  reads as held in front rather than as stripes between the arms. `vaultlevel.css` moves both
- *  together: up to the shelf, a beat, and back down for the next one. */
-export const SHELVING: Rect[] = [
-  // the lifting arm, reaching out to the right
-  r(21, 16, 2, 5, 'arm'),
-  // the book
-  r(22, 13, 5, 7, 'object'),
-  r(23, 14, 3, 1, 'object'),
-]
 
 /** Pairs each rect with its index *within its own part*, so `avatar.css` can address
  *  "the third arm" as `.av-arm-2` regardless of where the arms sit in the list. Numbering

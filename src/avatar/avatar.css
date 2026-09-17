@@ -26,15 +26,20 @@
 .av-injecting .av-object-2 { animation-delay: .9s; }
 /* `av-object-N` is the Nth object *of this scene* — see `withPartIndex` in scenes.ts. */
 
-/* tool — an arm probes, the ring lights in sequence. */
+/* tool — an arm reaches into the ring and pulls a thread of nodes down to the head. Only the
+   two ring nodes the thread comes from light; the rest stay dim, which says where it came from. */
 @keyframes av-node-on { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
-.av-reading .av-node { animation: av-node-on 1.5s ease-in-out infinite; }
-.av-reading .av-node-1 { animation-delay: .19s; }
-.av-reading .av-node-2 { animation-delay: .38s; }
-.av-reading .av-node-3 { animation-delay: .57s; }
-.av-reading .av-node-4 { animation-delay: .76s; }
-.av-reading .av-node-5 { animation-delay: .95s; }
-/* The ring lights clockwise; the sequence is the point, not which pixel starts it. */
+@keyframes av-thread-down { 0% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 1; } 75% { transform: translate(-1px, 3px); opacity: 1; } 100% { transform: translate(-2px, 5px); opacity: 0; } }
+@keyframes av-tug { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+.av-reading .av-node { opacity: .3; }
+.av-reading .av-node-1, .av-reading .av-node-3 { animation: av-node-on 1.5s ease-in-out infinite; }
+.av-reading .av-node-3 { animation-delay: .4s; }
+/* The thread flows from the ring (object-2) toward the arm (object-0), one node after another. */
+.av-reading .av-object { fill: var(--fg); animation: av-thread-down 1.5s ease-in infinite; }
+.av-reading .av-object-1 { animation-delay: .25s; }
+.av-reading .av-object-0 { animation-delay: .5s; }
+/* The reaching arm is the fifth and sixth arm rect of this scene: it tugs with each node. */
+.av-reading .av-arm-4, .av-reading .av-arm-5 { animation: av-tug .75s ease-in-out infinite; }
 
 /* enrich — an arm holds the scroll open, steady. */
 @keyframes av-hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
