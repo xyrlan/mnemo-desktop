@@ -1,17 +1,23 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { store } from '../layout/app-store'
+import { paneRects } from '../layout/rects'
 import type { PaneId } from '../layout/tree'
 import { tauriPty } from '../pty/client'
 import { dropText, fileDropStore } from './drop'
 
 /** The live terminal pane under a point in CSS pixels, or null (another view, a divider, a
- *  broken or exited terminal). */
+ *  broken or exited terminal). Uses each pane's real rect rather than
+ *  `elementFromPoint`, which returns the topmost element at the point — an overlay, or a
+ *  child of a pane that is not under the cursor when panes are split. */
 export function terminalAt(x: number, y: number): PaneId | null {
-  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.pane[data-pane]')
-  const id = el ? Number(el.dataset.pane) : NaN
-  const pane = Number.isFinite(id) ? store.getState().panes[id] : undefined
-  return pane && pane.view === 'terminal' && id >= 0 && pane.exitCode === undefined && !pane.error ? id : null
+  for (const [id, r] of paneRects()) {
+    if (r.w <= 0 || r.h <= 0) continue
+    if (x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h) continue
+    const pane = store.getState().panes[id]
+    return pane && pane.view === 'terminal' && pane.exitCode === undefined && !pane.error ? id : null
+  }
+  return null
 }
 
 type DropEvent = { type: 'enter' | 'over'; position: { x: number; y: number } } | { type: 'drop'; paths: string[]; position: { x: number; y: number } } | { type: 'leave' }

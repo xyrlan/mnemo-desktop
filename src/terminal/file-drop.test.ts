@@ -9,20 +9,34 @@ vi.mock('@tauri-apps/api/webview', () => ({ getCurrentWebview: () => ({ onDragDr
 
 import { store } from '../layout/app-store'
 import { fileDropStore } from './drop'
-import { holdFileDrop, onFileDrag } from './file-drop'
+import { holdFileDrop, onFileDrag, terminalAt } from './file-drop'
 
-/** Two panes side by side at 100px each: a terminal (7) and an editor (-3). */
+/** Three panes side by side at 100px each: two terminals (7, 8) split by an editor (-3) — an
+ *  overlay child of pane 7 stretches across the whole row, so `elementFromPoint` alone would
+ *  misattribute a drop over pane 8 to pane 7. */
 function layout() {
   store.setState({
     panes: {
       7: { id: 7, view: 'terminal' },
-      8: { id: 8, view: 'terminal', exitCode: 0 },
+      8: { id: 8, view: 'terminal' },
+      9: { id: 9, view: 'terminal', exitCode: 0 },
       [-3]: { id: -3, view: 'editor' },
     },
   })
-  document.body.innerHTML = '<div class="pane" data-pane="7"><div class="xterm"></div></div><div class="pane" data-pane="-3"></div><div class="pane" data-pane="8"></div>'
-  const [term, editor, exited] = [...document.querySelectorAll('.pane')]
-  document.elementFromPoint = (x: number) => (x < 100 ? term.firstElementChild : x < 200 ? editor : exited)
+  document.body.innerHTML =
+    '<div class="pane" data-pane="7"><div class="overlay"></div></div>' +
+    '<div class="pane" data-pane="-3"></div>' +
+    '<div class="pane" data-pane="8"></div>' +
+    '<div class="pane" data-pane="9"></div>'
+  const [term, editor, other, exited] = [...document.querySelectorAll<HTMLElement>('.pane')]
+  const rect = (left: number, width: number): DOMRect => ({ left, top: 0, width, height: 50, right: left + width, bottom: 50, x: left, y: 0, toJSON: () => ({}) })
+  term.getBoundingClientRect = () => rect(0, 100)
+  editor.getBoundingClientRect = () => rect(100, 100)
+  other.getBoundingClientRect = () => rect(200, 100)
+  exited.getBoundingClientRect = () => rect(300, 100)
+  // The overlay spans every pane and would win `elementFromPoint`, but `terminalAt` no longer uses it.
+  term.firstElementChild!.getBoundingClientRect = () => rect(0, 300)
+  document.elementFromPoint = () => term.firstElementChild
 }
 
 beforeEach(() => {
@@ -32,15 +46,24 @@ beforeEach(() => {
 })
 
 test('dragging over a terminal highlights it, over anything else clears', () => {
-  onFileDrag({ type: 'over', position: { x: 100, y: 20 } }, 2) // 50 CSS px: the terminal
+  onFileDrag({ type: 'over', position: { x: 100, y: 20 } }, 2) // 50 CSS px: the first terminal
   expect(fileDropStore.getState().over).toBe(7)
   onFileDrag({ type: 'over', position: { x: 300, y: 20 } }, 2) // the editor
   expect(fileDropStore.getState().over).toBeNull()
-  onFileDrag({ type: 'enter', position: { x: 500, y: 20 } }, 2) // an exited terminal
+  onFileDrag({ type: 'over', position: { x: 500, y: 20 } }, 2) // the second terminal
+  expect(fileDropStore.getState().over).toBe(8)
+  onFileDrag({ type: 'enter', position: { x: 700, y: 20 } }, 2) // an exited terminal
   expect(fileDropStore.getState().over).toBeNull()
   onFileDrag({ type: 'over', position: { x: 10, y: 20 } }, 2)
   onFileDrag({ type: 'leave' })
   expect(fileDropStore.getState().over).toBeNull()
+})
+
+test("a split's overlay child does not steal a drop meant for the pane beside it", () => {
+  // The overlay under pane 7 physically covers this point too, so a hit test built on
+  // `elementFromPoint` would resolve it to 7 instead of 8.
+  const id = terminalAt(250, 5)
+  expect(id).toBe(8)
 })
 
 test('dropping on a terminal types the escaped paths into its PTY and focuses it', () => {
@@ -50,11 +73,15 @@ test('dropping on a terminal types the escaped paths into its PTY and focuses it
   expect(focus).toHaveBeenCalledWith(7)
   expect(fileDropStore.getState().over).toBeNull()
   focus.mockRestore()
+  invoke.mockClear()
+
+  onFileDrag({ type: 'drop', paths: ['/tmp/c.png'], position: { x: 250, y: 5 } }, 1)
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 8, data: '/tmp/c.png ' })
 })
 
 test('dropping outside a live terminal writes nothing', () => {
   onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 150, y: 5 } }, 1)
-  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 250, y: 5 } }, 1)
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 350, y: 5 } }, 1)
   expect(invoke).not.toHaveBeenCalled()
 })
 
