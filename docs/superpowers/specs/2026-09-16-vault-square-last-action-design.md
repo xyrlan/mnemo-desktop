@@ -126,6 +126,17 @@ tick-by-tick log.
 
 `pulses.log` already retains 200 entries (`MAX_PULSES`), so the trail needs no new storage.
 
+### Every pane, not the focused one
+
+Since #97 a pulse is routed to the pane whose session caused it, and `Pulse` carries an
+optional `pane`. The square is not a pane: it sits in the sidebar and reports on mnemo as a
+whole, the way the sidebar already lists every child rather than the focused one. So it reads
+the tail of `log` and ignores `pane` entirely.
+
+The caption's `project` line is what disambiguates. Following the focused pane instead was
+rejected: the square would flicker on every tab switch, and it would empty out whenever a
+pane without a session is focused — worse than showing everything.
+
 A new pure module, `src/vaultlevel/recent.ts`, exports
 `recentPulses(log, n): { kind: PulseKind; count: number }[]` and `toneOfKind(kind)`.
 

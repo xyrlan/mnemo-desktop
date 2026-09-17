@@ -63,6 +63,11 @@ the square already stretches with the sidebar.
 **The age recounts itself** on its own 30s interval, separate from the vault poll.
 Same period today, different reasons to change.
 
+**Every pane, not the focused one.** Since #97 a pulse carries the `pane` whose
+session caused it. The square ignores that field: it sits in the sidebar and
+reports on mnemo as a whole, the way the sidebar already lists every child. The
+caption's project line is what disambiguates.
+
 `recentPulses` collapses consecutive repeats of one kind into a single dot with a
 count. `tool` can fire many times a minute and five identical dots say less than
 five distinct kinds. Take the dot colour from `SCENES[kind].tone` rather than
@@ -80,6 +85,14 @@ with the feature. `POSES` stays: it dresses the empty-log case.
 `src/avatar/gallery.html` renders every scene from `SCENES`, so the new `tool`
 appears there for free — open it and check that `tool` no longer reads as `IDLE`
 with the captions hidden. That is the test the gallery exists for.
+
+**`avatar.css` is shared.** Four surfaces render the octopus:
+`src/pulse/Overlay.tsx`, `src/cockpit/MissionMap.tsx`,
+`src/cockpit/ChildMark.tsx` (new in #104, child rows) and this square. Add the
+`tool` keyframes; do not retune a shared rule or a `STATE_SCENES` animation to
+make the square look right, because the change lands on child rows and the
+overlay too. The square's own keyframes belong in `vaultlevel.css`, which is
+where the old shelving animation lived.
 
 **Report what you saw, not what you drew.** The spec's claim is that a 104px
 octopus wearing a scene is legible where a 58px one was not, and that the new
