@@ -20,6 +20,10 @@
 .ck-row-head { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; cursor: pointer; min-width: 0; }
 .ck-label { color: var(--fg); font-weight: 600; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 2em; }
 .ck-detail { color: var(--fg-muted); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A child's state is its octopus (ChildMark), centred on the text line; the word stays for
+   screen readers only. */
+.ck-mark { flex: 0 0 auto; align-self: center; display: inline-flex; }
+.ck-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ck-tokens { color: var(--ansi-cyan); font-size: 11px; flex: 0 0 auto; }
 .ck-row .nd-repo { flex: 0 0 auto; }
 .ck-here .ck-label { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent); text-underline-offset: 2px; }
@@ -36,11 +40,8 @@
 .ck-ci { border-left-color: var(--ansi-red); }
 .ck-ready, .ck-land, .ck-replied { border-left-color: var(--ansi-green); }
 .ck-working { border-left-color: var(--accent); }
-.ck-blocked .nd-word { color: var(--bg); background: var(--ansi-yellow); }
 .ck-replied .nd-word, .ck-ready .nd-word, .ck-land .nd-word { color: var(--bg); background: var(--ansi-green); }
 .ck-ci .nd-word { color: var(--bg); background: var(--ansi-red); }
-.ck-working .nd-word { color: var(--accent); border: 1px solid var(--accent); }
-.ck-done .nd-word { color: var(--fg-muted); border: 1px solid var(--border); }
 
 .ck-section { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
 .ck-fold { align-self: flex-start; background: transparent; border: 0; color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; padding: 2px 0; }

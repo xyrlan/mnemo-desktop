@@ -2,6 +2,7 @@ import { useMission } from '../mission/app-store'
 import { delta } from '../mission/types'
 import { openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import type { Need } from './needs'
+import ChildMark from './ChildMark'
 
 /** Where a click on a need goes: the child's mission pane, the PR, the landable contract. */
 export function openNeed(n: Need) {
@@ -18,7 +19,11 @@ function Head({ n, showRepo, replied }: { n: Need; showRepo: boolean; replied: b
   const label = n.kind === 'blocked' ? n.label : n.kind === 'land' ? `mission ${n.mission.feature}` : `${n.piece} · PR #${n.pr.number}`
   return (
     <>
-      <span className="nd-word">{replied ? 'replied' : HEAD[n.kind]}</span>
+      {/* One visual marker per fact, as on the cockpit rows (InboxRow): a blocked child shows
+          its animated state instead of the BLOCKED pill, with the word kept for screen readers.
+          `replied` is your act, not the child's state, and the PR / mission needs have no child:
+          those keep their pill. */}
+      {n.kind === 'blocked' && !replied ? <ChildMark child={n.child} /> : <span className="nd-word">{replied ? 'replied' : HEAD[n.kind]}</span>}
       <span className="nd-label">{label}</span>
       {showRepo && <span className="nd-repo">{n.repo.name}</span>}
       {d > 0 && <span className="m-delta">+{d}</span>}
