@@ -201,3 +201,33 @@ test('the square is its four bands tall, and the library is gone', async () => {
   expect(host.querySelector('.vl-hud .vl-fire')).not.toBeNull()
   unmount()
 })
+
+/** The stylesheets are the ones that ship, read off disk: jsdom applies no layout, and a `?raw`
+ *  import of a `.css` comes back empty under vitest (the CSS plugin stubs it first). The `fs`
+ *  type is declared here rather than pulled in: the project carries no `@types/node`, and a guard
+ *  is not worth a dependency. Both files, because the bug this guards against lived in the gap
+ *  between them. */
+type Fs = { readFileSync(path: string, encoding: string): string }
+const readCss = async (rel: string): Promise<string> => {
+  // The specifier is built at run time so `tsc` does not try to resolve `node:fs`, which has no
+  // types here. Vitest runs in Node, so the import itself is ordinary.
+  const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
+  return fs.readFileSync(new URL(rel, import.meta.url).pathname, 'utf8')
+}
+
+const pxIn = (css: string, selector: string, prop: string): number => {
+  const rule = css.split('\n').find((l: string) => l.trimStart().startsWith(`${selector} {`))
+  if (!rule) throw new Error(`${selector} not found`)
+  const found = new RegExp(`(?:^|[;{\\s])${prop}:\\s*(\\d+)px`).exec(rule)
+  if (!found) throw new Error(`${selector} has no ${prop}`)
+  return Number(found[1])
+}
+
+test('the slot is tall enough for the square, so the HUD is never clipped', async () => {
+  // The square's bands are `flex: 0 0`, and both boxes clip. A slot shorter than the square does
+  // not scale it down — it cuts the last band off the bottom, and the last band is the HUD that
+  // carries `lv N`. This is how the level vanished when the square grew to 176 and the slot,
+  // written for the older 160, stayed behind.
+  expect(pxIn(await readCss('./vaultlevel.css'), '.vl-square', 'height')).toBe(SQUARE)
+  expect(pxIn(await readCss('../theme.css'), '.vault-level-slot', 'height')).toBeGreaterThanOrEqual(SQUARE)
+})

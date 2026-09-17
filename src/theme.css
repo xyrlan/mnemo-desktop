@@ -105,8 +105,11 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 /* The vault's square, docked under the cockpit body. `vault-level` passes its square as the
    slot's children; with none, an empty bordered square holds the place. */
 /* The square fills this: `stretch` rather than `center`, so the rain spans the sidebar's width
-   instead of sitting in a 160px column with empty margins either side. */
-.vault-level-slot { flex: 0 0 auto; height: 160px; position: relative; display: flex; align-items: stretch; justify-content: stretch; border-top: 1px solid var(--border); overflow: hidden; }
+   instead of sitting in a narrower column with empty margins either side. */
+/* The height is the square's own `SQUARE` (176 = stage 113 + caption 26 + trail 15 + HUD 22, see
+   `src/vaultlevel/vaultlevel.css`). The two must agree: the slot clips, the square's bands do not
+   shrink, so a slot shorter than the square silently eats the HUD off the bottom. */
+.vault-level-slot { flex: 0 0 auto; height: 176px; position: relative; display: flex; align-items: stretch; justify-content: stretch; border-top: 1px solid var(--border); overflow: hidden; }
 /* Centred on its own, since the slot no longer centres its child. */
 .vault-level-placeholder { width: 144px; height: 144px; margin: auto; box-sizing: border-box; border: 1px dashed var(--border); border-radius: 6px; }
 
