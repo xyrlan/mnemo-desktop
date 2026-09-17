@@ -12,6 +12,12 @@ export type LayoutLike = {
   focusPane(id: number): void
 }
 
+/** Home's backend: the snapshot client plus the GitHub read, which only the lens triggers. */
+export type LensClient = HomeClient & { refreshGithub(): Promise<void> }
+
+/** `idle`: GitHub not read by this lens yet; `loading`: a read is running. */
+export type GithubRead = 'idle' | 'loading' | 'ready'
+
 export type HomeState = {
   snapshot: HomeSnapshot
   loading: boolean
@@ -24,11 +30,18 @@ export type HomeState = {
   /** Roots opened or cloned this run that history does not know yet. */
   extraRoots: string[]
   notice: string | null
+  github: GithubRead
+  /** When the last GitHub read finished; null before one did. */
+  githubAt: number | null
 }
 export type HomeActions = {
   load(): Promise<void>
   /** A user's pick. Resolves an unresolved repo; `load` never does, so launch stays quiet. */
   select(root: string): Promise<void>
+  /** Read every listed repo's issues and PRs through `gh`, then reload the snapshot that
+   *  carries them. Only on the lens showing and its refresh control, never on a timer; a
+   *  call while one runs is dropped. */
+  refreshGithub(): Promise<void>
   setFilter(q: string): void
   setShowHidden(v: boolean): void
   setShowProtected(v: boolean): void
@@ -46,7 +59,7 @@ export type HomeStore = StoreApi<HomeState & HomeActions>
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
 
-export function createHomeStore(client: HomeClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike): HomeStore {
+export function createHomeStore(client: LensClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike): HomeStore {
   return createZustand<HomeState & HomeActions>((set, get) => ({
     snapshot: EMPTY,
     loading: false,
@@ -57,6 +70,8 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
     cloneSpec: '',
     extraRoots: [],
     notice: null,
+    github: 'idle',
+    githubAt: null,
 
     async load() {
       set({ loading: true })
@@ -83,6 +98,17 @@ export function createHomeStore(client: HomeClient, settings: () => HomeSettings
         set({ notice: String(e) })
       }
       await get().load()
+    },
+    async refreshGithub() {
+      if (get().github === 'loading') return
+      set({ github: 'loading' })
+      try {
+        await client.refreshGithub()
+        await get().load()
+        set({ github: 'ready', githubAt: Date.now() })
+      } catch (e) {
+        set({ github: get().githubAt === null ? 'idle' : 'ready', notice: String(e) })
+      }
     },
     setFilter: (filter) => set({ filter }),
     setShowHidden: (showHidden) => set({ showHidden }),

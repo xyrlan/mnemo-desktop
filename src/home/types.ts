@@ -12,8 +12,8 @@ export type Pr = { number: number; title: string; state: 'open' | 'draft'; check
 /** `unresolved`: under a folder macOS guards, grouped by its history path without running git
  *  (see `mission::is_protected`); selecting it resolves it. `children`: sessions run in a
  *  dispatch worktree beside the repo, kept out of `sessions`. `issues`/`prs`: open ones as the
- *  last `refreshGithub()` read them, empty before one ran or when `gh` could not read the repo
- *  (the reason is in `HomeSnapshot.errors`). */
+ *  last `refreshGithub()` read them; absent or empty before one ran and when `gh` could not
+ *  read the repo (the reason is in `HomeSnapshot.errors`, see `githubError`). */
 export type HomeRepo = {
   root: string
   name: string
@@ -23,8 +23,6 @@ export type HomeRepo = {
   unresolved: boolean
   sessions: HomeSession[]
   children: HomeSession[]
-  // Always sent by `home_snapshot`. Optional only because `Home.test.tsx` and `store.test.ts`
-  // (read-only in round 14) build repos without them; required once round 15 updates them.
   issues?: Issue[]
   prs?: Pr[]
 }
@@ -81,6 +79,35 @@ export function cloneDest(base: string, spec: string): string | null {
   if (!s) return null
   const name = s.replace(/\/+$/, '').split(/[/:]/).pop()?.replace(/\.git$/, '')
   return name ? `${base.replace(/\/+$/, '')}/${name}` : null
+}
+
+const GH_ERROR = /^github \(([^)]*)\): (.*)$/
+
+/** Why `gh` could not read the repo named `name`, from `HomeSnapshot.errors` lines shaped
+ *  `github (a, b): reason` (`lens::error_lines`); null when it could. */
+export function githubError(errors: string[], name: string): string | null {
+  for (const e of errors) {
+    const m = e.match(GH_ERROR)
+    if (m && m[1].split(', ').includes(name)) return m[2]
+  }
+  return null
+}
+
+/** The `errors` lines no repo group shows: everything but `gh`'s per-repo reasons. */
+export const otherErrors = (errors: string[]) => errors.filter((e) => !GH_ERROR.test(e))
+
+/** The dispatch child a PR names (`Pr.child`, a `~/.claude/jobs` short id, the session id's
+ *  first eight characters) among the repo's children; null when this snapshot does not list it. */
+export function childSession(repo: HomeRepo, short: string): HomeSession | null {
+  return repo.children.find((s) => s.id.startsWith(short)) ?? null
+}
+
+/** Rows a group shows before "more": every live session, then the most recent others up to
+ *  `recent`. Order is kept; `rest` counts what is left out. */
+export function firstRows(sessions: HomeSession[], recent: number): { rows: HomeSession[]; rest: number } {
+  let quiet = 0
+  const rows = sessions.filter((s) => !!s.live || quiet++ < recent)
+  return { rows, rest: sessions.length - rows.length }
 }
 
 export function relTime(ms: number, now = Date.now()): string {

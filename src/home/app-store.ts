@@ -1,11 +1,11 @@
 import { useStore } from 'zustand'
 import { createHomeStore, type HomeActions, type HomeState } from './store'
-import { tauriHome } from './client'
+import { refreshGithub, tauriHome } from './client'
 import { settingsStore } from '../settings/app-store'
 import { store as layout } from '../layout/app-store'
 
 export const homeStore = createHomeStore(
-  tauriHome,
+  { ...tauriHome, refreshGithub },
   () => {
     const s = settingsStore.getState()
     return { homePinned: s.homePinned, homeHidden: s.homeHidden, cloneBase: s.cloneBase }
