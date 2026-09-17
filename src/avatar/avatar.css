@@ -56,16 +56,18 @@
 .av-blocked .av-object-5 { fill: var(--bg); }
 .av-blocked .av-head, .av-blocked .av-arm { animation: av-tremor .42s ease-in-out infinite; }
 
-/* briefing — the scroll rolls up and tucks away. */
+/* briefing — the disk shrinks into his side and is put away. */
 @keyframes av-tuck { 0%, 18% { transform: translateY(0) scale(1); opacity: 1; } 62% { transform: translateY(3px) scale(.55); opacity: 1; } 84%, 100% { transform: translateY(6px) scale(.1); opacity: 0; } }
-/* The bundle shrinks into itself and drops behind the head. */
+/* The origin is the head, so the disk shrinks toward the body and drops behind it. */
 .av-saving .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 16px 10px; animation: av-tuck 2.1s ease-in-out infinite; }
+/* The label and the shutter slot are light, so the shape reads as a disk and not a box. */
+.av-saving .av-object-2, .av-saving .av-object-3 { fill: var(--bg); }
 
-/* catchup — the scroll unrolls and opens. */
+/* catchup — the speech bubble unfolds downward from its top edge. */
 @keyframes av-unroll { 0% { transform: scaleY(.08); opacity: 0; } 12% { opacity: 1; } 38%, 88% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(1); opacity: 0; } }
-/* The page unrolls downward from its top edge; the text lines sit light on it. */
-.av-catchup .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 16px 2px; animation: av-unroll 1.6s ease-out infinite; }
-.av-catchup .av-object-1, .av-catchup .av-object-2, .av-catchup .av-object-3 { fill: var(--bg); }
+/* The origin is the bubble's top edge; the text lines, the last two rects, sit light on it. */
+.av-catchup .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 25px 1px; animation: av-unroll 1.6s ease-out infinite; }
+.av-catchup .av-object-4, .av-catchup .av-object-5 { fill: var(--bg); }
 
 /* learned — a new node pops into the ring, which turns slowly. */
 @keyframes av-pop { 0%, 55% { opacity: 0; transform: scale(.3); } 68% { opacity: 1; transform: scale(1.7); } 80%, 100% { opacity: 1; transform: scale(1); } }

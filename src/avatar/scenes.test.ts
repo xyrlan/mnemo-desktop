@@ -1,4 +1,4 @@
-import { IDLE, SCENES, STATE_SCENES, caption, withPartIndex } from './scenes'
+import { IDLE, SCENES, STATE_SCENES, caption, withPartIndex, type Rect } from './scenes'
 import type { PulseEvent } from '../pulse/types'
 
 const ev = (over: Partial<PulseEvent>): PulseEvent => ({ at: 1, kind: 'reflex', project: 'mnemo', agent: 'mnemo', slugs: [], ...over })
@@ -63,4 +63,27 @@ test('tool holds an object, so on the square it cannot pass for idle', () => {
     expect(rect.x).toBeGreaterThanOrEqual(16)
     expect(rect.y + rect.h).toBeLessThanOrEqual(16)
   }
+})
+
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+const parts = (rects: Rect[], part: Rect['part']) => rects.filter((r) => r.part === part)
+
+test('catchup and briefing keep clear of the head, so at rest he has a face and no hat', () => {
+  for (const kind of ['catchup', 'briefing'] as const) {
+    const rects = SCENES[kind].rects
+    const body = [...parts(rects, 'head'), ...parts(rects, 'eye')]
+    for (const object of parts(rects, 'object')) {
+      for (const b of body) expect(overlaps(object, b), `${kind} object at ${object.x},${object.y}`).toBe(false)
+    }
+  }
+})
+
+test('the node learned stands apart from the ring it joins', () => {
+  const rects = SCENES.learned.rects
+  const ring = parts(rects, 'node')
+  const learned = parts(rects, 'object')
+  for (const object of learned) for (const node of ring) expect(overlaps(object, node)).toBe(false)
+  // Bigger than any ring node, so it is findable once the pop has settled.
+  const span = (rs: Rect[]) => Math.max(...rs.map((r) => r.x + r.w)) - Math.min(...rs.map((r) => r.x))
+  expect(span(learned)).toBeGreaterThan(Math.max(...ring.map((n) => n.w)) * 2)
 })
