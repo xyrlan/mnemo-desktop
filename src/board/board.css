@@ -34,3 +34,24 @@
 .bd-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bd-label { font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
 .bd-row .bd-dispatch { font-size: 11px; }
+
+.bd-select { border: 0; background: transparent; color: var(--fg-muted); font-size: 12px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.bd-select.on, .bd-select:hover { color: var(--accent); }
+.bd-card .bd-select { margin-left: auto; }
+.bd-card .bd-select + .bd-dispatch { margin-left: 0; }
+
+.bd-batch { display: flex; align-items: center; gap: 6px; }
+.bd-batch button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); font: inherit; padding: 1px 8px; border-radius: 4px; cursor: pointer; }
+.bd-batch button:hover { border-color: var(--accent); }
+.bd-batch .bd-link { background: transparent; border-color: transparent; padding: 1px 2px; }
+
+.bd-sheet-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.bd-sheet { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; width: 280px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+.bd-sheet h3 { margin: 0; font-size: 13px; }
+.bd-sheet-issues { color: var(--fg-muted); font-size: 11px; overflow-wrap: anywhere; }
+.bd-sheet label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+.bd-sheet input { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); font: inherit; border-radius: 4px; padding: 2px 6px; width: 120px; }
+.bd-sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.bd-sheet-actions button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); font: inherit; padding: 3px 10px; border-radius: 4px; cursor: pointer; }
+.bd-sheet-actions button:hover { border-color: var(--accent); }
+.bd-sheet-actions .bd-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
