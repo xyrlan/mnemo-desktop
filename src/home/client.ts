@@ -13,6 +13,10 @@ export interface HomeClient {
   pickFolder(): Promise<string | null>
 }
 
+/** Fetch every listed repo's open issues and PRs through `gh`; the next `home_snapshot`
+ *  carries them. GitHub is read only when this is called, never on the snapshot's poll. */
+export const refreshGithub = (): Promise<void> => invoke('home_refresh_github')
+
 export const tauriHome: HomeClient = {
   snapshot: (a) => invoke('home_snapshot', a),
   registerRepo: (path) => invoke('home_register_repo', { path }),
