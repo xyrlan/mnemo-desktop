@@ -1190,9 +1190,7 @@ mod tests {
     const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/marketplace/rules-repo");
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("mnemo-desktop-mkt-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
+        let d = crate::testutil::temp_dir(&format!("mkt-{tag}"));
         d
     }
 
@@ -1392,18 +1390,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn import_runs_mnemo_in_the_cwd_and_reports_output_either_way() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = temp("import");
         let project = dir.join("project");
         std::fs::create_dir_all(&project).unwrap();
         let tree = Path::new(FIXTURE).join(SHARE_DIR);
         let fake = dir.join("mnemo");
-        std::fs::write(
+        crate::testutil::write_script(
             &fake,
             "#!/bin/sh\necho \"$1 $2 in $(pwd -P)\"\ncase \"$2\" in *react*) echo 'refused feedback/x: collision' >&2; exit 1;; esac\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let fake = fake.to_string_lossy().to_string();
         let path_env = std::env::var("PATH").unwrap_or_default();
         let cwd = project.to_string_lossy().to_string();
@@ -1589,9 +1584,7 @@ mod tests {
 
     #[cfg(unix)]
     fn script(path: &Path, body: &str) {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(path, body).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testutil::write_script(path, body);
     }
 
     fn git_out(args: &[&str], cwd: &Path) -> String {

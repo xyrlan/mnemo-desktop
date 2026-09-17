@@ -309,8 +309,7 @@ mod tests {
 
     #[test]
     fn branch_and_repo_of_checkouts_worktrees_and_plain_dirs() {
-        let tmp = std::env::temp_dir().join(format!("mnemo-desktop-chrome-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = crate::testutil::temp_dir("chrome");
         let main = tmp.join("proj");
         let plain = tmp.join("plain");
         std::fs::create_dir_all(&main).unwrap();

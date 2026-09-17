@@ -111,8 +111,7 @@ mod tests {
     impl Sandbox {
         fn new(tag: &str) -> Self {
             // Canonical, so the guard tests exercise escapes rather than the /var -> /private/var link.
-            let root = std::env::temp_dir().canonicalize().unwrap().join(format!("mnemo-fs-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&root);
+            let root = crate::testutil::temp_dir(&format!("fs-{tag}")).canonicalize().unwrap();
             let home = root.join("home");
             let outside = root.join("outside");
             std::fs::create_dir_all(&home).unwrap();

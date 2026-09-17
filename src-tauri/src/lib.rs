@@ -52,6 +52,10 @@ pub mod github;
 // -- build info (src/build_info.rs) --
 pub mod build_info;
 
+// -- test helpers (src/testutil.rs) --
+#[cfg(test)]
+mod testutil;
+
 use commands::PtyState;
 use tauri::Manager;
 

@@ -485,9 +485,7 @@ mod tests {
 
     #[cfg(unix)]
     fn scratch(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("mnemo-mcp-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
+        let d = crate::testutil::temp_dir(&format!("mcp-{tag}"));
         d
     }
 

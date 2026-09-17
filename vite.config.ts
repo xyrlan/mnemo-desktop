@@ -14,6 +14,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Building a fresh jsdom per file was ~80% of suite time and starved slow CI
+    // runners into 5 s timeouts; vmThreads keeps per-file isolation at a third of the cost.
+    pool: 'vmThreads',
     globals: true,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.mjs'],
   },

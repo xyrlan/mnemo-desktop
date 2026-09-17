@@ -359,8 +359,7 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-pulse-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::testutil::temp_dir(&format!("pulse-{tag}"));
         std::fs::create_dir_all(dir.join(".mnemo")).unwrap();
         dir
     }
