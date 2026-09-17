@@ -1,6 +1,6 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { closeLeaf, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect } from './tree'
+import { closeLeaf, extract, graft, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect, type Side } from './tree'
 import { layoutRects, workspaceRect } from './rects'
 import { reuseHandler } from './reuse'
 import { mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved } from './saved'
@@ -72,6 +72,10 @@ export type Actions = {
   /** Exchange the places of two panes of the same tab (drag a pane bar onto another).
    *  Focus stays on the pane it was on; panes in different tabs are left alone. */
   swapPanes(a: PaneId, b: PaneId): void
+  /** Take `from` out of its place and put it on `side` of `to`, which splits evenly to hold it
+   *  (drag a pane bar onto another's edge). Nothing happens when `from` is `to` or the two are
+   *  in different tabs; focus stays on the pane it was on. */
+  movePane(from: PaneId, to: PaneId, side: Side): void
   setCwd(id: PaneId, cwd: string): void
   /** Record (or clear) the Claude Code session a pane runs; Home and the workspace restore read it. */
   setSessionId(id: PaneId, sessionId: string | undefined): void
@@ -310,6 +314,22 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           tabs: s.tabs.map((t) => {
             const root = swapLeaves(t.root, a, b)
             return root === t.root ? t : { ...t, root }
+          }),
+        }))
+      },
+
+      movePane(from, to, side) {
+        // Refused here, before extract: grafting onto a target that was just extracted finds
+        // no target and hands back the tree without `from`, deleting the pane.
+        if (from === to) return
+        set((s) => ({
+          tabs: s.tabs.map((t) => {
+            const ids = leaves(t.root)
+            if (!ids.includes(from) || !ids.includes(to)) return t
+            const rest = extract(t.root, from)
+            if (!rest) return t
+            const root = graft(rest, to, from, side)
+            return root === rest ? t : { ...t, root }
           }),
         }))
       },

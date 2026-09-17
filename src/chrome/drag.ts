@@ -13,6 +13,18 @@ export type DragState = { from: PaneId | null; over: PaneId | null; zone: Zone |
 export const dragStore = createStore<DragState>(() => ({ from: null, over: null, zone: null }))
 export const useDrag = <T,>(sel: (s: DragState) => T) => useStore(dragStore, sel)
 
+/** What releasing over `zone` of pane `to` does: the center swaps the two panes, an edge moves
+ *  `from` to that side of `to`. */
+export function dropPane(
+  panes: { swapPanes(a: PaneId, b: PaneId): void; movePane(from: PaneId, to: PaneId, side: Side): void },
+  from: PaneId,
+  to: PaneId,
+  zone: Zone,
+): void {
+  if (zone === 'center') panes.swapPanes(from, to)
+  else panes.movePane(from, to, zone)
+}
+
 /** Pixels the pointer travels before a press on the bar becomes a drag (a click only focuses). */
 export const THRESHOLD = 4
 
@@ -60,12 +72,15 @@ function resolveTarget(ev: MouseEvent, id: PaneId): { over: PaneId | null; zone:
   return { over, zone: dropZone(ev.clientX, ev.clientY, { x: r.left, y: r.top, w: r.width, h: r.height }) }
 }
 
-/** Follows the pointer from a mousedown on pane `id`'s bar until release, then calls `swap`
- *  when it was let go over another pane's center zone — an edge zone is inert beyond its
- *  highlight, since only a swap is wired up today. Listens in the capture phase so xterm,
- *  which handles its own mouse events, cannot hide the moves. Escape cancels. Returns a
- *  cancel function. */
-export function startPaneDrag(id: PaneId, start: { clientX: number; clientY: number }, swap: (a: PaneId, b: PaneId) => void): () => void {
+/** Follows the pointer from a mousedown on pane `id`'s bar until release, then calls `drop`
+ *  with the pane and zone it was let go over — never for its own pane, nothing, or a cancel.
+ *  Listens in the capture phase so xterm, which handles its own mouse events, cannot hide the
+ *  moves. Escape cancels. Returns a cancel function. */
+export function startPaneDrag(
+  id: PaneId,
+  start: { clientX: number; clientY: number },
+  drop: (from: PaneId, to: PaneId, zone: Zone) => void,
+): () => void {
   let active = false
   const move = (ev: MouseEvent) => {
     if (!active) {
@@ -87,7 +102,7 @@ export function startPaneDrag(id: PaneId, start: { clientX: number; clientY: num
       document.body.classList.remove('pane-dragging')
       dragStore.setState({ from: null, over: null, zone: null })
     }
-    if (commit && active && over !== null && over !== id && zone === 'center') swap(id, over)
+    if (commit && active && over !== null && over !== id && zone !== null) drop(id, over, zone)
   }
   const up = (ev: MouseEvent) => {
     // The pane the pointer is released over, even when no move event reached it.
