@@ -1,4 +1,4 @@
-import { cloneDest, isFolded, paneForSession, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
+import { childSession, cloneDest, firstRows, githubError, isFolded, otherErrors, paneForSession, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
 
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession =>
   ({ title: 't', cwd: '/r', last_at: 0, transcript: true, live: null, kind: 'interactive', agent: null, ...o })
@@ -79,4 +79,26 @@ test('refreshGithub invokes the lens refresh command', async () => {
   expect(invoke).toHaveBeenCalledWith('home_refresh_github')
   vi.doUnmock('@tauri-apps/api/core')
   vi.doUnmock('@tauri-apps/plugin-dialog')
+})
+
+test('githubError finds a repo in the lens lines by name; otherErrors keeps the rest', () => {
+  const errors = ['github (other, desk): no git remotes found', 'github (mnemo): gh: auth required', 'history unreadable']
+  expect(githubError(errors, 'desk')).toBe('no git remotes found')
+  expect(githubError(errors, 'mnemo')).toBe('gh: auth required')
+  expect(githubError(errors, 'des')).toBeNull()
+  expect(githubError(errors, 'history')).toBeNull()
+  expect(otherErrors(errors)).toEqual(['history unreadable'])
+})
+
+test('childSession matches a job short id to the child session it prefixes', () => {
+  const r = repo({ root: '/gh/a', children: [sess({ id: 'aaaa1111-2222' }), sess({ id: 'bbbb2222-3333' })] })
+  expect(childSession(r, 'bbbb2222')?.id).toBe('bbbb2222-3333')
+  expect(childSession(r, 'cccc3333')).toBeNull()
+})
+
+test('firstRows keeps every live session and the most recent quiet ones, in order', () => {
+  const ss = [sess({ id: 'a' }), sess({ id: 'b', live: 'bg' }), sess({ id: 'c' }), sess({ id: 'd' }), sess({ id: 'e', live: 'here' })]
+  expect(firstRows(ss, 2)).toEqual({ rows: [ss[0], ss[1], ss[2], ss[4]], rest: 1 })
+  expect(firstRows(ss, 0).rows.map((s) => s.id)).toEqual(['b', 'e'])
+  expect(firstRows([], 3)).toEqual({ rows: [], rest: 0 })
 })

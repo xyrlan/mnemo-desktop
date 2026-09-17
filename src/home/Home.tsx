@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { homeStore, useHome } from './app-store'
-import { isFolded, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
+import { childSession, firstRows, githubError, isFolded, otherErrors, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
+import { repoAccent } from './repo-color'
+import type { Issue } from '../github/types'
+import { openIssue, openUrl } from '../github/actions'
 import { store as layout, useApp } from '../layout/app-store'
 import { Wordmark } from '../brand/Wordmark'
 import Account from '../github/Account'
 import './home.css'
 
 const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~')
+/** Rows a section shows before its "more" line. */
+const FIRST = 5
+/** Dead parent sessions a group shows before "more"; live ones always show. */
+const RECENT_SESSIONS = 3
 
 function Entry() {
   const spec = useHome((s) => s.cloneSpec)
@@ -32,23 +39,27 @@ function Entry() {
   )
 }
 
-function RepoRow({ r, selected }: { r: HomeRepo; selected: boolean }) {
-  const live = r.sessions.some((s) => s.live) || r.children.some((s) => s.live)
+/** The explicit GitHub read; the other one is the lens showing. */
+function Refresh() {
+  const github = useHome((s) => s.github)
+  const at = useHome((s) => s.githubAt)
   return (
     <button
-      className={`hm-repo${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}${r.unresolved ? ' hm-unresolved' : ''}`}
-      onClick={() => void homeStore.getState().select(r.root)}
-      title={r.unresolved ? `${r.root}\nclick to read the repo (macOS may ask for permission)` : r.root}
+      className="hm-btn hm-refresh"
+      disabled={github === 'loading'}
+      title={at ? `issues and PRs read ${relTime(at)} ago` : 'issues and PRs not read yet'}
+      onClick={() => void homeStore.getState().refreshGithub()}
     >
-      <span className="hm-repo-name">
-        {r.pinned ? '★ ' : ''}
-        {r.name}
-      </span>
-      <span className="hm-repo-path">{short(r.root)}</span>
-      <span className="hm-repo-when">
-        {live && <span className="hm-dot" />}
-        {relTime(r.last_at)}
-      </span>
+      {github === 'loading' ? 'reading GitHub…' : '↻ GitHub'}
+    </button>
+  )
+}
+
+/** Plain rows sharing a group's accent; `repo` names the group on hover. */
+function RowButton({ repo, className = '', ...p }: { repo: HomeRepo; className?: string; title?: string; disabled?: boolean; onClick(): void; children: ReactNode }) {
+  return (
+    <button className={`hm-row ${className}`} disabled={p.disabled} title={`${repo.name} · ${p.title ?? ''}`} onClick={p.onClick}>
+      {p.children}
     </button>
   )
 }
@@ -59,7 +70,8 @@ function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
   const panes = useApp((st) => st.panes)
   const click = whatClickDoes(s, panes)
   return (
-    <button
+    <RowButton
+      repo={repo}
       className="hm-session"
       disabled={click.kind === 'nothing'}
       title={click.kind === 'nothing' ? click.why : s.id}
@@ -76,44 +88,147 @@ function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
         {s.cwd !== repo.root && <span className="hm-session-cwd">{short(s.cwd)}</span>}
         {relTime(s.last_at)}
       </span>
-    </button>
+    </RowButton>
   )
 }
 
-/** Background children of dispatches: one collapsed row per repo, rows on click. */
-function Children({ repo }: { repo: HomeRepo }) {
-  const [open, setOpen] = useState(false)
-  const kids = repo.children
-  const live = kids.filter((s) => s.live).length
+function IssueRow({ repo, i }: { repo: HomeRepo; i: Issue }) {
   return (
-    <>
-      <button className={`hm-session hm-children${open ? ' hm-open' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="hm-caret">{open ? '▾' : '▸'}</span>
-        <span className="hm-session-title">dispatch children ({kids.length})</span>
-        <span className="hm-session-meta">
-          {live > 0 && (
-            <span className="hm-children-live">
-              <span className="hm-dot" />
-              {live}
-            </span>
-          )}
-          {relTime(kids[0]?.last_at ?? 0)}
+    <RowButton repo={repo} className="hm-issue" title={i.url} onClick={() => openIssue(i)}>
+      <span className="hm-num">#{i.number}</span>
+      <span className="hm-session-title">{i.title}</span>
+      {i.labels.slice(0, 3).map((l) => (
+        <span key={l} className="hm-agent">
+          {l}
         </span>
+      ))}
+    </RowButton>
+  )
+}
+
+const CHECKS: Record<Pr['checks'], [string, string] | null> = {
+  pass: ['✓', 'checks pass'],
+  fail: ['✗', 'checks fail'],
+  pending: ['●', 'checks running'],
+  none: null,
+}
+
+function PrRow({ repo, pr }: { repo: HomeRepo; pr: Pr }) {
+  const check = CHECKS[pr.checks]
+  const kid = pr.child ? childSession(repo, pr.child) : null
+  return (
+    <div className="hm-row hm-pr" title={`${repo.name} · ${pr.url}`}>
+      <button className="hm-pr-open" onClick={() => openUrl(pr.url, `PR #${pr.number}`)}>
+        <span className="hm-num">#{pr.number}</span>
+        {check && (
+          <span className={`hm-checks hm-checks-${pr.checks}`} title={check[1]}>
+            {check[0]}
+          </span>
+        )}
+        <span className="hm-session-title">{pr.title}</span>
+        {pr.state === 'draft' && <span className="hm-agent">draft</span>}
       </button>
-      {open && (
-        <div className="hm-children-rows">
-          {kids.map((s) => (
-            <SessionRow key={s.id} repo={repo} s={s} />
-          ))}
-        </div>
+      {pr.child &&
+        (kid ? (
+          <button className="hm-child" title={`opened by ${kid.title || kid.id}`} onClick={() => homeStore.getState().openSession(repo, kid)}>
+            ← child {pr.child}
+          </button>
+        ) : (
+          <span className="hm-child" title={`opened by job ${pr.child}`}>
+            ← child {pr.child}
+          </span>
+        ))}
+    </div>
+  )
+}
+
+/** A labelled list that shows `first(items)` and folds the rest behind one line. */
+function Capped<T>({ label, items, first, more, row }: { label: string; items: T[]; first: (all: T[]) => T[]; more: string; row(t: T): ReactNode }) {
+  const [open, setOpen] = useState(false)
+  if (items.length === 0) return null
+  const shown = open ? items : first(items)
+  const rest = items.length - first(items).length
+  return (
+    <div className="hm-section">
+      <div className="hm-section-label">
+        {label} <span className="hm-count">{items.length}</span>
+      </div>
+      {shown.map(row)}
+      {rest > 0 && (
+        <button className="hm-link hm-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? 'show less' : `${rest} ${more}`}
+        </button>
       )}
-    </>
+    </div>
+  )
+}
+
+function RepoGroup({ r }: { r: HomeRepo }) {
+  // Read at click time, not render time: the store's actions are replaceable.
+  const h = () => homeStore.getState()
+  const selected = useHome((s) => s.selected === r.root)
+  const errors = useHome((s) => s.snapshot.errors)
+  const ghError = githubError(errors, r.name)
+  const live = r.sessions.some((s) => s.live) || r.children.some((s) => s.live)
+  const issues = r.issues ?? []
+  const prs = r.prs ?? []
+  // Acting in a group makes it the repo the rest of the app defaults to (`selected`).
+  const act = (f: () => void) => () => {
+    if (!r.unresolved) void h().select(r.root)
+    f()
+  }
+  const empty = !r.unresolved && issues.length + prs.length + r.sessions.length + r.children.length === 0
+  return (
+    <section
+      className={`hm-group${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}${r.unresolved ? ' hm-unresolved' : ''}`}
+      style={{ '--repo': repoAccent(r.root) } as CSSProperties}
+      data-root={r.root}
+    >
+      <header className="hm-group-head" title={r.root}>
+        <span className="hm-repo-name">
+          {r.pinned ? '★ ' : ''}
+          {r.name}
+        </span>
+        <span className="hm-repo-path">{short(r.root)}</span>
+        <span className="hm-repo-when">
+          {live && <span className="hm-dot" />}
+          {relTime(r.last_at)}
+        </span>
+        <span className="hm-actions">
+          {r.unresolved ? (
+            <button className="hm-btn" title="read the repo (macOS may ask for permission)" onClick={() => void h().select(r.root)}>
+              Read repo
+            </button>
+          ) : (
+            <>
+              <button className="hm-btn hm-primary" onClick={act(() => h().newSession(r.root))}>
+                New session
+              </button>
+              <button className="hm-btn" onClick={act(() => h().shell(r.root))}>
+                Shell
+              </button>
+            </>
+          )}
+          <button className="hm-btn" onClick={() => void h().togglePin(r.root)}>
+            {r.pinned ? 'Unpin' : 'Pin'}
+          </button>
+          <button className="hm-btn" onClick={() => void h().toggleHidden(r.root)}>
+            {r.hidden ? 'Show' : 'Hide'}
+          </button>
+        </span>
+      </header>
+      {ghError && <div className="hm-row hm-gh-error">GitHub could not read this repo: {ghError}</div>}
+      <Capped label="Issues" items={issues} more="more issues" first={(a) => a.slice(0, FIRST)} row={(i) => <IssueRow key={i.number} repo={r} i={i} />} />
+      <Capped label="PRs" items={prs} more="more PRs" first={(a) => a.slice(0, FIRST)} row={(p) => <PrRow key={p.number} repo={r} pr={p} />} />
+      <Capped label="Sessions" items={r.sessions} more="older sessions" first={(a) => firstRows(a, RECENT_SESSIONS).rows} row={(s) => <SessionRow key={s.id} repo={r} s={s} />} />
+      <Capped label="Dispatch children" items={r.children} more="finished children" first={(a) => firstRows(a, 0).rows} row={(s) => <SessionRow key={s.id} repo={r} s={s} />} />
+      {empty && <div className="hm-row hm-muted">No sessions yet.</div>}
+    </section>
   )
 }
 
 export default function Home() {
   const snap = useHome((s) => s.snapshot)
-  const selected = useHome((s) => s.selected)
   const filter = useHome((s) => s.filter)
   const showHidden = useHome((s) => s.showHidden)
   const showProtected = useHome((s) => s.showProtected)
@@ -121,14 +236,17 @@ export default function Home() {
   const tabs = useApp((s) => s.tabs)
   const h = homeStore.getState()
 
+  // Home is mounted only while it shows: this is "the lens became visible". Sessions first,
+  // since they are local and fast; GitHub after, on the roots that snapshot listed.
   useEffect(() => {
-    void homeStore.getState().load()
+    const st = homeStore.getState()
+    void st.load().then(() => st.refreshGithub())
   }, [])
 
   const repos = visibleRepos(snap.repos, filter, showHidden, showProtected)
   const folded = snap.repos.filter(isFolded).length
-  const repo = snap.repos.find((r) => r.root === selected) ?? null
   const hiddenCount = snap.repos.filter((r) => r.hidden).length
+  const errors = otherErrors(snap.errors)
 
   if (snap.repos.length === 0) {
     return (
@@ -153,17 +271,19 @@ export default function Home() {
             ← back
           </button>
         )}
+        <input className="hm-filter" placeholder="filter repos…" value={filter} onChange={(e) => h.setFilter(e.target.value)} />
+        <Refresh />
         <Entry />
         <Account />
       </header>
-      <div className="hm-body">
-        <aside className="hm-left">
-          <input className="hm-filter" placeholder="filter…" value={filter} onChange={(e) => h.setFilter(e.target.value)} />
-          {repos.map((r) => (
-            <RepoRow key={r.root} r={r} selected={r.root === selected} />
-          ))}
+      <main className="hm-stream">
+        {repos.map((r) => (
+          <RepoGroup key={r.root} r={r} />
+        ))}
+        {repos.length === 0 && filter.trim() && <p className="hm-muted">No repo matches “{filter}”.</p>}
+        <div className="hm-folds">
           {folded > 0 && (
-            <button className="hm-link hm-protected" onClick={() => h.setShowProtected(!showProtected)} title="folders macOS protects (Downloads, Desktop, Documents, volumes); selecting one reads the repo">
+            <button className="hm-link hm-protected" onClick={() => h.setShowProtected(!showProtected)} title="folders macOS protects (Downloads, Desktop, Documents, volumes); reading one runs git there">
               {showProtected ? 'hide protected folders' : `${folded} protected folder${folded === 1 ? '' : 's'} · show`}
             </button>
           )}
@@ -172,39 +292,9 @@ export default function Home() {
               {showHidden ? 'hide hidden repos' : `${hiddenCount} hidden repo${hiddenCount === 1 ? '' : 's'}`}
             </button>
           )}
-        </aside>
-        <main className="hm-right">
-          {repo && (
-            <>
-              <div className="hm-repo-head">
-                <h2>{repo.name}</h2>
-                <span className="hm-repo-path">{short(repo.root)}</span>
-                <span className="hm-actions">
-                  <button className="hm-btn hm-primary" onClick={() => h.newSession(repo.root)}>
-                    New session
-                  </button>
-                  <button className="hm-btn" onClick={() => h.shell(repo.root)}>
-                    Shell
-                  </button>
-                  <button className="hm-btn" onClick={() => void h.togglePin(repo.root)}>
-                    {repo.pinned ? 'Unpin' : 'Pin'}
-                  </button>
-                  <button className="hm-btn" onClick={() => void h.toggleHidden(repo.root)}>
-                    {repo.hidden ? 'Show' : 'Hide'}
-                  </button>
-                </span>
-              </div>
-              {repo.children.length > 0 && <Children key={repo.root} repo={repo} />}
-              {repo.sessions.length === 0 && repo.children.length === 0 ? (
-                <p className="hm-muted">No sessions yet.</p>
-              ) : (
-                repo.sessions.map((s) => <SessionRow key={s.id} repo={repo} s={s} />)
-              )}
-            </>
-          )}
-        </main>
-      </div>
-      {snap.errors.length > 0 && <div className="hm-errors">{snap.errors.join(' · ')}</div>}
+        </div>
+      </main>
+      {errors.length > 0 && <div className="hm-errors">{errors.join(' · ')}</div>}
       {notice && (
         <div className="hm-notice" onClick={h.dismiss}>
           {notice}

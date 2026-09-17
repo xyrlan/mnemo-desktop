@@ -1,5 +1,6 @@
 import { createHomeStore } from './store'
 import type { HomeClient } from './client'
+import type { LensClient } from './store'
 import type { HomeSnapshot } from './types'
 
 const snap: HomeSnapshot = {
@@ -12,9 +13,9 @@ const snap: HomeSnapshot = {
   protected: 0,
 }
 
-function mk(over: Partial<HomeClient> = {}) {
+function mk(over: Partial<LensClient> = {}) {
   const calls: string[] = []
-  const client: HomeClient = {
+  const client: LensClient = {
     // Like the Rust side: roots opened this run come back as (empty) repos.
     snapshot: async (a) => ({
       ...snap,
@@ -23,6 +24,7 @@ function mk(over: Partial<HomeClient> = {}) {
     registerRepo: async (p) => p,
     resolveRepo: async (p) => p,
     pickFolder: async () => '/gh/picked',
+    refreshGithub: async () => {},
     ...over,
   }
   const settings = { homePinned: [] as string[], homeHidden: [] as string[], cloneBase: null as string | null }
@@ -160,4 +162,46 @@ test('a failed resolve surfaces the error', async () => {
   await store.getState().load()
   await store.getState().select('/dl/x-sub')
   expect(store.getState().notice).toBe('not a git repository')
+})
+
+test('refreshGithub reads GitHub, then reloads the snapshot that carries it', async () => {
+  const order: string[] = []
+  let fetched = false
+  const pr = { number: 7, title: 't', state: 'open' as const, checks: 'none' as const, child: null, url: 'u' }
+  const { store } = mk({
+    refreshGithub: async () => { order.push('gh'); fetched = true },
+    snapshot: async () => { order.push('snapshot'); return { ...snap, repos: snap.repos.map((r) => ({ ...r, prs: fetched ? [pr] : [] })) } },
+  })
+  expect(store.getState().github).toBe('idle')
+  await store.getState().load()
+  const p = store.getState().refreshGithub()
+  expect(store.getState().github).toBe('loading')
+  await p
+  expect(order).toEqual(['snapshot', 'gh', 'snapshot'])
+  expect(store.getState().github).toBe('ready')
+  expect(store.getState().githubAt).not.toBeNull()
+  expect(store.getState().snapshot.repos[0].prs).toEqual([pr])
+})
+
+test('refreshGithub while one runs is dropped; a failure is a notice and keeps the lists', async () => {
+  let calls = 0
+  let release = () => {}
+  const { store } = mk({ refreshGithub: () => { calls++; return new Promise<void>((r) => { release = r }) } })
+  const first = store.getState().refreshGithub()
+  await store.getState().refreshGithub()
+  expect(calls).toBe(1)
+  release()
+  await first
+  const failing = mk({ refreshGithub: async () => { throw 'gh: not logged in' } })
+  await failing.store.getState().refreshGithub()
+  expect(failing.store.getState().notice).toBe('gh: not logged in')
+  expect(failing.store.getState().github).toBe('idle')
+})
+
+test('load alone never reads GitHub', async () => {
+  let calls = 0
+  const { store } = mk({ refreshGithub: async () => { calls++ } })
+  await store.getState().load()
+  await store.getState().load()
+  expect(calls).toBe(0)
 })
