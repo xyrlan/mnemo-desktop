@@ -1,10 +1,19 @@
+import type { Issue } from '../github/types'
+
 /** Mirrors `src-tauri/src/home.rs`. */
 export type Live = 'here' | 'bg' | 'elsewhere'
 /** `agent`: the `claude agents` name of a live session, only when it differs from `title`. */
 export type HomeSession = { id: string; title: string; cwd: string; last_at: number; transcript: boolean; live: Live | null; kind: string; agent: string | null }
+export type Checks = 'pass' | 'fail' | 'pending' | 'none'
+/** An open PR (`src-tauri/src/home/lens.rs`). `child`: short id of the dispatch child that
+ *  opened it, null when none resolves, which is ordinary: show the PR without a badge. */
+export type Pr = { number: number; title: string; state: 'open' | 'draft'; checks: Checks; child: string | null; url: string }
+
 /** `unresolved`: under a folder macOS guards, grouped by its history path without running git
  *  (see `mission::is_protected`); selecting it resolves it. `children`: sessions run in a
- *  dispatch worktree beside the repo, kept out of `sessions`. */
+ *  dispatch worktree beside the repo, kept out of `sessions`. `issues`/`prs`: open ones as the
+ *  last `refreshGithub()` read them, empty before one ran or when `gh` could not read the repo
+ *  (the reason is in `HomeSnapshot.errors`). */
 export type HomeRepo = {
   root: string
   name: string
@@ -14,6 +23,10 @@ export type HomeRepo = {
   unresolved: boolean
   sessions: HomeSession[]
   children: HomeSession[]
+  // Always sent by `home_snapshot`. Optional only because `Home.test.tsx` and `store.test.ts`
+  // (read-only in round 14) build repos without them; required once round 15 updates them.
+  issues?: Issue[]
+  prs?: Pr[]
 }
 /** `protected`: unresolved repos that are neither hidden nor pinned, folded behind one line. */
 export type HomeSnapshot = { repos: HomeRepo[]; clone_base: string; errors: string[]; protected: number }

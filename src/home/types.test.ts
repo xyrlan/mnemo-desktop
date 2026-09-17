@@ -1,4 +1,4 @@
-import { cloneDest, isFolded, paneForSession, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession } from './types'
+import { cloneDest, isFolded, paneForSession, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
 
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession =>
   ({ title: 't', cwd: '/r', last_at: 0, transcript: true, live: null, kind: 'interactive', agent: null, ...o })
@@ -56,4 +56,27 @@ test('relTime buckets minutes, hours, days', () => {
   expect(relTime(now - 5 * 60000, now)).toBe('5m')
   expect(relTime(now - 3 * 3600000, now)).toBe('3h')
   expect(relTime(now - 5 * 86400000, now)).toBe('5d')
+})
+
+test('a repo carries its open issues and PRs as home_snapshot sends them', () => {
+  // Shape of `HomeRepo` from `home_snapshot` (see home::tests::github_lists_join_from_the_cache…).
+  const wire = JSON.parse(`{"root":"/gh/a","name":"a","last_at":0,"pinned":false,"hidden":false,"unresolved":false,
+    "sessions":[],"children":[],"issues":[],
+    "prs":[{"number":7,"title":"t","state":"open","checks":"none","child":null,"url":"u"},
+           {"number":8,"title":"d","state":"draft","checks":"pending","child":"4480e61c","url":"v"}]}`) as HomeRepo
+  const prs: Pr[] = wire.prs ?? []
+  expect(prs.map((p) => [p.number, p.child])).toEqual([[7, null], [8, '4480e61c']])
+  expect(repo({ root: '/gh/b' }).prs).toBeUndefined()
+})
+
+test('refreshGithub invokes the lens refresh command', async () => {
+  vi.resetModules()
+  const invoke = vi.fn().mockResolvedValue(undefined)
+  vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
+  vi.doMock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+  const { refreshGithub } = await import('./client')
+  await expect(refreshGithub()).resolves.toBeUndefined()
+  expect(invoke).toHaveBeenCalledWith('home_refresh_github')
+  vi.doUnmock('@tauri-apps/api/core')
+  vi.doUnmock('@tauri-apps/plugin-dialog')
 })

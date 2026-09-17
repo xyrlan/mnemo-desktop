@@ -1,9 +1,15 @@
 //! Home screen data: repositories and past Claude Code sessions, from
-//! `~/.claude/history.jsonl` joined with `claude agents --json --all`.
+//! `~/.claude/history.jsonl` joined with `claude agents --json --all`, plus each repo's
+//! open issues and PRs as the last `refresh_github` left them (`lens`).
+
+pub mod lens;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use crate::github::Issue;
+pub use lens::Pr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRow {
@@ -93,7 +99,7 @@ pub struct HomeSession {
     pub agent: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct HomeRepo {
     pub root: String,
     pub name: String,
@@ -109,9 +115,13 @@ pub struct HomeRepo {
     /// Sessions run in a dispatch worktree beside the repo (`<name>-wt-<n>`, see
     /// `is_dispatch_child`): background children of a dispatch, not the user's conversations.
     pub children: Vec<HomeSession>,
+    /// Open issues and PRs from the last `refresh_github`; empty until one ran, and for a
+    /// repo `gh` cannot read (the reason is in `HomeSnapshot.errors`).
+    pub issues: Vec<Issue>,
+    pub prs: Vec<Pr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct HomeSnapshot {
     pub repos: Vec<HomeRepo>,
     pub clone_base: String,
@@ -245,6 +255,8 @@ pub fn group_repos(
                 unresolved,
                 sessions: home_sessions(own),
                 children: home_sessions(children),
+                issues: vec![],
+                prs: vec![],
                 root,
             }
         })
@@ -347,6 +359,8 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
                 unresolved: !crate::mission::may_probe(root),
                 sessions: vec![],
                 children: vec![],
+                issues: vec![],
+                prs: vec![],
             });
         }
     }
@@ -359,9 +373,48 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
         }
     };
     join_live(&mut repos, &live, here, &|cwd, id| crate::mission::transcript_path(cwd, id).is_some());
+    *lens::last_roots().lock().unwrap_or_else(|p| p.into_inner()) = Some(github_roots(&repos));
+    errors.extend(join_github(&mut repos, &lens::cache().lock().unwrap_or_else(|p| p.into_inner())));
     let roots: Vec<String> = repos.iter().map(|r| r.root.clone()).collect();
     let protected = protected_count(&repos);
     HomeSnapshot { repos, clone_base: clone_base(&roots, &home), errors, protected }
+}
+
+/// Repos a GitHub refresh may run `gh` in: never an unresolved one (macOS may ask) nor a
+/// hidden one (the user put it away).
+pub fn github_roots(repos: &[HomeRepo]) -> Vec<String> {
+    repos.iter().filter(|r| !r.unresolved && !r.hidden).map(|r| r.root.clone()).collect()
+}
+
+/// Copy each repo's cached issues and PRs in; returns the `errors` lines for repos the last
+/// refresh could not read.
+pub fn join_github(repos: &mut [HomeRepo], cache: &HashMap<String, lens::RepoGithub>) -> Vec<String> {
+    for r in repos.iter_mut() {
+        if let Some(g) = cache.get(&r.root) {
+            r.issues = g.issues.clone();
+            r.prs = g.prs.clone();
+        }
+    }
+    let names: Vec<(String, String)> = repos.iter().map(|r| (r.root.clone(), r.name.clone())).collect();
+    lens::error_lines(cache, &names)
+}
+
+/// Fetch open issues and PRs for the repos the last snapshot listed (see `github_roots`);
+/// the next snapshot carries them. Runs a snapshot first when none ran yet.
+pub fn refresh_github() {
+    let known = lens::last_roots().lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let roots = match known {
+        Some(r) => r,
+        None => github_roots(&collect_home(&[], &[], &[], &[]).repos),
+    };
+    lens::refresh(&roots);
+}
+
+/// The lens's GitHub trigger (`refreshGithub()` in `src/home/client.ts`). Never polled: the
+/// front calls it when the lens becomes visible and from its refresh button.
+#[tauri::command]
+pub async fn home_refresh_github() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(refresh_github).await.map_err(|e| e.to_string())
 }
 
 /// A folder the user picked: its main-checkout root, or an error when it is not a git repo.
@@ -623,6 +676,31 @@ mod tests {
                 eprintln!("    {:?} {:?} t={} {} | {} {:?}", s.live, s.transcript, s.kind, &s.id[..8], s.title, s.agent);
             }
         }
+    }
+
+    #[test]
+    fn github_lists_join_from_the_cache_and_errors_name_their_repos() {
+        let sessions = sessions_from_history(&parse_history(HISTORY));
+        let mut repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &["/Users/me/github/other".to_string()]);
+        let may_probe = |p: &str| !crate::mission::is_protected(p, "/Users/me");
+        let guarded = group_repos(sessions_from_history(&parse_history(HISTORY)).into_values().collect(), &fake_root, &may_probe, &[], &[]);
+        // Hidden and unresolved repos are never fetched.
+        assert_eq!(github_roots(&repos), vec!["/Users/me/github/mnemo".to_string()]);
+        assert!(github_roots(&guarded).iter().all(|r| !r.contains("/Downloads")));
+
+        let pr = lens::parse_prs(r#"[{"number":7,"title":"t","state":"OPEN","isDraft":false,"url":"u","headRefName":"fix/issue-1"}]"#).unwrap();
+        let mut cache = HashMap::new();
+        cache.insert("/Users/me/github/mnemo".to_string(), lens::RepoGithub { issues: vec![], prs: pr, error: None });
+        cache.insert("/Users/me/github/other".to_string(), lens::RepoGithub { error: Some("no git remotes found".into()), ..Default::default() });
+        let errors = join_github(&mut repos, &cache);
+        let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
+        assert_eq!(mnemo.prs.iter().map(|p| (p.number, p.child.clone())).collect::<Vec<_>>(), vec![(7, None)]);
+        assert!(repos.iter().find(|r| r.name == "other").unwrap().prs.is_empty());
+        assert_eq!(errors, vec!["github (other): no git remotes found".to_string()]);
+
+        let json = serde_json::to_value(mnemo).unwrap();
+        assert_eq!(json["prs"][0], serde_json::json!({"number": 7, "title": "t", "state": "open", "checks": "none", "child": null, "url": "u"}));
+        assert_eq!(json["issues"], serde_json::json!([]));
     }
 
     #[test]
