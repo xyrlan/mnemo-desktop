@@ -83,11 +83,11 @@ test('ghost cards frame the canvas on the centre, even when every neighbour is o
 
 test('the count says how many are shown, and of how many only when the limit cut some', () => {
   const g = (shown: number, total: number): VaultGraph => ({ center: 'c', total, error: null, nodes: Array.from({ length: shown + 1 }, (_, i) => node(`n${i}`)), edges: [] })
-  expect(countLabel(g(11, 37))).toBe('11 de 37')
-  expect(countLabel(g(11, 11))).toBe('11 vizinhos')
+  expect(countLabel(g(11, 37))).toBe('11 of 37')
+  expect(countLabel(g(11, 11))).toBe('11 neighbours')
   // Hub-only pages fill the room but are not in `total`.
-  expect(countLabel(g(11, 4))).toBe('11 vizinhos')
-  expect(countLabel({ ...g(0, 0), nodes: [] })).toBe('0 vizinhos')
+  expect(countLabel(g(11, 4))).toBe('11 neighbours')
+  expect(countLabel({ ...g(0, 0), nodes: [] })).toBe('0 neighbours')
 })
 
 test('firedIds finds the nodes a pulse names, by slug or name', () => {

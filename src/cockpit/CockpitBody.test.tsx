@@ -67,10 +67,10 @@ async function renderBoth() {
 const fold = (host: HTMLElement, which: 'working' | 'done') => host.querySelector<HTMLButtonElement>(`.ck-section-${which} .ck-fold`)
 const labels = (host: HTMLElement, which: 'working' | 'done') => [...host.querySelectorAll(`.ck-section-${which} .ck-row .ck-label`)].map((e) => e.textContent)
 
-test('the sidebar renders the whole cockpit body: needs, andando, feito hoje', async () => {
+test('the sidebar renders the whole cockpit body: needs, working, done today', async () => {
   await renderBoth()
   expect([...side.querySelectorAll('.needs-list .nd-label')].map((e) => e.textContent)).toEqual(['vault'])
-  expect(fold(side, 'working')?.textContent).toMatch(/^▸ andando: \d+$/)
+  expect(fold(side, 'working')?.textContent).toMatch(/^▸ working: \d+$/)
   expect(fold(side, 'working')?.textContent).toBe(fold(pane, 'working')?.textContent)
   // Opened, the sidebar lists the same children as the pane, without the mission-map button.
   await act(async () => fold(side, 'working')!.click())
@@ -79,7 +79,7 @@ test('the sidebar renders the whole cockpit body: needs, andando, feito hoje', a
   expect(side.querySelector('.ck-section .ck-mission')).toBeNull()
 })
 
-test('andando opens by itself when nothing needs you, on both surfaces', async () => {
+test('working opens by itself when nothing needs you, on both surfaces', async () => {
   serve(calm())
   await renderBoth()
   for (const host of [side, pane]) {

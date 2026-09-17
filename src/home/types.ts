@@ -32,8 +32,8 @@ export type Click =
   | { kind: 'command'; cmd: string; sessionId: string }
   | { kind: 'nothing'; why: string }
 
-export const ELSEWHERE = 'aberta em outro terminal'
-export const NO_TRANSCRIPT = 'transcript não encontrado'
+export const ELSEWHERE = 'open in another terminal'
+export const NO_TRANSCRIPT = 'transcript not found'
 
 /** Never fork: a live session is focused or attached, only a dead one is resumed. */
 export function whatClickDoes(s: HomeSession, panes: Record<number, PaneLike>): Click {

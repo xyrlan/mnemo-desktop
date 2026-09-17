@@ -16,8 +16,8 @@ export default function Account() {
   if (!auth.installed)
     return (
       <span className="gh-account">
-        <button className="hm-btn" onClick={installGh} title="abre um terminal com brew install gh">
-          instalar gh
+        <button className="hm-btn" onClick={installGh} title="opens a terminal with brew install gh">
+          install gh
         </button>
         <code className="gh-quiet">brew install gh</code>
       </span>
@@ -25,13 +25,13 @@ export default function Account() {
   if (!auth.logged)
     return (
       <span className="gh-account">
-        <button className="hm-btn" onClick={ghLogin} title="abre um terminal com gh auth login --web">
-          Entrar no GitHub
+        <button className="hm-btn" onClick={ghLogin} title="opens a terminal with gh auth login --web">
+          Log in to GitHub
         </button>
       </span>
     )
   return (
-    <span className="gh-account gh-login" title={auth.scopes.length ? `escopos: ${auth.scopes.join(', ')}` : undefined}>
+    <span className="gh-account gh-login" title={auth.scopes.length ? `scopes: ${auth.scopes.join(', ')}` : undefined}>
       @{auth.login ?? 'github'}
     </span>
   )

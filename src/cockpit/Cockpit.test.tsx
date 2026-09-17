@@ -96,7 +96,7 @@ test('the inbox lists what needs you by urgency, with the reply inline and the r
   act(() => button(blocked, 'really stop?')!.click())
   expect(opened('terminal-cmd')).toContainEqual({ cmd: 'claude stop 094c6a03' })
 
-  act(() => button(rows()[1], 'abrir job')!.click())
+  act(() => button(rows()[1], 'open job')!.click())
   expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
 })
 
@@ -119,12 +119,12 @@ test('land and merge run in a terminal tab only after a second press', async () 
   expect(typed.at(-1)).toEqual([desktop.root, 'gh pr merge 7 --squash'])
 })
 
-test('andando and feito hoje are collapsed below the needs and open on click', async () => {
+test('working and done today are collapsed below the needs and open on click', async () => {
   missionStore.setState({ snapshot: { ...withPrs, repos: withPrs.repos.map((r) => (r.root === shipped.root ? { ...r, children: r.children.map((c) => ({ ...c, branch: 'fix/issue-40' })) } : r)) } })
   await render()
   const [working, done] = [...host.querySelectorAll<HTMLButtonElement>('.ck-fold')]
-  expect(working.textContent).toBe('▸ andando: 2')
-  expect(done.textContent).toBe('▸ feito hoje: 1')
+  expect(working.textContent).toBe('▸ working: 2')
+  expect(done.textContent).toBe('▸ done today: 1')
   expect(rows('.ck-working')).toEqual([])
   act(() => working.click())
   expect(rows('.ck-working').map((r) => r.querySelector('.ck-label')?.textContent)).toEqual(['cockpit', '#40'])
@@ -184,7 +184,7 @@ test('a row\'s mission opens as a map beside the inbox, at 100%, with action car
   act(() => button(land, 'land')!.click())
   act(() => button(land, 'confirm land?')!.click())
   expect(typed).toEqual([[shipped.root, `mnemo land ${shipped.missions[0].contract_path} --merge`]])
-  act(() => button(card('pr:/Users/me/github/mnemo#13')!, 'abrir job')!.click())
+  act(() => button(card('pr:/Users/me/github/mnemo#13')!, 'open job')!.click())
   expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
 
   key('Escape')
@@ -220,7 +220,7 @@ test('every repo is listed, the focused one first, and the head names it with it
   // No scope toggle any more: what needs you elsewhere is still here.
   expect(host.querySelector('.m-scope')).toBeNull()
   expect(rows().map((r) => r.dataset.key)).toEqual(['blocked:094c6a03'])
-  expect(host.querySelector('.ck-fold')?.textContent).toBe('▸ andando: 2')
+  expect(host.querySelector('.ck-fold')?.textContent).toBe('▸ working: 2')
   act(() => host.querySelector<HTMLButtonElement>('.ck-fold')!.click())
   expect(rows('.ck-working').map((r) => [r.querySelector('.ck-label')?.textContent, r.querySelector('.nd-repo')?.textContent])).toEqual([
     ['#40', 'mnemo'],
@@ -276,7 +276,7 @@ test('a merged PR with a red last rollup is not a row', async () => {
   missionStore.setState({ snapshot: { ...withPrs, repos: [merged] } })
   await render()
   expect(rows()).toEqual([])
-  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
+  expect(host.querySelector('.ck-empty')?.textContent).toBe('nothing pending')
 })
 
 test('the open map asks for the width its layout spans and the inbox narrows to titles', async () => {
@@ -291,15 +291,15 @@ test('the open map asks for the width its layout spans and the inbox narrows to 
   expect(host.querySelector('.ck-body')?.className).not.toContain('ck-mapped')
 })
 
-test('shows errors, and nada pendente when there is nothing at all', async () => {
+test('shows errors, and nothing pending when there is nothing at all', async () => {
   missionStore.setState({ snapshot: { repos: [], errors: ['gh missing on PATH'], at: '' }, lastError: null })
   await render()
   expect(host.textContent).toContain('gh missing on PATH')
-  expect(host.querySelector('.ck-empty')?.textContent).toBe('nada pendente')
+  expect(host.querySelector('.ck-empty')?.textContent).toBe('nothing pending')
   expect(host.querySelector('.ck-fold')).toBeNull()
 })
 
-test('a permission row: Aprovar / Negar instead of the reply, y / n on the selected row, detach once an answer opened its attach', async () => {
+test('a permission row: Approve / Deny instead of the reply, y / n on the selected row, detach once an answer opened its attach', async () => {
   answered.length = 0
   const m = desktop.missions[0]
   const vault = m.pieces[1]
@@ -311,7 +311,7 @@ test('a permission row: Aprovar / Negar instead of the reply, y / n on the selec
   expect(blocked.querySelector('.m-perm-cmd')?.textContent).toBe('touch approve-probe.txt && ls -la')
   // The cockpit row has its own attach button; the box adds none.
   expect([...blocked.querySelectorAll('button')].filter((b) => b.textContent === 'attach')).toHaveLength(1)
-  expect(host.querySelector('.ck-hint')?.textContent).toContain('y aprovar · n negar')
+  expect(host.querySelector('.ck-hint')?.textContent).toContain('y approve · n deny')
 
   key('y')
   key('n')
@@ -329,5 +329,5 @@ test('a permission row: Aprovar / Negar instead of the reply, y / n on the selec
   })
   expect(button(row('blocked:094c6a03'), 'detach')).toBeDefined()
   expect(button(row('blocked:094c6a03'), 'attach')).toBeUndefined()
-  expect(row('blocked:094c6a03').querySelector('.m-sent')?.textContent).toContain('aprovado ✓')
+  expect(row('blocked:094c6a03').querySelector('.m-sent')?.textContent).toContain('approved ✓')
 })

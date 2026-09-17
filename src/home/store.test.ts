@@ -84,7 +84,7 @@ test('openSession with a live-here session focuses its pane; elsewhere only noti
   expect(layout.focused).toEqual([4])
   store.getState().openSession(snap.repos[0], { ...snap.repos[0].sessions[0], id: 's9', live: 'elsewhere' })
   expect(layout.commands).toEqual([])
-  expect(store.getState().notice).toBe('aberta em outro terminal')
+  expect(store.getState().notice).toBe('open in another terminal')
 })
 
 test('clone types gh into a tab under clone_base and remembers the dest as an extra root', async () => {
@@ -98,10 +98,10 @@ test('clone types gh into a tab under clone_base and remembers the dest as an ex
 })
 
 test('openFolder registers the picked dir and refreshes; non-git surfaces the error', async () => {
-  const bad = mk({ registerRepo: async () => { throw 'não é um repositório git' } })
+  const bad = mk({ registerRepo: async () => { throw 'not a git repository' } })
   await bad.store.getState().load()
   await bad.store.getState().openFolder()
-  expect(bad.store.getState().notice).toBe('não é um repositório git')
+  expect(bad.store.getState().notice).toBe('not a git repository')
   const ok = mk()
   await ok.store.getState().load()
   await ok.store.getState().openFolder()
@@ -156,8 +156,8 @@ test('selecting an unresolved repo resolves it once and selects the resolved roo
 })
 
 test('a failed resolve surfaces the error', async () => {
-  const { store } = mkProtected(async () => { throw 'não é um repositório git' })
+  const { store } = mkProtected(async () => { throw 'not a git repository' })
   await store.getState().load()
   await store.getState().select('/dl/x-sub')
-  expect(store.getState().notice).toBe('não é um repositório git')
+  expect(store.getState().notice).toBe('not a git repository')
 })

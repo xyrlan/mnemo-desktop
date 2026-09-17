@@ -108,12 +108,12 @@ test('the health screen is a table of rules by heat with badges, tiles, filters 
 
   // Rows in the order Rust sent (hottest first), stale added from `mnemo stale`.
   expect(names(host)).toEqual(['Run the tests', 'target-dir', 'bare'])
-  expect([...host.querySelectorAll('.vr-row')].map((r) => [...r.querySelectorAll('.vr-badge')].map((b) => b.textContent))).toEqual([['inbox'], ['stale'], ['nunca', 'revisar']])
+  expect([...host.querySelectorAll('.vr-row')].map((r) => [...r.querySelectorAll('.vr-badge')].map((b) => b.textContent))).toEqual([['inbox'], ['stale'], ['never', 'review']])
   expect(host.querySelector('.vr-row:nth-child(3) .vr-last')?.textContent).toBe('—')
   expect(host.querySelector('.vr-row .vr-last')?.textContent).toBe('2d ago')
 
   // Tiles: status numbers, then review = bare (both lists, once) + stale target-dir.
-  expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2precisa revisão'])
+  expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2needs review'])
   expect(host.querySelector('.vr-raw')).toBeNull()
   await click(byText(host, 'button', 'status / doctor'))
   expect(host.querySelector('.vr-raw')?.textContent).toContain('doctor says hi')
@@ -175,7 +175,7 @@ test('a row opens its page and ego graph; a neighbour selects; disable asks twic
     ['run-tests', 'stub-node ve-centre'],
     ['bare', 'stub-node'],
   ])
-  expect(host.querySelector('.ve-bar')?.textContent).toContain('1 de 3')
+  expect(host.querySelector('.ve-bar')?.textContent).toContain('1 of 3')
   // A ghost card only frames the canvas: clicking one selects nothing.
   await click(host.querySelector('.stub-node.ve-ghost'))
   await flush()

@@ -31,11 +31,11 @@ test('visibleRepos folds unresolved protected folders unless shown, matched by a
 test('whatClickDoes covers the five states', () => {
   const panes = { 7: { id: 7, view: 'terminal', sessionId: 'x' } }
   expect(whatClickDoes(sess({ id: 'x', live: 'here' }), panes)).toEqual({ kind: 'focus', pane: 7 })
-  expect(whatClickDoes(sess({ id: 'y', live: 'here' }), panes)).toEqual({ kind: 'nothing', why: 'aberta em outro terminal' })
+  expect(whatClickDoes(sess({ id: 'y', live: 'here' }), panes)).toEqual({ kind: 'nothing', why: 'open in another terminal' })
   expect(whatClickDoes(sess({ id: 'b', live: 'bg' }), panes)).toEqual({ kind: 'command', cmd: 'claude attach b', sessionId: 'b' })
-  expect(whatClickDoes(sess({ id: 'e', live: 'elsewhere' }), panes)).toEqual({ kind: 'nothing', why: 'aberta em outro terminal' })
+  expect(whatClickDoes(sess({ id: 'e', live: 'elsewhere' }), panes)).toEqual({ kind: 'nothing', why: 'open in another terminal' })
   expect(whatClickDoes(sess({ id: 'd' }), panes)).toEqual({ kind: 'command', cmd: 'claude --resume d', sessionId: 'd' })
-  expect(whatClickDoes(sess({ id: 'g', transcript: false }), panes)).toEqual({ kind: 'nothing', why: 'transcript não encontrado' })
+  expect(whatClickDoes(sess({ id: 'g', transcript: false }), panes)).toEqual({ kind: 'nothing', why: 'transcript not found' })
 })
 
 test('paneForSession finds the pane running a session', () => {

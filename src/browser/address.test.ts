@@ -78,9 +78,9 @@ describe('AddressBar', () => {
     }
     await act(async () => root.render(createElement(AddressBar, all)))
   }
-  const chrome = () => host.querySelector<HTMLButtonElement>('button[aria-label="Abrir no Chrome"]')!
+  const chrome = () => host.querySelector<HTMLButtonElement>('button[aria-label="Open in Chrome"]')!
 
-  test('"Abrir no Chrome" hands the loaded page, not the half-typed text, to Chrome', async () => {
+  test('"Open in Chrome" hands the loaded page, not the half-typed text, to Chrome', async () => {
     const client = fakeClient()
     const bar = barReducer(at('https://github.com/o/r/pull/4'), { type: 'edit', input: 'githu' })
     await render({ client, bar })
@@ -109,7 +109,7 @@ describe('AddressBar', () => {
     await act(async () => root.unmount())
     root = createRoot(host)
     await render({ client: fakeClient('ephemeral') })
-    expect(host.querySelector('.browser-store')?.textContent).toBe('sem login salvo')
+    expect(host.querySelector('.browser-store')?.textContent).toBe('no saved login')
   })
 
   test('navigation buttons and Escape still work from the bar', async () => {

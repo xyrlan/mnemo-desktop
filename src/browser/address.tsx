@@ -102,15 +102,15 @@ export function AddressBar({ id, bar, dispatch, client, input, onSubmit, onError
         onKeyDown={onKey}
       />
       {store === 'ephemeral' && (
-        <span className="browser-store" title="Logins neste painel somem ao fechar o app (MNEMO_BROWSER_EPHEMERAL)">
-          sem login salvo
+        <span className="browser-store" title="Logins in this pane are gone when the app closes (MNEMO_BROWSER_EPHEMERAL)">
+          no saved login
         </span>
       )}
       <button
         type="button"
         className="browser-external"
-        title={external ? 'Abrir no Chrome' : 'Abrir no Chrome (nenhuma página carregada)'}
-        aria-label="Abrir no Chrome"
+        title={external ? 'Open in Chrome' : 'Open in Chrome (no page loaded)'}
+        aria-label="Open in Chrome"
         disabled={!external}
         onClick={() => void openInChrome(client, bar.url).catch(onError)}
       >

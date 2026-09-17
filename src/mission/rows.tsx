@@ -41,9 +41,9 @@ export function splitAsk(ask: string): { tool: string | null; command: string } 
   return m ? { tool: m[1], command: m[2] } : { tool: null, command: ask }
 }
 
-const ANSWERED: Record<Choice, string> = { yes: 'aprovado', always: 'aprovado e liberado', no: 'negado' }
+const ANSWERED: Record<Choice, string> = { yes: 'approved', always: 'approved, not asking again', no: 'denied' }
 
-/** A permission prompt: what the child wants to run, in full, and Aprovar / Negar (`y` / `n`
+/** A permission prompt: what the child wants to run, in full, and Approve / Deny (`y` / `n`
  *  while the block has focus), answered through `claude attach`. No reply field: a reply
  *  does not answer a prompt. */
 export function PermissionBox({ c, className = '' }: { c: ChildSession; className?: string }) {
@@ -66,22 +66,22 @@ export function PermissionBox({ c, className = '' }: { c: ChildSession; classNam
       }}
     >
       <div className="m-perm-head">
-        permissão{tool ? <> · <span className="m-perm-tool">{tool}</span></> : null}
+        permission{tool ? <> · <span className="m-perm-tool">{tool}</span></> : null}
       </div>
       {ask ? <pre className="m-perm-cmd">{command}</pre> : <div className="m-needs">{c.waiting_for ?? 'permission prompt'}</div>}
       <div className="m-reply-actions">
-        <button className="m-approve" disabled={busy} title="Aprovar uma vez (y)" onClick={() => run('yes')}>
-          Aprovar
+        <button className="m-approve" disabled={busy} title="Approve once (y)" onClick={() => run('yes')}>
+          Approve
         </button>
-        <button disabled={busy} title="Aprovar e não perguntar de novo, quando o prompt oferece (⇧Y)" onClick={() => run('always')}>
-          Aprovar e não perguntar de novo
+        <button disabled={busy} title="Approve and don't ask again, when the prompt offers it (⇧Y)" onClick={() => run('always')}>
+          Approve and don't ask again
         </button>
-        <button className="m-deny" disabled={busy} title="Negar (n)" onClick={() => run('no')}>
-          Negar
+        <button className="m-deny" disabled={busy} title="Deny (n)" onClick={() => run('no')}>
+          Deny
         </button>
       </div>
-      {answer?.phase === 'attaching' && <div className="m-sent">abrindo claude attach {c.id}…</div>}
-      {answer?.phase === 'sent' && Date.now() - answer.at < 120_000 && <div className="m-sent">{ANSWERED[answer.choice]} ✓ · acompanhe no painel do attach</div>}
+      {answer?.phase === 'attaching' && <div className="m-sent">opening claude attach {c.id}…</div>}
+      {answer?.phase === 'sent' && Date.now() - answer.at < 120_000 && <div className="m-sent">{ANSWERED[answer.choice]} ✓ · follow it in the attach pane</div>}
       {answer?.phase === 'error' && <div className="m-error">{answer.error}</div>}
     </div>
   )

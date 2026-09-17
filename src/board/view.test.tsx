@@ -97,8 +97,8 @@ test('without a Project: the open issues as a list, with the label filter', asyn
 test('needs_scope: says how to add the scope and still lists the issues', async () => {
   gh.project = 'needs_scope'
   await render()
-  expect(host.querySelector('.bd-notice')?.textContent).toContain('rodar gh auth refresh -s project')
-  act(() => buttons('rodar')[0].click())
+  expect(host.querySelector('.bd-notice')?.textContent).toContain('run gh auth refresh -s project')
+  act(() => buttons('run')[0].click())
   expect(typed).toEqual([[undefined, 'gh auth refresh -s project']])
   expect(host.querySelectorAll('.bd-row').length).toBe(mnemoIssues.length)
   // #40 already has a child: no dispatch button on its row.
@@ -115,7 +115,7 @@ test('gh missing or logged out: offers the fix instead of a board', async () => 
   githubStore.setState({ auth: null })
   gh.auth = { installed: true, logged: false, login: null, scopes: [] }
   await render()
-  act(() => buttons('Entrar no GitHub')[0].click())
+  act(() => buttons('Log in to GitHub')[0].click())
   expect(typed).toEqual([[undefined, 'gh auth login --web']])
   expect(githubStore.getState().boards).toEqual({})
 })

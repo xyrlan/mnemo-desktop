@@ -206,7 +206,7 @@ export default function Cockpit() {
           <CockpitBody
             inbox={inbox}
             needs={<div className="ck-needs">{renderRows(inbox.needs)}</div>}
-            empty={!err && <div className="ck-empty">nada pendente</div>}
+            empty={!err && <div className="ck-empty">nothing pending</div>}
             renderRows={renderRows}
           />
         </div>
@@ -225,7 +225,7 @@ export default function Cockpit() {
           </div>
         )}
       </div>
-      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y aprovar · n negar' : 'r reply'} · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
+      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>
   )
 }

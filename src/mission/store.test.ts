@@ -147,7 +147,7 @@ test('replyAsMe failure keeps the draft and shows why, without the Error prefix'
   expect(await s.getState().replyAsMe('empty')).toBe(false)
 })
 
-test('folds: andando opens by itself only when nothing needs you, feito starts collapsed', () => {
+test('folds: working opens by itself only when nothing needs you, done starts collapsed', () => {
   expect(foldsOpen({}, 0)).toEqual({ working: true, done: false })
   expect(foldsOpen({}, 2)).toEqual({ working: false, done: false })
   // A click wins over the default, either way.

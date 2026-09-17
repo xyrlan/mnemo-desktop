@@ -14,7 +14,7 @@ function Entry() {
   return (
     <div className="hm-entry">
       <button className="hm-btn" onClick={() => void h.openFolder()}>
-        Abrir pasta…
+        Open folder…
       </button>
       <form
         className="hm-clone"
@@ -23,9 +23,9 @@ function Entry() {
           void h.clone()
         }}
       >
-        <input placeholder="owner/repo ou URL" value={spec} onChange={(e) => h.setCloneSpec(e.target.value)} />
+        <input placeholder="owner/repo or URL" value={spec} onChange={(e) => h.setCloneSpec(e.target.value)} />
         <button className="hm-btn" type="submit" disabled={!spec.trim()}>
-          Clonar
+          Clone
         </button>
       </form>
     </div>
@@ -38,7 +38,7 @@ function RepoRow({ r, selected }: { r: HomeRepo; selected: boolean }) {
     <button
       className={`hm-repo${selected ? ' hm-selected' : ''}${r.hidden ? ' hm-hidden' : ''}${r.unresolved ? ' hm-unresolved' : ''}`}
       onClick={() => void homeStore.getState().select(r.root)}
-      title={r.unresolved ? `${r.root}\nclique para ler o repositório (o macOS pode pedir permissão)` : r.root}
+      title={r.unresolved ? `${r.root}\nclick to read the repo (macOS may ask for permission)` : r.root}
     >
       <span className="hm-repo-name">
         {r.pinned ? '★ ' : ''}
@@ -53,7 +53,7 @@ function RepoRow({ r, selected }: { r: HomeRepo; selected: boolean }) {
   )
 }
 
-const BADGE: Record<string, string> = { here: 'aqui', bg: 'background', elsewhere: 'em outro terminal' }
+const BADGE: Record<string, string> = { here: 'here', bg: 'background', elsewhere: 'in another terminal' }
 
 function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
   const panes = useApp((st) => st.panes)
@@ -68,7 +68,7 @@ function SessionRow({ repo, s }: { repo: HomeRepo; s: HomeSession }) {
       {s.live && <span className={`hm-live hm-live-${s.live}`}>{BADGE[s.live]}</span>}
       <span className="hm-session-title">{s.title || s.id.slice(0, 8)}</span>
       {s.agent && (
-        <span className="hm-agent" title="nome em claude agents">
+        <span className="hm-agent" title="name in claude agents">
           {s.agent}
         </span>
       )}
@@ -89,7 +89,7 @@ function Children({ repo }: { repo: HomeRepo }) {
     <>
       <button className={`hm-session hm-children${open ? ' hm-open' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="hm-caret">{open ? '▾' : '▸'}</span>
-        <span className="hm-session-title">filhos de dispatch ({kids.length})</span>
+        <span className="hm-session-title">dispatch children ({kids.length})</span>
         <span className="hm-session-meta">
           {live > 0 && (
             <span className="hm-children-live">
@@ -133,7 +133,7 @@ export default function Home() {
   if (snap.repos.length === 0) {
     return (
       <div className="hm hm-empty">
-        <p>Nenhum repositório ainda. Abra uma pasta ou clone um do GitHub.</p>
+        <p>No repos yet. Open a folder or clone one from GitHub.</p>
         <Entry />
         {notice && (
           <div className="hm-notice" onClick={h.dismiss}>
@@ -150,7 +150,7 @@ export default function Home() {
         <Wordmark />
         {tabs.length > 0 && (
           <button className="hm-btn hm-back" onClick={() => layout.getState().goToTab(0)}>
-            ← voltar
+            ← back
           </button>
         )}
         <Entry />
@@ -158,18 +158,18 @@ export default function Home() {
       </header>
       <div className="hm-body">
         <aside className="hm-left">
-          <input className="hm-filter" placeholder="filtrar…" value={filter} onChange={(e) => h.setFilter(e.target.value)} />
+          <input className="hm-filter" placeholder="filter…" value={filter} onChange={(e) => h.setFilter(e.target.value)} />
           {repos.map((r) => (
             <RepoRow key={r.root} r={r} selected={r.root === selected} />
           ))}
           {folded > 0 && (
-            <button className="hm-link hm-protected" onClick={() => h.setShowProtected(!showProtected)} title="pastas que o macOS protege (Downloads, Desktop, Documents, volumes); selecionar uma lê o repositório">
-              {showProtected ? 'ocultar pastas protegidas' : `${folded} pasta${folded > 1 ? 's' : ''} protegida${folded > 1 ? 's' : ''} · mostrar`}
+            <button className="hm-link hm-protected" onClick={() => h.setShowProtected(!showProtected)} title="folders macOS protects (Downloads, Desktop, Documents, volumes); selecting one reads the repo">
+              {showProtected ? 'hide protected folders' : `${folded} protected folder${folded === 1 ? '' : 's'} · show`}
             </button>
           )}
           {hiddenCount > 0 && (
             <button className="hm-link" onClick={() => h.setShowHidden(!showHidden)}>
-              {showHidden ? 'ocultar escondidos' : `${hiddenCount} escondido${hiddenCount > 1 ? 's' : ''}`}
+              {showHidden ? 'hide hidden repos' : `${hiddenCount} hidden repo${hiddenCount === 1 ? '' : 's'}`}
             </button>
           )}
         </aside>
@@ -181,22 +181,22 @@ export default function Home() {
                 <span className="hm-repo-path">{short(repo.root)}</span>
                 <span className="hm-actions">
                   <button className="hm-btn hm-primary" onClick={() => h.newSession(repo.root)}>
-                    Nova sessão
+                    New session
                   </button>
                   <button className="hm-btn" onClick={() => h.shell(repo.root)}>
                     Shell
                   </button>
                   <button className="hm-btn" onClick={() => void h.togglePin(repo.root)}>
-                    {repo.pinned ? 'Desafixar' : 'Fixar'}
+                    {repo.pinned ? 'Unpin' : 'Pin'}
                   </button>
                   <button className="hm-btn" onClick={() => void h.toggleHidden(repo.root)}>
-                    {repo.hidden ? 'Mostrar' : 'Esconder'}
+                    {repo.hidden ? 'Show' : 'Hide'}
                   </button>
                 </span>
               </div>
               {repo.children.length > 0 && <Children key={repo.root} repo={repo} />}
               {repo.sessions.length === 0 && repo.children.length === 0 ? (
-                <p className="hm-muted">Nenhuma sessão ainda.</p>
+                <p className="hm-muted">No sessions yet.</p>
               ) : (
                 repo.sessions.map((s) => <SessionRow key={s.id} repo={repo} s={s} />)
               )}
