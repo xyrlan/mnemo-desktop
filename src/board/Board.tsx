@@ -101,6 +101,12 @@ function IssueRow({ issue, root, order, link }: { issue: Issue; root: string; or
   )
 }
 
+/** The values `mnemo dispatch` accepts for each flag; empty means the flag is left off.
+ *  Closed sets, not free text: these words are joined into a command typed into a shell. */
+const MODELS = ['', 'haiku', 'sonnet', 'opus']
+const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max']
+const MAY = ['', 'pr', 'push', 'none']
+
 /** The selected-issues confirm sheet: shows what will be dispatched and offers `--model`,
  *  `--effort` and `--may` before spending anything. */
 function DispatchSheet({ root, ns, onClose }: { root: string; ns: number[]; onClose: () => void }) {
@@ -126,15 +132,33 @@ function DispatchSheet({ root, ns, onClose }: { root: string; ns: number[]; onCl
         <div className="bd-sheet-issues">{sorted.map((n) => `#${n}`).join(', ')}</div>
         <label>
           model
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="default" />
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           effort
-          <input value={effort} onChange={(e) => setEffort(e.target.value)} placeholder="default" />
+          <select value={effort} onChange={(e) => setEffort(e.target.value)}>
+            {EFFORTS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           may
-          <input value={may} onChange={(e) => setMay(e.target.value)} placeholder="default" />
+          <select value={may} onChange={(e) => setMay(e.target.value)}>
+            {MAY.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="bd-sheet-actions">
           <button onClick={onClose}>cancel</button>

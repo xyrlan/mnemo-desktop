@@ -21,7 +21,7 @@ import { store as appStore } from '../layout/app-store'
 import { missionStore } from '../mission/app-store'
 import { homeStore } from '../home/app-store'
 import { settingsStore } from '../settings/app-store'
-import { githubStore } from '../github/app-store'
+import { githubStore, selectionStore } from '../github/app-store'
 import { board, mnemoIssues, snapWithIssues } from '../github/fixtures'
 import './view'
 
@@ -118,4 +118,24 @@ test('gh missing or logged out: offers the fix instead of a board', async () => 
   act(() => buttons('Log in to GitHub')[0].click())
   expect(typed).toEqual([[undefined, 'gh auth login --web']])
   expect(githubStore.getState().boards).toEqual({})
+})
+
+test('the dispatch sheet offers closed sets, never free text', async () => {
+  gh.project = null
+  await render()
+  const rows = [...host.querySelectorAll('.bd-row')].filter((x) => x.querySelector('.bd-dispatch'))
+  expect(rows.length).toBeGreaterThan(0)
+  const n = Number(rows[0].querySelector('.bd-num')!.textContent!.slice(1))
+  act(() => selectionStore.getState().pick(root, [n], n, { shift: false, meta: false }))
+  await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
+  act(() => buttons('dispatch selected')[0].click())
+
+  const sheet = host.querySelector('.bd-sheet')!
+  expect(sheet).toBeTruthy()
+  // The flag values are joined into a command typed into a shell, so none of them may be typed.
+  expect(sheet.querySelectorAll('input')).toHaveLength(0)
+  const opts = (i: number) => [...sheet.querySelectorAll('select')[i].options].map((o) => o.value)
+  expect(opts(0)).toEqual(['', 'haiku', 'sonnet', 'opus'])
+  expect(opts(1)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max'])
+  expect(opts(2)).toEqual(['', 'pr', 'push', 'none'])
 })
