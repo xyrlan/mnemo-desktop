@@ -208,11 +208,16 @@ test('the square is its four bands tall, and the library is gone', async () => {
  *  is not worth a dependency. Both files, because the bug this guards against lived in the gap
  *  between them. */
 type Fs = { readFileSync(path: string, encoding: string): string }
+type Url = { fileURLToPath(url: URL): string }
 const readCss = async (rel: string): Promise<string> => {
-  // The specifier is built at run time so `tsc` does not try to resolve `node:fs`, which has no
-  // types here. Vitest runs in Node, so the import itself is ordinary.
+  // The specifiers are built at run time so `tsc` does not try to resolve them: the project
+  // carries no `@types/node`, and a guard is not worth a dependency. Vitest runs in Node, so the
+  // imports themselves are ordinary.
   const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
-  return fs.readFileSync(new URL(rel, import.meta.url).pathname, 'utf8')
+  const url = (await import(/* @vite-ignore */ 'node:' + 'url')) as unknown as Url
+  // `fileURLToPath`, never `.pathname`: on Windows the latter yields `/D:/a/...`, which `fs`
+  // reads as relative and opens as `D:\D:\a\...`.
+  return fs.readFileSync(url.fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 }
 
 const pxIn = (css: string, selector: string, prop: string): number => {
