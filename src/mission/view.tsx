@@ -72,7 +72,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
           {child?.cwd && <span title={child.cwd}>{child.cwd.split('/').pop()}</span>}
         </div>
         <div className="mission-actions">
-          <button onClick={attach}>attach</button>
+          <button onClick={attach}>take over</button>
           <button
             onClick={() => {
               if (!confirmStop) {

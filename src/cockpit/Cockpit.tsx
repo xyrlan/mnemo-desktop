@@ -225,7 +225,7 @@ export default function Cockpit() {
           </div>
         )}
       </div>
-      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a attach · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
+      <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a take over · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>
   )
 }

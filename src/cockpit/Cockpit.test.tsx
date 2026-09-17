@@ -89,7 +89,7 @@ test('the inbox lists what needs you by urgency, with the reply inline and the r
   const blocked = rows()[0]
   expect(blocked.querySelector('.m-needs')?.textContent).toBe('may I add a crate?')
   expect(blocked.querySelector('textarea')?.value).toBe('yes')
-  act(() => button(blocked, 'attach')!.click())
+  act(() => button(blocked, 'take over')!.click())
   expect(opened('terminal-cmd')).toContainEqual({ cmd: 'claude attach 094c6a03' })
   act(() => button(blocked, 'stop')!.click())
   expect(opened('terminal-cmd')).not.toContainEqual({ cmd: 'claude stop 094c6a03' })
@@ -299,7 +299,7 @@ test('shows errors, and nothing pending when there is nothing at all', async () 
   expect(host.querySelector('.ck-fold')).toBeNull()
 })
 
-test('a permission row: Approve / Deny instead of the reply, y / n on the selected row, detach once an answer opened its attach', async () => {
+test('a permission row: Approve / Deny instead of the reply, y / n on the selected row, step back once an answer opened its attach', async () => {
   answered.length = 0
   const m = desktop.missions[0]
   const vault = m.pieces[1]
@@ -309,8 +309,8 @@ test('a permission row: Approve / Deny instead of the reply, y / n on the select
   const blocked = row('blocked:094c6a03')
   expect(blocked.querySelector('textarea')).toBeNull()
   expect(blocked.querySelector('.m-perm-cmd')?.textContent).toBe('touch approve-probe.txt && ls -la')
-  // The cockpit row has its own attach button; the box adds none.
-  expect([...blocked.querySelectorAll('button')].filter((b) => b.textContent === 'attach')).toHaveLength(1)
+  // The cockpit row has its own take-over button; the box adds none.
+  expect([...blocked.querySelectorAll('button')].filter((b) => b.textContent === 'take over')).toHaveLength(1)
   expect(host.querySelector('.ck-hint')?.textContent).toContain('y approve · n deny')
 
   key('y')
@@ -322,12 +322,12 @@ test('a permission row: Approve / Deny instead of the reply, y / n on the select
   expect(answered).toHaveLength(2)
   expect(host.querySelector('.ck-hint')?.textContent).toContain('r reply')
 
-  // An answer left its attach pane open here: the row offers to leave it.
+  // An answer left its attach pane open here: the row offers to step back from it.
   act(() => {
     appStore.setState({ tabs: [{ id: 'tab-8', root: { kind: 'leaf', pane: 8 }, focused: 8 }], panes: { 8: { id: 8, view: 'terminal', cwd: '/x' } } })
     answerStore.setState({ answers: { '094c6a03': { choice: 'yes', phase: 'sent', pane: 8, at: Date.now() } } })
   })
-  expect(button(row('blocked:094c6a03'), 'detach')).toBeDefined()
-  expect(button(row('blocked:094c6a03'), 'attach')).toBeUndefined()
+  expect(button(row('blocked:094c6a03'), 'step back')).toBeDefined()
+  expect(button(row('blocked:094c6a03'), 'take over')).toBeUndefined()
   expect(row('blocked:094c6a03').querySelector('.m-sent')?.textContent).toContain('approved ✓')
 })

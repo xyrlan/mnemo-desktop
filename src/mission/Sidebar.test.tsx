@@ -90,11 +90,11 @@ test('a blocked child keeps its reply field, prefilled; clicking it opens the mi
   expect(Object.values(appStore.getState().panes).find((p) => p.view === 'mission')?.props).toEqual({ id: '094c6a03' })
 })
 
-test('a question keeps the reply field and gets an attach link', async () => {
+test('a question keeps the reply field and gets a take-over link', async () => {
   await render()
   const blocked = host.querySelector('.nd-blocked')!
   expect(blocked.querySelector('.m-permission')).toBeNull()
-  await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'attach')!.click())
+  await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'take over')!.click())
   expect(Object.values(appStore.getState().panes).find((p) => p.view === 'terminal-cmd')?.props).toEqual({ cmd: 'claude attach 094c6a03' })
 })
 

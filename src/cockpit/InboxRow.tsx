@@ -116,8 +116,8 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
         {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
-        {child && answered !== null && btn('detach', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
-        {child && answered === null && (row.kind === 'blocked' || child.live) && btn('attach', () => attachChild(child.id), '', `claude attach ${child.id}`)}
+        {child && answered !== null && btn('step back', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
+        {child && answered === null && (row.kind === 'blocked' || child.live) && btn('take over', () => attachChild(child.id), '', `claude attach ${child.id}`)}
         {row.kind === 'blocked' &&
           btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
       </div>
