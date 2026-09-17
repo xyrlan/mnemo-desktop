@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register, registerProvider } from '../actions/registry'
 import { missionStore, useMission } from './app-store'
@@ -7,6 +7,7 @@ import { store as appStore } from '../layout/app-store'
 import { allChildren, childWord, isRecent, type TimelineLine } from './types'
 import { attachChild, openMissionPane, ReplyBox } from './rows'
 import { estimateUsd, fmtUsd } from './cost'
+import { clock, timelineRows } from './timeline'
 import { settingsStore } from '../settings/app-store'
 
 function MissionPane({ id: paneId, props }: PaneViewProps) {
@@ -43,7 +44,16 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' })
-  }, [lines.length])
+  }, [lines.length, sentList.length])
+
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set())
+  const toggle = (first: number) =>
+    setOpen((o) => {
+      const n = new Set(o)
+      if (!n.delete(first)) n.add(first)
+      return n
+    })
+  const rows = useMemo(() => timelineRows(lines, sentList, seenAtOpen.current), [lines, sentList])
 
   const attach = () => attachChild(id, 'split-col')
 
@@ -79,24 +89,44 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
         </div>
       </div>
       <div className="mission-timeline">
-        {lines.map((l, i) => {
-          const fresh = seenAtOpen.current !== undefined && i >= seenAtOpen.current
-          const t = l.at ? new Date(l.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
-          return (
-            <div key={i} className={`tl-line${fresh ? ' fresh' : ''}`}>
-              <span className="tl-at">{t}</span>
-              <span className="tl-state">{l.state}</span>
-              <span className="tl-detail">{l.detail}</span>
+        {rows.map((r) =>
+          r.kind === 'you' ? (
+            <div key={`you-${r.at}-${r.sent.text}`} className="tl-line fresh tl-you">
+              <span className="tl-at">{clock(r.at)}</span>
+              <span className="tl-state">you</span>
+              <span className="tl-detail" title={r.sent.original !== r.sent.text ? `typed: ${r.sent.original}` : undefined}>{r.sent.text}</span>
             </div>
-          )
-        })}
-        {sentList.map((m, i) => (
-          <div key={`you-${i}`} className="tl-line fresh tl-you">
-            <span className="tl-at">{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-            <span className="tl-state">you</span>
-            <span className="tl-detail" title={m.original !== m.text ? `typed: ${m.original}` : undefined}>{m.text}</span>
-          </div>
-        ))}
+          ) : r.lines.length === 1 ? (
+            <div key={r.lines[0].index} className={`tl-line${r.fresh ? ' fresh' : ''}`}>
+              <span className="tl-at">{clock(r.first)}</span>
+              <span className="tl-state">{r.state}</span>
+              <span className="tl-detail">{r.detail}</span>
+            </div>
+          ) : (
+            <div key={r.lines[0].index} className="tl-run">
+              <button
+                className={`tl-line tl-run-head${r.fresh ? ' fresh' : ''}`}
+                aria-expanded={open.has(r.lines[0].index)}
+                onClick={() => toggle(r.lines[0].index)}
+              >
+                <span className="tl-at">{clock(r.last)}</span>
+                <span className="tl-state">{r.state}</span>
+                <span className="tl-detail">{r.detail}</span>
+                <span className="tl-count">
+                  {r.lines.length}× · {clock(r.first, false)}–{clock(r.last, false)}
+                </span>
+              </button>
+              {open.has(r.lines[0].index) &&
+                r.lines.map((l) => (
+                  <div key={l.index} className="tl-line tl-run-line">
+                    <span className="tl-at">{clock(l.ms)}</span>
+                    <span className="tl-state">{l.state}</span>
+                    <span className="tl-detail">{l.detail}</span>
+                  </div>
+                ))}
+            </div>
+          ),
+        )}
         {final && (
           <div className="tl-final">
             <div className="tl-final-head">report</div>
