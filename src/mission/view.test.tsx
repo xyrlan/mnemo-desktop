@@ -2,7 +2,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({ lines: [], total: 0 })) }))
+const timeline = vi.hoisted(() => ({ lines: [] as { at: string; state: string; detail: string; text: string }[] }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({ lines: timeline.lines, total: timeline.lines.length })) }))
 
 import { missionStore } from './app-store'
 import { paneView } from '../panes/registry'
@@ -22,6 +23,7 @@ beforeEach(() => {
   document.body.appendChild(host)
   root = createRoot(host)
   missionStore.setState({ snapshot, lastError: null, looked: {}, drafts: {}, sent: {} })
+  timeline.lines = []
 })
 
 afterEach(() => {
@@ -93,4 +95,32 @@ test('the pane shows the child model and prices it at that model, and says defau
   })
   expect(host.querySelector('.m-model')?.textContent).toBe('default model · default effort')
   expect(host.textContent).toContain('~$30.00')
+})
+
+// #82: a reply sent at 17:16:42 was drawn under every status line, however late those were,
+// and each poll's identical status was its own row.
+test('the pane folds repeated status lines and places a sent reply at its time', async () => {
+  const child = allChildren(snapshot)[0]
+  const l = (at: string, detail: string) => ({ at, state: 'blocked', detail, text: '' })
+  timeline.lines = [
+    l('2026-09-15T17:10:00Z', 'awaiting task specification'),
+    l('2026-09-15T17:23:00Z', 'awaiting task clarification'),
+    l('2026-09-15T17:24:00Z', 'awaiting task clarification'),
+    l('2026-09-15T17:26:00Z', 'awaiting task clarification'),
+  ]
+  missionStore.setState({ sent: { [child.id]: [{ at: Date.parse('2026-09-15T17:16:42Z'), text: 'go ahead', original: 'go ahead' }] } })
+  const Pane = paneView('mission')!
+  await act(async () => {
+    root.render(<Pane id={1} props={{ id: child.id }} />)
+  })
+  const rows = () => [...host.querySelectorAll('.mission-timeline > *')].map((e) => e.querySelector('.tl-detail')?.textContent)
+  expect(rows()).toEqual(['awaiting task specification', 'go ahead', 'awaiting task clarification', undefined])
+  const head = host.querySelector<HTMLButtonElement>('.tl-run-head')!
+  expect(head.querySelector('.tl-count')?.textContent).toMatch(/^3× · /)
+  expect(host.querySelectorAll('.tl-run-line')).toHaveLength(0)
+  await act(async () => head.click())
+  expect(head.getAttribute('aria-expanded')).toBe('true')
+  expect(host.querySelectorAll('.tl-run-line')).toHaveLength(3)
+  await act(async () => head.click())
+  expect(host.querySelectorAll('.tl-run-line')).toHaveLength(0)
 })

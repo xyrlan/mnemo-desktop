@@ -175,6 +175,11 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 .tl-at { flex: 0 0 70px; }
 .tl-state { flex: 0 0 64px; }
 .tl-detail { overflow: hidden; text-overflow: ellipsis; }
+/* A run of identical status lines, folded into one row that opens to show each (#82). */
+.tl-run-head { width: 100%; background: transparent; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; }
+.tl-run-head:hover { background: var(--bg-elev); }
+.tl-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; color: var(--fg-muted); }
+.tl-run-line { padding-left: 12px; opacity: .8; }
 .tl-final { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .tl-final-head { color: var(--ansi-magenta); margin-bottom: 4px; }
 .tl-final pre { white-space: pre-wrap; font: inherit; margin: 0; color: var(--fg); }
