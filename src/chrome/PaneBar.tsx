@@ -4,7 +4,7 @@ import { useMission } from '../mission/app-store'
 import type { PaneId } from '../layout/tree'
 import { tauriChrome, type ChromeClient } from './client'
 import { barInfo, FLASH_MS, pulseLabel, pulseTitle } from './info'
-import { startPaneDrag } from './drag'
+import { dropPane, startPaneDrag } from './drag'
 import { tauriSession, useSessionLearn, type SessionClient } from './session'
 import { pulseStore, usePulse } from '../pulse/app-store'
 import type { Pulse } from '../pulse/store'
@@ -85,7 +85,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
     const active = document.activeElement
     if (active instanceof HTMLElement && own && !own.contains(active)) active.blur()
     store.getState().focusPane(id)
-    startPaneDrag(id, e, (a, b) => store.getState().swapPanes(a, b))
+    startPaneDrag(id, e, (from, to, zone) => dropPane(store.getState(), from, to, zone))
   }
 
   const close = (e: React.MouseEvent) => {
@@ -103,7 +103,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
 
   return (
     <>
-      <div ref={ref} className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap'}>
+      <div ref={ref} className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap, or onto its edge to move beside it'}>
         <span className="pane-bar-grip" aria-hidden>
           ⠿
         </span>

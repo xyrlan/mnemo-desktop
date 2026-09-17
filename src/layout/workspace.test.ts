@@ -104,6 +104,27 @@ test('restore recreates the tabs with new ids, spawns shells in their cwd and re
   }
 })
 
+test('a moved layout saves and restores with the same panes in the same places', async () => {
+  const s = await sample()
+  s.getState().focusPane(2)
+  await s.getState().split('col', '/repo/low')
+  // 1 | (2 / 3), focus on 3; move 1 below 3 and keep focus on it.
+  s.getState().focusPane(1)
+  s.getState().movePane(1, 3, 'down')
+  const moved = split('col', 0.5, leaf(2), split('col', 0.5, leaf(3), leaf(1)))
+  expect(s.getState().tabs[0].root).toEqual(moved)
+  const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave())) as Saved
+  expect(saved.tabs[0]).toEqual({ id: 'tab-1', root: moved, focused: 1 })
+
+  const r = createStore(fakePty(10).pty, { workspace: () => null })
+  await r.getState().restore(saved)
+  const t = r.getState().tabs[0]
+  // Spawned in tree order: 2 → 10, 3 → 11, 1 → 12.
+  expect(t).toEqual({ id: 'tab-10', root: split('col', 0.5, leaf(10), split('col', 0.5, leaf(11), leaf(12))), focused: 12 })
+  expect([10, 11, 12].map((id) => r.getState().panes[id].cwd)).toEqual(['/repo/wt', '/repo/low', '/repo'])
+  expect(r.getState().snapshotForSave().tabs[0]).toEqual({ id: 'tab-10', root: split('col', 0.5, leaf(10), split('col', 0.5, leaf(11), leaf(12))), focused: 12 })
+})
+
 test('restore of nothing restores nothing; of junk tabs rejects; restored tabs go after the open ones', async () => {
   const s = createStore(fakePty().pty, { workspace: () => null })
   await s.getState().restore({})

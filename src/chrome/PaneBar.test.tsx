@@ -63,3 +63,50 @@ test('a zone over a different pane draws nothing here', async () => {
   await act(async () => dragStore.setState({ from: other, over: other, zone: 'left' }))
   expect(host.querySelector('.pane-drop-zone')).toBeNull()
 })
+
+describe('dropping the bar on another pane', () => {
+  let beside: number
+  let target: HTMLDivElement
+
+  beforeEach(() => {
+    store.getState().openView('editor', { root: '/tmp' }, 'split-row', 'other.md')
+    beside = store.getState().tabs[0].focused
+    store.getState().focusPane(id)
+    host.className = 'pane'
+    host.dataset.pane = String(id)
+    target = document.createElement('div')
+    target.className = 'pane'
+    target.dataset.pane = String(beside)
+    document.body.appendChild(target)
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ x: 100, y: 0, width: 100, height: 100 }))
+  })
+  afterEach(() => target.remove())
+
+  const drag = (to: Element, x: number, y: number) => {
+    const bar = host.querySelector('.pane-bar')!
+    const at = (type: string, el: Element, cx: number, cy: number) =>
+      el.dispatchEvent(new MouseEvent(type, { clientX: cx, clientY: cy, bubbles: true, cancelable: true, button: 0 }))
+    at('mousedown', bar, 0, 0)
+    at('mousemove', to, x, y)
+    at('mouseup', to, x, y)
+  }
+  const tree = () => store.getState().tabs[0].root
+
+  test("an edge moves this pane to that side of the other and keeps it focused", () => {
+    expect(tree()).toEqual({ kind: 'split', dir: 'row', ratio: 0.5, children: [{ kind: 'leaf', pane: id }, { kind: 'leaf', pane: beside }] })
+    drag(target, 150, 95)
+    expect(tree()).toEqual({ kind: 'split', dir: 'col', ratio: 0.5, children: [{ kind: 'leaf', pane: beside }, { kind: 'leaf', pane: id }] })
+    expect(store.getState().tabs[0].focused).toBe(id)
+  })
+
+  test('the center still swaps the two', () => {
+    drag(target, 150, 50)
+    expect(tree()).toEqual({ kind: 'split', dir: 'row', ratio: 0.5, children: [{ kind: 'leaf', pane: beside }, { kind: 'leaf', pane: id }] })
+  })
+
+  test('its own bar leaves the tree as it was', () => {
+    const before = tree()
+    drag(host.querySelector('.pane-bar')!, 90, 50)
+    expect(tree()).toBe(before)
+  })
+})

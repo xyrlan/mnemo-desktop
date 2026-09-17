@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { createStore } from './store'
 import { registerReuse } from './reuse'
+import { leaves } from './tree'
 import type { PtyClient } from '../pty/client'
 
 function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean } = {}): PtyClient & { killed: number[]; outputs: Record<number, (b: Uint8Array) => void> } {
@@ -347,6 +348,71 @@ test('swapPanes exchanges two panes of a tab, keeps focus on its pane and leaves
   s.getState().swapPanes(1, 4) // different tabs
   expect(s.getState().tabs[0].root).toBe(t.root)
   expect(s.getState().tabs[1]).toBe(second)
+})
+
+test('movePane puts a pane on the chosen side of another and collapses the split it left', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().split('col')
+  // 1 | (2 / 3)
+  s.getState().movePane(1, 3, 'right')
+  expect(s.getState().tabs[0].root).toEqual({
+    kind: 'split', dir: 'col', ratio: 0.5,
+    children: [{ kind: 'leaf', pane: 2 }, { kind: 'split', dir: 'row', ratio: 0.5, children: [{ kind: 'leaf', pane: 3 }, { kind: 'leaf', pane: 1 }] }],
+  })
+  // 2 / 1 once 3 leaves, then 3 above 2.
+  s.getState().movePane(3, 2, 'up')
+  expect(s.getState().tabs[0].root).toEqual({
+    kind: 'split', dir: 'col', ratio: 0.5,
+    children: [{ kind: 'split', dir: 'col', ratio: 0.5, children: [{ kind: 'leaf', pane: 3 }, { kind: 'leaf', pane: 2 }] }, { kind: 'leaf', pane: 1 }],
+  })
+})
+
+test('movePane onto itself leaves the tree alone instead of deleting the pane', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  const before = s.getState().tabs
+  for (const side of ['left', 'right', 'up', 'down'] as const) {
+    s.getState().movePane(2, 2, side)
+    s.getState().movePane(1, 1, side)
+  }
+  expect(s.getState().tabs).toBe(before)
+  expect(leaves(s.getState().tabs[0].root)).toEqual([1, 2])
+})
+
+test('movePane between tabs or to an unknown pane changes nothing', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().newTab()
+  const [first, second] = s.getState().tabs
+  s.getState().movePane(1, 3, 'left')
+  s.getState().movePane(3, 1, 'left')
+  s.getState().movePane(1, 99, 'down')
+  s.getState().movePane(99, 1, 'down')
+  expect(s.getState().tabs[0]).toBe(first)
+  expect(s.getState().tabs[1]).toBe(second)
+})
+
+test('movePane keeps focus on the pane that held it, moved or not, and leaves other tabs identical', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  await s.getState().split('row')
+  await s.getState().split('col')
+  await s.getState().newTab()
+  s.getState().goToTab(0)
+  const second = s.getState().tabs[1]
+  s.getState().focusPane(3)
+  s.getState().movePane(3, 1, 'left')
+  expect(s.getState().tabs[0].focused).toBe(3)
+  expect(leaves(s.getState().tabs[0].root)).toEqual([3, 1, 2])
+  s.getState().movePane(2, 3, 'up')
+  expect(s.getState().tabs[0].focused).toBe(3)
+  expect(leaves(s.getState().tabs[0].root)).toEqual([2, 3, 1])
+  expect(s.getState().tabs[1]).toBe(second)
+  expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
 })
 
 test('setSessionId tags an existing pane and ignores unknown ids', async () => {

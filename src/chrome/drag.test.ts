@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { dragStore, dropZone, paneUnder, startPaneDrag, THRESHOLD } from './drag'
+import { dragStore, dropPane, dropZone, paneUnder, startPaneDrag, THRESHOLD } from './drag'
 
 let host: HTMLDivElement
 beforeEach(() => {
@@ -70,49 +70,75 @@ describe('dropZone', () => {
   })
 })
 
-test('dragging onto the center of another pane highlights it and swaps on release', () => {
+test('dragging onto the center of another pane highlights it and drops there on release', () => {
   stubRect($('.pane[data-pane="-2"]'), { x: 100, y: 0, w: 100, h: 100 })
-  const swap = vi.fn()
-  startPaneDrag(1, { clientX: 0, clientY: 0 }, swap)
+  const drop = vi.fn()
+  startPaneDrag(1, { clientX: 0, clientY: 0 }, drop)
   mouse('mousemove', $('#t1'), THRESHOLD + 1)
   expect(dragStore.getState()).toEqual({ from: 1, over: null, zone: null })
   expect(document.body.classList.contains('pane-dragging')).toBe(true)
   mouse('mousemove', $('#t2'), 150, 50)
   expect(dragStore.getState()).toEqual({ from: 1, over: -2, zone: 'center' })
   mouse('mouseup', $('#t2'), 150, 50)
-  expect(swap).toHaveBeenCalledWith(1, -2)
+  expect(drop).toHaveBeenCalledWith(1, -2, 'center')
   expect(dragStore.getState()).toEqual({ from: null, over: null, zone: null })
   expect(document.body.classList.contains('pane-dragging')).toBe(false)
 })
 
-test('releasing over an edge zone highlights it but never swaps', () => {
+test('releasing over an edge zone drops there with that side', () => {
   stubRect($('.pane[data-pane="-2"]'), { x: 100, y: 0, w: 100, h: 100 })
-  const swap = vi.fn()
-  startPaneDrag(1, { clientX: 0, clientY: 0 }, swap)
+  const drop = vi.fn()
+  startPaneDrag(1, { clientX: 0, clientY: 0 }, drop)
   mouse('mousemove', $('#t1'), THRESHOLD + 1)
   mouse('mousemove', $('#t2'), 105, 50)
   expect(dragStore.getState()).toEqual({ from: 1, over: -2, zone: 'left' })
-  mouse('mouseup', $('#t2'), 105, 50)
-  expect(swap).not.toHaveBeenCalled()
+  mouse('mouseup', $('#t2'), 195, 50)
+  // The zone of the release point wins over the last move's.
+  expect(drop).toHaveBeenCalledTimes(1)
+  expect(drop).toHaveBeenCalledWith(1, -2, 'right')
   expect(dragStore.getState()).toEqual({ from: null, over: null, zone: null })
 })
 
-test('a click without movement, a release over nothing, and Escape never swap', () => {
-  const swap = vi.fn()
-  startPaneDrag(1, { clientX: 0, clientY: 0 }, swap)
+test("releasing on the dragged pane's own bar or body drops nothing, whatever its zone", () => {
+  stubRect($('.pane[data-pane="1"]'), { x: 0, y: 0, w: 100, h: 100 })
+  const drop = vi.fn()
+  startPaneDrag(1, { clientX: 50, clientY: 50 }, drop)
+  mouse('mousemove', $('#t1'), 95, 50)
+  expect(dragStore.getState()).toEqual({ from: 1, over: null, zone: null })
+  mouse('mouseup', $('#t1'), 95, 50)
+
+  startPaneDrag(1, { clientX: 50, clientY: 50 }, drop)
+  mouse('mousemove', $('#t1'), 50, 5)
+  mouse('mouseup', $('.pane[data-pane="1"]'), 50, 5)
+  expect(drop).not.toHaveBeenCalled()
+})
+
+test('dropPane swaps on the center and moves on an edge', () => {
+  const panes = { swapPanes: vi.fn(), movePane: vi.fn() }
+  dropPane(panes, 1, 2, 'center')
+  expect(panes.swapPanes).toHaveBeenCalledWith(1, 2)
+  expect(panes.movePane).not.toHaveBeenCalled()
+  for (const side of ['left', 'right', 'up', 'down'] as const) dropPane(panes, 1, 2, side)
+  expect(panes.movePane.mock.calls).toEqual([[1, 2, 'left'], [1, 2, 'right'], [1, 2, 'up'], [1, 2, 'down']])
+  expect(panes.swapPanes).toHaveBeenCalledTimes(1)
+})
+
+test('a click without movement, a release over nothing, and Escape never drop', () => {
+  const drop = vi.fn()
+  startPaneDrag(1, { clientX: 0, clientY: 0 }, drop)
   mouse('mousemove', $('#t2'), THRESHOLD - 1)
   expect(dragStore.getState().from).toBeNull()
   mouse('mouseup', $('#t2'), THRESHOLD - 1)
 
-  startPaneDrag(1, { clientX: 0, clientY: 0 }, swap)
+  startPaneDrag(1, { clientX: 0, clientY: 0 }, drop)
   mouse('mousemove', $('#t2'), 100)
   mouse('mouseup', $('#gap'), 100)
 
-  startPaneDrag(1, { clientX: 0, clientY: 0 }, swap)
+  startPaneDrag(1, { clientX: 0, clientY: 0 }, drop)
   mouse('mousemove', $('#t2'), 100)
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   expect(dragStore.getState()).toEqual({ from: null, over: null, zone: null })
   mouse('mouseup', $('#t2'), 100)
 
-  expect(swap).not.toHaveBeenCalled()
+  expect(drop).not.toHaveBeenCalled()
 })
