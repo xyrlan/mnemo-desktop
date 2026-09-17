@@ -6,7 +6,18 @@ import { SCOPE_FIX, type Issue } from './types'
 /** What a click does with GitHub: commands run in a terminal tab, pages open in a browser pane. */
 
 export function dispatchIssue(root: string, n: number) {
-  void layout.getState().openCommandTab(root, `mnemo dispatch ${n}`)
+  dispatchIssues(root, [n])
+}
+
+/** Dispatches every issue in `ns` together: `mnemo dispatch <n> <n> ... [--model x] [--effort x] [--may x]`,
+ *  typed into a fresh terminal tab the same way the single-issue path already does. */
+export function dispatchIssues(root: string, ns: number[], opts?: { model?: string; effort?: string; may?: string }) {
+  if (!ns.length) return
+  const words = ['mnemo', 'dispatch', ...ns.map(String)]
+  if (opts?.model) words.push('--model', opts.model)
+  if (opts?.effort) words.push('--effort', opts.effort)
+  if (opts?.may) words.push('--may', opts.may)
+  void layout.getState().openCommandTab(root, words.join(' '))
 }
 
 export function openUrl(url: string, title: string) {

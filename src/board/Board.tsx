@@ -4,8 +4,8 @@ import { store as appStore } from '../layout/app-store'
 import { missionStore, useMission } from '../mission/app-store'
 import { homeStore, useHome } from '../home/app-store'
 import { useSettings } from '../settings/app-store'
-import { githubStore, useGithub } from '../github/app-store'
-import { dispatchIssue, ghLogin, installGh, openIssue, openUrl, refreshScope } from '../github/actions'
+import { githubStore, selectionStore, useGithub, useSelection } from '../github/app-store'
+import { dispatchIssue, dispatchIssues, ghLogin, installGh, openIssue, openUrl, refreshScope } from '../github/actions'
 import { filterByLabels, labelsOf, linkIssues, linkWord, NEEDS_SCOPE, SCOPE_FIX, type BoardItem, type Issue, type IssueLink } from '../github/types'
 import type { Pr } from '../mission/types'
 import LabelPicker from '../github/LabelPicker'
@@ -36,7 +36,27 @@ function Dispatch({ root, n }: { root: string; n: number }) {
   )
 }
 
-function Card({ item, root, link, pr }: { item: BoardItem; root: string; link?: IssueLink; pr?: Pr }) {
+/** Picks `n` for batch dispatch: click selects just it, shift-click extends the range from the
+ *  last pick within `order`, cmd/ctrl-click toggles it without disturbing the rest. */
+function SelectBox({ root, order, n }: { root: string; order: number[]; n: number }) {
+  const on = useSelection((s) => s.root === root && s.ns.includes(n))
+  return (
+    <button
+      type="button"
+      className={`bd-select${on ? ' on' : ''}`}
+      aria-pressed={on}
+      title="select for batch dispatch (shift: range, ⌘: toggle)"
+      onClick={(e) => {
+        e.stopPropagation()
+        selectionStore.getState().pick(root, order, n, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })
+      }}
+    >
+      {on ? '☑' : '☐'}
+    </button>
+  )
+}
+
+function Card({ item, root, order, link, pr }: { item: BoardItem; root: string; order: number[]; link?: IssueLink; pr?: Pr }) {
   const issue = item.kind === 'Issue' && item.number !== null
   const chip = issue ? linkWord(link) : pr ? [`PR ${pr.state.toLowerCase()}`, CI[pr.ci]].filter(Boolean).join(' · ') : null
   return (
@@ -48,13 +68,18 @@ function Card({ item, root, link, pr }: { item: BoardItem; root: string; link?: 
       <div className="bd-card-foot">
         {item.kind === 'DraftIssue' && <span className="bd-chip bd-muted">draft</span>}
         <Chip text={chip} />
-        {issue && !link && <Dispatch root={root} n={item.number!} />}
+        {issue && !link && (
+          <>
+            <SelectBox root={root} order={order} n={item.number!} />
+            <Dispatch root={root} n={item.number!} />
+          </>
+        )}
       </div>
     </div>
   )
 }
 
-function IssueRow({ issue, root, link }: { issue: Issue; root: string; link?: IssueLink }) {
+function IssueRow({ issue, root, order, link }: { issue: Issue; root: string; order: number[]; link?: IssueLink }) {
   return (
     <div className="bd-row" onClick={() => openIssue(issue)} title={issue.url}>
       <span className="bd-num">#{issue.number}</span>
@@ -66,7 +91,82 @@ function IssueRow({ issue, root, link }: { issue: Issue; root: string; link?: Is
       ))}
       {issue.assignees.length > 0 && <span className="bd-quiet">{issue.assignees.map((a) => `@${a}`).join(' ')}</span>}
       <Chip text={linkWord(link)} />
-      {!link && <Dispatch root={root} n={issue.number} />}
+      {!link && (
+        <>
+          <SelectBox root={root} order={order} n={issue.number} />
+          <Dispatch root={root} n={issue.number} />
+        </>
+      )}
+    </div>
+  )
+}
+
+/** The values `mnemo dispatch` accepts for each flag; empty means the flag is left off.
+ *  Closed sets, not free text: these words are joined into a command typed into a shell. */
+const MODELS = ['', 'haiku', 'sonnet', 'opus']
+const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max']
+const MAY = ['', 'pr', 'push', 'none']
+
+/** The selected-issues confirm sheet: shows what will be dispatched and offers `--model`,
+ *  `--effort` and `--may` before spending anything. */
+function DispatchSheet({ root, ns, onClose }: { root: string; ns: number[]; onClose: () => void }) {
+  const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('')
+  const [may, setMay] = useState('')
+  const sorted = [...ns].sort((a, b) => a - b)
+  const go = () => {
+    dispatchIssues(
+      root,
+      sorted,
+      { model: model.trim() || undefined, effort: effort.trim() || undefined, may: may.trim() || undefined },
+    )
+    selectionStore.getState().clearSelection()
+    onClose()
+  }
+  return (
+    <div className="bd-sheet-backdrop" onClick={onClose}>
+      <div className="bd-sheet" onClick={(e) => e.stopPropagation()}>
+        <h3>
+          dispatch {sorted.length} issue{sorted.length === 1 ? '' : 's'}
+        </h3>
+        <div className="bd-sheet-issues">{sorted.map((n) => `#${n}`).join(', ')}</div>
+        <label>
+          model
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          effort
+          <select value={effort} onChange={(e) => setEffort(e.target.value)}>
+            {EFFORTS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          may
+          <select value={may} onChange={(e) => setMay(e.target.value)}>
+            {MAY.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="bd-sheet-actions">
+          <button onClick={onClose}>cancel</button>
+          <button className="bd-primary" onClick={go}>
+            dispatch
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -111,6 +211,21 @@ export default function Board(_: PaneViewProps) {
   const b = root ? slot[root] : undefined
   const labels = (root && issueLabels[root]) || []
   const roots = knownRoots(snap, { repos: homeRepos, selected: homeSelected }, root)
+  const shown = filterByLabels(issues, labels)
+
+  // The dispatchable issue numbers in the order they're shown, for shift-click's range and for
+  // the picker itself: only an issue with no child, piece or PR linked can be batch-dispatched.
+  const order = b?.board
+    ? b.board.columns.flatMap((c) => c.items.filter((it) => it.kind === 'Issue' && it.number !== null && !links.get(it.number!)).map((it) => it.number!))
+    : shown.filter((i) => !links.get(i.number)).map((i) => i.number)
+  const selRoot = useSelection((s) => s.root)
+  const selNs = useSelection((s) => s.ns)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const selected = root && selRoot === root ? selNs : []
+
+  useEffect(() => {
+    setSheetOpen(false)
+  }, [root])
 
   let body
   if (!root) body = <div className="bd-empty">open a terminal in a repository, or pick one on Home</div>
@@ -137,14 +252,20 @@ export default function Board(_: PaneViewProps) {
               {c.name} <span className="bd-quiet">{c.items.length}</span>
             </header>
             {c.items.map((it) => (
-              <Card key={it.id} item={it} root={root} link={it.kind === 'Issue' && it.number !== null ? links.get(it.number) : undefined} pr={it.kind === 'PullRequest' && it.number !== null ? prs.get(it.number) : undefined} />
+              <Card
+                key={it.id}
+                item={it}
+                root={root}
+                order={order}
+                link={it.kind === 'Issue' && it.number !== null ? links.get(it.number) : undefined}
+                pr={it.kind === 'PullRequest' && it.number !== null ? prs.get(it.number) : undefined}
+              />
             ))}
           </section>
         ))}
       </div>
     )
   else {
-    const shown = filterByLabels(issues, labels)
     body = (
       <>
         {b.error === NEEDS_SCOPE ? (
@@ -160,7 +281,7 @@ export default function Board(_: PaneViewProps) {
         {root && issueSlots[root]?.error && <div className="bd-notice bd-error">{issueSlots[root].error}</div>}
         <div className="bd-list">
           {shown.map((i) => (
-            <IssueRow key={i.number} issue={i} root={root} link={links.get(i.number)} />
+            <IssueRow key={i.number} issue={i} root={root} order={order} link={links.get(i.number)} />
           ))}
           {issueSlots[root] && shown.length === 0 && <div className="bd-quiet bd-pad">{labels.length ? 'no open issue with these labels' : 'no open issues'}</div>}
         </div>
@@ -189,9 +310,19 @@ export default function Board(_: PaneViewProps) {
           </button>
         )}
         <span className="bd-spacer" />
+        {root && selected.length > 0 && (
+          <span className="bd-batch">
+            <span className="bd-quiet">{selected.length} selected</span>
+            <button onClick={() => setSheetOpen(true)}>dispatch selected</button>
+            <button className="bd-link" onClick={() => selectionStore.getState().clearSelection()}>
+              clear
+            </button>
+          </span>
+        )}
         {root && b && !b.board && auth?.logged && <LabelPicker root={root} labels={labelsOf(issues)} selected={labels} />}
       </div>
       {body}
+      {sheetOpen && root && selected.length > 0 && <DispatchSheet root={root} ns={selected} onClose={() => setSheetOpen(false)} />}
     </div>
   )
 }
