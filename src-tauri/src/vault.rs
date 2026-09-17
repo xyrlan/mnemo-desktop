@@ -1622,34 +1622,30 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_mnemo(dir: &Path) -> String {
-        use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("mnemo");
-        std::fs::write(&bin, "#!/bin/sh\necho \"ran $* in $(pwd)\"\necho oops >&2\nexit 3\n").unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testutil::write_script(&bin, "#!/bin/sh\necho \"ran $* in $(pwd)\"\necho oops >&2\nexit 3\n");
         bin.to_string_lossy().to_string()
     }
 
     #[cfg(unix)]
     #[test]
     fn run_passes_allowed_args_in_cwd_and_returns_both_streams_and_code() {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-vault-run-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir("vault-run");
         let bin = fake_mnemo(&dir);
         let cwd = dir.canonicalize().unwrap();
         let r = run_with(&bin, "/usr/bin:/bin", "why", &strs(&["--json"]), &cwd.to_string_lossy());
-        assert_eq!(r.stdout.trim(), format!("ran why --json in {}", cwd.display()));
-        assert_eq!(r.stderr.trim(), "oops");
-        assert_eq!(r.code, Some(3));
+        // One comparison, so a spawn failure shows its stderr instead of an empty stdout.
+        assert_eq!(
+            (r.stdout.trim(), r.stderr.trim(), r.code),
+            (format!("ran why --json in {}", cwd.display()).as_str(), "oops", Some(3))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn run_refuses_before_spawning() {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-vault-refuse-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir("vault-refuse");
         let bin = fake_mnemo(&dir);
         let refused = run_with(&bin, "/usr/bin:/bin", "doctor", &[], &dir.to_string_lossy());
         assert_eq!((refused.code, refused.stdout.as_str()), (None, ""));
@@ -2015,7 +2011,7 @@ mod tests {
 
     #[test]
     fn the_best_xp_only_climbs() {
-        let dir = std::env::temp_dir().join(format!("mnemo-level-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir("level");
         let path = dir.join("nested").join("vault-level.json");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(record_best(&path, 120), 120);

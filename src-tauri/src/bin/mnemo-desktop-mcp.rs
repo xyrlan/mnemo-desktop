@@ -218,7 +218,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_closed_app_is_a_readable_error() {
-        let missing = std::env::temp_dir().join(format!("mnemo-mcp-none-{}.sock", std::process::id()));
+        // A socket in a directory that does not exist, so nothing can be listening on it.
+        let missing = std::env::temp_dir().join("mnemo-mcp-no-such-dir").join("app.sock");
         // SAFETY: tests in this binary do not read the environment concurrently with this one.
         unsafe { std::env::set_var(SOCKET_ENV, &missing) };
         let e = call_app("desktop_list_panes", json!({})).unwrap_err();

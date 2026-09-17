@@ -1226,9 +1226,7 @@ mod tests {
     #[test]
     fn transcript_refresh_reads_only_appended_lines() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-tally-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir("tally");
         let path = dir.join("s.jsonl");
         std::fs::write(&path, TRANSCRIPT).unwrap();
         let mut t = Tally::default();
@@ -1311,8 +1309,7 @@ mod tests {
 
     #[test]
     fn worktree_root_resolves_to_main_checkout() {
-        let tmp = std::env::temp_dir().join(format!("mnemo-desktop-wt-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = crate::testutil::temp_dir("wt");
         let main = tmp.join("main");
         std::fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str], cwd: &Path| {
@@ -1368,8 +1365,7 @@ mod tests {
 
     #[test]
     fn looked_marker_round_trips() {
-        let home = std::env::temp_dir().join(format!("mnemo-desktop-home-{}", std::process::id()));
-        std::fs::create_dir_all(&home).unwrap();
+        let home = crate::testutil::temp_dir("home");
         let prev = std::env::var_os("HOME");
         std::env::set_var("HOME", &home);
         mark_looked("abc", 7).unwrap();
@@ -1481,9 +1477,7 @@ mod reply_tests {
 
     #[test]
     fn post_message_writes_auth_then_user_turn_as_json_lines() {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-sock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir("sock");
         let path = dir.join("s.sock");
         let listener = UnixListener::bind(&path).unwrap();
         let server = std::thread::spawn(move || {
@@ -1505,9 +1499,7 @@ mod reply_tests {
 
     #[test]
     fn post_message_without_token_skips_the_auth_line() {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-sock2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir("sock2");
         let path = dir.join("s.sock");
         let listener = UnixListener::bind(&path).unwrap();
         let server = std::thread::spawn(move || {
@@ -1561,15 +1553,12 @@ pub fn translate(text: &str) -> Result<String, String> {
 #[cfg(all(test, unix))]
 mod translate_tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     /// A fake `claude` that records its last argument in `prompt` next to itself and
     /// prints `answer`.
     fn fake_claude(tag: &str, answer: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("mnemo-desktop-tr-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::temp_dir(&format!("tr-{tag}"));
         std::fs::write(dir.join("answer"), answer).unwrap();
         let fake = dir.join("claude");
         // POSIX sh (dash on Ubuntu) has no `${@: -1}`; walk to the last argument instead.
@@ -1577,24 +1566,12 @@ mod translate_tests {
             "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\nprintf '%s' \"$last\" > '{d}/prompt'\ncat '{d}/answer'\n",
             d = dir.display()
         );
-        std::fs::write(&fake, script).unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testutil::write_script(&fake, &script);
         fake
     }
 
     fn translate_via(fake: &Path, text: &str) -> String {
-        // Another test's fork can hold the script's write fd for a moment after we
-        // closed it; Linux then refuses to exec it (ETXTBSY). Retry briefly.
-        (0..20)
-            .find_map(|_| match translate_with(fake.to_str().unwrap(), text) {
-                Err(e) if e.contains("Text file busy") => {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    None
-                }
-                r => Some(r),
-            })
-            .expect("exec kept failing with ETXTBSY")
-            .unwrap()
+        translate_with(fake.to_str().unwrap(), text).unwrap()
     }
 
     fn cleanup(fake: &Path) {
