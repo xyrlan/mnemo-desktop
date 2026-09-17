@@ -94,7 +94,7 @@ test('a question keeps the reply field and gets a take-over link', async () => {
   await render()
   const blocked = host.querySelector('.nd-blocked')!
   expect(blocked.querySelector('.m-permission')).toBeNull()
-  await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'Take over')!.click())
+  await act(async () => [...blocked.querySelectorAll('button')].find((b) => b.textContent === 'take over')!.click())
   expect(Object.values(appStore.getState().panes).find((p) => p.view === 'terminal-cmd')?.props).toEqual({ cmd: 'claude attach 094c6a03' })
 })
 

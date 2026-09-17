@@ -11,7 +11,7 @@ import { buildMissionMap, type MapAction, type MapCard } from './model'
 import { landMission, mergePr, openJob, useArm } from './actions'
 import Avatar from '../avatar/Avatar'
 
-const WORD: Record<MapAction['kind'], string> = { contract: 'contract', open: 'open', reply: 'reply', attach: 'Take over', pr: 'PR', job: 'open job', merge: 'merge', land: 'land', issue: 'GitHub' }
+const WORD: Record<MapAction['kind'], string> = { contract: 'contract', open: 'open', reply: 'reply', attach: 'take over', pr: 'PR', job: 'open job', merge: 'merge', land: 'land', issue: 'GitHub' }
 const CONFIRM: Partial<Record<MapAction['kind'], string>> = { merge: 'confirm merge?', land: 'confirm land?' }
 
 const actionKey = (a: MapAction) =>
