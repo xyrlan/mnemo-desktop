@@ -28,8 +28,8 @@ export default function CockpitBody({ inbox, needs, empty, renderRows }: {
   return (
     <>
       {inbox.needs.length > 0 ? needs : empty}
-      {section('working', 'andando', inbox.working)}
-      {section('done', 'feito hoje', inbox.done)}
+      {section('working', 'working', inbox.working)}
+      {section('done', 'done today', inbox.done)}
     </>
   )
 }

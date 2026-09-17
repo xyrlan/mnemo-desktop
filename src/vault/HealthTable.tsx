@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault, vault } from './app-store'
 import { EgoView } from './EgoView'
 import { PageView, openInEditor, short } from './PageView'
-import { applyChips, BADGE_LABEL, BADGE_TITLE, confidenceTone, facets, reviewCount, scopeAgents, sinceText, withStale } from './rules'
+import { applyChips, BADGE_LABEL, BADGES, BADGE_TITLE, confidenceTone, facets, reviewCount, scopeAgents, sinceText, withStale } from './rules'
 import { parseStale } from './stale'
 import { useArm } from './useArm'
 import type { RunResult, RuleRow } from './types'
@@ -48,7 +48,7 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
             onClick={() => vault.getState().setChips({ problems: true })}
           >
             <div className="vh-tile-value">{review}</div>
-            <div className="vh-tile-label">precisa revisão</div>
+            <div className="vh-tile-label">needs review</div>
           </button>
         )}
         {!health && <div className="vt-empty">{loading ? 'running mnemo status, doctor, stale…' : ''}</div>}
@@ -203,9 +203,9 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
             </option>
           ))}
         </select>
-        <label className="vr-toggle" title="Only rules with a badge: nunca, stale, revisar, inbox">
+        <label className="vr-toggle" title={`Only rules with a badge: ${BADGES.map((b) => BADGE_LABEL[b]).join(', ')}`}>
           <input type="checkbox" checked={chips.problems} onChange={(e) => vault.getState().setChips({ problems: e.target.checked })} />
-          só problemas
+          only problems
         </label>
         <span className="vt-count">
           {loading && !loaded ? 'reading…' : shown.length === badged.length ? `${shown.length} rules` : `${shown.length} of ${badged.length} rules`}

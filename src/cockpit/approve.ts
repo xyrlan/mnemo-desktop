@@ -107,7 +107,7 @@ export async function answerPrompt(child: ChildSession, choice: Choice, deps: Pa
     const s = appStore.getState()
     const fresh = Object.keys(s.panes).map(Number).filter((id) => !before.has(String(id)))
     pane = fresh.find((id) => id > 0) ?? s.tabs.find((t) => t.id === s.activeTab)?.focused ?? null
-    if (pane === null || pane <= 0) return fail('não consegui abrir um terminal para o attach', pane)
+    if (pane === null || pane <= 0) return fail('could not open a terminal for the attach', pane)
   }
 
   for (;;) {
@@ -115,13 +115,13 @@ export async function answerPrompt(child: ChildSession, choice: Choice, deps: Pa
     const options = lines && promptOptions(lines)
     if (options) {
       const key = keyFor(options, choice)
-      if (key === null) return fail('este prompt não oferece "não perguntar de novo" — escolha no painel', pane)
+      if (key === null) return fail('this prompt does not offer "don\'t ask again" — choose in the attach pane', pane)
       await d.write(pane, key)
       const a: Answer = { choice, phase: 'sent', pane, at: Date.now() }
       put(child.id, a)
       return a
     }
-    if (Date.now() - started > d.timeoutMs) return fail('o prompt não apareceu no attach — responda no painel', pane)
+    if (Date.now() - started > d.timeoutMs) return fail('the prompt did not appear in the attach — answer in the attach pane', pane)
     await d.sleep(POLL_MS)
   }
 }

@@ -113,7 +113,7 @@ test("reply as me refuses the prefilled suggestion and types the maintainer's ow
   expect(blocked.querySelector('.m-sent')?.textContent).toContain('typed as you')
 })
 
-test('a child parked on a permission prompt shows the command and Aprovar / Negar, no reply field; y and n answer it', async () => {
+test('a child parked on a permission prompt shows the command and Approve / Deny, no reply field; y and n answer it', async () => {
   answered.length = 0
   const m = snapshot.repos[0].missions[0]
   const vault = m.pieces[1]
@@ -126,9 +126,9 @@ test('a child parked on a permission prompt shows the command and Aprovar / Nega
   expect(box.querySelector('.m-perm-cmd')?.textContent).toBe('cd ~/.claude/projects && ls -la')
   expect(blocked.querySelector('textarea')).toBeNull()
   const buttons = [...box.querySelectorAll('button')].map((b) => b.textContent)
-  expect(buttons).toEqual(['Aprovar', 'Aprovar e não perguntar de novo', 'Negar'])
+  expect(buttons).toEqual(['Approve', "Approve and don't ask again", 'Deny'])
 
-  await act(async () => [...box.querySelectorAll('button')].find((b) => b.textContent === 'Negar')!.click())
+  await act(async () => [...box.querySelectorAll('button')].find((b) => b.textContent === 'Deny')!.click())
   expect(answered).toEqual([['094c6a03', 'no']])
   const press = (key: string, shiftKey = false) => act(async () => void box.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true })))
   await press('y')

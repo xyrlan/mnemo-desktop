@@ -369,7 +369,7 @@ pub fn register_repo(path: &str) -> Result<String, String> {
     resolve_repo(path)
 }
 
-pub const NOT_A_REPO: &str = "não é um repositório git";
+pub const NOT_A_REPO: &str = "not a git repository";
 
 /// The user selected an unresolved repo (or picked a folder): unlock it and run git there,
 /// which is when macOS may ask, once. Returns the main-checkout root. On "not a repo" the
@@ -389,7 +389,7 @@ pub fn resolve_with(root: &str, git_root: &dyn Fn(&str) -> Result<String, String
         Err(e) if e.contains("Operation not permitted") => {
             crate::mission::relock(root);
             Err(format!(
-                "sem permissão para ler {root}: libere o mnemo em Ajustes do Sistema › Privacidade e Segurança › Arquivos e Pastas"
+                "no permission to read {root}: allow mnemo in System Settings › Privacy & Security › Files and Folders"
             ))
         }
         Err(_) => Err(NOT_A_REPO.to_string()),
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(not_git, Err(NOT_A_REPO.to_string()));
         assert!(unlock_covers("/Users/me/Downloads/r2"), "stays unlocked so the next snapshot drops it");
         let denied = resolve_with("/Users/me/Downloads/r3", &|_| Err("git: Operation not permitted (os error 1)".into()));
-        assert!(denied.unwrap_err().contains("sem permissão"));
+        assert!(denied.unwrap_err().contains("no permission"));
         assert!(!unlock_covers("/Users/me/Downloads/r3"), "locked again so it stays listed, unresolved");
     }
 

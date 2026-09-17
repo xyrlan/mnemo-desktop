@@ -83,7 +83,7 @@ test("renders repos and sessions from the store, live badge and disabled row", a
   const rows = host.querySelectorAll(".hm-session");
   expect(rows).toHaveLength(2);
   expect(rows[0].querySelector(".hm-live")?.textContent).toBe(
-    "em outro terminal",
+    "in another terminal",
   );
   expect((rows[0] as HTMLButtonElement).disabled).toBe(true);
   expect((rows[1] as HTMLButtonElement).disabled).toBe(true);
@@ -115,18 +115,36 @@ test("an unresolved repo is folded behind one line, muted when shown, and not au
   await act(async () => root.render(<Home />));
   expect(host.querySelectorAll(".hm-repo")).toHaveLength(1);
   const line = host.querySelector<HTMLButtonElement>(".hm-protected")!;
-  expect(line.textContent).toBe("1 pasta protegida · mostrar");
+  expect(line.textContent).toBe("1 protected folder · show");
   act(() => line.click());
   const rows = host.querySelectorAll(".hm-repo");
   expect(rows[0].classList.contains("hm-unresolved")).toBe(true);
   expect(rows[1].classList.contains("hm-unresolved")).toBe(false);
   expect(host.querySelector(".hm-repo.hm-selected .hm-repo-name")?.textContent).toBe("b");
-  expect(host.querySelector(".hm-protected")?.textContent).toBe("ocultar pastas protegidas");
+  expect(host.querySelector(".hm-protected")?.textContent).toBe("hide protected folders");
   // Folded again; a typed filter that matches brings it back on its own.
   act(() => host.querySelector<HTMLButtonElement>(".hm-protected")!.click());
   act(() => homeStore.getState().setFilter("downloads"));
   expect([...host.querySelectorAll(".hm-repo-name")].map((n) => n.textContent)).toEqual(["x"]);
   act(() => homeStore.getState().setFilter(""));
+});
+
+test("the fold and hidden lines count in English: one folder, two folders, one repo, two repos", async () => {
+  const repo = { last_at: 1, pinned: false, sessions: [], children: [] };
+  const at = (name: string, over: object) => ({ ...repo, root: `/Users/me/Downloads/${name}`, name, hidden: false, unresolved: false, ...over });
+  const render = async (repos: object[]) => {
+    current = { repos, clone_base: "/gh", errors: [], protected: 0 } as unknown as HomeSnapshot;
+    homeStore.setState({ selected: null, filter: "", showProtected: false, showHidden: false });
+    await act(async () => root.render(<Home key={repos.length} />));
+    return [...host.querySelectorAll(".hm-link")].map((b) => b.textContent);
+  };
+  expect(await render([at("a", { unresolved: true }), at("b", { unresolved: true }), at("c", { hidden: true }), at("d", {})])).toEqual([
+    "2 protected folders · show",
+    "1 hidden repo",
+  ]);
+  expect(await render([at("a", { hidden: true }), at("b", { hidden: true }), at("d", {})])).toEqual(["2 hidden repos"]);
+  act(() => host.querySelector<HTMLButtonElement>(".hm-link")!.click());
+  expect(host.querySelector(".hm-link")?.textContent).toBe("hide hidden repos");
 });
 
 test("dispatch children sit under one collapsed row; the agent name is a badge beside the prompt", async () => {
@@ -154,13 +172,13 @@ test("dispatch children sit under one collapsed row; the agent name is a badge b
   homeStore.setState({ selected: null });
   await act(async () => root.render(<Home />));
   const titles = () => [...host.querySelectorAll(".hm-session-title")].map((n) => n.textContent);
-  expect(titles()).toEqual(["filhos de dispatch (2)", "melhorar a primeira tela"]);
+  expect(titles()).toEqual(["dispatch children (2)", "melhorar a primeira tela"]);
   expect(host.querySelector(".hm-agent")?.textContent).toBe("a-f2");
   const group = host.querySelector<HTMLButtonElement>(".hm-children")!;
   expect(group.getAttribute("aria-expanded")).toBe("false");
   act(() => group.click());
   expect(titles()).toEqual([
-    "filhos de dispatch (2)",
+    "dispatch children (2)",
     "Work on issue #288 in this repo",
     "Work on issue #287 in this repo",
     "melhorar a primeira tela",
@@ -189,7 +207,7 @@ test("header right side: @login when gh is logged in, the wordmark and repo rows
   expect(host.querySelectorAll(".hm-repo")).toHaveLength(1);
 });
 
-test("header right side: Entrar no GitHub runs gh auth login --web in a terminal tab", async () => {
+test("header right side: Log in to GitHub runs gh auth login --web in a terminal tab", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   try {
     current = oneRepo();
@@ -197,7 +215,7 @@ test("header right side: Entrar no GitHub runs gh auth login --web in a terminal
     const typed: [string | undefined, string][] = [];
     layout.setState({ openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) });
     await act(async () => root.render(<Home />));
-    const login = [...host.querySelectorAll<HTMLButtonElement>(".hm-head button")].find((b) => b.textContent === "Entrar no GitHub")!;
+    const login = [...host.querySelectorAll<HTMLButtonElement>(".hm-head button")].find((b) => b.textContent === "Log in to GitHub")!;
     act(() => login.click());
     expect(typed).toEqual([[undefined, "gh auth login --web"]]);
     // Logged in from that tab: the header follows on the next poll.
@@ -214,6 +232,6 @@ test("header right side: without gh, offers the brew line", async () => {
   auth = { installed: false, logged: false, login: null, scopes: [] };
   await act(async () => root.render(<Home />));
   const head = host.querySelector(".hm-head")!;
-  expect([...head.querySelectorAll("button")].some((b) => b.textContent === "instalar gh")).toBe(true);
+  expect([...head.querySelectorAll("button")].some((b) => b.textContent === "install gh")).toBe(true);
   expect(head.textContent).toContain("brew install gh");
 });

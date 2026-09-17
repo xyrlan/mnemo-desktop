@@ -98,7 +98,7 @@ const deps = (screens: (string[] | undefined)[]) => {
   }
 }
 
-test('Aprovar opens claude attach in the child cwd, waits for the prompt, and presses its key', async () => {
+test('Approve opens claude attach in the child cwd, waits for the prompt, and presses its key', async () => {
   const d = deps([undefined, ['Attaching…'], PROMPT])
   const a = await answerPrompt(probe, 'yes', d)
   expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', '987fb657-a6c1']])
@@ -107,7 +107,7 @@ test('Aprovar opens claude attach in the child cwd, waits for the prompt, and pr
   expect(answerStore.getState().answers['987fb657'].phase).toBe('sent')
   expect(answerPane('987fb657')).toBe(8)
 
-  // The pane still shows the prompt (say the key was lost): Negar reuses it, no second attach.
+  // The pane still shows the prompt (say the key was lost): Deny reuses it, no second attach.
   const again = deps([PROMPT])
   await answerPrompt(probe, 'no', again)
   expect(typed).toHaveLength(1)
@@ -131,13 +131,13 @@ test('no prompt in time, or no always-allow option: an error, nothing typed, the
   d.timeoutMs = -1
   const a = await answerPrompt(probe, 'yes', d)
   expect(a.phase).toBe('error')
-  expect(a.error).toContain('não apareceu')
+  expect(a.error).toContain('did not appear')
   expect(d.writes).toEqual([])
   expect(appStore.getState().panes[8]).toBeDefined()
 
   const bare = deps([[' ❯ 1. Yes', '   2. No', '']])
   const b = await answerPrompt(probe, 'always', bare)
   expect(b.phase).toBe('error')
-  expect(b.error).toContain('não perguntar de novo')
+  expect(b.error).toContain("don't ask again")
   expect(bare.writes).toEqual([])
 })

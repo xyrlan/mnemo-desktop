@@ -372,7 +372,7 @@ fn gh(args: &[&str], cwd: Option<&Path>) -> Gh {
 /// stdout of a successful `gh`, else a one-line error (`needs_scope` for a missing scope).
 fn gh_ok(args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
     match gh(args, cwd) {
-        Gh::Missing => Err("gh não encontrado no PATH (brew install gh)".into()),
+        Gh::Missing => Err("gh not found in PATH (brew install gh)".into()),
         Gh::Ran { ok: true, stdout, .. } => Ok(stdout),
         Gh::Ran { stdout, stderr, .. } => {
             let text = if stderr.is_empty() { stdout } else { stderr };
@@ -406,7 +406,7 @@ const ISSUE_FIELDS: &str = "number,title,labels,assignees,state,url,updatedAt,mi
 fn probe(root: &str) -> Result<&Path, String> {
     let p = Path::new(root);
     if !p.is_dir() || !may_probe(root) {
-        return Err(format!("{root}: repositório não acessível"));
+        return Err(format!("{root}: repository not accessible"));
     }
     Ok(p)
 }

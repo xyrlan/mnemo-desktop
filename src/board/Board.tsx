@@ -124,7 +124,7 @@ export default function Board(_: PaneViewProps) {
   else if (!auth.logged)
     body = (
       <div className="bd-empty">
-        not logged in to GitHub. <button onClick={ghLogin}>Entrar no GitHub</button>
+        not logged in to GitHub. <button onClick={ghLogin}>Log in to GitHub</button>
       </div>
     )
   else if (!b || (b.loading && !b.board && !b.error)) body = <div className="bd-empty">loading…</div>
@@ -149,8 +149,8 @@ export default function Board(_: PaneViewProps) {
       <>
         {b.error === NEEDS_SCOPE ? (
           <div className="bd-notice">
-            O board do Project precisa do escopo <code>project</code>: rodar <code>{SCOPE_FIX}</code>
-            <button onClick={refreshScope}>rodar</button>
+            The Project board needs the <code>project</code> scope: run <code>{SCOPE_FIX}</code>
+            <button onClick={refreshScope}>run</button>
           </div>
         ) : b.error ? (
           <div className="bd-notice bd-error">{b.error}</div>

@@ -3,7 +3,7 @@ import type { Badge, Health, RuleRow } from './types'
 
 export const BADGES: Badge[] = ['never', 'stale', 'review', 'inbox']
 
-export const BADGE_LABEL: Record<Badge, string> = { never: 'nunca', stale: 'stale', review: 'revisar', inbox: 'inbox' }
+export const BADGE_LABEL: Record<Badge, string> = { never: 'never', stale: 'stale', review: 'review', inbox: 'inbox' }
 
 export const BADGE_TITLE: Record<Badge, string> = {
   never: 'no reflex emission or MCP read on record',

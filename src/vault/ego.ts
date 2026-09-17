@@ -29,11 +29,11 @@ function sub(n: GraphNode, relation: string | null): string {
   return [n.type, n.confidence ?? 'no confidence', n.fires ? `${n.fires}× fired` : 'never fired'].join(' · ')
 }
 
-/** The header count: `11 vizinhos`, or `11 de 37` when the limit cut linked and rare-topic
+/** The header count: `11 neighbours`, or `11 of 37` when the limit cut linked and rare-topic
  *  neighbours. Pages sharing only hub topics never enter `total`, so it is never inflated. */
 export function countLabel(g: VaultGraph): string {
   const shown = Math.max(0, g.nodes.length - 1)
-  return shown < g.total ? `${shown} de ${g.total}` : `${shown} vizinhos`
+  return shown < g.total ? `${shown} of ${g.total}` : `${shown} neighbours`
 }
 
 /** Id prefix of the invisible cards that balance the layout around the centre. */

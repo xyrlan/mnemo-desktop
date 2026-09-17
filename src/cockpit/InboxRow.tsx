@@ -13,10 +13,10 @@ import './cockpit.css'
 /** One cockpit row, as the pane and the sidebar's cockpit body both render it. */
 
 /** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
-export const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'abrir job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
+export const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'open job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
 const armKey = (r: Row) => `${r.kind === 'ready' ? 'merge' : r.kind === 'land' ? 'land' : 'stop'}:${r.key}`
 
-/** A blocked row whose child is parked on a permission prompt: Aprovar / Negar, not a reply. */
+/** A blocked row whose child is parked on a permission prompt: Approve / Deny, not a reply. */
 export const isPermission = (r: Row | undefined) => r?.kind === 'blocked' && needKind(r.child) === 'permission'
 
 /** The pane of this window the row's child runs in, if it is open here. */
@@ -112,7 +112,7 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {d > 0 && <span className="m-delta">+{d}</span>}
         {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
         {row.mission && onMap && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
-        {row.kind === 'ci' && btn('abrir job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
+        {row.kind === 'ci' && btn('open job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
         {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
         {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
