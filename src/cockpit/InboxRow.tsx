@@ -1,12 +1,13 @@
 import { useMission } from '../mission/app-store'
 import { store as appStore, useApp } from '../layout/app-store'
-import { childWord, delta, needKind, type Mission } from '../mission/types'
+import { delta, needKind, type Mission } from '../mission/types'
 import { paneForSession } from '../layout/tabs'
 import { fmtTokens } from '../mission/tokens'
 import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import { rowChild, type Row } from './inbox'
 import { landMission, mergePr, openJob, stopChild } from './actions'
 import { answerPane, detachAnswer, useAnswer } from './approve'
+import ChildMark from './ChildMark'
 import './cockpit.css'
 
 /** One cockpit row, as the pane and the sidebar's cockpit body both render it. */
@@ -66,12 +67,13 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
   const answer = useAnswer(child?.id ?? '')
   const answered = useApp(() => (child && answer ? answerPane(child.id) : null))
 
+  // `word` is the pill for rows that are not a child's state; `null` means the child's avatar.
   const [word, label, detail] =
-    row.kind === 'blocked' ? [replied ? 'replied' : 'BLOCKED', row.label, '']
+    row.kind === 'blocked' ? [replied ? 'replied' : null, row.label, '']
     : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, row.pr.head]
     : row.kind === 'ready' ? ['ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
     : row.kind === 'land' ? ['land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
-    : [childWord(row.child), row.label, row.child.detail]
+    : [null, row.label, row.child.detail]
 
   const btn = (text: string, run: () => void, cls = '', title?: string) => (
     <button
@@ -97,7 +99,11 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         }}
         title={here !== null ? `Go to its tab · ${child?.cwd}` : (child?.cwd ?? row.repo.root)}
       >
-        <span className="nd-word">{word}</span>
+        {/* One visual marker per fact: a child's state is its animated avatar *instead of* the
+            word pill, not beside it — the word survives only as screen-reader text and the hover
+            title (ChildMark). `replied` is not the child's state but what you did, so it keeps
+            its pill, as do the PR and mission rows, which have no child. */}
+        {word === null && child ? <ChildMark child={child} /> : <span className="nd-word">{word}</span>}
         <span className="ck-label">{label}</span>
         {here !== null && <span className="ck-tab-link">↗ tab</span>}
         {detail && <span className="ck-detail">{detail}</span>}
