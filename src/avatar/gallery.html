@@ -21,8 +21,9 @@
 <h1>mnemo avatar — every scene</h1>
 <p class="lede">
   The judgement this page exists for: <strong>hide the captions and see whether the gesture still says which action it is</strong>.
-  Two pairs are the risk — <code>reading</code> vs <code>remembering</code> (adjacent concepts), and among the child states,
-  whether <code>BLOCKED</code> is still the one your eye goes to when all five loop at once.
+  Three pairs are the risk — <code>reading</code> vs <code>at rest</code> (the vault square wears <code>tool</code>, the most
+  frequent pulse, until the next one arrives), <code>reading</code> vs <code>remembering</code> (adjacent concepts), and among
+  the child states, whether <code>BLOCKED</code> is still the one your eye goes to when all five loop at once.
 </p>
 <p><button id="toggle">Hide captions</button></p>
 
@@ -33,8 +34,10 @@
 <div class="grid" id="states"></div>
 
 <script type="module">
-  import { SCENES, STATE_SCENES, withPartIndex, caption } from './scenes.ts'
+  import { IDLE, SCENES, STATE_SCENES, withPartIndex, caption } from './scenes.ts'
   import './avatar.css'
+  // IDLE's keyframes live with the square that wears it.
+  import '../vaultlevel/vaultlevel.css'
 
   const svg = (scene) => {
     const rects = withPartIndex(scene.rects)
@@ -52,6 +55,7 @@
   for (const [kind, scene] of Object.entries(SCENES)) {
     draw(document.getElementById('actions'), scene, caption(ev(kind, HITS[kind])), kind)
   }
+  draw(document.getElementById('actions'), IDLE, 'at rest', 'idle — no action')
   for (const [state, scene] of Object.entries(STATE_SCENES)) {
     draw(document.getElementById('states'), scene, state, scene.className)
   }

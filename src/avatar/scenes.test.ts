@@ -52,3 +52,15 @@ test('idle is the plain body at rest, apart from every action and every child st
   const taken = Object.values({ ...SCENES, ...STATE_SCENES }).map((s) => s.className)
   expect(taken).not.toContain(IDLE.className)
 })
+
+test('tool holds an object, so on the square it cannot pass for idle', () => {
+  const objects = withPartIndex(SCENES.tool.rects).filter(([rect]) => rect.part === 'object')
+  expect(objects.map(([, n]) => n)).toEqual([0, 1, 2])
+  const key = (rects: typeof IDLE.rects) => rects.map((r) => `${r.part}:${r.x},${r.y},${r.w},${r.h}`).sort().join(' ')
+  expect(key(SCENES.tool.rects)).not.toBe(key(IDLE.rects))
+  // The thread and the reaching arm sit right of centre, clear of the arm band's top.
+  for (const [rect] of objects) {
+    expect(rect.x).toBeGreaterThanOrEqual(16)
+    expect(rect.y + rect.h).toBeLessThanOrEqual(16)
+  }
+})

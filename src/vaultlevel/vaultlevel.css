@@ -1,10 +1,11 @@
 /* The vault square. Every colour is a theme token; the slot around it belongs to the sidebar. */
-/* Fills the slot's width; the height is fixed. The rain spans it, the octopus is centred. */
-.vl-square { position: relative; width: 100%; height: 160px; flex: 1 1 auto; overflow: hidden; --vl-tone: var(--accent); }
-/* Five tones down one ramp. The ansi tokens alone do not make a ramp — this theme's
-   `--ansi-red` is a pink (#f7768e) that reads as decorative next to the green, so the two ends
-   are deepened and the middles mixed, keeping the theme's hues but widening the distance the
-   eye has to travel between bands. */
+/* Fills the slot's width; the height is fixed. Four bands top to bottom — stage 113, caption 26,
+   trail 15, HUD 22 — adding up to `SQUARE` (176) in Square.tsx. */
+.vl-square { position: relative; width: 100%; height: 176px; flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; --vl-tone: var(--accent); }
+/* Five health tones down one ramp, for the HUD bar and the octopus at rest. The ansi tokens
+   alone do not make a ramp — this theme's `--ansi-red` is a pink (#f7768e) that reads as
+   decorative next to the green, so the two ends are deepened and the middles mixed, keeping the
+   theme's hues but widening the distance the eye has to travel between bands. */
 .vl-green { --vl-tone: var(--ansi-green); }
 .vl-lime { --vl-tone: color-mix(in oklab, var(--ansi-green) 40%, var(--ansi-yellow)); }
 .vl-yellow { --vl-tone: var(--ansi-yellow); }
@@ -12,33 +13,25 @@
 .vl-red { --vl-tone: color-mix(in oklab, var(--ansi-red) 62%, #7d1d2e); }
 .vl-muted { --vl-tone: var(--fg-muted); }
 
-/* Layer 1 — the library. One book per band of pages, shelved bottom-up: the wall fills as the
-   vault grows, and a wider sidebar is a wider wall rather than the same books stretched. */
-.vl-shelves { position: absolute; inset: 0; }
-/* The library is mnemo's own blue (`--accent`, the mark's colour), not the health tone. Two
-   things, two readings: the books are how much memory there is, the librarian is how it is
-   doing. Painting both from one tone said the same thing twice. */
-.vl-plank { fill: color-mix(in srgb, var(--accent) 26%, var(--bg)); }
-.vl-book {
-  /* Each spine sits somewhere along the blue, so the wall has grain instead of a barcode. */
-  fill: color-mix(in srgb, var(--accent) calc(34% + var(--vl-shade, .5) * 48%), var(--bg));
-  transition: fill .25s;
-}
-/* A pulse turns the lamp on over the desk. */
-.vl-shelves.vl-lit .vl-book { fill: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
-.vl-shelves.vl-lit .vl-plank { fill: color-mix(in srgb, var(--accent) 50%, var(--bg)); }
+/* The scene's own tone, the same four `avatar.css` paints the octopus with, for the things around
+   him that follow the action rather than the vault: his glow and the trail's dots. */
+.vl-kind-accent { --vl-kind: var(--accent); }
+.vl-kind-green { --vl-kind: var(--ansi-green); }
+.vl-kind-yellow { --vl-kind: var(--ansi-yellow); }
+.vl-kind-red { --vl-kind: var(--ansi-red); }
+.vl-kind-muted { --vl-kind: var(--fg-muted); }
 
-/* The body takes the square's own tone, so all five bands colour it, not just the four
-   `avatar.css` happens to define. */
+/* Band 1 — the stage. The octopus is a fixed 104px, centred, whatever the sidebar's width. */
+.vl-stage { flex: 0 0 113px; display: flex; justify-content: center; align-items: flex-end; }
+.vl-octo { width: 104px; height: 104px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--vl-kind) 40%, transparent)); }
+.vl-octo.vl-at-rest { --vl-kind: var(--vl-tone); }
+
+/* At rest, before the first pulse, the body takes the vault's own tone, so all five bands colour
+   it, not just the four `avatar.css` happens to define. Only here: once a scene is worn, its
+   tone is the scene's. */
 .vl-body .av-head, .vl-body .av-node { fill: var(--vl-tone); }
 .vl-body .av-arm { fill: color-mix(in srgb, var(--vl-tone) 60%, var(--bg)); }
 .vl-body .av-eye { fill: var(--bg); }
-
-/* Layer 2 — the octopus, which leaves the square while a scene plays. The halo is the presence
-   overlay's (`.pv-halo`), on the health tone rather than the accent and at the square's smaller
-   scale, so the librarian is lit the same way wherever he turns up. */
-.vl-octo { position: absolute; left: 50%; margin-left: -29px; top: 8px; width: 58px; height: 58px; z-index: 1; transform-origin: 50% 60%; transition: transform .2s ease-in, opacity .2s ease-in; filter: drop-shadow(0 0 16px color-mix(in srgb, var(--vl-tone) 45%, transparent)); }
-.vl-octo.vl-away { transform: scale(0); opacity: 0; }
 
 /* idle — the octopus at rest, breathing. Its scene is in `src/avatar/scenes.ts` (IDLE);
    the keyframes are here because `avatar.css` is read-only for this feature. */
@@ -59,41 +52,23 @@
 /* Slower and shallower: a vault in trouble does not bustle. */
 .av-poor, .av-poor .av-arm { animation-duration: 6.5s; }
 
-/* Shelving: the arm lifts its book to the shelf, holds a beat, and comes back for the next.
-   Two moves in one loop, which is what reads as work without a frame-by-frame sequence. */
-@keyframes vl-shelve {
-  0%, 12% { transform: translate(0, 0) rotate(0deg); }
-  38%, 52% { transform: translate(2px, -7px) rotate(-8deg); }
-  62% { transform: translate(3px, -7px) rotate(-8deg); opacity: 1; }
-  /* The book is left on the shelf: the arm comes back without it. */
-  68% { opacity: 0; }
-  88% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-  100% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
-}
-.vl-shelving { transform-box: fill-box; transform-origin: 20% 10%; animation: vl-shelve 5.5s ease-in-out infinite; }
-/* The book in his hands is one of the shelf's own, so it takes the library's blue rather than
-   the health tone — a shade above the brightest spine, since it is the one being looked at. */
-.vl-shelving .av-object { fill: color-mix(in srgb, var(--accent) 90%, var(--fg)); }
+/* Band 2 — the caption: what he did, then where and how long ago. A long target is cut here,
+   not in JavaScript: the width belongs to the layout. */
+.vl-caption { flex: 0 0 26px; padding: 0 10px; text-align: center; font-size: 11px; line-height: 13px; min-width: 0; }
+.vl-what, .vl-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vl-what { color: var(--fg-muted); }
+/* The target is what the eye is after — `git push --force`, not `blocked`. */
+.vl-target { color: var(--fg); }
+.vl-where { color: var(--fg-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 
-/* The other half of the loop: the book he is carrying lands on the shelf at the exact moment
-   it leaves his hand, and is gone again when he picks up the next one. Same 5.5s clock as
-   `vl-shelve`, in opposite phase — the two keyframes are one gesture. */
-@keyframes vl-slot-in {
-  /* Carried: the slot is empty. */
-  0%, 62% { opacity: 0; transform: translateY(-2px) scaleY(.9); }
-  /* Released at 68% of vl-shelve, where the held book fades out. */
-  68% { opacity: 1; transform: translateY(0) scaleY(1); }
-  /* Shelved, until he comes back for the next one. */
-  99% { opacity: 1; transform: translateY(0) scaleY(1); }
-  100% { opacity: 0; transform: translateY(-2px) scaleY(.9); }
-}
-.vl-slotting { transform-box: fill-box; transform-origin: 50% 100%; animation: vl-slot-in 5.5s ease-in-out infinite; }
-
-/* Eating: a fragment drifts up into the head and is gone, and he dips to take it. */
-@keyframes vl-morsel-up { 0% { transform: translateY(0) scale(1); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-30px) scale(.6); opacity: 0; } }
-.vl-morsel { position: absolute; inset: 0; fill: var(--vl-tone); animation: vl-morsel-up 1.4s ease-in 1; }
-@keyframes vl-gulp { 0%, 100% { transform: translateY(0); } 55% { transform: translateY(2px); } }
-.vl-octo.vl-eating .av { animation: vl-gulp 1.4s ease-in-out 1; }
+/* Band 3 — the trail: oldest to newest, the current one ringed, repeats folded into a count. */
+.vl-trail { flex: 0 0 15px; list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; gap: 10px; }
+/* The count sits beside its dot, in the flow, so it pushes the next dot along rather than
+   running into it. */
+.vl-dot { display: flex; align-items: center; gap: 2px; }
+.vl-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--vl-kind); opacity: .75; }
+.vl-dot.vl-now::before { opacity: 1; box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 2.5px var(--vl-kind); }
+.vl-count { font-size: 9px; line-height: 1; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 
 /* The discreet way into the vault: only on hover, and never over the octopus. */
 .vl-open { position: absolute; right: 4px; top: 4px; z-index: 2; opacity: 0; transition: opacity .12s; background: none; border: 0; color: var(--fg-muted); font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
@@ -101,9 +76,14 @@
 .vl-open:hover { opacity: 1; color: var(--fg); background: var(--bg); }
 .vl-open:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
 
-/* The fire: sustained good health. */
-/* Inside `.vl-octo`, so it follows the centring and the 58px scale. */
-.vl-fire { position: absolute; left: 0; top: 40px; }
+/* Band 4 — the HUD: the vault's level, and its health on the bar. */
+.vl-hud { flex: 0 0 22px; margin: 0 8px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fg-muted); }
+.vl-level { color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vl-bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.vl-fill { display: block; height: 100%; background: var(--vl-tone); transition: width .4s ease-out; }
+
+/* The fire at the end of the bar: sustained good health. */
+.vl-fire { flex: 0 0 auto; }
 @keyframes vl-flicker { 0%, 100% { transform: scaleY(1); opacity: .9; } 50% { transform: scaleY(.7); opacity: .6; } }
 /* Hot at the base, pale at the tip. The base rect keeps the theme's red only as a tint: on its
    own that token is a pink and reads as confetti under a green octopus. */
@@ -113,12 +93,6 @@
 .vl-flame-1 { animation-delay: .17s; }
 .vl-flame-2 { animation-delay: .34s; }
 
-/* Layer 3 — the HUD. */
-.vl-hud { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 14px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fg-muted); }
-.vl-level { color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vl-bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.vl-fill { display: block; height: 100%; background: var(--vl-tone); transition: width .4s ease-out; }
-
 @media (prefers-reduced-motion: reduce) {
-  .vl-square *, .vl-octo { animation: none !important; transition: none !important; }
+  .vl-square * { animation: none !important; transition: none !important; }
 }
