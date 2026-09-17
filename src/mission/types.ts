@@ -31,6 +31,12 @@ export type ChildSession = {
   /** What the child's process is parked on, from `claude agents` (`permission prompt`);
    *  absent in snapshots from before #81. */
   waiting_for?: string | null
+  /** The model the child respawns with (`opus[1m]`, `claude-haiku-4-5`). null is not a
+   *  failed read: a lean child resolves no `--model`, so it runs on its settings' default.
+   *  Absent in snapshots from before #99. */
+  model?: string | null
+  /** `--effort` it was dispatched with (`low`…`max`); null means the default. */
+  effort?: string | null
 }
 export type Pr = { number: number; url: string; state: string; head: string; ci: 'pass' | 'fail' | 'pending' | 'none' }
 export type Piece = { name: string; branch: string; child: ChildSession | null; pr: Pr | null }

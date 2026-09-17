@@ -109,6 +109,7 @@
   "children": [],
   "live": false,
   "model": "opus[1m]",
+  "effort": "high",
   "is_blocked": false,
   "is_waiting": false,
   "is_abandoned": false,

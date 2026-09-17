@@ -57,7 +57,8 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
         </div>
         <div className="mission-meta">
           {child?.branch && <span>{child.branch}</span>}
-          {child && <span>{child.tokens.toLocaleString()} tok · ~{fmtUsd(estimateUsd(child.tokens, null))}</span>}
+          {child && <span className="m-model">{child.model ?? 'default model'} · {child.effort ?? 'default'} effort</span>}
+          {child && <span>{child.tokens.toLocaleString()} tok · ~{fmtUsd(estimateUsd(child.tokens, child.model))}</span>}
           {child?.cwd && <span title={child.cwd}>{child.cwd.split('/').pop()}</span>}
         </div>
         <div className="mission-actions">
