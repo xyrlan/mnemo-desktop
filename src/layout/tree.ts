@@ -32,6 +32,33 @@ export function closeLeaf(n: Node, target: PaneId): Node | null {
   return { ...n, children: [a2, b2] }
 }
 
+/** Removes a leaf so it can be placed elsewhere: its parent split collapses into the surviving
+ *  sibling, which takes the whole of the parent's space. Null when the last leaf is extracted,
+ *  the same tree when the pane is absent. */
+export function extract(n: Node, target: PaneId): Node | null {
+  return closeLeaf(n, target)
+}
+
+/** Replaces the target leaf with an even split holding it and `pane`, with `pane` on `side` of it.
+ *  The same tree when the target is absent or `pane` is already in the tree (extract it first). */
+export function graft(n: Node, target: PaneId, pane: PaneId, side: Side): Node {
+  const ids = leaves(n)
+  if (!ids.includes(target) || ids.includes(pane)) return n
+  const dir: Dir = side === 'left' || side === 'right' ? 'row' : 'col'
+  const first = side === 'left' || side === 'up'
+  const walk = (m: Node): Node => {
+    if (m.kind === 'leaf') {
+      if (m.pane !== target) return m
+      return { kind: 'split', dir, ratio: 0.5, children: first ? [leaf(pane), m] : [m, leaf(pane)] }
+    }
+    const [a, b] = m.children
+    const a2 = walk(a)
+    const b2 = a2 === a ? walk(b) : b
+    return a2 === a && b2 === b ? m : { ...m, children: [a2, b2] }
+  }
+  return walk(n)
+}
+
 /** Exchanges the places of two panes; ratios and shape stay. The same tree when either is absent or a === b. */
 export function swapLeaves(n: Node, a: PaneId, b: PaneId): Node {
   if (a === b) return n

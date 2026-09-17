@@ -1,4 +1,5 @@
-import { splitAt, closeLeaf, leaves, replaceRatio, neighbour, swapLeaves, type Node, type Rect } from './tree'
+import { splitAt, closeLeaf, leaves, replaceRatio, neighbour, swapLeaves, extract, graft, type Node, type Rect, type Side } from './tree'
+import { layoutRects } from './rects'
 
 const L = (p: number): Node => ({ kind: 'leaf', pane: p })
 
@@ -73,4 +74,76 @@ test('swapLeaves is a no-op for the same pane or an absent one', () => {
   const t = splitAt(L(1), 1, 2, 'row')
   expect(swapLeaves(t, 1, 1)).toBe(t)
   expect(swapLeaves(t, 1, 9)).toBe(t)
+})
+
+const S = (dir: 'row' | 'col', a: Node, b: Node, ratio = 0.5): Node => ({ kind: 'split', dir, ratio, children: [a, b] })
+
+test('extract from a nested split collapses the parent into the sibling and keeps the rest', () => {
+  const t = S('row', L(1), S('col', L(2), S('row', L(3), L(4), 0.3), 0.7), 0.6)
+  expect(extract(t, 2)).toEqual(S('row', L(1), S('row', L(3), L(4), 0.3), 0.6))
+  expect(extract(t, 4)).toEqual(S('row', L(1), S('col', L(2), L(3), 0.7), 0.6))
+  expect(extract(t, 1)).toEqual(S('col', L(2), S('row', L(3), L(4), 0.3), 0.7))
+})
+
+test('extract leaves untouched subtrees shared', () => {
+  const right = S('col', L(2), L(3))
+  const t = S('row', S('row', L(1), L(4)), right)
+  expect((extract(t, 4) as any).children[1]).toBe(right)
+})
+
+test('extract the last leaf returns null', () => {
+  expect(extract(L(1), 1)).toBeNull()
+})
+
+test('extract an absent pane returns the same tree', () => {
+  const t = S('row', L(1), L(2))
+  expect(extract(t, 9)).toBe(t)
+})
+
+test('graft onto a leaf inside a split replaces only that leaf', () => {
+  const t = S('row', L(1), S('col', L(2), L(3), 0.7), 0.6)
+  expect(graft(t, 3, 5, 'right')).toEqual(S('row', L(1), S('col', L(2), S('row', L(3), L(5)), 0.7), 0.6))
+})
+
+test('graft orders the panes by side at an even ratio', () => {
+  const cases: [Side, Node][] = [
+    ['left', S('row', L(5), L(1))],
+    ['right', S('row', L(1), L(5))],
+    ['up', S('col', L(5), L(1))],
+    ['down', S('col', L(1), L(5))],
+  ]
+  for (const [side, want] of cases) expect(graft(L(1), 1, 5, side)).toEqual(want)
+})
+
+test('graft places the pane on the named side on screen', () => {
+  const box: Rect = { x: 0, y: 0, w: 200, h: 200 }
+  const t = S('row', L(1), L(2))
+  const r = (side: Side) => layoutRects(graft(t, 2, 5, side), box)
+  expect(r('left').get(5)!.x).toBeLessThan(r('left').get(2)!.x)
+  expect(r('right').get(5)!.x).toBeGreaterThan(r('right').get(2)!.x)
+  expect(r('up').get(5)!.y).toBeLessThan(r('up').get(2)!.y)
+  expect(r('down').get(5)!.y).toBeGreaterThan(r('down').get(2)!.y)
+  for (const side of ['left', 'right', 'up', 'down'] as Side[]) expect(r(side).get(1)).toEqual({ x: 0, y: 0, w: 100, h: 200 })
+})
+
+test('graft is a no-op for an absent target, the target itself, or a pane already in the tree', () => {
+  const t = S('row', L(1), L(2))
+  expect(graft(t, 9, 5, 'left')).toBe(t)
+  expect(graft(t, 1, 1, 'left')).toBe(t)
+  expect(graft(t, 1, 2, 'left')).toBe(t)
+})
+
+test('extract then graft moves a pane and preserves leaves()', () => {
+  const t = S('row', L(1), S('col', L(2), S('row', L(3), L(4), 0.3), 0.7), 0.6)
+  const before = [...leaves(t)].sort()
+  for (const p of leaves(t)) {
+    const rest = extract(t, p)!
+    for (const target of leaves(rest)) {
+      for (const side of ['left', 'right', 'up', 'down'] as Side[]) {
+        const moved = graft(rest, target, p, side)
+        expect([...leaves(moved)].sort()).toEqual(before)
+        expect(extract(moved, p)).toEqual(rest)
+      }
+    }
+  }
 })
