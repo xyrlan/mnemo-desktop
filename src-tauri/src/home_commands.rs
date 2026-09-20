@@ -17,3 +17,10 @@ pub fn home_register_repo(path: String) -> Result<String, String> {
 pub async fn home_resolve_repo(root: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || home::resolve_repo(&root)).await.map_err(|e| e.to_string())?
 }
+
+/// The lens's GitHub trigger (`refreshGithub()` in `src/home/client.ts`). Never polled: the
+/// front calls it when the lens becomes visible and from its refresh button.
+#[tauri::command]
+pub async fn home_refresh_github() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(home::refresh_github).await.map_err(|e| e.to_string())
+}

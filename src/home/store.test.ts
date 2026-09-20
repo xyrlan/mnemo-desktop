@@ -17,9 +17,13 @@ function mk(over: Partial<LensClient> = {}) {
   const calls: string[] = []
   const client: LensClient = {
     // Like the Rust side: roots opened this run come back as (empty) repos.
+    // Like the Rust side: the flags come back applied from the arguments, and repos are
+    // sorted pinned first, then by last activity, then by name (`sort_repos` in home.rs).
     snapshot: async (a) => ({
       ...snap,
-      repos: [...snap.repos, ...a.extraRoots.map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }))],
+      repos: [...snap.repos, ...a.extraRoots.map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }))]
+        .map((r) => ({ ...r, pinned: a.pinned.includes(r.root), hidden: a.hidden.includes(r.root) }))
+        .sort((x, y) => Number(y.pinned) - Number(x.pinned) || y.last_at - x.last_at || x.name.localeCompare(y.name)),
     }),
     registerRepo: async (p) => p,
     resolveRepo: async (p) => p,
@@ -204,4 +208,35 @@ test('load alone never reads GitHub', async () => {
   await store.getState().load()
   await store.getState().load()
   expect(calls).toBe(0)
+})
+
+test('a toggle shows in the snapshot at once, without waiting for a reload', async () => {
+  // The real snapshot reads history.jsonl, runs `claude agents` and probes git per cwd. A
+  // toggle only moves a repo in a list already on screen, so it must not wait for any of it.
+  const held: Array<() => void> = []
+  let snapshots = 0
+  const { store } = mk({
+    snapshot: async () => {
+      snapshots++
+      if (snapshots > 1) await new Promise<void>((res) => held.push(res))
+      return snap
+    },
+  })
+  await store.getState().load()
+
+  const pin = store.getState().togglePin('/gh/a')
+  expect(store.getState().snapshot.repos.find((r) => r.root === '/gh/a')!.pinned).toBe(true)
+  // Let the reload the toggle started finish, so nothing is left pending.
+  await Promise.resolve()
+  held.forEach((r) => r())
+  await pin
+})
+
+test('pinning reorders the list the way the backend sorts it', async () => {
+  const { store } = mk()
+  await store.getState().load()
+  expect(store.getState().snapshot.repos.map((r) => r.root)).toEqual(['/gh/a', '/gh/b'])
+  await store.getState().togglePin('/gh/b')
+  // Pinned first, then by last activity: /gh/b jumps the newer /gh/a.
+  expect(store.getState().snapshot.repos.map((r) => r.root)).toEqual(['/gh/b', '/gh/a'])
 })

@@ -410,13 +410,6 @@ pub fn refresh_github() {
     lens::refresh(&roots);
 }
 
-/// The lens's GitHub trigger (`refreshGithub()` in `src/home/client.ts`). Never polled: the
-/// front calls it when the lens becomes visible and from its refresh button.
-#[tauri::command]
-pub async fn home_refresh_github() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(refresh_github).await.map_err(|e| e.to_string())
-}
-
 /// A folder the user picked: its main-checkout root, or an error when it is not a git repo.
 pub fn register_repo(path: &str) -> Result<String, String> {
     resolve_repo(path)
