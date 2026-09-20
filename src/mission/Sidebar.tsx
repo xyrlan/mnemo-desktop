@@ -11,6 +11,8 @@ import CockpitBody from '../cockpit/CockpitBody'
 import InboxRow from '../cockpit/InboxRow'
 import { VaultLevelSlot } from '../cockpit/VaultLevelSlot'
 import VaultSquare from '../vaultlevel/VaultSquare'
+import Avatar from '../avatar/Avatar'
+import type { ChildWord } from '../avatar/scenes'
 import { useArm } from '../cockpit/actions'
 import { cwdForNewShell } from '../layout/cwd'
 import { dropOnGroup, groupLabel, paneAccent, paneLabel, sessionTitle, tabLabel, type Git, type TabLabel } from '../layout/tabs'
@@ -62,6 +64,10 @@ type Over = { key: string; pane: PaneId; zone: Zone }
 /** The classes a line wears while a drop would land in it. */
 const overClass = (over: Over | null, key: string) => (over?.key === key ? ` ws-over ws-over-${over.zone}` : '')
 
+/** The octopus a group's head wears, in the scene of the loudest thing Claude is doing in it:
+ *  the same creature the cockpit gives a child, so one mark means one thing across the app. */
+const CLAUDE_WORD: Record<NonNullable<TabLabel['state']>, ChildWord> = { working: 'active', blocked: 'BLOCKED', idle: 'stalled' }
+
 /** The state dot of a line, with the tooltip that says what it means. */
 const Dot = ({ state }: { state?: TabLabel['state'] }) => (
   <span className={`ws-dot${state ? ` ws-${state}` : ''}`} title={state ? DOT_TITLE[state] : undefined} />
@@ -106,16 +112,25 @@ function TabRow({
       data-tab={tab.id}
       data-drop={dropKey}
       data-pane={dropPaneId}
-      title={index < 9 ? `⌘${index + 1} · double-click to rename` : 'Double-click to rename'}
+      title={group ? 'Double-click to rename this group' : index < 9 ? `⌘${index + 1} · double-click to rename` : 'Double-click to rename'}
       onMouseDown={(e) => {
+        // A group's head names the group and nothing else: its panes are the lines underneath,
+        // and each of them is the way in. Renaming and closing stay, since those act on the
+        // group itself rather than on whichever pane the head would otherwise have picked.
+        if (group) return
         appStore.getState().goToTab(index)
         // A tab of one pane is that pane's own line as well, so dragging it carries the pane into
         // another group — and the tab it empties goes with it. A group's head carries no one pane.
-        if (e.button === 0 && !group) startPaneDrag(dropPaneId, e, (from, to, zone) => dropOnGroup(appStore.getState(), from, to, zone))
+        if (e.button === 0) startPaneDrag(dropPaneId, e, (from, to, zone) => dropOnGroup(appStore.getState(), from, to, zone))
       }}
       onDoubleClick={start}
     >
       <Dot state={label.state} />
+      {group && label.state && (
+        <span className="ws-claude" title="Claude Code runs in one of these panes" aria-hidden>
+          <Avatar state={CLAUDE_WORD[label.state]} size={14} />
+        </span>
+      )}
       <span className="ws-text">
         {editing ? (
           <input

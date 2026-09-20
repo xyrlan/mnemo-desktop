@@ -48,6 +48,9 @@
 .ws-group { padding-bottom: 2px; }
 /* The head names the group and counts it — never one of its panes, which are listed under it. */
 .ws-group-head .ws-name { font-style: italic; }
+/* A separator, not a way in: the head names the group and its panes are the lines under it. */
+.ws-group-head { cursor: default; }
+.ws-claude { flex: 0 0 auto; display: inline-flex; align-items: center; }
 /* A pane's line: the repo's accent down the left (set inline, per repo), indented under its head. */
 .ws-pane { display: flex; align-items: center; gap: 8px; padding: 2px 8px 2px 10px; margin-left: 14px; border-left: 2px solid var(--border); color: var(--fg-muted); cursor: default; min-width: 0; }
 .ws-pane:hover { background: var(--bg); }

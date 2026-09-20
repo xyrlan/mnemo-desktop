@@ -394,3 +394,38 @@ test('a drag let go over nothing, or back over its own line, moves nothing', asy
   await drag(paneRows()[0], paneRows()[0])
   expect(appStore.getState().tabs.map((t) => leaves(t.root))).toEqual(before)
 })
+
+test('the group head is a separator: it does not switch tabs when clicked', async () => {
+  grouped()
+  appStore.setState({ activeTab: 't2' })
+  await render()
+  const head = host.querySelector<HTMLElement>('.ws-group-head')!
+  await act(async () => head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })))
+  // The head names the group, it is not a way into it: its panes are the lines underneath.
+  expect(appStore.getState().activeTab).toBe('t2')
+})
+
+test('the group head still renames on a double click and closes with its ×', async () => {
+  grouped()
+  await render()
+  const head = host.querySelector<HTMLElement>('.ws-group-head')!
+  await act(async () => head.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+  const input = head.querySelector<HTMLInputElement>('.ws-rename')!
+  expect(input).toBeTruthy()
+  await act(async () => {
+    input.value = 'the round'
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  })
+  expect(appStore.getState().tabs.find((t) => t.id === 't1')!.name).toBe('the round')
+  expect(host.querySelector('.ws-group-head .ws-close')).toBeTruthy()
+})
+
+test('a group running Claude says so on its head, and one that is not does not', async () => {
+  grouped()
+  await render()
+  expect(host.querySelector('.ws-group-head .ws-claude')).toBeTruthy()
+  // The same group with no Claude in any pane: both panes are plain shells.
+  appStore.setState({ panes: { ...appStore.getState().panes, 1: { id: 1, view: 'terminal', cwd: '/Users/me/scratch' } } })
+  await render()
+  expect(host.querySelector('.ws-group-head .ws-claude')).toBeNull()
+})
