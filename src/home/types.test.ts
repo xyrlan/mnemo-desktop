@@ -1,4 +1,4 @@
-import { childSession, cloneDest, firstRows, githubError, isFolded, otherErrors, paneForSession, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
+import { childSession, cloneDest, firstRows, githubError, isFolded, otherErrors, paneForSession, prView, relTime, stopCmd, takeOver, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type Pr } from './types'
 
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession =>
   ({ title: 't', cwd: '/r', last_at: 0, transcript: true, live: null, kind: 'interactive', agent: null, ...o })
@@ -101,4 +101,34 @@ test('firstRows keeps every live session and the most recent quiet ones, in orde
   expect(firstRows(ss, 2)).toEqual({ rows: [ss[0], ss[1], ss[2], ss[4]], rest: 1 })
   expect(firstRows(ss, 0).rows.map((s) => s.id)).toEqual(['b', 'e'])
   expect(firstRows([], 3)).toEqual({ rows: [], rest: 0 })
+})
+
+const openPr = (o: Partial<Pr> = {}): Pr =>
+  ({ number: 7, title: 'seven', state: 'open', checks: 'none', child: null, url: 'https://gh/o/a/pull/7', ...o })
+const snapOf = (repos: HomeRepo[]): HomeSnapshot => ({ repos, clone_base: '/gh', errors: [], protected: 0 })
+
+test('prView prefers the PR the latest snapshot carries, and finds the child that opened it', () => {
+  const kid = sess({ id: 'cccc1111-9f', live: 'bg' })
+  const fresh = openPr({ checks: 'pass', child: 'cccc1111' })
+  const snap = snapOf([repo({ root: '/gh/a', prs: [fresh], children: [kid] })])
+  const clicked = openPr({ checks: 'pending', child: 'cccc1111' })
+  expect(prView(snap, { repo: '/gh/a', pr: clicked })).toEqual({ repo: snap.repos[0], pr: fresh, child: kid })
+  // A PR the last read dropped still shows, from the row that was clicked.
+  expect(prView(snapOf([repo({ root: '/gh/a', prs: [] })]), { repo: '/gh/a', pr: clicked }).pr).toBe(clicked)
+  // So does one whose repo is gone from the list; there is no child to resolve then.
+  expect(prView(snapOf([]), { repo: '/gh/a', pr: clicked })).toEqual({ repo: null, pr: clicked, child: null })
+  // `child: null` is ordinary: a PR a human opened.
+  expect(prView(snap, { repo: '/gh/a', pr: openPr({ number: 8 }) }).child).toBeNull()
+})
+
+test('takeOver words the child action, and says why when there is none', () => {
+  expect(takeOver(sess({ id: 'bg', live: 'bg' }), {})).toEqual({ label: 'Take over', why: null })
+  expect(takeOver(sess({ id: 'here', live: 'here' }), { 5: { id: 5, sessionId: 'here' } })).toEqual({ label: 'Show its pane', why: null })
+  expect(takeOver(sess({ id: 'dead' }), {})).toEqual({ label: 'Resume', why: null })
+  expect(takeOver(sess({ id: 'gone', transcript: false }), {}).why).toBe('transcript not found')
+  expect(takeOver(sess({ id: 'far', live: 'elsewhere' }), {}).why).toBe('open in another terminal')
+})
+
+test('stopCmd is what the cockpit runs', () => {
+  expect(stopCmd(sess({ id: '094c6a03-1' }))).toBe('claude stop 094c6a03-1')
 })

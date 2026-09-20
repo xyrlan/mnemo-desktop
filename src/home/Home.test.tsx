@@ -38,11 +38,15 @@ beforeEach(() => {
   auth = {};
   invoked.length = 0;
   githubStore.setState({ auth: null });
-  homeStore.setState({ selected: null, filter: "", showProtected: false, showHidden: false, github: "idle", githubAt: null, notice: null });
+  homeStore.setState({ selected: null, filter: "", showProtected: false, showHidden: false, github: "idle", githubAt: null, notice: null, openedPr: null });
 });
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount());
   host.remove();
+  // A released PR-view webview is destroyed only after the grace period a remount would
+  // cancel (`makeWebviews`). Wait it out, so no test starts with one still alive and sees a
+  // reuse where it expects a fresh page.
+  if (invoked.includes("browser_create")) await new Promise((r) => setTimeout(r, 300));
 });
 
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession => ({
@@ -177,7 +181,7 @@ test("before any GitHub read a repo without lists renders; an empty one says so"
   expect(group("/gh/a").querySelector(".hm-muted")?.textContent).toBe("No sessions yet.");
 });
 
-test("clicking an issue or a PR opens its page; a child badge opens the child", async () => {
+test("clicking an issue opens its page; a PR opens the PR view; a child badge opens the child", async () => {
   const views: [string, unknown, string | undefined][] = [];
   const typed: [string | undefined, string][] = [];
   const prev = layout.getState();
@@ -197,11 +201,12 @@ test("clicking an issue or a PR opens its page; a child badge opens the child", 
     await act(async () => root.render(<Home />));
     const a = group("/gh/a");
     act(() => a.querySelector<HTMLButtonElement>(".hm-issue")!.click());
-    act(() => a.querySelector<HTMLButtonElement>(".hm-pr-open")!.click());
-    expect(views).toEqual([
-      ["browser", { url: "https://github.com/o/a/issues/3" }, "#3"],
-      ["browser", { url: "https://github.com/o/a/pull/9" }, "PR #9"],
-    ]);
+    expect(views).toEqual([["browser", { url: "https://github.com/o/a/issues/3" }, "#3"]]);
+    // A PR no longer leaves for a browser pane: it pushes the lens's own view over the stream.
+    await act(async () => a.querySelector<HTMLButtonElement>(".hm-pr-open")!.click());
+    expect(views).toHaveLength(1);
+    expect(homeStore.getState().openedPr).toEqual({ repo: "/gh/a", pr: pr(9, "cccc1111") });
+    await act(async () => host.querySelector<HTMLButtonElement>(".hm-pr-back")!.click());
     const badges = a.querySelectorAll(".hm-child");
     expect(badges[0].tagName).toBe("BUTTON");
     act(() => (badges[0] as HTMLButtonElement).click());
@@ -387,4 +392,33 @@ test("header right side: without gh, offers the brew line", async () => {
   const head = host.querySelector(".hm-head")!;
   expect([...head.querySelectorAll("button")].some((b) => b.textContent === "install gh")).toBe(true);
   expect(head.textContent).toContain("brew install gh");
+});
+
+test("a PR pushes the view over the stream and pops back to it; a lens on its stream holds no webview", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    current = snapOf([repo({ root: "/gh/a", prs: [pr(9, null)], sessions: [sess({ id: "s1" })] })]);
+    await act(async () => root.render(<Home />));
+    const stream = host.querySelector(".hm-stream")!;
+    const count = (cmd: string) => invoked.filter((c) => c === cmd).length;
+    expect(count("browser_create")).toBe(0);
+
+    await act(async () => host.querySelector<HTMLButtonElement>(".hm-pr-open")!.click());
+    expect(host.querySelector(".hm-pr-view")).toBeTruthy();
+    expect(count("browser_create")).toBe(1);
+    // The stream is the same element still, so it comes back where it was scrolled to; it is
+    // only kept out of focus and screen readers while the PR covers it.
+    expect(host.querySelector(".hm-stream")).toBe(stream);
+    expect(stream.hasAttribute("inert")).toBe(true);
+
+    const destroyed = count("browser_destroy");
+    await act(async () => host.querySelector<HTMLButtonElement>(".hm-pr-back")!.click());
+    expect(host.querySelector(".hm-pr-view")).toBeNull();
+    expect(host.querySelector(".hm-stream")).toBe(stream);
+    expect(stream.hasAttribute("inert")).toBe(false);
+    await act(async () => void vi.advanceTimersByTime(300));
+    expect(count("browser_destroy")).toBe(destroyed + 1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

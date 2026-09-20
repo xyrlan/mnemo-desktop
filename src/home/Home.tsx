@@ -2,8 +2,9 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { homeStore, useHome } from './app-store'
 import { childSession, firstRows, githubError, isFolded, otherErrors, relTime, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type Pr } from './types'
 import { repoAccent } from './repo-color'
+import PrPane from './pr-pane'
 import type { Issue } from '../github/types'
-import { openIssue, openUrl } from '../github/actions'
+import { openIssue } from '../github/actions'
 import { store as layout, useApp } from '../layout/app-store'
 import { Wordmark } from '../brand/Wordmark'
 import Account from '../github/Account'
@@ -118,7 +119,7 @@ function PrRow({ repo, pr }: { repo: HomeRepo; pr: Pr }) {
   const kid = pr.child ? childSession(repo, pr.child) : null
   return (
     <div className="hm-row hm-pr" title={`${repo.name} · ${pr.url}`}>
-      <button className="hm-pr-open" onClick={() => openUrl(pr.url, `PR #${pr.number}`)}>
+      <button className="hm-pr-open" title="open the PR view" onClick={() => homeStore.getState().openPr(repo.root, pr)}>
         <span className="hm-num">#{pr.number}</span>
         {check && (
           <span className={`hm-checks hm-checks-${pr.checks}`} title={check[1]}>
@@ -233,6 +234,7 @@ export default function Home() {
   const showHidden = useHome((s) => s.showHidden)
   const showProtected = useHome((s) => s.showProtected)
   const notice = useHome((s) => s.notice)
+  const opened = useHome((s) => s.openedPr)
   const tabs = useApp((s) => s.tabs)
   const h = homeStore.getState()
 
@@ -264,7 +266,9 @@ export default function Home() {
 
   return (
     <div className="hm">
-      <header className="hm-head">
+      {/* The stream stays mounted under an open PR, so its scroll position is still there
+          when the view pops; `inert` keeps the covered rows out of focus and screen readers. */}
+      <header className="hm-head" inert={!!opened}>
         <Wordmark />
         {tabs.length > 0 && (
           <button className="hm-btn hm-back" onClick={() => layout.getState().goToTab(0)}>
@@ -276,7 +280,7 @@ export default function Home() {
         <Entry />
         <Account />
       </header>
-      <main className="hm-stream">
+      <main className="hm-stream" inert={!!opened}>
         {repos.map((r) => (
           <RepoGroup key={r.root} r={r} />
         ))}
@@ -294,6 +298,7 @@ export default function Home() {
           )}
         </div>
       </main>
+      {opened && <PrPane opened={opened} />}
       {errors.length > 0 && <div className="hm-errors">{errors.join(' · ')}</div>}
       {notice && (
         <div className="hm-notice" onClick={h.dismiss}>

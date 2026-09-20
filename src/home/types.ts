@@ -118,3 +118,31 @@ export function relTime(ms: number, now = Date.now()): string {
   if (h < 48) return `${h}h`
   return `${Math.round(h / 24)}d`
 }
+
+/** The PR the lens pushed over its stream: which repo it belongs to, and the row that was
+ *  clicked. One level deep — a PR is as deep as the stream goes. */
+export type OpenedPr = { repo: string; pr: Pr }
+
+/** What the PR view shows: the repo as this snapshot has it (null once it is gone from the
+ *  list), the PR as the latest read knows it — checks and draft state move while the view is
+ *  open — falling back to the row that was clicked, and the child that opened it. */
+export type PrView = { repo: HomeRepo | null; pr: Pr; child: HomeSession | null }
+
+export function prView(snapshot: HomeSnapshot, opened: OpenedPr): PrView {
+  const repo = snapshot.repos.find((r) => r.root === opened.repo) ?? null
+  const pr = repo?.prs?.find((p) => p.number === opened.pr.number) ?? opened.pr
+  return { repo, pr, child: repo && pr.child ? childSession(repo, pr.child) : null }
+}
+
+/** What taking a child over does, worded for a button: `label` when it acts, `why` when it
+ *  cannot (then it is not a control, see `whatClickDoes`). */
+export function takeOver(s: HomeSession, panes: Record<number, PaneLike>): { label: string; why: string | null } {
+  const c = whatClickDoes(s, panes)
+  if (c.kind === 'nothing') return { label: 'Take over', why: c.why }
+  if (c.kind === 'focus') return { label: 'Show its pane', why: null }
+  return { label: c.cmd.startsWith('claude attach') ? 'Take over' : 'Resume', why: null }
+}
+
+/** `claude stop <id>`, as the cockpit's inbox runs it (`src/cockpit/actions.ts`). Only a live
+ *  child has one: there is nothing to stop in a finished session. */
+export const stopCmd = (s: HomeSession) => `claude stop ${s.id}`

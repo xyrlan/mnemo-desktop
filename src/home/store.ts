@@ -1,6 +1,6 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { HomeClient } from './client'
-import { cloneDest, EMPTY, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot } from './types'
+import { cloneDest, EMPTY, stopCmd, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type OpenedPr, type Pr } from './types'
 
 export type HomeSettings = { homePinned: string[]; homeHidden: string[]; cloneBase: string | null }
 export type SetSetting = (key: 'homePinned' | 'homeHidden', value: string[]) => Promise<void>
@@ -33,6 +33,10 @@ export type HomeState = {
   github: GithubRead
   /** When the last GitHub read finished; null before one did. */
   githubAt: number | null
+  /** The PR pushed over the stream, or null while the stream is showing. The whole
+   *  navigation stack this lens has: one level, because a PR is as deep as it goes. The
+   *  stream stays mounted underneath, so its scroll position comes back with it. */
+  openedPr: OpenedPr | null
 }
 export type HomeActions = {
   load(): Promise<void>
@@ -49,6 +53,14 @@ export type HomeActions = {
   togglePin(root: string): Promise<void>
   toggleHidden(root: string): Promise<void>
   openSession(repo: HomeRepo, s: HomeSession): void
+  /** Push `pr` of `repo` over the stream. Carries the row that was clicked so the view has
+   *  something to draw before the next snapshot lands; `prView` prefers the fresh one. */
+  openPr(repo: string, pr: Pr): void
+  /** Pop back to the stream. The view's webview goes with it (see `src/home/pr-pane.tsx`). */
+  closePr(): void
+  /** `claude stop <id>` in a terminal tab in the repo, so its output stays in front of the
+   *  user. Only ever called behind a confirmation. */
+  stopChild(repo: HomeRepo, s: HomeSession): void
   newSession(root: string): void
   shell(root: string): void
   openFolder(): Promise<void>
@@ -85,6 +97,7 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
     notice: null,
     github: 'idle',
     githubAt: null,
+    openedPr: null,
 
     async load() {
       set({ loading: true })
@@ -145,6 +158,9 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
       else if (c.kind === 'command') void layout.openCommandTab(repo.root, c.cmd, c.sessionId)
       else set({ notice: c.why })
     },
+    openPr: (repo, pr) => set({ openedPr: { repo, pr } }),
+    closePr: () => set({ openedPr: null }),
+    stopChild: (repo, s) => void layout.openCommandTab(repo.root, stopCmd(s)),
     newSession: (root) => void layout.openCommandTab(root, 'claude'),
     shell: (root) => void layout.newTab(root),
     async openFolder() {
