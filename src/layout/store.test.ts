@@ -415,6 +415,88 @@ test('movePane keeps focus on the pane that held it, moved or not, and leaves ot
   expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
 })
 
+/** Two tabs: 1 | (2 / 3) in the first, 4 alone in the second. */
+async function twoTabs() {
+  const s = createStore(fakePty())
+  await s.getState().newTab('/a')
+  await s.getState().split('row', '/b')
+  await s.getState().split('col', '/c')
+  await s.getState().newTab('/d')
+  return s
+}
+
+const grouped = (s: ReturnType<typeof createStore>) => s.getState().tabs.map((t) => leaves(t.root))
+
+test('a cross-tab move keeps every pane, out of a split and out of a tab of one alike', async () => {
+  const s = await twoTabs()
+  const before = grouped(s).flat().sort()
+  const second = s.getState().tabs[1].id
+  // 3 leaves the split it shares with 2 and joins the tab 4 is alone in.
+  s.getState().movePane(3, 4, 'down', second)
+  expect(grouped(s)).toEqual([[1, 2], [4, 3]])
+  expect(grouped(s).flat().sort()).toEqual(before)
+  // …and back out again, into the first tab.
+  s.getState().movePane(3, 1, 'left', s.getState().tabs[0].id)
+  expect(grouped(s)).toEqual([[3, 1, 2], [4]])
+  expect(grouped(s).flat().sort()).toEqual(before)
+  expect(Object.keys(s.getState().panes).map(Number).sort()).toEqual(before)
+})
+
+test('a tab whose last pane moves away closes, and activeTab follows the pane rather than the hole', async () => {
+  const pty = fakePty()
+  const s = createStore(pty)
+  await s.getState().newTab('/a')
+  await s.getState().split('row', '/b')
+  await s.getState().newTab('/d')
+  const [first, second] = s.getState().tabs
+  expect(s.getState().activeTab).toBe(second.id)
+  s.getState().movePane(3, 1, 'right', first.id)
+  expect(s.getState().tabs.map((t) => t.id)).toEqual([first.id])
+  expect(grouped(s)).toEqual([[1, 3, 2]])
+  expect(s.getState().activeTab).toBe(first.id)
+  // The pane went with it: nothing was killed and nothing was forgotten.
+  expect(pty.killed).toEqual([])
+  expect(Object.keys(s.getState().panes).map(Number).sort()).toEqual([1, 2, 3])
+})
+
+test('focus follows the moved pane, and the tab it left focuses one that still exists', async () => {
+  const s = await twoTabs()
+  const [first, second] = s.getState().tabs
+  s.getState().goToTab(0)
+  s.getState().focusPane(3)
+  s.getState().movePane(3, 4, 'up', second.id)
+  const tabs = s.getState().tabs
+  expect(tabs[1].focused).toBe(3)
+  expect(leaves(tabs[0].root)).toContain(tabs[0].focused)
+  expect(tabs[0].focused).not.toBe(3)
+  // The group being looked at survived, so the eye stays where it was.
+  expect(s.getState().activeTab).toBe(first.id)
+})
+
+test('a cross-tab move is refused when the target is not in the named tab, and asked for no tab at all', async () => {
+  const s = await twoTabs()
+  const before = s.getState().tabs
+  // 1 is not in the second tab.
+  s.getState().movePane(4, 1, 'left', before[1].id)
+  s.getState().movePane(4, 1, 'left', 'no-such-tab')
+  s.getState().movePane(99, 1, 'left', before[0].id)
+  // Without a tab named, two tabs are still refused: on screen that pair cannot happen.
+  s.getState().movePane(4, 1, 'left')
+  expect(s.getState().tabs).toBe(before)
+})
+
+test('a cross-tab move round-trips through save and restore, same panes in the same groups', async () => {
+  const s = await twoTabs()
+  s.getState().movePane(3, 4, 'down', s.getState().tabs[1].id)
+  const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave()))
+  const cwds = (st: ReturnType<typeof createStore>) => st.getState().tabs.map((t) => leaves(t.root).map((id) => st.getState().panes[id].cwd))
+  expect(cwds(s)).toEqual([['/a', '/b'], ['/d', '/c']])
+  const again = createStore(fakePty())
+  await again.getState().restore(saved)
+  expect(cwds(again)).toEqual([['/a', '/b'], ['/d', '/c']])
+  expect(again.getState().tabs).toHaveLength(2)
+})
+
 test('setSessionId tags an existing pane and ignores unknown ids', async () => {
   const s = createStore(fakePty())
   await s.getState().newTab()
