@@ -50,6 +50,10 @@
 .ws-group-head .ws-name { font-style: italic; }
 /* A separator, not a way in: the head names the group and its panes are the lines under it. */
 .ws-group-head { cursor: default; }
+/* The count belongs beside the name, not under it: `.ws-text` stacks name over sub because a
+   pane's line puts its repo and branch there, and a head has a number instead. */
+.ws-group-head .ws-text { flex-direction: row; align-items: baseline; gap: 8px; }
+.ws-group-head .ws-sub { flex: 0 0 auto; }
 .ws-claude { flex: 0 0 auto; display: inline-flex; align-items: center; }
 /* A pane's line: the repo's accent down the left (set inline, per repo), indented under its head. */
 .ws-pane { display: flex; align-items: center; gap: 8px; padding: 2px 8px 2px 10px; margin-left: 14px; border-left: 2px solid var(--border); color: var(--fg-muted); cursor: default; min-width: 0; }
