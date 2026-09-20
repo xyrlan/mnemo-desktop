@@ -151,6 +151,7 @@ pub fn run() {
             home_commands::home_snapshot,
             home_commands::home_register_repo,
             home_commands::home_resolve_repo,
+            home_commands::home_refresh_github,
 
             // -- chrome commands --
             chrome::chrome_session,
@@ -289,4 +290,82 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running mnemo-desktop");
+}
+
+#[cfg(test)]
+mod handler_tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    /// Every `#[tauri::command]` in the crate, by function name.
+    fn declared() -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![dir];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).expect("src is readable") {
+                let p = e.expect("entry").path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&p).expect("source is utf-8");
+                let mut lines = text.lines().peekable();
+                while let Some(line) = lines.next() {
+                    if !line.trim_start().starts_with("#[tauri::command") {
+                        continue;
+                    }
+                    // The signature follows, possibly after other attributes.
+                    for next in lines.by_ref() {
+                        let t = next.trim_start();
+                        if t.starts_with('#') {
+                            continue;
+                        }
+                        if let Some(rest) = t.split("fn ").nth(1) {
+                            // `browser_create<R: Runtime>(…)`: the generics are part of the
+                            // signature, never of the name the handler lists.
+                            if let Some(name) = rest.split(['(', '<']).next() {
+                                out.insert(name.trim().to_string());
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Every name listed in `generate_handler!`, without its module path.
+    fn registered() -> BTreeSet<String> {
+        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+            .expect("lib.rs is utf-8");
+        let start = text.find("generate_handler!").expect("the handler exists");
+        let body = &text[start..];
+        let end = body.find("])").expect("the handler list closes");
+        body[..end]
+            .lines()
+            .skip(1)
+            .filter_map(|l| {
+                let t = l.trim().trim_end_matches(',');
+                if t.is_empty() || t.starts_with("//") || t.starts_with('[') {
+                    return None;
+                }
+                t.rsplit("::").next().map(|s| s.to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// A command the front calls is only reachable once it is in `generate_handler!`; the Rust
+    /// tests call these functions directly and the TypeScript ones mock `invoke`, so nothing else
+    /// notices a missing line. `home_refresh_github` shipped unregistered this way.
+    #[test]
+    fn every_command_is_registered() {
+        let missing: Vec<_> = declared().difference(&registered()).cloned().collect();
+        assert!(missing.is_empty(), "declared but never registered: {missing:?}");
+    }
 }

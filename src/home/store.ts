@@ -59,6 +59,19 @@ export type HomeStore = StoreApi<HomeState & HomeActions>
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
 
+/** `sort_repos` in `src-tauri/src/home.rs`: pinned first, then by last activity, then by name. */
+const byRepo = (a: HomeRepo, b: HomeRepo) =>
+  Number(b.pinned) - Number(a.pinned) || b.last_at - a.last_at || a.name.localeCompare(b.name)
+
+/** One repo's `pinned` or `hidden` set, and the list put back in the backend's order. The next
+ *  snapshot carries the same answer; this is only so a toggle does not wait for one, since that
+ *  read walks the session history, asks `claude agents` and probes git per working directory. */
+function withFlag(snapshot: HomeSnapshot, root: string, flag: 'pinned' | 'hidden', on: boolean): HomeSnapshot {
+  const repos = snapshot.repos.map((r) => (r.root === root ? { ...r, [flag]: on } : r))
+  repos.sort(byRepo)
+  return { ...snapshot, repos }
+}
+
 export function createHomeStore(client: LensClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike): HomeStore {
   return createZustand<HomeState & HomeActions>((set, get) => ({
     snapshot: EMPTY,
@@ -115,11 +128,15 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
     setShowProtected: (showProtected) => set({ showProtected }),
     setCloneSpec: (cloneSpec) => set({ cloneSpec }),
     async togglePin(root) {
-      await setSetting('homePinned', toggle(settings().homePinned, root))
+      const next = toggle(settings().homePinned, root)
+      set({ snapshot: withFlag(get().snapshot, root, 'pinned', next.includes(root)) })
+      await setSetting('homePinned', next)
       await get().load()
     },
     async toggleHidden(root) {
-      await setSetting('homeHidden', toggle(settings().homeHidden, root))
+      const next = toggle(settings().homeHidden, root)
+      set({ snapshot: withFlag(get().snapshot, root, 'hidden', next.includes(root)) })
+      await setSetting('homeHidden', next)
       await get().load()
     },
     openSession(repo, s) {
