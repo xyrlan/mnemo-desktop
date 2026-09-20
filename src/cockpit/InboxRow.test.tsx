@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
 import InboxRow, { costLine } from './InboxRow'
 import { child, desktop } from '../mission/fixtures'
 import type { ChildRow } from './inbox'
+import type { Need } from './needs'
 import type { ChildSession } from '../mission/types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -40,4 +41,20 @@ test('the first line keeps the label; the marker is bigger than 16', async () =>
   const host = await draw(child({ id: 'aa000004', model: 'sonnet', effort: 'high' }))
   expect(host.querySelector('.ck-row-head .ck-label')!.textContent).toBe('a piece')
   expect(Number(host.querySelector('.ck-mark svg')!.getAttribute('width'))).toBeGreaterThan(16)
+})
+
+test('a blocked child keeps its cost line after you reply to it', async () => {
+  // `replied` is what you did, not the child's state: the pill replaces the avatar for a
+  // minute, but the model and effort it is spending do not change because you answered.
+  const c = child({ id: 'aa000005', model: 'opus[1m]', effort: 'max' })
+  const { missionStore } = await import('../mission/app-store')
+  missionStore.setState({ sent: { [c.id]: [{ at: Date.now(), text: 'go on', original: 'go on' }] } })
+  const row: Need = { kind: 'blocked', key: `blocked:${c.id}`, repo: desktop, child: c, label: 'a piece', mission: null }
+  const host = document.createElement('div')
+  document.body.append(host)
+  await act(async () =>
+    createRoot(host).render(<InboxRow row={row} selected={false} showRepo={false} narrow={false} armed={null} fire={() => true} onSelect={() => {}} />),
+  )
+  expect(host.querySelector('.nd-word')!.textContent).toBe('replied')
+  expect(host.querySelector('.ck-cost')?.textContent).toBe('opus[1m] · max effort')
 })

@@ -124,9 +124,9 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {row.kind === 'blocked' &&
           btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
       </div>
-      {word === null && child && (
-        <div className="ck-cost" style={{ paddingLeft: MARK_SIZE + 6 }}>{costLine(child)}</div>
-      )}
+      {/* What the child spends, not what it is doing: a reply swaps the avatar for a pill for a
+          minute (`replied`), and the model and effort behind it are the same either way. */}
+      {child && <div className="ck-cost" style={{ paddingLeft: MARK_SIZE + 6 }}>{costLine(child)}</div>}
       {row.kind === 'blocked' && <ReplyBox c={row.child} />}
     </div>
   )
