@@ -24,7 +24,7 @@
 .hm-empty { align-items: center; justify-content: center; gap: 16px; color: var(--fg-muted); }
 .hm-empty .hm-entry { margin: 0; }
 .hm-errors { padding: 6px 20px; color: var(--fg-muted); font-size: 11px; border-top: 1px solid var(--border); }
-.hm-notice { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-elev); border: 1px solid var(--ansi-yellow); color: var(--fg); padding: 8px 14px; border-radius: 4px; cursor: pointer; }
+.hm-notice { position: absolute; z-index: 3; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-elev); border: 1px solid var(--ansi-yellow); color: var(--fg); padding: 8px 14px; border-radius: 4px; cursor: pointer; }
 .hm-agent { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
 .hm-filter { min-width: 180px; }
 .hm-stream { flex: 1; min-height: 0; overflow: auto; padding: 12px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
@@ -55,3 +55,23 @@ button.hm-child:hover { background: color-mix(in srgb, var(--repo) 18%, transpar
 .hm-more { font-size: 11px; padding: 3px 12px; }
 .hm-more:hover { color: var(--fg); }
 .hm-folds { display: flex; gap: 12px; }
+.hm-armed { border-color: var(--ansi-red); color: var(--ansi-red); }
+/* The PR view sits over the stream, which stays mounted (and scrolled) underneath. */
+.hm-pr-view { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--bg); }
+.hm-pr-crumbs { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.hm-pr-back { color: var(--repo); padding: 4px 6px; font-weight: 700; }
+.hm-pr-back:hover { text-decoration: underline; }
+.hm-pr-sep, .hm-pr-crumb { color: var(--fg-muted); }
+.hm-pr-cols { flex: 1; min-height: 0; display: flex; }
+.hm-pr-side { width: 300px; flex: none; border-right: 1px solid var(--border); border-left: 3px solid var(--repo); padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.hm-pr-head { display: flex; align-items: center; gap: 8px; }
+.hm-pr-title { font-size: 15px; font-weight: 700; margin: 0; line-height: 1.35; }
+.hm-pr-checks { color: var(--fg-muted); font-size: 11px; }
+.hm-pr-child { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
+.hm-pr-child .hm-section-label { padding-left: 0; }
+.hm-pr-kid { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hm-pr-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.hm-pr-why { font-size: 11px; }
+/* The native webview is drawn over this rectangle, so it stays empty but for a failure. */
+.hm-pr-page { flex: 1; min-width: 0; position: relative; background: var(--bg-elev); }
+.hm-pr-error { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; color: var(--ansi-red); text-align: center; }

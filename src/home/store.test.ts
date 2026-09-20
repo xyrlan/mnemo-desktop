@@ -240,3 +240,34 @@ test('pinning reorders the list the way the backend sorts it', async () => {
   // Pinned first, then by last activity: /gh/b jumps the newer /gh/a.
   expect(store.getState().snapshot.repos.map((r) => r.root)).toEqual(['/gh/b', '/gh/a'])
 })
+
+const aPr = { number: 372, title: 'the PR view', state: 'open' as const, checks: 'none' as const, child: 'cccc1111', url: 'https://gh/o/a/pull/372' }
+
+test('openPr pushes a PR over the stream and closePr pops it; nothing else moves', async () => {
+  const { store } = mk()
+  await store.getState().load()
+  expect(store.getState().openedPr).toBeNull()
+  store.getState().openPr('/gh/a', aPr)
+  expect(store.getState().openedPr).toEqual({ repo: '/gh/a', pr: aPr })
+  // The stream is untouched underneath: same snapshot, same selection.
+  expect(store.getState().selected).toBe('/gh/a')
+  store.getState().openPr('/gh/b', { ...aPr, number: 9 })
+  expect(store.getState().openedPr?.pr.number).toBe(9)
+  store.getState().closePr()
+  expect(store.getState().openedPr).toBeNull()
+})
+
+test('a reload leaves an open PR open: the view reads the fresh one out of the snapshot', async () => {
+  const { store } = mk()
+  store.getState().openPr('/gh/a', aPr)
+  await store.getState().load()
+  expect(store.getState().openedPr).toEqual({ repo: '/gh/a', pr: aPr })
+})
+
+test('stopChild types `claude stop` in a terminal tab in the repo', async () => {
+  const { store, layout } = mk()
+  await store.getState().load()
+  const repo = store.getState().snapshot.repos[0]
+  store.getState().stopChild(repo, repo.sessions[0])
+  expect(layout.commands).toEqual(['/gh/a:claude stop s1'])
+})
