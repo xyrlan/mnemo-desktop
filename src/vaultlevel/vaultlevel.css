@@ -1,6 +1,6 @@
 /* The vault square. Every colour is a theme token; the slot around it belongs to the sidebar. */
 /* Fills the slot's width; the height is fixed. Four bands top to bottom — stage 113, caption 26,
-   trail 15, HUD 22 — adding up to `SQUARE` (176) in Square.tsx. */
+   texture 15, HUD 22 — adding up to `SQUARE` (176) in Square.tsx. */
 .vl-square { position: relative; width: 100%; height: 176px; flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; --vl-tone: var(--accent); }
 /* Five health tones down one ramp, for the HUD bar and the octopus at rest. The ansi tokens
    alone do not make a ramp — this theme's `--ansi-red` is a pink (#f7768e) that reads as
@@ -14,7 +14,7 @@
 .vl-muted { --vl-tone: var(--fg-muted); }
 
 /* The scene's own tone, the same four `avatar.css` paints the octopus with, for the things around
-   him that follow the action rather than the vault: his glow and the trail's dots. */
+   him that follow the action rather than the vault: his glow and the texture's bars. */
 .vl-kind-accent { --vl-kind: var(--accent); }
 .vl-kind-green { --vl-kind: var(--ansi-green); }
 .vl-kind-yellow { --vl-kind: var(--ansi-yellow); }
@@ -61,14 +61,15 @@
 .vl-target { color: var(--fg); }
 .vl-where { color: var(--fg-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 
-/* Band 3 — the trail: oldest to newest, the current one ringed, repeats folded into a count. */
-.vl-trail { flex: 0 0 15px; list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; gap: 10px; }
-/* The count sits beside its dot, in the flow, so it pushes the next dot along rather than
-   running into it. */
-.vl-dot { display: flex; align-items: center; gap: 2px; }
-.vl-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--vl-kind); opacity: .75; }
-.vl-dot.vl-now::before { opacity: 1; box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 2.5px var(--vl-kind); }
-.vl-count { font-size: 9px; line-height: 1; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+/* Band 3 — the activity texture: one thin bar per bucket of the last hour, oldest at the left,
+   as tall as that bucket's share of the busiest one and coloured by what mostly happened in it.
+   The heights come in as inline px from `TICK` in Square.tsx, so this band only has to place
+   them. Texture, not data: nothing here is a number, a legend or a hover target. */
+.vl-texture { flex: 0 0 15px; display: flex; justify-content: center; align-items: flex-end; gap: 1px; padding-bottom: 3px; }
+.vl-tick { width: 2px; min-height: 1px; border-radius: 1px; background: var(--vl-kind); opacity: .85; transition: height .3s ease-out; }
+/* An empty bucket keeps its place as a rest mark. Without it a quiet hour is two bars adrift in
+   a void, and the row stops reading as a stretch of time. */
+.vl-tick.vl-quiet { background: var(--fg-muted); opacity: .25; }
 
 /* The discreet way into the vault: only on hover, and never over the octopus. */
 .vl-open { position: absolute; right: 4px; top: 4px; z-index: 2; opacity: 0; transition: opacity .12s; background: none; border: 0; color: var(--fg-muted); font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
