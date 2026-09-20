@@ -130,3 +130,19 @@ nothing they touch.
 - No pane is created for an action the user already confirmed.
 - `take over` still opens a terminal.
 - The square's layout does not move.
+
+## A trap the two consumers share
+
+`useCockpit` takes a selector. A selector that builds a fresh array or object on
+every call re-renders forever and blanks the app — it happened here once already
+and cost a black window. Piece B holds a list of log lines and piece C a list of
+messages, so both are exactly the shape that trips it.
+
+Select the reference, never a derived collection:
+
+```ts
+const lines = useCockpit((s) => s.jobs[key]?.lines)   // one reference
+const lines = useCockpit((s) => s.jobs[key]?.lines ?? [])  // NO — fresh [] each call
+```
+
+Keep the fallback out of the selector, or memoise a single empty array module-side.
