@@ -7,7 +7,10 @@ import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '..
 import { rowChild, type Row } from './inbox'
 import { landMission, mergePr, openJob, stopChild } from './actions'
 import { answerPane, detachAnswer, useAnswer } from './approve'
-import ChildMark from './ChildMark'
+import ChildMark, { MARK_SIZE } from './ChildMark'
+
+/** What the child runs on. Both fields are genuinely absent on a child dispatched without them: say so. */
+export const costLine = (c: { model?: string | null; effort?: string | null }) => `${c.model || 'default model'} · ${c.effort || 'default'} effort`
 import './cockpit.css'
 
 /** One cockpit row, as the pane and the sidebar's cockpit body both render it. */
@@ -121,6 +124,9 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {row.kind === 'blocked' &&
           btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
       </div>
+      {/* What the child spends, not what it is doing: a reply swaps the avatar for a pill for a
+          minute (`replied`), and the model and effort behind it are the same either way. */}
+      {child && <div className="ck-cost" style={{ paddingLeft: MARK_SIZE + 6 }}>{costLine(child)}</div>}
       {row.kind === 'blocked' && <ReplyBox c={row.child} />}
     </div>
   )
