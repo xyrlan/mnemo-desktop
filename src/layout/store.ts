@@ -73,9 +73,16 @@ export type Actions = {
    *  Focus stays on the pane it was on; panes in different tabs are left alone. */
   swapPanes(a: PaneId, b: PaneId): void
   /** Take `from` out of its place and put it on `side` of `to`, which splits evenly to hold it
-   *  (drag a pane bar onto another's edge). Nothing happens when `from` is `to` or the two are
-   *  in different tabs; focus stays on the pane it was on. */
-  movePane(from: PaneId, to: PaneId, side: Side): void
+   *  (drag a pane bar onto another's edge). Nothing happens when `from` is `to`; focus stays on
+   *  the pane it was on.
+   *
+   *  `tab` is the id of the group `to` belongs to, and naming it is what asks for a move across
+   *  groups (dropping a pane onto another group's line in the sidebar): `from` leaves its own
+   *  tree and joins that one, focused there, and a tab left with no pane closes. Without it the
+   *  move stays inside one tab and a pair from two tabs is refused — on screen only the active
+   *  tab is rendered, so such a pair is a stale id, and teleporting a pane is worse than doing
+   *  nothing. Nothing happens when `to` is not in `tab`. */
+  movePane(from: PaneId, to: PaneId, side: Side, tab?: string): void
   setCwd(id: PaneId, cwd: string): void
   /** Record (or clear) the Claude Code session a pane runs; Home and the workspace restore read it. */
   setSessionId(id: PaneId, sessionId: string | undefined): void
@@ -318,20 +325,37 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         }))
       },
 
-      movePane(from, to, side) {
+      movePane(from, to, side, tab) {
         // Refused here, before extract: grafting onto a target that was just extracted finds
         // no target and hands back the tree without `from`, deleting the pane.
         if (from === to) return
-        set((s) => ({
-          tabs: s.tabs.map((t) => {
-            const ids = leaves(t.root)
-            if (!ids.includes(from) || !ids.includes(to)) return t
-            const rest = extract(t.root, from)
-            if (!rest) return t
+        set((s) => {
+          const src = s.tabs.find((t) => leaves(t.root).includes(from))
+          const dest = tab === undefined ? src : s.tabs.find((t) => t.id === tab)
+          if (!src || !dest || !leaves(dest.root).includes(to)) return {}
+          if (dest === src) {
+            const rest = extract(src.root, from)
+            if (!rest) return {}
             const root = graft(rest, to, from, side)
-            return root === rest ? t : { ...t, root }
-          }),
-        }))
+            if (root === rest) return {}
+            return { tabs: s.tabs.map((t) => (t === src ? { ...t, root } : t)) }
+          }
+          // Grafted first, and only then extracted: a graft that refuses after the pane has
+          // already left its own tree is the one way a move loses a pane for good.
+          const joined = graft(dest.root, to, from, side)
+          if (joined === dest.root) return {}
+          const rest = extract(src.root, from)
+          const tabs = s.tabs.flatMap((t) => {
+            if (t === dest) return [{ ...t, root: joined, focused: from }]
+            if (t !== src) return [t]
+            // The pane it left was the last one: the group goes with it rather than staying empty.
+            if (!rest) return []
+            const kept = leaves(rest)
+            return [{ ...t, root: rest, focused: kept.includes(t.focused) ? t.focused : kept[0] }]
+          })
+          // Following the pane: the group the maintainer was looking at no longer exists.
+          return { tabs, activeTab: !rest && s.activeTab === src.id ? dest.id : s.activeTab }
+        })
       },
 
       setSessionId(id, sessionId) {

@@ -1,9 +1,11 @@
 import type { Pane, Tab } from './store'
-import { leaves } from './tree'
+import { leaves, type PaneId, type Side } from './tree'
 import type { Snapshot } from '../mission/types'
 import type { HomeSnapshot } from '../home/types'
-import { paneCwd } from '../mission/scope'
+import { paneCwd, repoOfCwd } from '../mission/scope'
 import { barInfo, paneParent } from '../chrome/info'
+import { repoAccent } from '../home/repo-color'
+import { dropPane, type Zone } from '../chrome/drag'
 
 /** What Claude Code in a tab is doing, from its parent row in the mission snapshot. */
 export type ClaudeState = 'working' | 'blocked' | 'idle'
@@ -52,13 +54,68 @@ export function paneName(pane: Pane | undefined, snap: Snapshot, home: HomeSnaps
   return pane.view
 }
 
-/** Everything a sidebar tab row shows. `git` is what the chrome client said for the focused pane's cwd. */
-export function tabLabel(tab: Tab, panes: Record<number, Pane>, snap: Snapshot, home: HomeSnapshot, git: Git = {}): TabLabel {
-  const pane = panes[tab.focused]
+/** What Claude Code is doing in a pane, when a terminal there runs it. */
+export function paneClaude(pane: Pane | undefined, snap: Snapshot): ClaudeState | undefined {
+  if (pane?.view !== 'terminal') return undefined
+  const parent = paneParent(pane, paneCwd(pane, snap), snap)
+  return parent ? claudeState(parent.status) : undefined
+}
+
+/** Everything one pane's line shows. `git` is what the chrome client said for that pane's cwd. */
+export function paneLabel(pane: Pane | undefined, snap: Snapshot, home: HomeSnapshot, git: Git = {}): TabLabel {
   const info = barInfo(pane, snap, git)
   const sub = [info.place, info.branch].filter(Boolean).join(' · ')
-  const parent = pane?.view === 'terminal' ? paneParent(pane, info.cwd, snap) : undefined
-  return { name: tab.name || paneName(pane, snap, home), sub, ...(parent ? { state: claudeState(parent.status) } : {}) }
+  const state = paneClaude(pane, snap)
+  return { name: paneName(pane, snap, home), sub, ...(state ? { state } : {}) }
+}
+
+/** Everything a sidebar tab row shows. `git` is what the chrome client said for the focused pane's cwd.
+ *  Only a tab of one pane is labelled this way: a group of several says so itself (`groupLabel`). */
+export function tabLabel(tab: Tab, panes: Record<number, Pane>, snap: Snapshot, home: HomeSnapshot, git: Git = {}): TabLabel {
+  const label = paneLabel(panes[tab.focused], snap, home, git)
+  return tab.name ? { ...label, name: tab.name } : label
+}
+
+/** The dot a group carries, when its panes disagree: whichever of them asks most of you. */
+const LOUDEST: ClaudeState[] = ['blocked', 'working', 'idle']
+
+/** A group's own line: its name and how many panes it holds, with the dot of the loudest thing
+ *  running in any of them. Never named after one of its panes — each is on a line of its own
+ *  underneath, and a label that follows focus is the thing this replaces. */
+export function groupLabel(tab: Tab, panes: Record<number, Pane>, snap: Snapshot): TabLabel {
+  const ids = leaves(tab.root)
+  const states = ids.map((id) => paneClaude(panes[id], snap))
+  const state = LOUDEST.find((s) => states.includes(s))
+  return { name: tab.name || 'group', sub: `${ids.length} panes`, ...(state ? { state } : {}) }
+}
+
+/** The accent a pane's line carries: its repo's, the very colour the lens gives that repo. A pane
+ *  in no repo the snapshot knows is keyed by its own directory instead, so two panes sitting in
+ *  one folder still agree; a pane in no directory at all (a vault, a cockpit) has no accent. */
+export function paneAccent(pane: Pane | undefined, snap: Snapshot): string | undefined {
+  const cwd = paneCwd(pane, snap)
+  return cwd ? repoAccent(repoOfCwd(snap, cwd)?.root ?? cwd) : undefined
+}
+
+/** What letting a dragged pane go over a sidebar line does. Inside the line's own group it is the
+ *  workspace's own drop — the centre swaps the two panes, an edge moves `from` to that side of
+ *  `to`. Across groups there is no second place to swap into, so the centre means what a new pane
+ *  means here, beside it (`split-row`); the pane leaves its group and joins this one. */
+export function dropOnGroup(
+  s: {
+    tabs: Tab[]
+    swapPanes(a: PaneId, b: PaneId): void
+    movePane(from: PaneId, to: PaneId, side: Side, tab?: string): void
+  },
+  from: PaneId,
+  to: PaneId,
+  zone: Zone,
+): void {
+  if (from === to) return
+  const dest = s.tabs.find((t) => leaves(t.root).includes(to))
+  if (!dest) return
+  if (leaves(dest.root).includes(from)) return dropPane(s, from, to, zone)
+  s.movePane(from, to, zone === 'center' ? 'right' : zone, dest.id)
 }
 
 const trimSlash = (p: string) => p.replace(/\/+$/, '') || '/'
