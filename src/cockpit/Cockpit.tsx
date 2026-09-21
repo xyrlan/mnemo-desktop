@@ -10,15 +10,20 @@ import { tauriChrome } from '../chrome/client'
 import { listKey } from '../actions/keys'
 import { pruneGone } from './needs'
 import { buildInbox, rowChild, type Inbox, type Row } from './inbox'
-import type { RepoGroup } from '../mission/types'
+import type { ChildSession, RepoGroup } from '../mission/types'
 import { useArm } from './actions'
 import { answerPrompt, type Choice } from './approve'
 import MissionMap from './MissionMap'
 import InboxRow, { isPermission, PRIMARY, runPrimary } from './InboxRow'
 import CockpitBody from './CockpitBody'
+import ChatDrawer, { chatKey, chatTitle } from './ChatDrawer'
 import { JobDrawer } from './JobLog'
+import { cockpitStore, useCockpit } from './app-store'
 import { lastCwd } from './where'
 import './cockpit.css'
+
+/** A row with a child to talk to: blocked, working or done today. */
+type ChatRow = Extract<Row, { child: ChildSession }>
 
 /** Branch checked out in `cwd`, re-asked every few seconds while the cockpit is open. */
 function useBranch(cwd: string | undefined): string | null {
@@ -86,6 +91,11 @@ export default function Cockpit() {
   const folds = useMission((s) => s.folds)
   const { working: workingOpen, done: doneOpen } = foldsOpen(folds, inbox.needs.length)
   const rows: Row[] = [...inbox.needs, ...(workingOpen ? inbox.working : []), ...(doneOpen ? inbox.done : [])]
+
+  // The child the drawer talks to, looked up across every list, folded or not: a child that
+  // blocks, finishes or is folded away mid-conversation keeps its drawer until you close it.
+  const drawer = useCockpit((s) => s.drawer)
+  const chatRow = drawer ? [...inbox.needs, ...inbox.working, ...inbox.done].find((r): r is ChatRow => chatKey(rowChild(r)?.id ?? '') === drawer) : undefined
 
   const [selKey, setSelKey] = useState<string | null>(null)
   const sel = Math.max(0, rows.findIndex((r) => r.key === selKey))
@@ -177,6 +187,11 @@ export default function Cockpit() {
         fire={fire}
         onSelect={() => setSelKey(r.key)}
         onMap={(m) => setMapAt({ root: r.repo.root, path: m.contract_path })}
+        onChat={() => {
+          const c = rowChild(r)
+          if (c) cockpitStore.getState().toggleDrawer(chatKey(c.id))
+        }}
+        chatting={!!chatRow && rowChild(r)?.id === chatRow.child.id}
       />
     ))
 
@@ -225,6 +240,10 @@ export default function Cockpit() {
             )}
           </div>
         )}
+        {/* The store holds one drawer key, and these two read it for disjoint prefixes: a
+            `chat:<child>` is never a job, and `JobDrawer` renders nothing without one. So at
+            most one of them is ever on screen, which is the drawer's own rule. */}
+        {chatRow && <ChatDrawer child={chatRow.child} title={chatTitle(chatRow.repo, chatRow.label)} onClose={() => cockpitStore.getState().closeDrawer()} />}
         <JobDrawer />
       </div>
       <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a take over · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>

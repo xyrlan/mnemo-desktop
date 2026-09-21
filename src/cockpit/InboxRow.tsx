@@ -61,7 +61,7 @@ function openRow(r: Row) {
   else openMissionPane(r.child)
 }
 
-export default function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMap }: {
+export default function InboxRow({ row, selected, showRepo, narrow, armed, fire, onSelect, onMap, onChat, chatting = false }: {
   row: Row
   selected: boolean
   showRepo: boolean
@@ -72,6 +72,11 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
   onSelect: () => void
   /** Opens the row's mission map beside the list. Without it (the sidebar) there is no map button. */
   onMap?: (m: Mission) => void
+  /** Opens (or closes) the chat drawer of the row's child, on a surface that has a board for it
+   *  to slide in beside. Without it (the sidebar) there is no chat button. */
+  onChat?: () => void
+  /** This row's child is the one the drawer is talking to. */
+  chatting?: boolean
 }) {
   const looked = useMission((s) => s.looked)
   const lastSent = useMission((s) => (row.kind === 'blocked' ? s.sent[row.child.id]?.at(-1)?.at : undefined))
@@ -141,6 +146,7 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {job && btn('log', () => cockpitStore.getState().toggleDrawer(row.key), logOpen ? 'ck-log-open' : '', logOpen ? 'Close the log' : 'What it printed')}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
         {child && answered !== null && btn('step back', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
+        {child && child.live && onChat && btn('chat', onChat, chatting ? 'ck-chatting' : '', `Send ${child.id} a message without opening its terminal`)}
         {child && answered === null && (row.kind === 'blocked' || child.live) && btn('take over', () => attachChild(child.id), '', `claude attach ${child.id}`)}
         {row.kind === 'blocked' &&
           btn(isArmed ? 'really stop?' : 'stop', () => fire(armKey(row)) && stopChild(row.child.id), isArmed ? 'ck-armed' : '', `claude stop ${row.child.id}`)}
