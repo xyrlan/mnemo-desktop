@@ -99,9 +99,6 @@ export function ReplyBox({ c, rows = 2, className = '', attach = false }: { c: C
 
 function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: number; className: string; attach: boolean }) {
   const draft = useMission((s) => s.drafts[c.id] ?? '')
-  const err = useMission((s) => s.replyErrors[c.id])
-  const sending = useMission((s) => s.sending[c.id])
-  const typing = useMission((s) => s.typing[c.id])
   const lastSent = useMission((s) => s.sent[c.id]?.at(-1))
   useEffect(() => {
     if (draft === '' && c.suggested_reply) missionStore.getState().setDraft(c.id, c.suggested_reply)
@@ -109,6 +106,29 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
   return (
     <div className={`m-reply${className ? ` ${className}` : ''}`}>
       <div className="m-needs">{c.needs}</div>
+      <ReplyField c={c} rows={rows} attach={attach} />
+      {lastSent && (
+        <div className="m-sent">
+          {lastSent.asMe ? 'typed as you' : 'sent'} ✓ {sentAt(lastSent.at)} · {lastSent.asMe ? 'in its terminal' : 'waiting for the child to pick it up…'} <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export const sentAt = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+/** The draft field, send / reply as me, and what each of them is: what the blocked child's
+ *  question box and the cockpit's chat drawer both type into. One draft per child, so the two
+ *  show the same text. It never prefills: a suggested reply is the question box's, for a child
+ *  that asked. */
+export function ReplyField({ c, rows, attach = false }: { c: ChildSession; rows: number; attach?: boolean }) {
+  const draft = useMission((s) => s.drafts[c.id] ?? '')
+  const err = useMission((s) => s.replyErrors[c.id])
+  const sending = useMission((s) => s.sending[c.id])
+  const typing = useMission((s) => s.typing[c.id])
+  return (
+    <>
       <textarea
         value={draft}
         rows={rows}
@@ -140,11 +160,6 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
       {/* Claude Code delivers socket writes as another session's message, which it tells
           the child is never user approval (#84); only the child's own terminal is the user (#86). */}
       <div className="m-reply-note">send arrives as a message from another session and cannot approve anything; reply as me types it into the child's terminal, as you</div>
-      {lastSent && (
-        <div className="m-sent">
-          {lastSent.asMe ? 'typed as you' : 'sent'} ✓ {new Date(lastSent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {lastSent.asMe ? 'in its terminal' : 'waiting for the child to pick it up…'} <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
-        </div>
-      )}
-    </div>
+    </>
   )
 }

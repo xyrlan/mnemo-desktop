@@ -89,6 +89,16 @@
 .ck-drawer-head { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-bottom: 1px solid var(--border); flex: 0 0 auto; min-width: 0; }
 .ck-drawer-title { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ck-drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px; }
+/* The chat drawer's content: what the child is doing, what you sent it, and the draft field. */
+.ck-act.ck-chatting { border-color: var(--accent); color: var(--accent); }
+.ck-chat { display: flex; flex-direction: column; gap: 6px; min-height: 100%; }
+.ck-chat-now { color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-chat-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ck-chat-msg { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 12px; }
+.ck-chat-at, .ck-chat-who { color: var(--fg-muted); font-size: 11px; }
+.ck-as-me .ck-chat-who { color: var(--accent); }
+.ck-chat-text { flex-basis: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ck-chat-reply { margin-top: auto; }
 
 @media (prefers-reduced-motion: reduce) {
   .ck-drawer { animation: none; }
