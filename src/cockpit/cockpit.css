@@ -79,3 +79,17 @@
 .mm-avatar { position: absolute; right: 5px; top: 3px; opacity: .9; pointer-events: none; }
 /* The label must not run under it. */
 .mm-card .gr-label { padding-right: 32px; }
+
+/* The card drawer: a flex sibling of the inbox, like the map, so the list keeps its own width
+   and stays visible and clickable. No `position`, no `inset`, no backdrop — a drawer that lies
+   over the board is the `palette-overlay` pattern, which this is not. It slides in from the
+   right edge it is attached to. */
+.ck-drawer { flex: 0 0 auto; width: 320px; max-width: 50%; border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; animation: ck-drawer-in .16s ease-out; }
+@keyframes ck-drawer-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.ck-drawer-head { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-bottom: 1px solid var(--border); flex: 0 0 auto; min-width: 0; }
+.ck-drawer-title { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ck-drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ck-drawer { animation: none; }
+}
