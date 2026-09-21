@@ -16,6 +16,7 @@ import { answerPrompt, type Choice } from './approve'
 import MissionMap from './MissionMap'
 import InboxRow, { isPermission, PRIMARY, runPrimary } from './InboxRow'
 import CockpitBody from './CockpitBody'
+import { JobDrawer } from './JobLog'
 import { lastCwd } from './where'
 import './cockpit.css'
 
@@ -224,6 +225,7 @@ export default function Cockpit() {
             )}
           </div>
         )}
+        <JobDrawer />
       </div>
       <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a take over · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>
