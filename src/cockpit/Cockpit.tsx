@@ -17,6 +17,7 @@ import MissionMap from './MissionMap'
 import InboxRow, { isPermission, PRIMARY, runPrimary } from './InboxRow'
 import CockpitBody from './CockpitBody'
 import ChatDrawer, { chatKey, chatTitle } from './ChatDrawer'
+import { JobDrawer } from './JobLog'
 import { cockpitStore, useCockpit } from './app-store'
 import { lastCwd } from './where'
 import './cockpit.css'
@@ -239,7 +240,11 @@ export default function Cockpit() {
             )}
           </div>
         )}
+        {/* The store holds one drawer key, and these two read it for disjoint prefixes: a
+            `chat:<child>` is never a job, and `JobDrawer` renders nothing without one. So at
+            most one of them is ever on screen, which is the drawer's own rule. */}
         {chatRow && <ChatDrawer child={chatRow.child} title={chatTitle(chatRow.repo, chatRow.label)} onClose={() => cockpitStore.getState().closeDrawer()} />}
+        <JobDrawer />
       </div>
       <div className="ck-hint">↑↓ move · ↩ {rows[sel] ? PRIMARY[rows[sel].kind] : 'action'} · {isPermission(rows[sel]) ? 'y approve · n deny' : 'r reply'} · a take over · ⤢ mission map{mapAt ? ' · esc close map' : ''}</div>
     </div>

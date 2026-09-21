@@ -49,6 +49,9 @@ pub mod pulse;
 // -- github (src/github.rs) --
 pub mod github;
 
+// -- job (src/job.rs) --
+pub mod job;
+
 // -- build info (src/build_info.rs) --
 pub mod build_info;
 
@@ -177,6 +180,9 @@ pub fn run() {
             github::gh_auth,
             github::gh_issues,
             github::gh_project,
+
+            // -- job commands --
+            job::job_run,
 
             // -- build info commands --
             build_info::app_build_info,

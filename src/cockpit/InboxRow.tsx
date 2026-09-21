@@ -5,7 +5,9 @@ import { paneForSession } from '../layout/tabs'
 import { fmtTokens } from '../mission/tokens'
 import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import { rowChild, type Row } from './inbox'
-import { landMission, mergePr, openJob, stopChild } from './actions'
+import { landArgv, landMission, mergeArgv, mergePr, openJob, stopChild } from './actions'
+import { cockpitStore, useCockpit } from './app-store'
+import { jobState, type Job } from './store'
 import { answerPane, detachAnswer, useAnswer } from './approve'
 import ChildMark, { MARK_SIZE } from './ChildMark'
 
@@ -14,6 +16,12 @@ export const costLine = (c: { model?: string | null; effort?: string | null }) =
 import './cockpit.css'
 
 /** One cockpit row, as the pane and the sidebar's cockpit body both render it. */
+
+/** The pill of a row whose merge or land ran headless: how it is going, in place of `ready`. */
+export function jobWord(kind: 'ready' | 'land', j: Job): string {
+  const s = jobState(j)
+  return s === 'running' ? (kind === 'ready' ? 'merging…' : 'landing…') : s === 'ok' ? (kind === 'ready' ? 'merged ✓' : 'landed ✓') : 'failed ✗'
+}
 
 /** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
 export const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'open job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
@@ -28,10 +36,17 @@ function rowPane(r: Row): number | null {
   return c ? paneForSession(appStore.getState(), c) : null
 }
 
+/** The row's merge or land is running or went through: Enter shows its log, never a second run. */
+const ranOk = (r: Row) => {
+  const j = cockpitStore.getState().jobs[r.key]
+  return !!j && jobState(j) !== 'failed'
+}
+
 export function runPrimary(r: Row, fire: (key: string) => boolean) {
   const here = rowPane(r)
   if (here !== null && (r.kind === 'blocked' || r.kind === 'working' || r.kind === 'done')) appStore.getState().goToPane(here)
   else if (r.kind === 'ci') openJob(r.pr)
+  else if ((r.kind === 'ready' || r.kind === 'land') && ranOk(r)) cockpitStore.getState().openDrawer(r.key)
   else if (r.kind === 'ready') fire(armKey(r)) && mergePr(r.repo.root, r.pr)
   else if (r.kind === 'land') fire(armKey(r)) && landMission(r.repo.root, r.mission)
   else openMissionPane(r.child)
@@ -74,13 +89,18 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
   // The attach an Aprovar / Negar opened, while its pane is still open here.
   const answer = useAnswer(child?.id ?? '')
   const answered = useApp(() => (child && answer ? answerPane(child.id) : null))
+  // The merge or land this row ran, if it has; the job, one reference (never a derived list).
+  const job = useCockpit((s) => (row.kind === 'ready' || row.kind === 'land' ? s.jobs[row.key] : undefined))
+  const logOpen = useCockpit((s) => s.drawer === row.key)
+  // While it runs there is nothing to confirm; once it merged there is nothing left to merge.
+  const canRun = !job || jobState(job) === 'failed'
 
   // `word` is the pill for rows that are not a child's state; `null` means the child's avatar.
   const [word, label, detail] =
     row.kind === 'blocked' ? [replied ? 'replied' : null, row.label, '']
     : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, row.pr.head]
-    : row.kind === 'ready' ? ['ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
-    : row.kind === 'land' ? ['land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
+    : row.kind === 'ready' ? [job ? jobWord('ready', job) : 'ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
+    : row.kind === 'land' ? [job ? jobWord('land', job) : 'land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
     : [null, row.label, row.child.detail]
 
   const btn = (text: string, run: () => void, cls = '', title?: string) => (
@@ -98,7 +118,7 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
   )
 
   return (
-    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}${here !== null ? ' ck-here' : ''}`} data-key={row.key}>
+    <div className={`ck-row ck-${row.kind}${replied ? ' ck-replied' : ''}${selected ? ' sel' : ''}${here !== null ? ' ck-here' : ''}${job ? ` ck-job-${jobState(job)}` : ''}`} data-key={row.key}>
       <div
         className="ck-row-head"
         onClick={() => {
@@ -121,8 +141,9 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
         {row.mission && onMap && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
         {row.kind === 'ci' && btn('open job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
-        {row.kind === 'ready' && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `gh pr merge ${row.pr.number} --squash`)}
-        {row.kind === 'land' && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, `mnemo land ${row.mission.contract_path} --merge`)}
+        {row.kind === 'ready' && canRun && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, mergeArgv(row.pr).join(' '))}
+        {row.kind === 'land' && canRun && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, landArgv(row.mission).join(' '))}
+        {job && btn('log', () => cockpitStore.getState().toggleDrawer(row.key), logOpen ? 'ck-log-open' : '', logOpen ? 'Close the log' : 'What it printed')}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}
         {child && answered !== null && btn('step back', () => detachAnswer(child.id), '', 'Leave the attach this answer opened (the child keeps running)')}
         {child && child.live && onChat && btn('chat', onChat, chatting ? 'ck-chatting' : '', `Send ${child.id} a message without opening its terminal`)}

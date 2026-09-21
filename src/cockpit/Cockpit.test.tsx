@@ -4,11 +4,24 @@ import { vi } from 'vitest'
 
 /** What the Tauri side answers: a branch for the header, GitHub issues for the `mnemo` repo. */
 const gh: { auth: unknown; issues: unknown } = { auth: {}, issues: [] }
+/** Every `job_run` the cockpit asked for, and what `job.rs` would emit back. */
+const jobs = vi.hoisted(() => ({ runs: [] as { id: string; cwd: string; argv: string[] }[], on: {} as Record<string, (e: { payload: unknown }) => void>, refuse: null as string | null }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string, args?: { root?: string }) =>
-    cmd === 'chrome_branch' ? 'main' : cmd === 'gh_auth' ? gh.auth : cmd === 'gh_issues' ? (args?.root === '/Users/me/github/mnemo' ? gh.issues : []) : {},
-  ),
+  invoke: vi.fn(async (cmd: string, args?: { root?: string }) => {
+    if (cmd === 'job_run') {
+      if (jobs.refuse) throw jobs.refuse
+      return void jobs.runs.push(args as never)
+    }
+    return cmd === 'chrome_branch' ? 'main' : cmd === 'gh_auth' ? gh.auth : cmd === 'gh_issues' ? (args?.root === '/Users/me/github/mnemo' ? gh.issues : []) : {}
+  }),
 }))
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: async (name: string, h: (e: { payload: unknown }) => void) => {
+    jobs.on[name] = h
+    return () => {}
+  },
+}))
+const emit = (name: 'job-line' | 'job-exit', payload: unknown) => act(() => jobs.on[name]({ payload }))
 
 const answered = vi.hoisted(() => [] as [string, string][])
 vi.mock('./approve', async (orig) => ({
@@ -23,6 +36,7 @@ import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'
 import { merged, withPrs, shipped } from './fixtures'
+import { cockpitStore } from './app-store'
 import { githubStore } from '../github/app-store'
 import { mnemoIssues } from '../github/fixtures'
 import { desktop, snapshot } from '../mission/fixtures'
@@ -52,6 +66,9 @@ beforeEach(() => {
   gh.issues = []
   githubStore.setState({ auth: null, issues: {}, boards: {} })
   typed = []
+  jobs.runs = []
+  jobs.refuse = null
+  cockpitStore.setState({ drawer: null, jobs: {} })
   // Fresh panes per test, so what a test opened is what it sees.
   appStore.setState({ tabs: [], activeTab: '', panes: {}, openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
 })
@@ -100,23 +117,112 @@ test('the inbox lists what needs you by urgency, with the reply inline and the r
   expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
 })
 
-test('land and merge run in a terminal tab only after a second press', async () => {
+/** Lets `runJob` get past its awaits (listen, then invoke). */
+const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))))
+const pill = (el: Element) => el.querySelector('.nd-word')?.textContent
+const drawer = () => host.querySelector<HTMLElement>('.ck-drawer')
+
+test('land and merge run headless only after a second press: no tab, no pane, the row says how it went', async () => {
   const m = desktop.missions[0]
   const ready = { ...desktop, missions: [{ ...m, pieces: [{ ...m.pieces[0], pr: { number: 7, url: 'https://github.com/me/d/pull/7', state: 'OPEN', head: 'feat/round3/cockpit', ci: 'pass' as const } }] }] }
   missionStore.setState({ snapshot: { ...withPrs, repos: [ready, shipped] } })
   await render()
-  const land = row(`land:${shipped.missions[0].contract_path}`)
-  act(() => button(land, 'land')!.click())
+  const landKey = `land:${shipped.missions[0].contract_path}`
+  const land = () => row(landKey)
+  act(() => button(land(), 'land')!.click())
+  expect(jobs.runs).toEqual([])
+  expect(button(land(), 'confirm land?')).toBeDefined()
+  act(() => button(land(), 'confirm land?')!.click())
+  await settle()
+  // A list, never a shell string, keyed by the row that ran it.
+  expect(jobs.runs).toEqual([{ id: landKey, cwd: shipped.root, argv: ['mnemo', 'land', shipped.missions[0].contract_path, '--merge'] }])
   expect(typed).toEqual([])
-  expect(button(land, 'confirm land?')).toBeDefined()
-  act(() => button(land, 'confirm land?')!.click())
-  expect(typed).toEqual([[shipped.root, `mnemo land ${shipped.missions[0].contract_path} --merge`]])
+  expect(appStore.getState().tabs).toEqual([])
+  expect(pill(land())).toBe('landing…')
+  // Nothing to confirm while it runs.
+  expect(button(land(), 'land')).toBeUndefined()
 
-  const merge = row(`ready:${desktop.root}#7`)
-  expect(merge.querySelector('.ck-label')?.textContent).toBe('cockpit · PR #7')
-  act(() => button(merge, 'merge')!.click())
-  act(() => button(merge, 'confirm merge?')!.click())
-  expect(typed.at(-1)).toEqual([desktop.root, 'gh pr merge 7 --squash'])
+  emit('job-line', { id: landKey, stream: 'out', line: 'merging 3 PRs' })
+  emit('job-line', { id: landKey, stream: 'err', line: 'remote: ok' })
+  emit('job-exit', { id: landKey, code: 0 })
+  expect(pill(land())).toBe('landed ✓')
+  // Success is silence: the log is there for whoever asks, the drawer does not open.
+  expect(drawer()).toBeNull()
+  act(() => button(land(), 'log')!.click())
+  expect(drawer()!.getAttribute('aria-label')).toBe('land · round4')
+  expect([...drawer()!.querySelectorAll('.ck-log-line')].map((l) => l.textContent)).toEqual(['outmerging 3 PRs', 'errremote: ok'])
+  expect(drawer()!.querySelector('.ck-log-end')?.textContent).toBe('exit 0')
+  // The row it came from stays visible and clickable beside it.
+  expect(land().isConnected).toBe(true)
+  act(() => button(land(), 'log')!.click())
+  expect(drawer()).toBeNull()
+
+  const mergeKey = `ready:${desktop.root}#7`
+  const merge = () => row(mergeKey)
+  expect(merge().querySelector('.ck-label')?.textContent).toBe('cockpit · PR #7')
+  act(() => button(merge(), 'merge')!.click())
+  act(() => button(merge(), 'confirm merge?')!.click())
+  await settle()
+  expect(jobs.runs.at(-1)).toEqual({ id: mergeKey, cwd: desktop.root, argv: ['gh', 'pr', 'merge', '7', '--squash'] })
+  expect(pill(merge())).toBe('merging…')
+  emit('job-line', { id: mergeKey, stream: 'err', line: 'Pull request #7 is not mergeable' })
+  emit('job-exit', { id: mergeKey, code: 1 })
+  expect(pill(merge())).toBe('failed ✗')
+  // A failure opens its drawer by itself, with what it printed.
+  expect(drawer()!.getAttribute('aria-label')).toBe('merge · PR #7')
+  expect(drawer()!.querySelector('.ck-log-err')?.textContent).toBe('errPull request #7 is not mergeable')
+  expect(drawer()!.querySelector('.ck-log-end')?.textContent).toBe('exit 1')
+  // And it can be tried again, still asking twice.
+  expect(button(merge(), 'merge')).toBeDefined()
+  expect(typed).toEqual([])
+})
+
+test('a job that cannot start fails in its row, and its log says why', async () => {
+  jobs.refuse = 'mnemo not found in PATH'
+  await render()
+  const id = `land:${shipped.missions[0].contract_path}`
+  act(() => button(row(id), 'land')!.click())
+  act(() => button(row(id), 'confirm land?')!.click())
+  await settle()
+  expect(pill(row(id))).toBe('failed ✗')
+  expect(drawer()!.querySelector('.ck-log-error')?.textContent).toBe('mnemo not found in PATH')
+})
+
+test('the log outlives its drawer, keeps streaming, and promotes to a pane without running again', async () => {
+  await render()
+  const id = `land:${shipped.missions[0].contract_path}`
+  act(() => button(row(id), 'land')!.click())
+  act(() => button(row(id), 'confirm land?')!.click())
+  await settle()
+  emit('job-line', { id, stream: 'out', line: 'one' })
+  act(() => button(row(id), 'log')!.click())
+  // Escape closes the window, never the job behind it.
+  act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  expect(drawer()).toBeNull()
+  emit('job-line', { id, stream: 'out', line: 'two' })
+  expect(pill(row(id))).toBe('landing…')
+  act(() => button(row(id), 'log')!.click())
+  expect([...drawer()!.querySelectorAll('.ck-log-text')].map((l) => l.textContent)).toEqual(['one', 'two'])
+  // Enter on a row whose job runs shows the log, it does not arm a second run.
+  act(() => cockpitStore.getState().closeDrawer())
+  const sel = rows().findIndex((r) => r.dataset.key === id)
+  for (let i = 0; i < sel; i++) key('ArrowDown')
+  key('Enter')
+  key('Enter')
+  expect(jobs.runs).toHaveLength(1)
+  expect(cockpitStore.getState().drawer).toBe(id)
+
+  act(() => button(drawer()!, 'open in pane')!.click())
+  expect(drawer()).toBeNull()
+  expect(opened('job-log')).toEqual([{ job: id }])
+  expect(jobs.runs).toHaveLength(1)
+  const Pane = paneView('job-log')!
+  const pane = document.createElement('div')
+  const r2 = createRoot(pane)
+  await act(async () => r2.render(<Pane id={-2} props={{ job: id }} />))
+  emit('job-line', { id, stream: 'out', line: 'three' })
+  expect([...pane.querySelectorAll('.ck-log-text')].map((l) => l.textContent)).toEqual(['one', 'two', 'three'])
+  act(() => r2.unmount())
 })
 
 test('working and done today are collapsed below the needs and open on click', async () => {
@@ -183,7 +289,8 @@ test('a row\'s mission opens as a map beside the inbox, at 100%, with action car
   const land = card(`land:${shipped.missions[0].contract_path}`)!
   act(() => button(land, 'land')!.click())
   act(() => button(land, 'confirm land?')!.click())
-  expect(typed).toEqual([[shipped.root, `mnemo land ${shipped.missions[0].contract_path} --merge`]])
+  await settle()
+  expect(jobs.runs.map((r) => r.argv)).toEqual([['mnemo', 'land', shipped.missions[0].contract_path, '--merge']])
   act(() => button(card('pr:/Users/me/github/mnemo#13')!, 'open job')!.click())
   expect(opened('browser')).toContainEqual({ url: 'https://github.com/me/mnemo/pull/13/checks' })
 

@@ -1,24 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
 import { store as appStore } from '../layout/app-store'
 import type { Mission, Pr } from '../mission/types'
+import { runJob } from './job'
 
-/** What the inbox rows and the mission map run. Commands go to a terminal tab in the repo,
- *  so their output stays in front of the user; pages open in a browser pane. */
+/** What the inbox rows and the mission map run. Pages open in a browser pane. `merge` and
+ *  `land` run headless: the user already confirmed them twice (`useArm`), so they do not move
+ *  anyone to a terminal to watch — the row says how it went, and the log is in its drawer. */
 
 /** The PR's checks page: GitHub lists the failing job first there. */
 export function openJob(pr: Pr) {
   appStore.getState().openView('browser', { url: `${pr.url.replace(/\/+$/, '')}/checks` }, 'auto', `PR #${pr.number} checks`)
 }
 
-export const mergeCmd = (pr: Pr) => `gh pr merge ${pr.number} --squash`
-export const landCmd = (m: Mission) => `mnemo land ${m.contract_path} --merge`
+export const mergeArgv = (pr: Pr) => ['gh', 'pr', 'merge', String(pr.number), '--squash']
+export const landArgv = (m: Mission) => ['mnemo', 'land', m.contract_path, '--merge']
+
+/** The job's key is the key of the row that offers it (`needs.ts`), so the map's merge and the
+ *  row's are one job, and the row finds its log. */
+export const mergeKey = (root: string, pr: Pr) => `ready:${root}#${pr.number}`
+export const landKey = (m: Mission) => `land:${m.contract_path}`
 
 export function mergePr(root: string, pr: Pr) {
-  void appStore.getState().openCommandTab(root, mergeCmd(pr))
+  void runJob(mergeKey(root, pr), `merge · PR #${pr.number}`, root, mergeArgv(pr))
 }
 
 export function landMission(root: string, m: Mission) {
-  void appStore.getState().openCommandTab(root, landCmd(m))
+  void runJob(landKey(m), `land · ${m.feature}`, root, landArgv(m))
+}
+
+/** Hands a job's log to a pane of its own, for whoever wants the full screen. It shows the same
+ *  log, still streaming; it never runs anything again. */
+export function openJobLog(key: string, title: string) {
+  appStore.getState().openView('job-log', { job: key }, 'auto', title)
 }
 
 export function stopChild(id: string) {

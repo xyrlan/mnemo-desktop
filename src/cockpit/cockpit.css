@@ -100,6 +100,19 @@
 .ck-chat-text { flex-basis: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ck-chat-reply { margin-top: auto; }
 
+/* A merge or land run headless: its pill says how it is going, its drawer holds what it printed. */
+.ck-job-running .nd-word { color: var(--bg); background: var(--ansi-yellow); }
+.ck-job-failed .nd-word { color: var(--bg); background: var(--ansi-red); }
+.ck-log { font-size: 11px; line-height: 1.45; }
+.ck-log-line { display: flex; gap: 6px; }
+.ck-log-stream { flex: 0 0 auto; width: 2.2em; color: var(--fg-muted); user-select: none; }
+.ck-log-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.ck-log-err .ck-log-text { color: var(--ansi-red); }
+.ck-log-end { margin-top: 6px; color: var(--fg-muted); }
+.ck-log-failed { color: var(--ansi-red); }
+.ck-log-ok { color: var(--ansi-green); }
+.ck-act.ck-log-open { border-color: var(--fg); }
+
 @media (prefers-reduced-motion: reduce) {
   .ck-drawer { animation: none; }
 }
