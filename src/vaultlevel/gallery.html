@@ -17,8 +17,10 @@
 
 <h1>mnemo vault square — every last action</h1>
 <p class="lede">
-  Each square has worn one pulse, plus a trail. The judgement: <strong>hide the captions and see whether the octopus
-  still says what mnemo last did</strong> — and whether <code>tool</code> reads as something other than rest.
+  Each square has worn one pulse, over an hour of activity texture. The judgement: <strong>hide the captions and see
+  whether the octopus still says what mnemo last did</strong> — and whether <code>tool</code> reads as something other
+  than rest. Band 3 is texture, not history: it should answer &ldquo;has he been busy&rdquo; at a glance and invite no
+  second look.
 </p>
 <p><button id="toggle">Hide captions</button><button id="pulse">Push a random pulse into the live square</button></p>
 <div class="grid" id="squares"></div>
@@ -47,7 +49,11 @@
     ['friction', ev('friction')],
     ['dispatch', ev('dispatch', { hits: 2 })],
   ]
-  const TRAIL = ['learned', 'reflex', 'tool', 'tool', 'tool', 'enrich']
+  /** What came before the last pulse, and how many minutes back, so the texture has a shape to
+   *  judge: a burst of reading half an hour ago, a lull, then something recalled. Pushed with
+   *  their own `received` — the store stamps `Date.now()` otherwise, and eight pulses in one
+   *  instant are one bar. */
+  const BEFORE = [['learned', 52], ['reflex', 44], ['tool', 34], ['tool', 34], ['tool', 33], ['tool', 33], ['tool', 32], ['enrich', 16]]
   const host = document.getElementById('squares')
   const mount = (label, pulses, v, width) => {
     const fig = document.createElement('figure')
@@ -58,7 +64,10 @@
 
   for (const [label, last] of LAST) {
     const pulses = createPulseStore()
-    if (last) for (const kind of [...TRAIL, last.kind]) pulses.getState().push(kind === last.kind ? last : ev(kind))
+    if (last) {
+      for (const [kind, agoMin] of BEFORE) pulses.getState().push(ev(kind), now - agoMin * 60_000)
+      pulses.getState().push(last, now - 125_000)
+    }
     mount(label, pulses, label === 'enforce' ? green : vault, 240)
   }
   const live = createPulseStore()

@@ -1,9 +1,9 @@
 /** The vault square at the foot of the sidebar. The octopus wears the scene of the last thing
- *  mnemo did, and keeps wearing it until the next pulse; a caption names that action, a trail
- *  records the kinds of thing done lately, and the HUD carries the vault's level and health.
+ *  mnemo did, and keeps wearing it until the next pulse; a caption names that action, a texture
+ *  says how busy the last hour was, and the HUD carries the vault's level and health.
  *
- *  Three sources, three surfaces: the last pulse dresses the octopus and the caption, the last
- *  few pulses draw the trail, and `client.level()` fills the HUD. The scene owns the octopus's
+ *  Three sources, three surfaces: the last pulse dresses the octopus and the caption, the hour
+ *  behind it draws the texture, and `client.level()` fills the HUD. The scene owns the octopus's
  *  colour — a blocked command is red on a green vault. Health paints him only before the first
  *  pulse, when there is nothing else to wear. */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
@@ -12,7 +12,7 @@ import type { PulseStore } from '../pulse/store'
 import { squareCaption } from './caption'
 import type { LevelClient } from './client'
 import { healthOf, levelOf, onFire, poseOf, toneOf, xpOf } from './level'
-import { recentPulses } from './recent'
+import { activityTexture } from './texture'
 import type { VaultLevel } from './types'
 import '../avatar/avatar.css'
 import './vaultlevel.css'
@@ -27,8 +27,12 @@ export const POLL_MS = 30_000
 /** How often the caption's age recounts itself. Its own timer: the same period as the poll
  *  today, but a different reason to change. */
 export const AGE_MS = 30_000
-/** Dots in the trail. */
-export const TRAIL = 5
+/** Bars in the activity texture, dividing `SPAN_MS` between them. Twenty-four two-pixel bars
+ *  with a pixel between them is 71px wide — a mark in the middle of the band at every sidebar
+ *  width the slot offers, and narrow enough per bar that it reads as grain and not as a chart. */
+export const BUCKETS = 24
+/** The tallest a bar gets. The band is 15px: 2 above the bars, 10 of bar, 3 below. */
+export const TICK = 10
 
 type Props = {
   client: LevelClient
@@ -68,7 +72,6 @@ export default function Square({ client, pulses, pollMs = POLL_MS, ageMs = AGE_M
   // The whole log, every pane's: the square reports on mnemo, not on the focused pane.
   const log = useSyncExternalStore(pulses.subscribe, () => pulses.getState().log)
   const last = log.at(-1)
-  const trail = useMemo(() => recentPulses(log, TRAIL), [log])
 
   // A new pulse resets the clock too, so it never reads as older than it is.
   const [now, setNow] = useState(() => Date.now())
@@ -77,6 +80,9 @@ export default function Square({ client, pulses, pollMs = POLL_MS, ageMs = AGE_M
     const timer = setInterval(() => setNow(Date.now()), ageMs)
     return () => clearInterval(timer)
   }, [ageMs, last?.id])
+
+  // Re-cut on every pulse and on every tick of the age clock, so the hour behind him slides.
+  const texture = useMemo(() => activityTexture(log, now, BUCKETS), [log, now])
 
   const ok = !!vault && !vault.error
   // Two different questions. A vault with no pages is not a sick vault, it is an empty one:
@@ -126,13 +132,18 @@ export default function Square({ client, pulses, pollMs = POLL_MS, ageMs = AGE_M
           </>
         )}
       </div>
-      <ol className="vl-trail" aria-hidden="true">
-        {trail.map((t, i) => (
-          <li key={i} className={`vl-dot vl-kind-${SCENES[t.kind]?.tone ?? 'muted'}${i === trail.length - 1 ? ' vl-now' : ''}`} title={t.kind}>
-            {t.count > 1 && <span className="vl-count">{t.count}</span>}
-          </li>
+      {/* Texture, not data: no number, no tooltip, no legend. It is out of the accessibility
+          tree because the caption above it already says what happened, and "has he been busy"
+          does not survive being read aloud bar by bar. */}
+      <div className="vl-texture" aria-hidden="true">
+        {texture.map((bar, i) => (
+          <span
+            key={i}
+            className={`vl-tick ${bar.height > 0 ? `vl-kind-${bar.tone}` : 'vl-quiet'}`}
+            style={{ height: `${Math.round(bar.height * TICK)}px` }}
+          />
         ))}
-      </ol>
+      </div>
       {openVault && (
         <button className="vl-open" onClick={openVault} title="Open the vault" aria-label="Open the vault">
           ▤

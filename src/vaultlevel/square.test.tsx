@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { vi } from 'vitest'
-import Square, { AGE_MS, OCTO, SQUARE } from './Square'
+import Square, { AGE_MS, BUCKETS, OCTO, SQUARE, TICK } from './Square'
 import { createPulseStore } from '../pulse/store'
 import type { LevelClient } from './client'
 import type { VaultLevel } from './types'
@@ -56,10 +56,12 @@ test('the square shows the level from the best xp, tinted by health', async () =
   expect(host.querySelector('.vl-level')?.textContent).toBe('lv 23')
   expect(host.querySelector('.vl-square')?.classList.contains('vl-green')).toBe(true)
   expect(host.querySelector('.vl-square')?.classList.contains('vl-on-fire')).toBe(true)
-  // No pulse yet: he wears the health pose, with nothing to say and no trail.
+  // No pulse yet: he wears the health pose, with nothing to say and an hour of rest marks.
   expect(host.querySelector('.av-idle.vl-body')).not.toBeNull()
   expect(host.querySelector('.vl-verb')).toBeNull()
-  expect(host.querySelectorAll('.vl-dot')).toHaveLength(0)
+  const quiet = [...host.querySelectorAll('.vl-tick')]
+  expect(quiet).toHaveLength(BUCKETS)
+  expect(quiet.every((t) => t.classList.contains('vl-quiet'))).toBe(true)
   unmount()
 })
 
@@ -112,6 +114,17 @@ test('the ▤ button opens the vault, and is absent when nothing can open it', a
 
 const svgOf = (host: HTMLElement) => host.querySelector('.vl-octo svg')!
 
+/** Every source in the app, read raw, the way `vault/modes.test.tsx` pins its own deletion. */
+const sources = import.meta.glob<string>('../**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true })
+
+test('`recent.ts` is gone, and nothing reaches for it', () => {
+  // A revert or a stale merge is how a deleted module comes back. The glob is the guard: it is
+  // the trail's data that went, not just its markup, and `recentPulses` has nowhere left to be.
+  expect(Object.keys(sources).length).toBeGreaterThan(50)
+  expect(Object.keys(sources).filter((f) => /vaultlevel\/recent\.tsx?$/.test(f))).toEqual([])
+  expect(Object.keys(sources).filter((f) => /recentPulses|toneOfKind/.test(sources[f]))).toEqual([])
+})
+
 test('the first pulse dresses him in its scene, and he keeps wearing it', async () => {
   vi.useFakeTimers()
   const pulses = createPulseStore()
@@ -155,19 +168,51 @@ test('the age recounts itself on its own clock', async () => {
   unmount()
 })
 
-test('the trail keeps the last five kinds, folds repeats, and rings the newest', async () => {
+const ticks = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.vl-tick')]
+
+test('the texture is always the whole window, and a busy minute is one tall bar in it', async () => {
   const pulses = createPulseStore()
   const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
   const kinds = ['learned', 'reflex', 'tool', 'tool', 'tool', 'enrich', 'enforce', 'friction'] as const
   await act(async () => kinds.forEach((kind) => pulses.getState().push(ev({ kind }))))
-  const dots = [...host.querySelectorAll('.vl-dot')]
-  expect(dots.map((d) => d.getAttribute('title'))).toEqual(['reflex', 'tool', 'enrich', 'enforce', 'friction'])
-  expect(dots[1].textContent).toBe('3')
-  expect(dots[0].textContent).toBe('')
-  expect(dots.map((d) => d.classList.contains('vl-now'))).toEqual([false, false, false, false, true])
-  // Each dot takes its scene's tone.
-  expect(dots[3].classList.contains('vl-kind-red')).toBe(true)
-  expect(dots[4].classList.contains('vl-kind-yellow')).toBe(true)
+
+  const bars = ticks(host)
+  // The row is a stretch of time, not a list of events: eight pulses, still `BUCKETS` bars.
+  expect(bars).toHaveLength(BUCKETS)
+  // All eight landed in this minute, so only the newest bucket has any height.
+  expect(bars.at(-1)!.style.height).toBe(`${TICK}px`)
+  expect(bars.slice(0, -1).every((t) => t.style.height === '0px' && t.classList.contains('vl-quiet'))).toBe(true)
+  // Its colour is the bucket's dominant tone, not the last pulse's: six of the eight are accent.
+  expect(bars.at(-1)!.classList.contains('vl-kind-accent')).toBe(true)
+  expect(bars.at(-1)!.classList.contains('vl-quiet')).toBe(false)
+  unmount()
+})
+
+test('the texture says how busy and nothing else: no number, no legend, nothing to hover', async () => {
+  const pulses = createPulseStore()
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} />)
+  await act(async () => pulses.getState().push(ev({ kind: 'enforce', tool: 'git push --force' })))
+  const band = host.querySelector('.vl-texture')!
+  expect(band.getAttribute('aria-hidden')).toBe('true')
+  expect(band.textContent).toBe('')
+  expect(ticks(host).some((t) => t.title || t.getAttribute('aria-label'))).toBe(false)
+  // The trail it replaced is gone for good: no dots, no run counts.
+  expect(host.querySelector('.vl-trail, .vl-dot, .vl-count, .vl-now')).toBeNull()
+  unmount()
+})
+
+test('a pulse an hour old has left the window, and the texture goes quiet again', async () => {
+  vi.useFakeTimers()
+  const pulses = createPulseStore()
+  // A slow poll, so only the age timer can be what re-cuts the texture.
+  const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={pulses} pollMs={10 * 60_000} />)
+  await act(async () => pulses.getState().push(ev({ kind: 'learned' })))
+  expect(ticks(host).at(-1)!.classList.contains('vl-quiet')).toBe(false)
+
+  await act(async () => vi.advanceTimersByTime(61 * 60_000))
+  expect(ticks(host).every((t) => t.classList.contains('vl-quiet'))).toBe(true)
+  // He is still wearing it, though: the texture forgets, the octopus does not.
+  expect(svgOf(host).classList.contains('av-learned')).toBe(true)
   unmount()
 })
 
@@ -197,6 +242,9 @@ test('the square is its four bands tall, and the library is gone', async () => {
   const { host, unmount } = await render(<Square client={fakeClient([vault()])} pulses={createPulseStore()} />)
   expect(SQUARE).toBe(113 + 26 + 15 + 22)
   expect(host.querySelector('.vl-shelves, .vl-book, .vl-shelving, .vl-morsel')).toBeNull()
+  // Band 3 is the texture now, and its predecessor left nothing behind.
+  expect(host.querySelector('.vl-texture')).not.toBeNull()
+  expect(host.querySelector('.vl-trail, .vl-dot, .vl-count')).toBeNull()
   // The fire moved to the HUD.
   expect(host.querySelector('.vl-hud .vl-fire')).not.toBeNull()
   unmount()
