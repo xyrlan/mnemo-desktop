@@ -1,0 +1,4 @@
+.vt-error-line { display: flex; align-items: flex-start; gap: 6px; }
+.vt-error-line .vt-error { flex: 1; min-width: 0; }
+.vault .vt-error-line button { flex: none; border: 0; background: transparent; padding: 0 4px; margin: 4px 0; color: var(--fg-muted); }
+.vault .vt-error-line button:hover { color: var(--fg); }

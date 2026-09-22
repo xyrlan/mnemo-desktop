@@ -3,6 +3,7 @@ import { useVault, vault } from './app-store'
 import { ACTIONS, type VaultAction } from './actions'
 import { resolveWikilink } from './search'
 import { Markdown } from './Markdown'
+import { ErrorLine } from './ErrorLine'
 import { useArm } from './useArm'
 import type { Page } from './types'
 
@@ -94,7 +95,10 @@ export function PageView({ cwd, empty = 'Select a page.' }: { cwd: string | unde
         <ActionBar page={page} cwd={cwd} />
       </header>
       {page.error ? (
-        <pre className="vt-error vt-page-error">{page.error}</pre>
+        <div className="vt-page-error">
+          {/* A page that cannot be read has nothing else to show: dismissing it closes the page. */}
+          <ErrorLine text={page.error} onDismiss={() => vault.getState().deselect()} />
+        </div>
       ) : (
         <div className="vt-body">
           <Markdown
