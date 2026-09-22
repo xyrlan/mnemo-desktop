@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { listKey } from '../actions/keys'
 import { useVault, vault } from './app-store'
 import { EgoView } from './EgoView'
 import { PageView, openInEditor, short } from './PageView'
@@ -6,6 +7,14 @@ import { applyChips, BADGE_LABEL, BADGES, BADGE_TITLE, confidenceTone, facets, r
 import { parseStale } from './stale'
 import { useArm } from './useArm'
 import type { RunResult, RuleRow } from './types'
+
+/** Closes the side panel. `deselect` is `close-path`'s; until it lands on this branch the
+ *  store has no way to write `selected` back to null, so write it here. */
+const deselect = () => {
+  const s = vault.getState() as ReturnType<typeof vault.getState> & { deselect?: () => void }
+  if (s.deselect) s.deselect()
+  else vault.setState({ selected: null, page: null })
+}
 
 /** Rows rendered before "show more": the vault has thousands. */
 export const PAGE_ROWS = 200
@@ -32,6 +41,8 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
   const health = useVault((s) => s.health)
   const loading = useVault((s) => s.healthLoading)
   const [raw, setRaw] = useState(false)
+  // Dismissing hides this read's error; the next read (↻) shows its own.
+  const [dismissed, setDismissed] = useState<typeof health>(null)
   return (
     <>
       <div className="vr-strip">
@@ -51,7 +62,12 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
             <div className="vh-tile-label">needs review</div>
           </button>
         )}
-        {!health && <div className="vt-empty">{loading ? 'running mnemo status, doctor, stale…' : ''}</div>}
+        {/* No health is always a read in flight: the mount starts one before the first paint. */}
+        {!health && (
+          <div className="vt-empty vt-loading" role="status">
+            running mnemo status, doctor, stale…
+          </div>
+        )}
         <div className="vr-strip-end">
           {health?.root && <span className="vt-count" title={health.root}>{short(health.root)}</span>}
           <button disabled={!health} className={raw ? 'vt-mode-on' : ''} title="mnemo status and mnemo doctor, as printed" onClick={() => setRaw(!raw)}>
@@ -62,7 +78,14 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
           </button>
         </div>
       </div>
-      {health?.error && <pre className="vt-error">{health.error}</pre>}
+      {health?.error && dismissed !== health && (
+        <div className="vt-error-line">
+          <pre className="vt-error">{health.error}</pre>
+          <button className="vt-x" title="Dismiss" aria-label="Dismiss" onClick={() => setDismissed(health)}>
+            ×
+          </button>
+        </div>
+      )}
       {raw && health && (
         <div className="vr-raw">
           <RawText title="mnemo status" result={health.status} />
@@ -131,6 +154,45 @@ function Row({ row, selected, cwd, armed, onDisable }: { row: RuleRow; selected:
   )
 }
 
+type Tab = 'page' | 'neighbourhood'
+
+/** The selected rule, beside the table: its page, or its neighbourhood graph. Page is the
+ *  default, and the graph is only mounted while its tab is open, so `vault_ego` runs when
+ *  asked for rather than on every row click. The tab outlives a change of selection (a
+ *  neighbour's click keeps you in the graph) and resets when the panel closes. */
+function SidePanel({ cwd, selected }: { cwd: string | undefined; selected: string }) {
+  const [tab, setTab] = useState<Tab>('page')
+  const tabs: [Tab, string][] = [
+    ['page', 'Page'],
+    ['neighbourhood', 'Neighbourhood'],
+  ]
+  return (
+    <aside className="vr-side" aria-label="Selected rule">
+      <div className="vr-side-bar">
+        <div className="vr-tabs" role="tablist">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              className={`vr-tab${tab === key ? ' vr-tab-on' : ''}`}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button className="vt-x vr-side-close" title="Close (Esc)" aria-label="Close the side panel" onClick={deselect}>
+          ×
+        </button>
+      </div>
+      <div className="vr-side-body" role="tabpanel">
+        {tab === 'page' ? <PageView cwd={cwd} empty="Select a rule." /> : <EgoView path={selected} />}
+      </div>
+    </aside>
+  )
+}
+
 /** The vault's main screen: rules by heat with their badges, filters, and the selected rule's
  *  page and neighbourhood beside them. `mnemo stale` runs in `cwd`. */
 export function HealthTable({ cwd, current }: { cwd: string | undefined; current: string | undefined }) {
@@ -179,8 +241,17 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
   }
   const setChip = (key: 'type' | 'topic', value: string) => vault.getState().setChips({ [key]: chips[key] === value ? null : value })
 
+  // Esc from anywhere in the table that is not a text field closes the side panel. The root
+  // takes focus on a click inside it (tabIndex -1), so a row click leaves Esc reachable.
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!selected || listKey(e) !== 'close') return
+    e.preventDefault()
+    e.stopPropagation()
+    deselect()
+  }
+
   return (
-    <div className="vr">
+    <div className="vr" tabIndex={-1} onKeyDown={onKeyDown}>
       <Strip cwd={cwd} review={reviewCount(health, staleRows)} />
       <div className="vr-bar">
         <input
@@ -256,12 +327,7 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
           )}
         </div>
         {/* The side panel only exists once a rule is selected: the table needs the width. */}
-        {selected && (
-          <aside className="vr-side">
-            <PageView cwd={cwd} empty="Select a rule." />
-            <EgoView path={selected} />
-          </aside>
-        )}
+        {selected && <SidePanel cwd={cwd} selected={selected} />}
       </div>
     </div>
   )
