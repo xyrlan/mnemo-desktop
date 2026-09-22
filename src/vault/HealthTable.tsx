@@ -8,13 +8,8 @@ import { parseStale } from './stale'
 import { useArm } from './useArm'
 import type { RunResult, RuleRow } from './types'
 
-/** Closes the side panel. `deselect` is `close-path`'s; until it lands on this branch the
- *  store has no way to write `selected` back to null, so write it here. */
-const deselect = () => {
-  const s = vault.getState() as ReturnType<typeof vault.getState> & { deselect?: () => void }
-  if (s.deselect) s.deselect()
-  else vault.setState({ selected: null, page: null })
-}
+/** Closes the side panel. */
+const deselect = () => vault.getState().deselect()
 
 /** Rows rendered before "show more": the vault has thousands. */
 export const PAGE_ROWS = 200
