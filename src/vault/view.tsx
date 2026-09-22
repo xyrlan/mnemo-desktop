@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
@@ -7,6 +7,7 @@ import { useVault, vault } from './app-store'
 import { agentForCwd, filterTree, orderAgents, pageCount, terms } from './search'
 import { decisionsFor, parseWhy } from './why'
 import { HealthTable } from './HealthTable'
+import { ErrorLine } from './ErrorLine'
 import { PageView, short } from './PageView'
 import type { LogEntry } from './store'
 import type { Agent } from './types'
@@ -143,6 +144,8 @@ function VaultPane(_: PaneViewProps) {
   const loaded = useVault((s) => s.loaded)
   const loading = useVault((s) => s.loading)
   const treeError = useVault((s) => s.treeError)
+  // The store keeps the error until a read succeeds, so dismissing hides it here until the next read.
+  const [dismissed, setDismissed] = useState(false)
   const tree = useVault((s) => s.tree)
   const agents = useVault((s) => s.agents)
   const query = useVault((s) => s.query)
@@ -154,6 +157,9 @@ function VaultPane(_: PaneViewProps) {
   useEffect(() => {
     if (mode === 'pages' && !vault.getState().loaded) void vault.getState().load()
   }, [mode])
+  useEffect(() => {
+    if (loading) setDismissed(false)
+  }, [loading])
 
   return (
     <div className="pane-body vault">
@@ -188,7 +194,7 @@ function VaultPane(_: PaneViewProps) {
               </button>
             </div>
             {!loaded && <div className="vt-empty">reading the vault…</div>}
-            {treeError && <pre className="vt-error">{treeError}</pre>}
+            {treeError && !dismissed && <ErrorLine text={treeError} onDismiss={() => setDismissed(true)} />}
             {loaded && !treeError && tree.length === 0 && (
               <div className="vt-empty">No vault found: `mnemo status` names none, or it holds no pages.</div>
             )}
