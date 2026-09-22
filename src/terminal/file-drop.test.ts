@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/webview', () => ({ getCurrentWebview: () => ({ onDragDr
 
 import { store } from '../layout/app-store'
 import { fileDropStore } from './drop'
-import { holdFileDrop, onFileDrag, terminalAt } from './file-drop'
+import { dropScale, holdFileDrop, onFileDrag, terminalAt } from './file-drop'
 
 /** Three panes side by side at 100px each: two terminals (7, 8) split by an editor (-3) — an
  *  overlay child of pane 7 stretches across the whole row, so `elementFromPoint` alone would
@@ -64,6 +64,31 @@ test("a split's overlay child does not steal a drop meant for the pane beside it
   // `elementFromPoint` would resolve it to 7 instead of 8.
   const id = terminalAt(250, 5)
   expect(id).toBe(8)
+})
+
+test('a pane that does not qualify does not hide a live terminal under the same point', () => {
+  // A stale rect listed first (the exited terminal, 9) overlaps the live one (8).
+  const [, , other, exited] = [...document.querySelectorAll<HTMLElement>('.pane')]
+  document.body.prepend(exited)
+  exited.getBoundingClientRect = other.getBoundingClientRect
+  expect(terminalAt(250, 5)).toBe(8)
+})
+
+test('the drop position is logical on macOS and Linux, physical only on Windows', () => {
+  expect(dropScale('MacIntel', 2)).toBe(1)
+  expect(dropScale('Linux x86_64', 2)).toBe(1)
+  expect(dropScale('Win32', 1.5)).toBe(1.5)
+})
+
+test('on a Retina Mac a drop over the right pane types into that pane', () => {
+  // wry hands macOS drops over in points, the same numbers as the page's CSS px: dividing
+  // them by devicePixelRatio (2) would read 250 as 125 and pick the editor to its left.
+  const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  const dpr = vi.spyOn(window, 'devicePixelRatio', 'get').mockReturnValue(2)
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 250, y: 5 } })
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 8, data: '/tmp/a.png ' })
+  platform.mockRestore()
+  dpr.mockRestore()
 })
 
 test('dropping on a terminal types the escaped paths into its PTY and focuses it', () => {
