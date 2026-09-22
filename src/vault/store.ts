@@ -49,6 +49,9 @@ export type VaultState = {
   egoLoading: boolean
   health: Health | null
   healthLoading: boolean
+  /** `mnemo doctor`, read only when the raw panel is opened. Null until then. */
+  doctor: RunResult | null
+  doctorLoading: boolean
   /** `mnemo stale --json`, run in the current repo beside `vault_health`. */
   stale: RunResult | null
 }
@@ -77,6 +80,8 @@ export type VaultActions = {
   loadEgo(path: string): Promise<void>
   /** Reads health and runs `mnemo stale --json` in `cwd`, once at a time. */
   loadHealth(cwd: string): Promise<void>
+  /** Runs `mnemo doctor` unless it is already in flight or already read. */
+  loadDoctor(): Promise<void>
 }
 
 export type VaultStore = StoreApi<VaultState & VaultActions>
@@ -139,6 +144,8 @@ export function createVaultStore(client: VaultClient): VaultStore {
       egoLoading: false,
       health: null,
       healthLoading: false,
+      doctor: null,
+      doctorLoading: false,
       stale: null,
 
       async load() {
@@ -256,7 +263,20 @@ export function createVaultStore(client: VaultClient): VaultStore {
           client.health().catch((e): Health => ({ ...emptyHealth(), error: String(e) })),
           client.run('stale', ['--json'], cwd).catch(failed),
         ])
-        set({ health, stale, healthLoading: false })
+        // A re-run drops the old doctor: it described the vault as it was before this read.
+        set({ health, stale, healthLoading: false, doctor: null })
+      },
+
+      async loadDoctor() {
+        if (get().doctorLoading || get().doctor) return
+        set({ doctorLoading: true })
+        let doctor: RunResult
+        try {
+          doctor = await client.doctor()
+        } catch (e) {
+          doctor = { stdout: '', stderr: String(e), code: null }
+        }
+        set({ doctor, doctorLoading: false })
       },
     }
   })
@@ -264,7 +284,7 @@ export function createVaultStore(client: VaultClient): VaultStore {
 
 function emptyHealth(): Health {
   const none: RunResult = { stdout: '', stderr: '', code: null }
-  return { root: null, status: none, doctor: none, tiles: [], label_only: [], dormant: [], pages: 0, never_fired: 0, inbox: 0, error: null }
+  return { root: null, status: none, tiles: [], label_only: [], dormant: [], pages: 0, never_fired: 0, inbox: 0, error: null }
 }
 
 function blank(path: string): PageInfo {

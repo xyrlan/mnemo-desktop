@@ -85,7 +85,6 @@ export type Review = { path: string; slug: string; name: string; reason: string 
 export type Health = {
   root: string | null
   status: RunResult
-  doctor: RunResult
   tiles: Tile[]
   label_only: Review[]
   dormant: Review[]

@@ -24,7 +24,6 @@ const ran = (stdout: string, code: number | null = 0): RunResult => ({ stdout, s
 const health: Health = {
   root: '/v',
   status: ran('Vault: /v  (exists)'),
-  doctor: ran('ok'),
   tiles: [],
   label_only: [],
   dormant: [],
@@ -41,6 +40,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (cmd === 'vault_rules') return rules
     if (cmd === 'vault_ego') return ego(args!.path as string)
     if (cmd === 'vault_health') return health
+    if (cmd === 'vault_doctor') return ran('ok')
     if (cmd === 'vault_run' && args!.action === 'stale') return ran('[]')
     if (cmd === 'vault_run') return ran('ok')
     if (cmd === 'vault_page') {

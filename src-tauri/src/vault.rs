@@ -1377,22 +1377,30 @@ pub async fn vault_ego(path: String, limit: u32) -> VaultGraph {
 #[tauri::command]
 pub async fn vault_health() -> Health {
     tauri::async_runtime::spawn_blocking(|| {
-        let path = crate::mission::login_path();
-        let (status, doctor) = std::thread::scope(|s| {
-            let doctor = s.spawn(|| exec("mnemo", &path, "doctor", &[], ""));
-            (exec("mnemo", &path, "status", &[], ""), doctor.join().unwrap_or_default())
-        });
+        let status = exec("mnemo", &crate::mission::login_path(), "status", &[], "");
         let mut health = match vault_root() {
-            Some(root) => health_at(&root, &read_fires(&root), now_ms()),
+            Some(root) => {
+                let (_, _, fires) = snapshot(&root);
+                health_at(&root, &fires, now_ms())
+            }
             None => Health { error: Some(NO_VAULT.into()), ..Default::default() },
         };
         health.tiles = parse_tiles(&status.stdout);
         health.status = status;
-        health.doctor = doctor;
         health
     })
     .await
     .unwrap_or_else(|e| Health { error: Some(e.to_string()), ..Default::default() })
+}
+
+/// `mnemo doctor`, on its own command because it is slow: 4.8s against a 5783-page vault,
+/// where `status` is 0.2s. It is only ever read behind the `status / doctor` button, so the
+/// health screen no longer waits on it to paint.
+#[tauri::command]
+pub async fn vault_doctor() -> RunResult {
+    tauri::async_runtime::spawn_blocking(|| exec("mnemo", &crate::mission::login_path(), "doctor", &[], ""))
+        .await
+        .unwrap_or_default()
 }
 
 /// The square's numbers: the page walk and the fire logs (cached like the table), no `mnemo`.
