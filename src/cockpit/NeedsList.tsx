@@ -48,8 +48,8 @@ export default function NeedsList({ needs, showRepo }: { needs: Need[]; showRepo
               <Head n={n} showRepo={showRepo} replied={replied} />
             </div>
             {n.kind === 'blocked' && <ReplyBox c={n.child} attach />}
-            {n.kind === 'ci' && <div className="nd-sub">{n.pr.head}</div>}
-            {SUB[n.kind] && <div className="nd-sub">{SUB[n.kind]}</div>}
+            {n.kind === 'ci' && <div className="nd-sub">{n.pr.failing?.length ? `${n.pr.failing.join(', ')} ✗` : n.pr.head}</div>}
+            {n.kind === 'ready' && n.pr.draft ? <div className="nd-sub">draft · CI green · its merge marks it ready first</div> : SUB[n.kind] && <div className="nd-sub">{SUB[n.kind]}</div>}
           </div>
         )
       })}

@@ -65,6 +65,11 @@ pub struct ChildSession {
     /// Claude Code never resolves an unpassed effort into `respawnFlags`.
     #[serde(default)]
     pub effort: Option<String>,
+    /// The PR this child opened, when it belongs to no contract (a contract piece carries its
+    /// PR on the piece). Its job's own record of the PR wins; failing that, the PR whose head
+    /// is the child's branch.
+    #[serde(default)]
+    pub pr: Option<Pr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,8 +78,14 @@ pub struct Pr {
     pub url: String,
     pub state: String,
     pub head: String,
-    /// pass | fail | pending | none
+    /// pass | fail | pending | none, folded from every check (`check_verdict`).
     pub ci: String,
+    /// Opened as a draft: `gh pr merge` refuses it until it is marked ready.
+    #[serde(default)]
+    pub draft: bool,
+    /// Names of the checks that failed, so a red row says which one.
+    #[serde(default)]
+    pub failing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -175,6 +186,7 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 waiting_for: None,
                 model: s(r.get("model")),
                 effort: s(r.get("effort")),
+                pr: None,
             })
         })
         .collect())
@@ -254,7 +266,10 @@ pub fn parse_contract(md: &str) -> Option<(String, Vec<String>)> {
     feature.map(|f| (f, pieces))
 }
 
-/// `gh pr list --json headRefName,number,url,statusCheckRollup,state`.
+/// `gh pr list --json` with these fields.
+pub const PR_FIELDS: &str = "headRefName,number,url,statusCheckRollup,state,isDraft";
+
+/// `gh pr list --json PR_FIELDS`.
 pub fn parse_prs(json: &str) -> Result<Vec<Pr>, String> {
     let rows: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| format!("prs json: {e}"))?;
     Ok(rows
@@ -266,30 +281,52 @@ pub fn parse_prs(json: &str) -> Result<Vec<Pr>, String> {
                 state: r.get("state")?.as_str()?.to_string(),
                 head: r.get("headRefName")?.as_str()?.to_string(),
                 ci: ci_state(r.get("statusCheckRollup")),
+                draft: r.get("isDraft").and_then(|d| d.as_bool()).unwrap_or(false),
+                failing: failing_checks(r.get("statusCheckRollup")),
             })
         })
         .collect())
 }
 
+/// One entry of a `statusCheckRollup`: a check run (`conclusion`) or a commit status
+/// (`state`). Passed only on a conclusion or state that says so; skipped and neutral runs
+/// count as passed, as GitHub counts them. A conclusion this does not know is never a pass:
+/// it is a failure when it says the run ended badly, and pending otherwise.
+/// `src/cockpit/merge.ts` has the same rule for the merge gate; both are pinned by
+/// `fixtures/check-verdicts.json`.
+pub fn check_verdict(c: &serde_json::Value) -> &'static str {
+    let conclusion = c.get("conclusion").and_then(|x| x.as_str()).unwrap_or("");
+    let state = c.get("state").and_then(|x| x.as_str()).unwrap_or("");
+    match (conclusion, state) {
+        ("FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "STALE", _) | (_, "FAILURE" | "ERROR") => "fail",
+        ("SUCCESS" | "NEUTRAL" | "SKIPPED", _) | ("", "SUCCESS") => "pass",
+        _ => "pending",
+    }
+}
+
+/// pass only when there are checks and every one passed; fail when any failed.
 pub fn ci_state(rollup: Option<&serde_json::Value>) -> String {
     let Some(checks) = rollup.and_then(|r| r.as_array()) else { return "none".into() };
     if checks.is_empty() {
         return "none".into();
     }
-    let mut pending = false;
-    for c in checks {
-        let conclusion = c.get("conclusion").and_then(|x| x.as_str()).unwrap_or("");
-        let status = c.get("status").and_then(|x| x.as_str()).unwrap_or("");
-        let state = c.get("state").and_then(|x| x.as_str()).unwrap_or("");
-        match (conclusion, status, state) {
-            ("FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED", _, _) | (_, _, "FAILURE" | "ERROR") => {
-                return "fail".into()
-            }
-            ("SUCCESS" | "NEUTRAL" | "SKIPPED", _, _) | (_, _, "SUCCESS") => {}
-            _ => pending = true,
-        }
+    let verdicts: Vec<&str> = checks.iter().map(check_verdict).collect();
+    if verdicts.contains(&"fail") {
+        "fail".into()
+    } else if verdicts.contains(&"pending") {
+        "pending".into()
+    } else {
+        "pass".into()
     }
-    if pending { "pending".into() } else { "pass".into() }
+}
+
+fn failing_checks(rollup: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(checks) = rollup.and_then(|r| r.as_array()) else { return vec![] };
+    checks
+        .iter()
+        .filter(|c| check_verdict(c) == "fail")
+        .map(|c| c.get("name").or_else(|| c.get("context")).and_then(|n| n.as_str()).unwrap_or("a check").to_string())
+        .collect()
 }
 
 pub fn parse_timeline(text: &str, from_line: usize) -> Timeline {
@@ -449,6 +486,8 @@ pub struct JoinInput<'a> {
     pub contracts: &'a HashMap<String, Vec<(String, String, Vec<String>)>>,
     /// root → PRs.
     pub prs: &'a HashMap<String, Vec<Pr>>,
+    /// Child short id → the PR urls its job recorded opening (`~/.claude/jobs/<id>/state.json`).
+    pub recorded: &'a HashMap<String, Vec<String>>,
     pub focused_root: Option<&'a str>,
     /// Parent session id → epoch ms it started, for `link_children`.
     pub parent_starts: &'a HashMap<String, u64>,
@@ -458,6 +497,20 @@ pub struct JoinInput<'a> {
 
 fn root_of(cwd: &str, roots: &HashMap<String, String>) -> String {
     roots.get(cwd).cloned().unwrap_or_else(|| cwd.to_string())
+}
+
+/// The PR a child opened: the one its job recorded, else the one whose head is its branch.
+/// Never a PR by time or by repo alone: siblings work the same repo in the same window.
+fn pr_of(c: &ChildSession, prs: &[Pr], recorded: &HashMap<String, Vec<String>>) -> Option<Pr> {
+    let norm = |u: &str| u.trim().trim_end_matches('/').to_ascii_lowercase();
+    let urls: Vec<String> = recorded.get(&c.id).map(|us| us.iter().map(|u| norm(u)).collect()).unwrap_or_default();
+    // A job that opened several PRs: the open one is the one that still needs someone.
+    let mut mine: Vec<&Pr> = prs.iter().filter(|p| urls.contains(&norm(&p.url))).collect();
+    mine.sort_by_key(|p| (p.state != "OPEN", std::cmp::Reverse(p.number)));
+    mine.first()
+        .copied()
+        .or_else(|| c.branch.as_deref().and_then(|b| prs.iter().find(|p| p.head == b)))
+        .cloned()
 }
 
 pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
@@ -533,6 +586,9 @@ pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
             by_branch.remove(&k);
         }
         leftover.extend(unclaimed.remove(&root).unwrap_or_default());
+        for c in &mut leftover {
+            c.pr = pr_of(c, &prs, input.recorded);
+        }
         leftover.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         g.children = leftover;
     }
@@ -828,43 +884,59 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         }
     }
     let focused_root = focused_cwd.and_then(|c| roots.get(c).cloned());
+    // Every repo a child worked in, contract or not: most dispatches are by issue, and their
+    // PRs need a merge row as much as a contract piece's do.
+    let child_roots: std::collections::HashSet<String> = children.iter().filter_map(|c| roots.get(&c.cwd).cloned()).collect();
 
     let mut branches: HashMap<String, String> = HashMap::new();
     let mut contracts = HashMap::new();
     let mut prs = HashMap::new();
     let mut seen = std::collections::HashSet::new();
+    let mut want_prs = Vec::new();
     for r in roots.values() {
         if !seen.insert(r.clone()) || !may_probe(r) {
             continue;
         }
         branches.extend(worktree_branches(r));
         let cs = contracts_in(r);
-        if !cs.is_empty() {
-            // PRs are fetched every tenth poll; the polls between reuse the last answer, so a
-            // PR node never blinks out of the cockpit graph and back (every id change there
-            // re-laid the canvas).
-            if with_prs {
-                match run(
-                    "gh",
-                    &["pr", "list", "--json", "headRefName,number,url,statusCheckRollup,state", "--state", "all", "--limit", "100"],
-                    Some(Path::new(r)),
-                )
-                .and_then(|j| parse_prs(&j))
-                {
-                    Ok(p) => {
-                        remember_prs(r, &p);
-                        prs.insert(r.clone(), p);
-                    }
-                    Err(e) => errors.push(e),
-                }
-            }
-            if !prs.contains_key(r) {
-                if let Some(p) = recall_prs(r) {
-                    prs.insert(r.clone(), p);
-                }
-            }
+        if !cs.is_empty() || child_roots.contains(r) {
+            want_prs.push(r.clone());
         }
         contracts.insert(r.clone(), cs);
+    }
+    // PRs are fetched every tenth poll; the polls between reuse the last answer, so a PR node
+    // never blinks out of the cockpit graph and back (every id change there re-laid the
+    // canvas). One `gh` per repo takes seconds, so the repos are asked at once.
+    if with_prs {
+        let fetched: Vec<(String, Result<Vec<Pr>, String>)> = std::thread::scope(|s| {
+            let asks: Vec<_> = want_prs
+                .iter()
+                .map(|r| {
+                    s.spawn(move || {
+                        let got = run("gh", &["pr", "list", "--json", PR_FIELDS, "--state", "all", "--limit", "100"], Some(Path::new(r)))
+                            .and_then(|j| parse_prs(&j));
+                        (r.clone(), got)
+                    })
+                })
+                .collect();
+            asks.into_iter().filter_map(|a| a.join().ok()).collect()
+        });
+        for (r, got) in fetched {
+            match got {
+                Ok(p) => {
+                    remember_prs(&r, &p);
+                    prs.insert(r, p);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+    }
+    for r in want_prs {
+        if !prs.contains_key(&r) {
+            if let Some(p) = recall_prs(&r) {
+                prs.insert(r, p);
+            }
+        }
     }
 
     let repos = join(JoinInput {
@@ -874,11 +946,18 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         branches: &branches,
         contracts: &contracts,
         prs: &prs,
+        recorded: &recorded_prs(),
         focused_root: focused_root.as_deref(),
         parent_starts: &parent_starts,
         child_starts: &child_starts,
     });
     Snapshot { repos, errors, at: chrono_now() }
+}
+
+/// Each background job's record of the PRs it opened, read as the lens reads it
+/// (`home/lens.rs`, which this only calls).
+fn recorded_prs() -> HashMap<String, Vec<String>> {
+    crate::home::lens::read_jobs(&crate::home::lens::jobs_dir()).into_iter().filter(|j| !j.prs.is_empty()).map(|j| (j.short, j.prs)).collect()
 }
 
 fn projects_dir() -> PathBuf {
@@ -1081,6 +1160,84 @@ mod tests {
     }
 
     #[test]
+    fn every_check_verdict_is_the_one_the_merge_gate_reads() {
+        // The same table pins `checkVerdict` in src/cockpit/merge.ts.
+        let rows: Vec<serde_json::Value> = serde_json::from_str(include_str!("../fixtures/check-verdicts.json")).unwrap();
+        for r in &rows {
+            assert_eq!(check_verdict(&r["check"]), r["verdict"].as_str().unwrap(), "{}", r["check"]);
+        }
+    }
+
+    #[test]
+    fn a_rollup_is_green_only_when_every_check_passed() {
+        let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        // PR #27: two green jobs and a red Windows job is red, whatever `gh pr merge` would say.
+        let rollup = j(r#"[{"name":"test (macos-latest)","conclusion":"SUCCESS"},{"name":"test (ubuntu-latest)","conclusion":"SUCCESS"},{"name":"test (windows-latest)","conclusion":"FAILURE"}]"#);
+        assert_eq!(ci_state(Some(&rollup)), "fail");
+        assert_eq!(failing_checks(Some(&rollup)), ["test (windows-latest)"]);
+        // A conclusion GitHub adds later never reads as green.
+        assert_eq!(ci_state(Some(&j(r#"[{"conclusion":"SUCCESS"},{"conclusion":"SOMETHING_NEW"}]"#))), "pending");
+        assert_eq!(ci_state(Some(&j(r#"[{"conclusion":"STARTUP_FAILURE"}]"#))), "fail");
+    }
+
+    #[test]
+    fn prs_carry_draft_and_the_names_of_failing_checks() {
+        let p = parse_prs(
+            r#"[{"number":49,"url":"u49","state":"OPEN","headRefName":"fix/issue-40","isDraft":true,"statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}]},
+                {"number":50,"url":"u50","state":"OPEN","headRefName":"x","statusCheckRollup":[{"context":"legacy","state":"ERROR"}]}]"#,
+        )
+        .unwrap();
+        assert!(p[0].draft && p[0].failing.is_empty() && p[0].ci == "pass");
+        // A gh without `isDraft` reads as not a draft, never as a parse failure.
+        assert!(!p[1].draft);
+        assert_eq!(p[1].failing, ["legacy"]);
+    }
+
+    fn pr(n: u64, head: &str, state: &str) -> Pr {
+        Pr { number: n, url: format!("https://github.com/me/r/pull/{n}"), state: state.into(), head: head.into(), ci: "pass".into(), draft: false, failing: vec![] }
+    }
+
+    fn issue_child(id: &str, cwd: &str) -> ChildSession {
+        let mut c = parse_sessions(SESSIONS).unwrap().remove(0);
+        c.id = id.into();
+        c.cwd = cwd.into();
+        c.pr = None;
+        c.parent_session = Some("p".into());
+        c
+    }
+
+    #[test]
+    fn a_child_outside_any_contract_gets_the_pr_it_opened() {
+        let root = "/gh/r".to_string();
+        let roots: HashMap<String, String> =
+            [("/gh/r-wt-40", &root), ("/gh/r-wt-41", &root), ("/gh/r-wt-42", &root), ("/gh/r-wt-43", &root)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let branches: HashMap<String, String> =
+            [("/gh/r-wt-40", "fix/issue-40"), ("/gh/r-wt-41", "fix/issue-41"), ("/gh/r-wt-43", "fix/issue-43")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let prs = HashMap::from([(root.clone(), vec![pr(7, "fix/issue-40", "OPEN"), pr(8, "renamed-by-hand", "OPEN"), pr(6, "fix/issue-43", "MERGED"), pr(9, "fix/issue-43", "OPEN")])]);
+        // 41's job recorded #8, opened from a branch that is not its worktree's.
+        let recorded = HashMap::from([("c41".to_string(), vec!["https://github.com/me/r/pull/8/".to_string()])]);
+        let children = vec![issue_child("c40", "/gh/r-wt-40"), issue_child("c41", "/gh/r-wt-41"), issue_child("c42", "/gh/r-wt-42"), issue_child("c43", "/gh/r-wt-43")];
+        let empty = HashMap::new();
+        let groups = join(JoinInput {
+            parents: vec![], children, roots: &roots, branches: &branches, contracts: &HashMap::new(), prs: &prs,
+            recorded: &recorded, focused_root: None, parent_starts: &empty, child_starts: &empty,
+        });
+        let pr_of = |id: &str| groups[0].children.iter().find(|c| c.id == id).unwrap().pr.as_ref().map(|p| p.number);
+        assert_eq!(pr_of("c40"), Some(7), "by branch");
+        assert_eq!(pr_of("c41"), Some(8), "the job's record wins over the branch");
+        assert_eq!(pr_of("c42"), None, "no branch, no record: no PR, never a guess");
+        assert_eq!(pr_of("c43"), Some(6), "the branch's first PR in gh's order (newest first in real output)");
+    }
+
+    #[test]
+    fn a_job_that_opened_several_prs_is_shown_its_open_one() {
+        let c = issue_child("c1", "/gh/r-wt-1");
+        let prs = vec![pr(3, "a", "MERGED"), pr(4, "b", "OPEN"), pr(5, "c", "CLOSED")];
+        let recorded = HashMap::from([("c1".to_string(), prs.iter().map(|p| p.url.clone()).collect())]);
+        assert_eq!(pr_of(&c, &prs, &recorded).map(|p| p.number), Some(4));
+    }
+
+    #[test]
     fn timeline_tail_from_offset() {
         let all = parse_timeline(TIMELINE, 0);
         assert!(all.total >= 4);
@@ -1106,7 +1263,7 @@ mod tests {
         contracts.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), vec![("docs/contracts/panes.md".to_string(), f, p)]);
         let mut prs = HashMap::new();
         let mut list = parse_prs(PRS).unwrap();
-        list.push(Pr { number: 9, url: "u".into(), state: "OPEN".into(), head: "feat/panes/editor".into(), ci: "pass".into() });
+        list.push(Pr { number: 9, url: "u".into(), state: "OPEN".into(), head: "feat/panes/editor".into(), ci: "pass".into(), draft: false, failing: vec![] });
         prs.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), list);
         roots.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
         roots.insert("/Users/xyrlan/github/mnemo-wt-244".to_string(), "/Users/xyrlan/github/mnemo".to_string());
@@ -1120,6 +1277,7 @@ mod tests {
             branches: &branches,
             contracts: &contracts,
             prs: &prs,
+            recorded: &HashMap::new(),
             focused_root: focused,
             parent_starts: &starts,
             child_starts: &child_starts,
@@ -1160,12 +1318,12 @@ mod tests {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
-            model: None, effort: None,
+            model: None, effort: None, pr: None,
         }];
         let empty = HashMap::new();
         let groups = join(JoinInput {
             parents: vec![], children, roots: &empty, branches: &empty, contracts: &HashMap::new(), prs: &HashMap::new(),
-            focused_root: None, parent_starts: &HashMap::new(), child_starts: &HashMap::new(),
+            recorded: &HashMap::new(), focused_root: None, parent_starts: &HashMap::new(), child_starts: &HashMap::new(),
         });
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "elsewhere");

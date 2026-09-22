@@ -37,8 +37,23 @@ export type ChildSession = {
   model?: string | null
   /** `--effort` it was dispatched with (`low`…`max`); null means the default. */
   effort?: string | null
+  /** The PR this child opened, when it belongs to no contract (a piece carries its own).
+   *  Absent in snapshots from before round 18. */
+  pr?: Pr | null
 }
-export type Pr = { number: number; url: string; state: string; head: string; ci: 'pass' | 'fail' | 'pending' | 'none' }
+/** `ci` is pass only when the PR has checks and every one of them passed (`check_verdict` in
+ *  mission.rs). `draft` and `failing` are absent on a `Pr` built outside the snapshot. */
+export type Pr = {
+  number: number
+  url: string
+  state: string
+  head: string
+  ci: 'pass' | 'fail' | 'pending' | 'none'
+  /** Opened as a draft: `gh pr merge` refuses it until it is marked ready. */
+  draft?: boolean
+  /** The checks that failed, by name. */
+  failing?: string[]
+}
 export type Piece = { name: string; branch: string; child: ChildSession | null; pr: Pr | null }
 export type Mission = { feature: string; contract_path: string; pieces: Piece[]; landable: boolean }
 export type RepoGroup = { root: string; name: string; parents: ParentSession[]; missions: Mission[]; children: ChildSession[] }
@@ -100,6 +115,9 @@ export function missionSummary(m: Mission): { withPr: number; total: number; ci:
 
 const RECENT_MS = 6 * 60 * 60 * 1000
 
+/** A PR nobody has merged or closed yet. */
+export const isOpen = (pr: Pr | null | undefined): pr is Pr => pr?.state === 'OPEN'
+
 /** Live children always; finished ones only for a few hours, so the sidebar is
  *  about now, not a history of every dispatch ever run. */
 export function isRecent(c: Pick<ChildSession, 'live' | 'updated_at'>, now = Date.now()): boolean {
@@ -113,7 +131,8 @@ export function pruneSnapshot(snap: Snapshot, now = Date.now()): Snapshot {
   const repos = snap.repos
     .map((r) => ({
       ...r,
-      children: r.children.filter((c) => isRecent(c, now)),
+      // A child whose PR is still open is not history, however long ago it finished.
+      children: r.children.filter((c) => isRecent(c, now) || isOpen(c.pr)),
       missions: r.missions.filter((m) => m.pieces.some((p) => (p.child && isRecent(p.child, now)) || p.pr)),
     }))
     .filter((r) => r.parents.length || r.children.length || r.missions.length)
