@@ -13,23 +13,34 @@ It is a separate file, and a separate dispatch, because it edits
 reworking a 268-line file in parallel and one of them rebasing onto a version
 that no longer resembles what it started from.
 
-**Dispatch this only after `side-panel` has landed on `main`.**
+`side-panel` landed as `80eb344` and delivered part of this piece's ground
+already: `listKey` is imported (`HealthTable.tsx:2`), the table root carries
+`tabIndex={-1}` and an `onKeyDown` (`:254`, `:246`), and Esc closes the side
+panel through it. What remains is the list navigation proper. This section was
+rewritten against that commit — do not restore what is already there.
 
 ## rows-navigable
 
-Health-table rows become reachable from the keyboard: focusable, activated by
-Enter, moved through with ↑↓ when focus is on the table rather than only inside
-the filter input. Today rows are `<tr onClick>` (`HealthTable.tsx:90`) and the
-arrow keys work only with focus inside the filter box (`HealthTable.tsx:195`).
+Health-table rows become reachable from the keyboard. Two gaps remain on
+`main`:
 
-`src/actions/keys.ts:36-47` already exports `listKey`, which maps
-`escape: 'close'` and refuses events originating in an INPUT, TEXTAREA, SELECT
-or contenteditable. The cockpit inbox uses it. Deliver the vault's list
-navigation against that helper so the app has one keyboard dialect, and extend
-`listKey` only if the vault needs a key it does not already map.
+- Rows are `<tr onClick>` (`HealthTable.tsx:113`) — not focusable, not
+  activatable by Enter.
+- The root's `onKeyDown` (`HealthTable.tsx:246`) acts on `listKey(e) === 'close'`
+  and drops everything else, so `'up'`, `'down'` and `'open'` fall through.
+  ↑↓ still work only inside the filter box (`:264`).
 
-Esc ordering is not this piece's to invent: `close-path` owns
-`escapeTarget(state)` and this piece calls it.
+Deliver against `listKey` (`src/actions/keys.ts:36-47`), which already maps
+↑↓/Enter/Esc and refuses events from an INPUT, TEXTAREA, SELECT or
+contenteditable — so the app keeps one keyboard dialect. Extend it only if the
+vault needs a key it does not map.
+
+Moving the selection is already in the file: `move(by)` (`HealthTable.tsx:237`)
+is what the filter box's arrows call (`:266`). Reuse it rather than writing a
+second one.
+
+Esc ordering is not this piece's to invent: `escapeTarget(state)` is
+`close-path`'s and landed in `4314bf6`.
 
 - **files:** src/vault/HealthTable.tsx, src/actions/keys.ts, src/vault/rows.test.tsx
 - **effort:** medium
