@@ -15,16 +15,26 @@ export function terminalAt(x: number, y: number): PaneId | null {
     if (r.w <= 0 || r.h <= 0) continue
     if (x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h) continue
     const pane = store.getState().panes[id]
-    return pane && pane.view === 'terminal' && pane.exitCode === undefined && !pane.error ? id : null
+    // A rect that does not qualify (a stale one, another view) does not end the search.
+    if (pane && pane.view === 'terminal' && pane.exitCode === undefined && !pane.error) return id
   }
   return null
 }
 
 type DropEvent = { type: 'enter' | 'over'; position: { x: number; y: number } } | { type: 'drop'; paths: string[]; position: { x: number; y: number } } | { type: 'leave' }
 
-/** Tauri's drag-drop payload, with its physical position, applied to the panes: `over` names
- *  the terminal to highlight, a drop types the files' paths into it and focuses it. */
-export function onFileDrag(e: DropEvent, scale = window.devicePixelRatio || 1): void {
+/** What divides Tauri's drop position into CSS pixels. The position is relative to the
+ *  webview on every platform (never the screen, so no window origin to subtract), but its
+ *  unit differs despite the `PhysicalPosition` type: wry reports AppKit points on macOS
+ *  (`draggingLocation`) and GTK widget coordinates on Linux, both already logical, and
+ *  only on Windows physical client pixels (`ScreenToClient`). */
+export function dropScale(platform = navigator.platform, dpr = window.devicePixelRatio || 1): number {
+  return /^win/i.test(platform) ? dpr : 1
+}
+
+/** Tauri's drag-drop payload applied to the panes: `over` names the terminal to highlight, a
+ *  drop types the files' paths into it and focuses it. */
+export function onFileDrag(e: DropEvent, scale = dropScale()): void {
   if (e.type === 'leave') return fileDropStore.setState({ over: null })
   const id = terminalAt(e.position.x / scale, e.position.y / scale)
   if (e.type !== 'drop') {
