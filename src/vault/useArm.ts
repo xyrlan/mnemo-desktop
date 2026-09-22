@@ -5,7 +5,7 @@ export const ARM_MS = 4000
 
 /** Destructive actions ask once, like the mission pane's stop: `press(key)` is true on the
  *  second press of the same key within `ARM_MS`, and arms it otherwise. */
-export function useArm(): { armed: string | null; press(key: string): boolean } {
+export function useArm(): { armed: string | null; press(key: string): boolean; disarm(): void } {
   const [armed, setArmed] = useState<string | null>(null)
   const timer = useRef<number>(undefined)
   useEffect(() => () => window.clearTimeout(timer.current), [])
@@ -20,6 +20,10 @@ export function useArm(): { armed: string | null; press(key: string): boolean } 
       setArmed(key)
       timer.current = window.setTimeout(() => setArmed(null), ARM_MS)
       return false
+    },
+    disarm() {
+      window.clearTimeout(timer.current)
+      setArmed(null)
     },
   }
 }
