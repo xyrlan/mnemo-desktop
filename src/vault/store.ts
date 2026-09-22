@@ -57,6 +57,8 @@ export type VaultActions = {
   load(): Promise<void>
   setQuery(q: string): void
   select(path: string): Promise<void>
+  /** Closes the selected page and drops its ego graph; a read still in flight lands nowhere. */
+  deselect(): void
   toggle(agent: string, open: boolean): void
   /** Runs one of `ACTIONS` in `cwd`; resolves when it finishes. */
   run(actionId: string, cwd: string): Promise<void>
@@ -80,6 +82,15 @@ export type VaultActions = {
 export type VaultStore = StoreApi<VaultState & VaultActions>
 
 export const MAX_LOG = 20
+
+/** What Escape closes, innermost first: an armed button, the selected page, the table's filter, the tree's search. */
+export function escapeTarget(s: { armed: boolean; selected: string | null; filter: string; query: string }): 'disarm' | 'deselect' | 'clear-filter' | 'clear-query' | null {
+  if (s.armed) return 'disarm'
+  if (s.selected !== null) return 'deselect'
+  if (s.filter) return 'clear-filter'
+  if (s.query) return 'clear-query'
+  return null
+}
 
 /** What an action needs of a row the tree has not read. */
 const rowInfo = (r: RuleRow): PageInfo => ({ path: r.path, slug: r.slug, name: r.name, description: r.description, type: r.type, confidence: r.confidence, topics: r.topics, modified: null, body: '' })
@@ -150,6 +161,12 @@ export function createVaultStore(client: VaultClient): VaultStore {
       async select(path) {
         set({ selected: path, page: get().page?.path === path ? get().page : null })
         await readPage(path)
+      },
+
+      deselect() {
+        // `readPage` already drops a page whose path is no longer selected; the ego read needs its turn taken.
+        egoRead++
+        set({ selected: null, page: null, ego: null, egoLoading: false })
       },
 
       toggle(agent, open) {

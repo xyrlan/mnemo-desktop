@@ -1,6 +1,6 @@
 import vaultRs from '../../src-tauri/src/vault.rs?raw'
 import libRs from '../../src-tauri/src/lib.rs?raw'
-import { createVaultStore, MAX_LOG } from './store'
+import { createVaultStore, escapeTarget, MAX_LOG } from './store'
 import { makeVaultClient, type VaultClient } from './client'
 import { ACTIONS } from './actions'
 import type { Agent, Health, Page, PageInfo, RuleRow, RunResult, VaultGraph } from './types'
@@ -271,4 +271,39 @@ test('every command the client invokes is registered in the vault block of lib.r
   void Promise.all([c.tree(), c.page(''), c.run('', [], ''), c.rules('', ''), c.ego('', 1), c.health()])
   expect(registered.sort()).toEqual(invoked.sort())
   for (const cmd of invoked) expect(vaultRs).toContain(`pub async fn ${cmd}(`)
+})
+
+test('deselect closes the page and its ego graph, and a slow read lands nowhere', async () => {
+  const pageRead = deferred<Page>()
+  const egoRead = deferred<VaultGraph>()
+  const s = createVaultStore(fake({ page: () => pageRead.promise, ego: () => egoRead.promise }))
+  const path = '/v/shared/feedback/a.md'
+  const selecting = s.getState().select(path)
+  const ego = s.getState().loadEgo(path)
+  s.getState().deselect()
+  pageRead.resolve(page(info('a')))
+  egoRead.resolve(egoOf(path))
+  await Promise.all([selecting, ego])
+  expect(s.getState()).toMatchObject({ selected: null, page: null, ego: null, egoLoading: false })
+})
+
+test('deselect drops a page and ego graph already read', async () => {
+  const s = createVaultStore(fake())
+  const path = '/v/shared/feedback/a.md'
+  await s.getState().select(path)
+  await s.getState().loadEgo(path)
+  expect(s.getState().page?.path).toBe(path)
+  s.getState().deselect()
+  expect(s.getState()).toMatchObject({ selected: null, page: null, ego: null })
+})
+
+test('escapeTarget closes the innermost thing first', () => {
+  const none = { armed: false, selected: null, filter: '', query: '' }
+  expect(escapeTarget(none)).toBeNull()
+  expect(escapeTarget({ ...none, query: 'q' })).toBe('clear-query')
+  expect(escapeTarget({ ...none, query: 'q', filter: 'f' })).toBe('clear-filter')
+  expect(escapeTarget({ ...none, query: 'q', filter: 'f', selected: '/p.md' })).toBe('deselect')
+  expect(escapeTarget({ armed: true, query: 'q', filter: 'f', selected: '/p.md' })).toBe('disarm')
+  // An empty path is still a selection.
+  expect(escapeTarget({ ...none, selected: '' })).toBe('deselect')
 })
