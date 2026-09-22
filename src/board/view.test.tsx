@@ -5,13 +5,22 @@ import { vi } from 'vitest'
 const root = '/Users/me/github/mnemo'
 /** What the GitHub commands answer; `project` rejects when it is a string. */
 const gh: { auth: unknown; project: unknown; issues: unknown } = { auth: {}, project: null, issues: [] }
+/** Every `job_run` a dispatch or a resume asked for, and what `job.rs` would emit back. */
+const jobs = vi.hoisted(() => ({ runs: [] as { id: string; cwd: string; argv: string[] }[], on: {} as Record<string, (e: { payload: unknown }) => void> }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string) => {
+  invoke: vi.fn(async (cmd: string, args?: unknown) => {
     if (cmd === 'gh_auth') return gh.auth
     if (cmd === 'gh_issues') return gh.issues
     if (cmd === 'gh_project') return typeof gh.project === 'string' ? Promise.reject(gh.project) : gh.project
+    if (cmd === 'job_run') return void jobs.runs.push(args as never)
     return {}
   }),
+}))
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: async (name: string, h: (e: { payload: unknown }) => void) => {
+    jobs.on[name] = h
+    return () => {}
+  },
 }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }))
 
@@ -22,6 +31,8 @@ import { missionStore } from '../mission/app-store'
 import { homeStore } from '../home/app-store'
 import { settingsStore } from '../settings/app-store'
 import { githubStore, selectionStore } from '../github/app-store'
+import { cockpitStore } from '../cockpit/app-store'
+import { dispatchKey } from '../github/actions'
 import { board, mnemoIssues, snapWithIssues } from '../github/fixtures'
 import './view'
 
@@ -37,6 +48,7 @@ beforeEach(() => {
   document.body.appendChild(host)
   r = createRoot(host)
   typed.length = 0
+  jobs.runs = []
   gh.auth = logged
   gh.project = board
   gh.issues = mnemoIssues
@@ -45,6 +57,7 @@ beforeEach(() => {
   settingsStore.setState({ issueLabels: {} })
   githubStore.setState({ auth: null, issues: {}, boards: {} })
   appStore.setState({ openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
+  cockpitStore.setState({ drawer: null, jobs: {} })
 })
 afterEach(() => {
   act(() => r.unmount())
@@ -77,11 +90,49 @@ test('a linked Project renders as a kanban with the snapshot state on its cards'
   expect(cards[2].querySelector('.bd-chip')?.textContent).toBe('PR open · CI ✗')
   expect(cards[3].className).toContain('bd-draft')
 
-  // An issue nobody works on can be dispatched from its card.
+  // An issue nobody works on can be dispatched from its card: headless, not a terminal tab,
+  // and its drawer opens right where the click happened.
   act(() => cards[0].querySelector<HTMLButtonElement>('.bd-dispatch')!.click())
-  expect(typed).toEqual([[root, 'mnemo dispatch 1']])
+  await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
+  expect(typed).toEqual([])
+  expect(jobs.runs).toEqual([{ id: dispatchKey(root, [1]), cwd: root, argv: ['mnemo', 'dispatch', '1'] }])
+  expect(host.querySelector('.ck-drawer')?.getAttribute('aria-label')).toBe('dispatch · #1')
   act(() => cards[0].click())
   expect(Object.values(appStore.getState().panes).some((p) => p.view === 'browser' && p.props?.url === 'https://github.com/me/mnemo/issues/1')).toBe(true)
+})
+
+test('dispatch streams output into the drawer, and a refusal still shows there', async () => {
+  await render()
+  const rows = [...host.querySelectorAll('.bd-row, .bd-card')].map((x) => x.querySelector<HTMLButtonElement>('.bd-dispatch')).filter((b): b is HTMLButtonElement => !!b)
+  act(() => rows[0].click())
+  await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
+  const id = jobs.runs[0].id
+  act(() => jobs.on['job-line']({ payload: { id, stream: 'out', line: 'child abc123 on feat/x/1' } }))
+  act(() => jobs.on['job-line']({ payload: { id, stream: 'out', line: 'attach: claude --resume abc123' } }))
+  act(() => jobs.on['job-exit']({ payload: { id, code: 0 } }))
+  const drawer = host.querySelector('.ck-drawer')!
+  expect([...drawer.querySelectorAll('.ck-log-text')].map((l) => l.textContent)).toEqual(['child abc123 on feat/x/1', 'attach: claude --resume abc123'])
+  // Dispatch is not silent on success: the drawer we opened stays, unlike a merge's.
+  expect(drawer.querySelector('.ck-log-end')?.textContent).toBe('exit 0')
+})
+
+test('resume wakes this repo\'s stalled children headless, and dispatching a contract sends the typed path', async () => {
+  await render()
+  act(() => buttons('resume')[0].click())
+  await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
+  expect(jobs.runs).toEqual([{ id: `resume:${root}`, cwd: root, argv: ['mnemo', 'resume'] }])
+
+  act(() => buttons('dispatch contract')[0].click())
+  const sheet = host.querySelector('.bd-sheet')!
+  const input = sheet.querySelector('input')!
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'docs/contracts/round18.md')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  act(() => [...sheet.querySelectorAll('button')].find((b) => b.textContent === 'dispatch')!.click())
+  await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
+  expect(jobs.runs[1]).toEqual({ id: `dispatch:${root}#contract:docs/contracts/round18.md`, cwd: root, argv: ['mnemo', 'dispatch', '--contract', 'docs/contracts/round18.md'] })
+  expect(host.querySelector('.bd-sheet')).toBeNull()
 })
 
 test('without a Project: the open issues as a list, with the label filter', async () => {
