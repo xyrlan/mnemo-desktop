@@ -38,7 +38,6 @@ const row = (slug: string, agent = 'shared'): RuleRow => ({
 const health = (over: Partial<Health> = {}): Health => ({
   root: '/v',
   status: ok('Vault: /v'),
-  doctor: ok('all good'),
   tiles: [],
   label_only: [],
   dormant: [],
@@ -63,6 +62,7 @@ function fake(over: Partial<VaultClient> = {}): VaultClient {
     rules: async () => [row('a'), row('b')],
     ego: async (path) => egoOf(path),
     health: async () => health(),
+    doctor: async () => ok('all good'),
     ...over,
   }
 }
@@ -268,7 +268,7 @@ test('every command the client invokes is registered in the vault block of lib.r
   const registered = [...block.matchAll(/vault::(\w+)/g)].map((m) => m[1])
   const invoked: string[] = []
   const c = makeVaultClient(async <T,>(cmd: string) => (invoked.push(cmd), undefined as T))
-  void Promise.all([c.tree(), c.page(''), c.run('', [], ''), c.rules('', ''), c.ego('', 1), c.health()])
+  void Promise.all([c.tree(), c.page(''), c.run('', [], ''), c.rules('', ''), c.ego('', 1), c.health(), c.doctor()])
   expect(registered.sort()).toEqual(invoked.sort())
   for (const cmd of invoked) expect(vaultRs).toContain(`pub async fn ${cmd}(`)
 })

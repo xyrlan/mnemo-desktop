@@ -145,6 +145,7 @@ pub fn run() {
             vault::vault_rules,
             vault::vault_ego,
             vault::vault_health,
+            vault::vault_doctor,
 
             // -- vaultlevel commands --
             vault::vault_level,

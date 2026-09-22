@@ -35,6 +35,7 @@ function RawText({ title, result }: { title: string; result: RunResult }) {
 function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
   const health = useVault((s) => s.health)
   const loading = useVault((s) => s.healthLoading)
+  const doctor = useVault((s) => s.doctor)
   const [raw, setRaw] = useState(false)
   // Dismissing hides this read's error; the next read (↻) shows its own.
   const [dismissed, setDismissed] = useState<typeof health>(null)
@@ -60,15 +61,22 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
         {/* No health is always a read in flight: the mount starts one before the first paint. */}
         {!health && (
           <div className="vt-empty vt-loading" role="status">
-            running mnemo status, doctor, stale…
+            running mnemo status, stale…
           </div>
         )}
         <div className="vr-strip-end">
           {health?.root && <span className="vt-count" title={health.root}>{short(health.root)}</span>}
-          <button disabled={!health} className={raw ? 'vt-mode-on' : ''} title="mnemo status and mnemo doctor, as printed" onClick={() => setRaw(!raw)}>
+          <button
+            disabled={!health}
+            className={raw ? 'vt-mode-on' : ''}
+            title="mnemo status and mnemo doctor, as printed"
+            // `doctor` is the slow one, so it is read here rather than with the rest of the
+            // health screen: opening this panel is the only thing that ever shows it.
+            onClick={() => (setRaw(!raw), raw ? undefined : void vault.getState().loadDoctor())}
+          >
             status / doctor
           </button>
-          <button title="Re-run status, doctor and stale" disabled={loading} onClick={() => void vault.getState().loadHealth(cwd ?? '')}>
+          <button title="Re-run status and stale" disabled={loading} onClick={() => void vault.getState().loadHealth(cwd ?? '')}>
             {loading ? '…' : '↻'}
           </button>
         </div>
@@ -84,7 +92,7 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
       {raw && health && (
         <div className="vr-raw">
           <RawText title="mnemo status" result={health.status} />
-          <RawText title="mnemo doctor" result={health.doctor} />
+          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <div className="vt-empty vt-loading" role="status">running mnemo doctor…</div>}
         </div>
       )}
     </>

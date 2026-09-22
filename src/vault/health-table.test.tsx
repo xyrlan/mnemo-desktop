@@ -41,7 +41,6 @@ const ran = (stdout: string, code: number | null = 0): RunResult => ({ stdout, s
 const health: Health = {
   root: '/v',
   status: ran('Vault: /v  (exists)'),
-  doctor: ran('doctor says hi', 2),
   tiles: [{ key: 'reflex', label: 'reflex injected', value: '5.0%', detail: '117 of 2350 prompts', tone: 'muted' }],
   label_only: [{ path: `${dir}/bare.md`, slug: 'bare', name: 'bare', reason: 'verified without evidence' }],
   dormant: [{ path: `${dir}/bare.md`, slug: 'bare', name: 'bare', reason: 'has activates_on, never fired' }],
@@ -63,6 +62,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (cmd === 'vault_rules') return args!.filter === 'nothing' ? [] : args!.scope === 'agent:mnemo-desktop' ? rules.filter((r) => r.agent === 'mnemo-desktop') : rules
     if (cmd === 'vault_ego') return { ...egoOf(args!.path as string), error: egoError }
     if (cmd === 'vault_health') return (await healthGate, { ...health, error: healthError })
+    if (cmd === 'vault_doctor') return ran('doctor says hi', 2)
     if (cmd === 'vault_run' && args!.action === 'stale') return ran(JSON.stringify([{ slug: 'mnemo-desktop__target-dir', reason: 'cites a deleted file' }]))
     if (cmd === 'vault_run') return ran('ok')
     if (cmd === 'vault_page') {
@@ -120,7 +120,11 @@ test('the health screen is a table of rules by heat with badges, tiles, filters 
   // Tiles: status numbers, then review = bare (both lists, once) + stale target-dir.
   expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2needs review'])
   expect(host.querySelector('.vr-raw')).toBeNull()
+  // `doctor` is 4.8s against a real vault, so the health read does not run it.
+  expect(calls.some(([c]) => c === 'vault_doctor')).toBe(false)
   await click(byText(host, 'button', 'status / doctor'))
+  await flush()
+  expect(calls.some(([c]) => c === 'vault_doctor')).toBe(true)
   expect(host.querySelector('.vr-raw')?.textContent).toContain('doctor says hi')
   expect(host.querySelector('.vr-raw')?.textContent).toContain('exit 2')
 
@@ -326,7 +330,7 @@ test('the health strip shows a loading state, never a blank, while the first rea
   const { host, root } = await mount()
   const status = host.querySelector('.vr-strip .vt-loading')
   expect(status?.getAttribute('role')).toBe('status')
-  expect(status?.textContent).toBe('running mnemo status, doctor, stale…')
+  expect(status?.textContent).toBe('running mnemo status, stale…')
   healthGate = null
   open()
   await flush()

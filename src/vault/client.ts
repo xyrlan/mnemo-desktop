@@ -12,8 +12,10 @@ export interface VaultClient {
   rules(scope: string, filter: string): Promise<RuleRow[]>
   /** The rule at `path` and at most `limit` nodes (≤ 30) of its neighbourhood. */
   ego(path: string, limit: number): Promise<VaultGraph>
-  /** `mnemo status` / `doctor`, their tiles, and what needs review. */
+  /** `mnemo status`, its tiles, and what needs review. Does not run `doctor`. */
   health(): Promise<Health>
+  /** `mnemo doctor`, on demand: 4.8s against a 5783-page vault, and only read behind a button. */
+  doctor(): Promise<RunResult>
 }
 
 export function makeVaultClient(invoke: Invoke): VaultClient {
@@ -24,5 +26,6 @@ export function makeVaultClient(invoke: Invoke): VaultClient {
     rules: (scope, filter) => invoke<RuleRow[]>('vault_rules', { scope, filter }),
     ego: (path, limit) => invoke<VaultGraph>('vault_ego', { path, limit }),
     health: () => invoke<Health>('vault_health'),
+    doctor: () => invoke<RunResult>('vault_doctor'),
   }
 }
