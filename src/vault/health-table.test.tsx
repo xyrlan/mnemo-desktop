@@ -117,8 +117,8 @@ test('the health screen is a table of rules by heat with badges, tiles, filters 
   expect(host.querySelector('.vr-row:nth-child(3) .vr-last')?.textContent).toBe('—')
   expect(host.querySelector('.vr-row .vr-last')?.textContent).toBe('2d ago')
 
-  // Tiles: status numbers, then review = bare (both lists, once) + stale target-dir.
-  expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2needs review'])
+  // Tiles: status numbers, then review = bare (both lists, once) + stale target-dir, then inbox.
+  expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2needs review', '1inbox'])
   expect(host.querySelector('.vr-raw')).toBeNull()
   // `doctor` is 4.8s against a real vault, so the health read does not run it.
   expect(calls.some(([c]) => c === 'vault_doctor')).toBe(false)
@@ -374,4 +374,18 @@ test('a health error and a neighbourhood error can each be dismissed, and come b
     healthError = null
     egoError = null
   }
+})
+
+test('the inbox tile on the health strip opens the inbox pane', async () => {
+  const { vault } = await import('./app-store')
+  const { host, root } = await mount()
+  const tile = byText(host, '.vh-tile-label', 'inbox')?.closest('button')
+  expect(tile?.textContent).toBe('1inbox')
+  await click(tile)
+  await flush()
+  expect(host.querySelector('.ib')).not.toBeNull()
+  expect(host.querySelector('.vr-strip')).toBeNull()
+  expect(calls.some(([c, a]) => c === 'vault_run' && (a as { action: string }).action === 'inbox')).toBe(true)
+  vault.getState().setMode('health')
+  await act(async () => root.unmount())
 })

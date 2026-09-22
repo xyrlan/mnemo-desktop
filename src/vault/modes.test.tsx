@@ -11,7 +11,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
 
 const sources = import.meta.glob<string>('../**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true })
 
-test('the vault pane offers Health and Pages, and no map action', async () => {
+test('the vault pane offers Health, Pages and Inbox, and no map action', async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   await import('./view')
   const { paneView } = await import('../panes/registry')
@@ -23,7 +23,7 @@ test('the vault pane offers Health and Pages, and no map action', async () => {
   document.body.appendChild(host)
   const r = createRoot(host)
   await act(async () => r.render(<Pane id={-1} props={{}} />))
-  expect([...host.querySelectorAll('.vt-modes button')].map((b) => b.textContent)).toEqual(['Health', 'Pages'])
+  expect([...host.querySelectorAll('.vt-modes button')].map((b) => b.textContent)).toEqual(['Health', 'Pages', 'Inbox'])
   await act(async () => r.unmount())
 })
 

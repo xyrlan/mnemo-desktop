@@ -1,4 +1,4 @@
-//! Vault pane: the mnemo vault on disk, read-only, plus seven `mnemo` subcommands, the rules
+//! Vault pane: the mnemo vault on disk, read-only, plus eight `mnemo` subcommands, the rules
 //! of the health table with their heat and badges (`vault_rules`), the neighbourhood of one
 //! rule (`vault_ego`) and a health report (`vault_health`).
 //!
@@ -1144,7 +1144,7 @@ pub fn record_best(path: &Path, xp: u64) -> u64 {
 // ------------------------------------------------------------ allowlist --
 
 /// The subcommands the pane may run, and nothing else.
-pub const ACTIONS: &[&str] = &["disable-rule", "why", "reverify", "rewrites", "learn", "status", "stale"];
+pub const ACTIONS: &[&str] = &["disable-rule", "why", "reverify", "rewrites", "learn", "status", "stale", "inbox"];
 
 /// A slug, rewrite key or session id: no flag, no traversal, no shell metacharacters.
 fn is_word(s: &str) -> bool {
@@ -1175,6 +1175,17 @@ pub fn check_run(action: &str, args: &[String]) -> Result<(), String> {
         "status" => &[("--scope", Some(|v| ["project", "global", "all"].contains(&v)))],
         // The health panel runs it in the current repo: stale-ness is checked against its git.
         "stale" => &[("--json", None)],
+        // One act per call, same rule the CLI itself enforces: `--show`/`--promote`/`--drop`/
+        // `--restore` never combine, but the pane sends one flag at a time and lets `mnemo`
+        // say so if that ever changes.
+        "inbox" => &[
+            ("--all", None),
+            ("--stats", None),
+            ("--show", Some(is_word)),
+            ("--promote", Some(is_word)),
+            ("--drop", Some(is_word)),
+            ("--restore", Some(is_word)),
+        ],
         _ => unreachable!(),
     };
     let mut it = args.iter();
@@ -1581,7 +1592,7 @@ mod tests {
     // ---- allowlist and running
 
     #[test]
-    fn allowlist_accepts_the_seven_actions_with_their_arguments() {
+    fn allowlist_accepts_the_eight_actions_with_their_arguments() {
         let ok = |a: &str, args: &[&str]| check_run(a, &strs(args));
         assert_eq!(ok("disable-rule", &["run-tests-before-commit"]), Ok(()));
         assert_eq!(ok("why", &["--json", "--limit", "20", "--all-projects"]), Ok(()));
@@ -1593,6 +1604,15 @@ mod tests {
         assert_eq!(ok("learn", &[]), Ok(()));
         assert_eq!(ok("status", &["--scope", "project"]), Ok(()));
         assert_eq!(ok("stale", &["--json"]), Ok(()));
+        assert_eq!(ok("inbox", &[]), Ok(()));
+        assert_eq!(ok("inbox", &["--all"]), Ok(()));
+        assert_eq!(ok("inbox", &["--stats"]), Ok(()));
+        assert_eq!(ok("inbox", &["--show", "reference/mnemo__slug"]), Ok(()));
+        assert_eq!(ok("inbox", &["--promote", "reference/mnemo__slug"]), Ok(()));
+        assert_eq!(ok("inbox", &["--drop", "reference/mnemo__slug"]), Ok(()));
+        assert_eq!(ok("inbox", &["--restore", "reference/mnemo__slug"]), Ok(()));
+        // A bare slug, with no `<type>/` prefix, is exactly what `--show KEY` also accepts.
+        assert_eq!(ok("inbox", &["--drop", "run-tests-before-commit"]), Ok(()));
     }
 
     #[test]
@@ -1618,6 +1638,10 @@ mod tests {
         bad("status", &["--scope", "everything"]);
         bad("stale", &["--repo", "/etc"]);
         bad("doctor", &[]);
+        bad("inbox", &["--exec", "rm -rf ~"]);
+        bad("inbox", &["--show", "-rf"]);
+        bad("inbox", &["--show", "../../etc/passwd"]);
+        bad("inbox", &["--promote"]);
     }
 
     #[test]

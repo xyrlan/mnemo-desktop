@@ -2,6 +2,7 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { VaultClient } from './client'
 import { actionById } from './actions'
 import { EGO_LIMIT } from './ego'
+import { parseInboxListing, parseInboxStats, type InboxListing, type InboxStats } from './inbox'
 import { NO_CHIPS, type Chips } from './rules'
 import { findPage } from './search'
 import type { Agent, Health, Page, PageInfo, RuleRow, RunResult, VaultGraph } from './types'
@@ -17,8 +18,14 @@ export type LogEntry = {
   result: RunResult | null
 }
 
-/** Health (the rules table, the selected page and its ego graph) or pages (tree + page). */
-export type VaultMode = 'health' | 'pages'
+/** Health (the rules table, the selected page and its ego graph), pages (tree + page), or
+ *  inbox (`_inbox` review: list, show, promote, drop). */
+export type VaultMode = 'health' | 'pages' | 'inbox'
+
+/** The last promote/drop/restore this session ran, for the notice under the inbox list.
+ *  `canRestore` only on a successful drop: the CLI archives rather than deletes, so it is
+ *  undone the same way (round18, inbox-review). */
+export type InboxNotice = { key: string; text: string; ok: boolean; canRestore: boolean }
 
 export type VaultState = {
   tree: Agent[]
@@ -54,6 +61,22 @@ export type VaultState = {
   doctorLoading: boolean
   /** `mnemo stale --json`, run in the current repo beside `vault_health`. */
   stale: RunResult | null
+  /** `mnemo inbox --all`: every project, not just the one `cwd` names. */
+  inboxAll: boolean
+  inboxListing: InboxListing | null
+  inboxLoading: boolean
+  /** A read that failed outright (no vault, refused), not a parsed empty queue. */
+  inboxError: string | null
+  /** The key `--show` is reading or has read. */
+  inboxSelected: string | null
+  inboxShowing: boolean
+  inboxShown: string | null
+  inboxShownError: string | null
+  /** The key a promote/drop/restore is in flight for; only one at a time. */
+  inboxBusy: string | null
+  inboxNotice: InboxNotice | null
+  inboxStats: InboxStats | null
+  inboxStatsLoading: boolean
 }
 
 export type VaultActions = {
@@ -82,6 +105,23 @@ export type VaultActions = {
   loadHealth(cwd: string): Promise<void>
   /** Runs `mnemo doctor` unless it is already in flight or already read. */
   loadDoctor(): Promise<void>
+  /** Sets `inboxAll` and re-reads the listing. */
+  setInboxAll(all: boolean, cwd: string): Promise<void>
+  /** Reads `mnemo inbox` (or `--all`) in `cwd`. */
+  loadInbox(cwd: string): Promise<void>
+  /** Reads one staged page with `--show`; a later key wins over a slow read. */
+  showInbox(key: string, cwd: string): Promise<void>
+  /** Closes the shown page without changing the listing. */
+  closeInboxShown(): void
+  /** Promotes a staged page; re-reads the listing on success. */
+  promoteInbox(key: string, cwd: string): Promise<void>
+  /** Drops a staged page (archived, not deleted); re-reads the listing on success. */
+  dropInbox(key: string, cwd: string): Promise<void>
+  /** Restores an archived page (from a drop, or an unreviewed expiry) into the queue. */
+  restoreInbox(key: string, cwd: string): Promise<void>
+  dismissInboxNotice(): void
+  /** Reads `mnemo inbox --stats`, once at a time. */
+  loadInboxStats(cwd: string): Promise<void>
 }
 
 export type VaultStore = StoreApi<VaultState & VaultActions>
@@ -104,6 +144,7 @@ export function createVaultStore(client: VaultClient): VaultStore {
   let nextId = 1
   let rulesRead = 0
   let egoRead = 0
+  let inboxShowRead = 0
   return createZustand<VaultState & VaultActions>((set, get) => {
     /** The page at `path` as the tree or the table knows it. */
     const known = (path: string): PageInfo | undefined => {
@@ -120,6 +161,26 @@ export function createVaultStore(client: VaultClient): VaultStore {
       }
       // A later click wins over a slow read.
       if (get().selected === path) set({ page })
+    }
+
+    /** `--promote` / `--drop` / `--restore`: one act, one key. `mnemo` itself does the
+     *  ledger write and the index rebuild, so a success here always re-reads the listing
+     *  rather than editing it locally. */
+    const actOnInbox = async (flag: '--promote' | '--drop' | '--restore', key: string, cwd: string) => {
+      if (get().inboxBusy) return
+      set({ inboxBusy: key, inboxNotice: null })
+      let notice: InboxNotice
+      try {
+        const r = await client.run('inbox', [flag, key], cwd)
+        notice = { key, text: (r.stdout || r.stderr).trim(), ok: r.code === 0, canRestore: flag === '--drop' && r.code === 0 }
+      } catch (e) {
+        notice = { key, text: String(e), ok: false, canRestore: false }
+      }
+      set({ inboxBusy: null, inboxNotice: notice })
+      if (notice.ok) {
+        if (get().inboxSelected === key) set({ inboxSelected: null, inboxShown: null, inboxShownError: null })
+        await get().loadInbox(cwd)
+      }
     }
 
     return {
@@ -147,6 +208,18 @@ export function createVaultStore(client: VaultClient): VaultStore {
       doctor: null,
       doctorLoading: false,
       stale: null,
+      inboxAll: false,
+      inboxListing: null,
+      inboxLoading: false,
+      inboxError: null,
+      inboxSelected: null,
+      inboxShowing: false,
+      inboxShown: null,
+      inboxShownError: null,
+      inboxBusy: null,
+      inboxNotice: null,
+      inboxStats: null,
+      inboxStatsLoading: false,
 
       async load() {
         if (get().loading) return
@@ -277,6 +350,67 @@ export function createVaultStore(client: VaultClient): VaultStore {
           doctor = { stdout: '', stderr: String(e), code: null }
         }
         set({ doctor, doctorLoading: false })
+      },
+
+      async setInboxAll(all, cwd) {
+        set({ inboxAll: all })
+        await get().loadInbox(cwd)
+      },
+
+      async loadInbox(cwd) {
+        set({ inboxLoading: true })
+        let listing: InboxListing | null = null
+        let error: string | null = null
+        try {
+          const r = await client.run('inbox', get().inboxAll ? ['--all'] : [], cwd)
+          if (r.code === 0) listing = parseInboxListing(r.stdout)
+          else error = r.stderr || r.stdout || `mnemo inbox: exit ${r.code}`
+        } catch (e) {
+          error = String(e)
+        }
+        set({ inboxListing: listing, inboxLoading: false, inboxError: error })
+      },
+
+      async showInbox(key, cwd) {
+        const read = ++inboxShowRead
+        set({ inboxSelected: key, inboxShowing: true, inboxShown: null, inboxShownError: null })
+        let shown: string | null = null
+        let error: string | null = null
+        try {
+          const r = await client.run('inbox', ['--show', key], cwd)
+          if (r.code === 0) shown = r.stdout
+          else error = r.stderr || r.stdout || `mnemo inbox --show: exit ${r.code}`
+        } catch (e) {
+          error = String(e)
+        }
+        // A later click wins over a slow read.
+        if (read === inboxShowRead) set({ inboxShown: shown, inboxShownError: error, inboxShowing: false })
+      },
+
+      closeInboxShown() {
+        inboxShowRead++
+        set({ inboxSelected: null, inboxShowing: false, inboxShown: null, inboxShownError: null })
+      },
+
+      promoteInbox: (key, cwd) => actOnInbox('--promote', key, cwd),
+      dropInbox: (key, cwd) => actOnInbox('--drop', key, cwd),
+      restoreInbox: (key, cwd) => actOnInbox('--restore', key, cwd),
+
+      dismissInboxNotice() {
+        set({ inboxNotice: null })
+      },
+
+      async loadInboxStats(cwd) {
+        if (get().inboxStatsLoading) return
+        set({ inboxStatsLoading: true })
+        let stats: InboxStats | null = null
+        try {
+          const r = await client.run('inbox', ['--stats'], cwd)
+          if (r.code === 0) stats = parseInboxStats(r.stdout)
+        } catch {
+          stats = null
+        }
+        set({ inboxStats: stats, inboxStatsLoading: false })
       },
     }
   })

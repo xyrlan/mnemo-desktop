@@ -8,6 +8,7 @@ import { agentForCwd, filterTree, orderAgents, pageCount, terms } from './search
 import { decisionsFor, parseWhy } from './why'
 import { HealthTable } from './HealthTable'
 import { ErrorLine } from './ErrorLine'
+import { InboxView } from './InboxView'
 import { PageView, short } from './PageView'
 import type { LogEntry } from './store'
 import type { Agent } from './types'
@@ -164,18 +165,20 @@ function VaultPane(_: PaneViewProps) {
   return (
     <div className="pane-body vault">
       <div className="vt-modes">
-        {(['health', 'pages'] as const).map((m) => (
+        {(['health', 'pages', 'inbox'] as const).map((m) => (
           <button
             key={m}
             className={mode === m ? 'vt-mode-on' : ''}
             onClick={() => vault.getState().setMode(m)}
           >
-            {m === 'health' ? 'Health' : 'Pages'}
+            {m === 'health' ? 'Health' : m === 'pages' ? 'Pages' : 'Inbox'}
           </button>
         ))}
       </div>
       {mode === 'health' ? (
         <HealthTable cwd={cwd} current={current} />
+      ) : mode === 'inbox' ? (
+        <InboxView cwd={cwd} />
       ) : (
         <div className="vt-main">
           <aside className="vt-side">
@@ -210,7 +213,7 @@ function VaultPane(_: PaneViewProps) {
 
 registerPaneView('vault', VaultPane)
 
-const open = (mode?: 'health' | 'pages') => () => {
+const open = (mode?: 'health' | 'pages' | 'inbox') => () => {
   if (mode) vault.getState().setMode(mode)
   store.getState().openView('vault', {}, 'auto', 'vault')
 }
@@ -218,3 +221,4 @@ const open = (mode?: 'health' | 'pages') => () => {
 register({ id: 'vault.open', title: 'Open vault', run: open() })
 register({ id: 'vault.health', title: 'Open vault health: rules by heat, what needs review', run: open('health') })
 register({ id: 'vault.pages', title: 'Open vault pages by agent', run: open('pages') })
+register({ id: 'vault.inbox', title: 'Open vault inbox: review, promote or drop staged pages', run: open('inbox') })

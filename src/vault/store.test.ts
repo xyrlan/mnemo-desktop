@@ -230,6 +230,137 @@ test('health reads vault_health and runs stale --json in the cwd, once at a time
   expect(broken.getState().stale).toEqual({ stdout: '', stderr: 'no mnemo', code: null })
 })
 
+test('inbox reads mnemo inbox (or --all) in cwd and parses the listing', async () => {
+  const runs: [string, string[], string][] = []
+  const s = createVaultStore(fake({ run: async (a, args, cwd) => (runs.push([a, args, cwd]), ok('nothing staged in shared/_inbox/\n')) }))
+  await s.getState().loadInbox('/repo')
+  expect(runs).toEqual([['inbox', [], '/repo']])
+  expect(s.getState()).toMatchObject({
+    inboxListing: { rows: [], summary: 'nothing staged in shared/_inbox/', other: 0 },
+    inboxLoading: false,
+    inboxError: null,
+  })
+
+  await s.getState().setInboxAll(true, '/repo')
+  expect(runs[1]).toEqual(['inbox', ['--all'], '/repo'])
+  expect(s.getState().inboxAll).toBe(true)
+})
+
+test('a refused or failing inbox read is an error, not a crash, and drops the old listing', async () => {
+  const s = createVaultStore(fake({ run: async () => ({ stdout: '', stderr: 'mnemo inbox: not an allowed action', code: 1 }) }))
+  await s.getState().loadInbox('')
+  expect(s.getState()).toMatchObject({ inboxListing: null, inboxError: 'mnemo inbox: not an allowed action' })
+
+  const broken = createVaultStore(fake({ run: async () => Promise.reject('no mnemo') }))
+  await broken.getState().loadInbox('')
+  expect(broken.getState()).toMatchObject({ inboxListing: null, inboxError: 'no mnemo' })
+})
+
+test('showInbox reads --show KEY, and the last click wins over a slow one', async () => {
+  const slow = deferred<RunResult>()
+  const s = createVaultStore(fake({ run: (_a, args) => (args[1] === 'reference/a' ? slow.promise : Promise.resolve(ok('---\nname: b\n---\nbody'))) }))
+  const first = s.getState().showInbox('reference/a', '/repo')
+  expect(s.getState()).toMatchObject({ inboxSelected: 'reference/a', inboxShowing: true })
+  await s.getState().showInbox('reference/b', '/repo')
+  slow.resolve(ok('---\nname: a\n---\nbody a'))
+  await first
+  expect(s.getState()).toMatchObject({ inboxSelected: 'reference/b', inboxShown: '---\nname: b\n---\nbody', inboxShowing: false })
+})
+
+test('showInbox surfaces a refusal as inboxShownError, and closeInboxShown clears it', async () => {
+  const s = createVaultStore(fake({ run: async () => ({ stdout: '', stderr: 'no staged page for x', code: 1 }) }))
+  await s.getState().showInbox('reference/x', '')
+  expect(s.getState()).toMatchObject({ inboxShown: null, inboxShownError: 'no staged page for x' })
+  s.getState().closeInboxShown()
+  expect(s.getState()).toMatchObject({ inboxSelected: null, inboxShown: null, inboxShownError: null })
+})
+
+test('closeInboxShown is also what a slow read lands nowhere against', async () => {
+  const slow = deferred<RunResult>()
+  const s = createVaultStore(fake({ run: () => slow.promise }))
+  const showing = s.getState().showInbox('reference/a', '')
+  s.getState().closeInboxShown()
+  slow.resolve(ok('shown'))
+  await showing
+  expect(s.getState()).toMatchObject({ inboxSelected: null, inboxShown: null, inboxShowing: false })
+})
+
+test('promote and drop run one act at a time, re-read the listing on success, and only drop offers undo', async () => {
+  const runs: string[][] = []
+  let listings = 0
+  const s = createVaultStore(
+    fake({
+      run: async (_a, args) =>
+        (runs.push(args),
+        args[0] === '--promote'
+          ? ok('promoted reference/a → shared/reference/a.md')
+          : args[0] === '--drop'
+            ? ok('dropped reference/a; archived to shared/_archive/dropped-x/reference/a.md')
+            : (listings++, ok('nothing staged in shared/_inbox/'))),
+    }),
+  )
+  await s.getState().loadInbox('/repo')
+  listings = 0
+
+  await s.getState().promoteInbox('reference/a', '/repo')
+  expect(s.getState().inboxNotice).toEqual({ key: 'reference/a', text: 'promoted reference/a → shared/reference/a.md', ok: true, canRestore: false })
+  expect(listings).toBe(1)
+
+  await s.getState().dropInbox('reference/a', '/repo')
+  expect(s.getState().inboxNotice).toEqual({ key: 'reference/a', text: 'dropped reference/a; archived to shared/_archive/dropped-x/reference/a.md', ok: true, canRestore: true })
+  expect(listings).toBe(2)
+  expect(runs.filter((a) => a[0]?.startsWith('--')).map((a) => a[0])).toEqual(['--promote', '--drop'])
+})
+
+test('a failed act does not re-read the listing, and a second act while one is busy is ignored', async () => {
+  const d = deferred<RunResult>()
+  let listings = 0
+  const s = createVaultStore(fake({ run: (_a, args) => (args[0] === '--promote' ? d.promise : (listings++, Promise.resolve(ok()))) }))
+  const first = s.getState().promoteInbox('reference/a', '')
+  expect(s.getState().inboxBusy).toBe('reference/a')
+  await s.getState().promoteInbox('reference/b', '')
+  expect(s.getState().inboxBusy).toBe('reference/a')
+  d.resolve({ stdout: '', stderr: 'shared/reference/a.md already exists', code: 1 })
+  await first
+  expect(s.getState()).toMatchObject({ inboxBusy: null, inboxNotice: { key: 'reference/a', ok: false, canRestore: false } })
+  expect(listings).toBe(0)
+})
+
+test('a successful promote or drop closes the shown page when it was the one acted on', async () => {
+  const s = createVaultStore(fake({ run: async (_a, args) => (args[0] === '--show' ? ok('---\nx\n---\nbody') : ok('done')) }))
+  await s.getState().showInbox('reference/a', '')
+  await s.getState().promoteInbox('reference/a', '')
+  expect(s.getState()).toMatchObject({ inboxSelected: null, inboxShown: null })
+})
+
+test('restore reads --restore KEY and re-reads the listing', async () => {
+  const runs: string[][] = []
+  const s = createVaultStore(fake({ run: async (_a, args) => (runs.push(args), ok('restored reference/a → shared/_inbox/reference/a.md')) }))
+  await s.getState().restoreInbox('reference/a', '/repo')
+  expect(runs[0]).toEqual(['--restore', 'reference/a'])
+  expect(s.getState().inboxNotice).toEqual({ key: 'reference/a', text: 'restored reference/a → shared/_inbox/reference/a.md', ok: true, canRestore: false })
+})
+
+test('dismissInboxNotice clears it', () => {
+  const s = createVaultStore(fake())
+  s.setState({ inboxNotice: { key: 'a', text: 'x', ok: true, canRestore: false } })
+  s.getState().dismissInboxNotice()
+  expect(s.getState().inboxNotice).toBeNull()
+})
+
+test('stats reads mnemo inbox --stats once at a time', async () => {
+  let reads = 0
+  const stats = [
+    '0 staged in shared/_inbox/ (median —, oldest —)',
+    'last 7 days: 0 offered at session start, 0 promoted, 0 dropped (0 resolved)',
+    'median offer → decision: no page has been both offered and decided yet',
+  ].join('\n')
+  const s = createVaultStore(fake({ run: async () => (reads++, ok(stats)) }))
+  await Promise.all([s.getState().loadInboxStats('/repo'), s.getState().loadInboxStats('/repo')])
+  expect(reads).toBe(1)
+  expect(s.getState().inboxStats).toMatchObject({ staged: 0, windowDays: 7, medianDecisionDays: null })
+})
+
 test('client maps to the Tauri commands', async () => {
   const seen: [string, unknown][] = []
   const c = makeVaultClient(async <T,>(cmd: string, args?: Record<string, unknown>) => (seen.push([cmd, args]), undefined as T))
@@ -249,10 +380,11 @@ test('client maps to the Tauri commands', async () => {
   ])
 })
 
-test('every button runs a subcommand the Rust allowlist has, and the allowlist holds only those and stale', () => {
+test('every button runs a subcommand the Rust allowlist has, and the allowlist holds only those, stale and inbox', () => {
   const allow = /pub const ACTIONS: &\[&str\] = &\[([^\]]*)\]/.exec(vaultRs)![1].match(/"([^"]+)"/g)!.map((s) => s.slice(1, -1))
-  // `stale` has no button: the health panel runs it (`loadHealth`).
-  expect(new Set([...ACTIONS.map((a) => a.command), 'stale'])).toEqual(new Set(allow))
+  // `stale` has no button: the health panel runs it (`loadHealth`). `inbox` has no button
+  // either: the inbox pane runs it directly (`loadInbox`, `showInbox`, `promoteInbox`, …).
+  expect(new Set([...ACTIONS.map((a) => a.command), 'stale', 'inbox'])).toEqual(new Set(allow))
   expect(ACTIONS.filter((a) => a.destructive).map((a) => a.id)).toEqual(['disable', 'rewrites-apply'])
 })
 
