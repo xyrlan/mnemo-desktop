@@ -105,7 +105,18 @@ function Row({ row, selected, cwd, armed, onDisable }: { row: RuleRow; selected:
   const select = () => void vault.getState().select(row.path)
   const lastFired = row.last_fired ? new Date(row.last_fired).toISOString().slice(0, 10) : 'never fired'
   return (
-    <tr className={`vr-row${selected ? ' vr-selected' : ''}`} onClick={select} title={short(row.path)}>
+    <tr
+      className={`vr-row${selected ? ' vr-selected' : ''}`}
+      onClick={select}
+      title={short(row.path)}
+      // Reachable by Tab, and by Enter once there. The root's handler owns ↑↓, so a focused
+      // row lets them through rather than swallowing them.
+      tabIndex={0}
+      aria-selected={selected}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), select())
+      }}
+    >
       <td className="vr-heat" title={`heat ${row.heat.toFixed(2)} · ${row.fires} fires in total`}>
         <i style={{ width: `${Math.min(100, row.heat * 20)}%` }} />
         <span>{row.heat >= 0.05 ? row.heat.toFixed(1) : '0'}</span>
@@ -236,13 +247,20 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
   }
   const setChip = (key: 'type' | 'topic', value: string) => vault.getState().setChips({ [key]: chips[key] === value ? null : value })
 
-  // Esc from anywhere in the table that is not a text field closes the side panel. The root
-  // takes focus on a click inside it (tabIndex -1), so a row click leaves Esc reachable.
+  // The table is a list: ↑↓ walk it, Enter opens the row, Esc closes the side panel — all
+  // from anywhere in it that is not a text field. The root takes focus on a click inside it
+  // (tabIndex -1), so a row click leaves the keys reachable.
   const onKeyDown = (e: KeyboardEvent) => {
-    if (!selected || listKey(e) !== 'close') return
+    const k = listKey(e)
+    // `open` belongs to the focused row, which handles Enter itself; `reply` and `attach`
+    // are the cockpit's. Anything this handler does not act on is left alone.
+    if (k !== 'up' && k !== 'down' && k !== 'close') return
+    if (k === 'close' && !selected) return
     e.preventDefault()
     e.stopPropagation()
-    deselect()
+    if (k === 'close') deselect()
+    else if (k === 'up') move(-1)
+    else if (k === 'down') move(1)
   }
 
   return (
