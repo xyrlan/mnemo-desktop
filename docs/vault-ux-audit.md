@@ -46,7 +46,7 @@ Severity: **A** blocks the work, **B** costs time every session, **C** polish.
 |---|-----|---------|-------|
 | 1 | A | `selected` is write-only to non-null; side panel has no close path | `store.ts:150`, `HealthTable.tsx:259` |
 | 2 | A | Esc closes nothing. Both vault Esc handlers are local to a text input and only clear text | `view.tsx:184`, `HealthTable.tsx:194` |
-| 3 | A | Opening the vault costs 3 subprocesses + a full disk walk, and paints a blank div while it runs | `store.ts:119`, `HealthTable.tsx:54` |
+| 3 | A | Opening the vault costs 3 subprocesses + a full disk walk, and paints a blank div while it runs — **measured at 4.876s, fixed to 0.214s in #146** | `store.ts:119`, `HealthTable.tsx:54` |
 | 4 | B | Error `<pre>` blocks have no dismiss in 5 places | `view.tsx:191`, `view.tsx:133`, `HealthTable.tsx:65`, `PageView.tsx:97`, `EgoView.tsx:90` |
 | 5 | B | Armed confirms cancel only by waiting 4 s — Esc and click-away do nothing | `useArm.ts:21` |
 | 6 | B | Table rows are `<tr onClick>`: not focusable, not keyboard-activatable. ↑↓ work only with focus inside the filter input | `HealthTable.tsx:90`, `HealthTable.tsx:195` |
@@ -146,11 +146,31 @@ no test file at all. Every phase-1 step above is a behaviour a test can hold:
 Those tests are the deliverable, not a follow-up — a close path with no test
 regresses the first time someone touches the store.
 
+## Measured after the fact
+
+Finding 3's wall-clock cost was not measured when this was written. It was
+measured before fixing it, against this machine's vault of 5783 pages:
+
+| command | time |
+|---------|------|
+| `mnemo doctor` | 4.8s |
+| `mnemo status` | 0.2s |
+| `mnemo stale --json` | 0.06s |
+
+`status` and `doctor` ran in parallel, so the health screen waited 4.876s of
+subprocess before its first paint, and 96% of it was `doctor` — which is read
+in exactly one place, behind a button that is closed by default. #146 moved it
+to its own command, run when that panel opens: 0.214s.
+
+    time ( mnemo doctor >/dev/null & mnemo status >/dev/null; wait )   # 4.876s
+    time mnemo status >/dev/null                                       # 0.214s
+
 ## What this audit does not claim
 
-- No measurement of how long the health path actually takes. The subprocess count
-  and the uncached full-vault walk are read from the code; the wall-clock cost is
-  not measured here.
+- The full-vault page walk inside `health_at` is still unmeasured. #146 only
+  moved the fire log onto the shared `PAGES_TTL` cache; whether walking 5783
+  pages costs a further second or a further millisecond is untested, and the
+  remaining phase-1 items (default mode, a cached health snapshot) are open.
 - Whether the ego graph earns its keep is untested. Making it a tab is the cheap
   experiment: if the tab goes unopened, the next step is deleting it along with
   react-flow and `src/graph/` — as `52cdecf` already did for the sigma map.
