@@ -32,6 +32,9 @@ pub mod vault;
 pub mod home;
 pub mod home_commands;
 
+// -- pr-review (src/review.rs) --
+pub mod review;
+
 // -- chrome (src/chrome.rs) --
 pub mod chrome;
 
@@ -156,6 +159,9 @@ pub fn run() {
             home_commands::home_register_repo,
             home_commands::home_resolve_repo,
             home_commands::home_refresh_github,
+
+            // -- pr-review commands --
+            review::review_pr,
 
             // -- chrome commands --
             chrome::chrome_session,

@@ -8,6 +8,9 @@ import { store as layout, useApp } from '../layout/app-store'
 import { homeStore, useHome } from './app-store'
 import { prView, relTime, stopCmd, takeOver, type HomeRepo, type HomeSession, type OpenedPr } from './types'
 import { repoAccent } from './repo-color'
+import { useReview, type ReviewState } from './review/client'
+import DiffView, { FileList, type Focus } from './review/DiffView'
+import Merge from './review/Merge'
 
 /** The PR view's one webview. Layout panes are positive ids and its synthetic view ids start
  *  at -1 and count down (`src/layout/store.ts`), so this sits far below anything that counter
@@ -65,14 +68,15 @@ function Child({ repo, child, pr }: { repo: HomeRepo; child: HomeSession; pr: nu
   )
 }
 
-/** The PR pushed over the stream: what the lens knows on the left, github.com on the right.
- *  Mounted only while a PR is open, so the webview's life is this component's. */
-export default function PrPane({ opened }: { opened: OpenedPr }) {
-  const snapshot = useHome((s) => s.snapshot)
-  const { repo, pr, child } = prView(snapshot, opened)
+/** github.com in the one webview, drawn over its placeholder. It lives as long as the PR view
+ *  does and loads behind the diff at zero size, so the GitHub tab shows a page already there;
+ *  `shown` only sizes it. */
+function GithubPage({ url, shown }: { url: string; shown: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const page = useRef<HTMLDivElement>(null)
-  const close = () => homeStore.getState().closePr()
+  // Read every frame, so a tab switch resizes the webview without recreating it.
+  const visible = useRef(shown)
+  visible.current = shown
 
   // The page is a native child webview drawn over `.hm-pr-page`, outside the DOM: it follows
   // that element every frame and goes when this view does, so a lens back on its stream — or
@@ -80,18 +84,18 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
   useEffect(() => {
     const el = page.current!
     let alive = true
-    const measure = () => pageBounds(el.getBoundingClientRect(), !layout.getState().paletteOpen)
+    const measure = () => pageBounds(el.getBoundingClientRect(), visible.current && !layout.getState().paletteOpen)
     let last: Bounds = measure()
     // A close and a different PR opened inside the grace period reuse the live webview,
     // which `acquire` leaves on the old page.
     const was = webviews.url(PR_WEBVIEW)
-    webviews.acquire(PR_WEBVIEW, pr.url, last).then(
+    webviews.acquire(PR_WEBVIEW, url, last).then(
       () => alive && setError(null),
       (e) => alive && setError(String(e)),
     )
-    if (was !== undefined && was !== pr.url) {
-      webviews.remember(PR_WEBVIEW, pr.url)
-      browser.navigate(PR_WEBVIEW, pr.url).catch((e) => alive && setError(String(e)))
+    if (was !== undefined && was !== url) {
+      webviews.remember(PR_WEBVIEW, url)
+      browser.navigate(PR_WEBVIEW, url).catch((e) => alive && setError(String(e)))
     }
     let frame = requestAnimationFrame(function follow() {
       const next = measure()
@@ -106,7 +110,51 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
       cancelAnimationFrame(frame)
       webviews.release(PR_WEBVIEW)
     }
-  }, [pr.url])
+  }, [url])
+
+  return (
+    <div ref={page} className="hm-pr-page" hidden={!shown}>
+      {error && <div className="hm-pr-error">{error}</div>}
+    </div>
+  )
+}
+
+/** The native reading's column: the diff once `gh` answered, what it said when it did not. */
+function Reading({ state, focus, reload, onGithub }: { state: ReviewState; focus: Focus | null; reload: () => void; onGithub: () => void }) {
+  if (state.status === 'loading') return <div className="rv-wait hm-muted">reading the diff…</div>
+  if (state.status === 'error')
+    return (
+      <div className="rv-wait">
+        <div className="rv-error">{state.error}</div>
+        <div className="rv-acts">
+          <button className="hm-btn" onClick={reload}>
+            Try again
+          </button>
+          <button className="hm-btn" onClick={onGithub}>
+            Read it on GitHub
+          </button>
+        </div>
+      </div>
+    )
+  return <DiffView review={state.review} focus={focus} onGithub={onGithub} />
+}
+
+type Mode = 'diff' | 'github'
+
+/** The PR pushed over the stream: what the lens knows on the left, the change on the right —
+ *  read natively by default, or on github.com in a webview. */
+export default function PrPane({ opened }: { opened: OpenedPr }) {
+  const snapshot = useHome((s) => s.snapshot)
+  const { repo, pr, child } = prView(snapshot, opened)
+  const root = repo?.root ?? opened.repo
+  const { state, reload } = useReview(root, pr.number)
+  const [mode, setMode] = useState<Mode>('diff')
+  const [focus, setFocus] = useState<Focus | null>(null)
+  const close = () => homeStore.getState().closePr()
+  const pick = (path: string) => {
+    setMode('diff')
+    setFocus((f) => ({ path, n: (f?.n ?? 0) + 1 }))
+  }
 
   // ⌘← pops back to the stream, the breadcrumb's shortcut. Unbound elsewhere: the layout's
   // arrow bindings all carry alt (`src/actions/keys.ts`).
@@ -122,6 +170,7 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
   }, [])
 
   const check = CHECK[pr.checks]
+  const files = state.status === 'ready' ? state.review.files : []
   return (
     <div className="hm-pr-view" style={{ '--repo': repoAccent(opened.repo) } as CSSProperties}>
       <header className="hm-pr-crumbs">
@@ -144,6 +193,7 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
           </div>
           <h2 className="hm-pr-title">{pr.title}</h2>
           {check && <div className="hm-pr-checks">{check[1]}</div>}
+          <Merge root={root} pr={pr} review={state} />
           {repo && child ? (
             <Child repo={repo} child={child} pr={pr.number} />
           ) : (
@@ -156,9 +206,29 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
               </section>
             )
           )}
+          {files.length > 0 && (
+            <section className="hm-pr-files">
+              <div className="hm-section-label">Files</div>
+              <FileList files={files} onPick={pick} />
+            </section>
+          )}
         </aside>
-        <div ref={page} className="hm-pr-page">
-          {error && <div className="hm-pr-error">{error}</div>}
+        <div className="hm-pr-main">
+          <div className="hm-pr-modes" role="tablist">
+            <button role="tab" aria-selected={mode === 'diff'} className={`hm-pr-mode${mode === 'diff' ? ' on' : ''}`} onClick={() => setMode('diff')}>
+              Diff
+            </button>
+            <button role="tab" aria-selected={mode === 'github'} className={`hm-pr-mode${mode === 'github' ? ' on' : ''}`} onClick={() => setMode('github')}>
+              GitHub
+            </button>
+            {mode === 'diff' && state.status !== 'loading' && (
+              <button className="hm-link hm-pr-reload" title="read the PR again" onClick={reload}>
+                ↻
+              </button>
+            )}
+          </div>
+          <GithubPage url={pr.url} shown={mode === 'github'} />
+          {mode === 'diff' && <Reading state={state} focus={focus} reload={reload} onGithub={() => setMode('github')} />}
         </div>
       </div>
     </div>
