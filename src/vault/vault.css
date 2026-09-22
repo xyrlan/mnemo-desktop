@@ -161,10 +161,23 @@
 .vault .vr-more { margin: 6px 0; }
 
 .vr-side { flex: 0 0 38%; min-width: 300px; max-width: 560px; display: flex; flex-direction: column; gap: 6px; min-height: 0; border-left: 1px solid var(--border); padding-left: 8px; }
-.vr-side .vt-page { flex: 1 1 50%; }
+.vr-side-bar { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
+.vr-tabs { flex: 1; display: flex; gap: 2px; }
+.vault .vr-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-muted); padding: 4px 8px; margin-bottom: -1px; }
+.vault .vr-tab:hover:not(:disabled) { color: var(--fg); }
+.vault .vr-tab.vr-tab-on { color: var(--fg); border-bottom-color: var(--accent); }
+.vr-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vr-side-body > .vt-page, .vr-side-body > .ve { flex: 1; }
+.vr:focus { outline: none; }
+.vault .vt-x { border: 0; background: transparent; color: var(--fg-muted); font-size: 14px; line-height: 1; padding: 0 4px; }
+.vault .vt-x:hover:not(:disabled) { color: var(--fg); }
+.vt-error-line { display: flex; align-items: flex-start; gap: 4px; }
+.vt-error-line .vt-error { flex: 1; min-width: 0; }
+.vt-loading::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--fg-muted); animation: vt-loading 1s ease-in-out infinite; }
+@keyframes vt-loading { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .vt-loading::before { animation: none; } }
 .ve { flex: 1 1 50%; min-height: 200px; display: flex; flex-direction: column; }
-.ve-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding-bottom: 4px; }
-.ve-title { font-weight: 700; }
+.ve-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 0; }
 .ve-canvas { position: relative; flex: 1; min-height: 320px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .ve-msg { position: absolute; inset: 0 auto auto 0; z-index: 5; padding: 8px 10px; margin: 0; }
 .ve-canvas .gr-card { min-width: 0; max-width: 170px; padding: 4px 8px; }

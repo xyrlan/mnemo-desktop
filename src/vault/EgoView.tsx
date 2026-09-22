@@ -59,7 +59,6 @@ const EMPTY = { nodes: [], edges: [] }
  *  topics. A neighbour's click selects it; a pulse naming a node makes it glow. */
 export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: PulseStore }) {
   const ego = useVault((s) => s.ego)
-  const loading = useVault((s) => s.egoLoading)
   useEffect(() => {
     if (vault.getState().ego?.center !== path) void vault.getState().loadEgo(path)
   }, [path])
@@ -69,11 +68,12 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
   const glow = useGlow(shown, pulses)
   const flow = useMemo(() => withGlow(laidOut, glow), [laidOut, glow])
   const neighbours = Math.max(0, (shown?.nodes.length ?? 0) - 1)
+  // Dismissing hides this read's error; the next read (another rule) shows its own.
+  const [dismissed, setDismissed] = useState<VaultGraph | null>(null)
 
   return (
     <section className="ve">
       <div className="ve-bar">
-        <span className="ve-title">Neighbourhood</span>
         {shown && !shown.error && (
           <span className="vt-count">{countLabel(shown)}</span>
         )}
@@ -87,8 +87,20 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
         </span>
       </div>
       <div className="ve-canvas">
-        {shown?.error && <pre className="vt-error ve-msg">{shown.error}</pre>}
-        {!shown && <div className="vt-empty ve-msg">{loading ? 'reading the neighbourhood…' : ''}</div>}
+        {shown?.error && dismissed !== shown && (
+          <div className="vt-error-line ve-msg">
+            <pre className="vt-error">{shown.error}</pre>
+            <button className="vt-x" title="Dismiss" aria-label="Dismiss" onClick={() => setDismissed(shown)}>
+              ×
+            </button>
+          </div>
+        )}
+        {/* Not yet read is always a read in flight: the mount starts one before the first paint. */}
+        {!shown && (
+          <div className="vt-empty vt-loading ve-msg" role="status">
+            reading the neighbourhood…
+          </div>
+        )}
         {shown && !shown.error && neighbours === 0 && <div className="vt-empty ve-msg">No links and no shared topics.</div>}
         {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} fitMinZoom={0.85} onNodeClick={(id) => id !== path && !id.startsWith(GHOST) && void vault.getState().select(id)} />}
       </div>

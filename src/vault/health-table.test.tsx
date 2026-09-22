@@ -51,13 +51,18 @@ const health: Health = {
   error: null,
 }
 
+// A test sets these to hold `vault_health` open, or to make it or `vault_ego` fail.
+let healthGate: Promise<void> | null = null
+let healthError: string | null = null
+let egoError: string | null = null
+
 vi.mock('@tauri-apps/api/core', () => ({
   Channel: class {},
   invoke: async (cmd: string, args?: Record<string, unknown>) => {
     calls.push([cmd, args])
     if (cmd === 'vault_rules') return args!.filter === 'nothing' ? [] : args!.scope === 'agent:mnemo-desktop' ? rules.filter((r) => r.agent === 'mnemo-desktop') : rules
-    if (cmd === 'vault_ego') return egoOf(args!.path as string)
-    if (cmd === 'vault_health') return health
+    if (cmd === 'vault_ego') return { ...egoOf(args!.path as string), error: egoError }
+    if (cmd === 'vault_health') return (await healthGate, { ...health, error: healthError })
     if (cmd === 'vault_run' && args!.action === 'stale') return ran(JSON.stringify([{ slug: 'mnemo-desktop__target-dir', reason: 'cites a deleted file' }]))
     if (cmd === 'vault_run') return ran('ok')
     if (cmd === 'vault_page') {
@@ -159,6 +164,9 @@ test('the health screen is a table of rules by heat with badges, tiles, filters 
   await act(async () => root.unmount())
 })
 
+const tab = (host: HTMLElement, label: string) => byText(host, '.vr-side [role="tab"]', label)
+const key = (el: Element, k: string) => act(() => void el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })))
+
 test('a row opens its page and ego graph; a neighbour selects; disable asks twice', async () => {
   const { vault } = await import('./app-store')
   vault.setState({ scope: '', filter: '', rulesLoaded: false })
@@ -170,6 +178,8 @@ test('a row opens its page and ego graph; a neighbour selects; disable asks twic
   await click(byText(host, '.vr-name-main', 'Run the tests')!.closest('tr'))
   await flush()
   expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('Run the tests')
+  await click(tab(host, 'Neighbourhood'))
+  await flush()
   expect(calls.filter(([c]) => c === 'vault_ego').pop()).toEqual(['vault_ego', { path: `${dir}/run-tests.md`, limit: 12 }])
   expect([...host.querySelectorAll('.stub-node:not(.ve-ghost)')].map((b) => [b.textContent, b.className])).toEqual([
     ['run-tests', 'stub-node ve-centre'],
@@ -179,14 +189,17 @@ test('a row opens its page and ego graph; a neighbour selects; disable asks twic
   // A ghost card only frames the canvas: clicking one selects nothing.
   await click(host.querySelector('.stub-node.ve-ghost'))
   await flush()
-  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('Run the tests')
+  expect(host.querySelector('.stub-node.ve-centre')?.textContent).toBe('run-tests')
   expect(host.querySelector('.vr-selected .vr-name-main')?.textContent).toBe('Run the tests')
 
+  // A neighbour's click keeps the graph open, now centred on the neighbour.
   await click(byText(host, '.stub-node', 'bare'))
   await flush()
-  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('bare')
   expect(host.querySelector('.vr-selected .vr-name-main')?.textContent).toBe('bare')
   expect(host.querySelector('.stub-node.ve-centre')?.textContent).toBe('bare')
+  await click(tab(host, 'Page'))
+  expect(host.querySelector('.stub-graph')).toBeNull()
+  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('bare')
 
   const disable = () => host.querySelector('.vr-row:nth-child(2) .vr-acts .vt-destructive')!
   await click(disable())
@@ -209,6 +222,7 @@ test('a pulse naming a rule on the ego graph makes its node glow for GLOW_MS', a
   pulseStore.getState().push({ at: 1, kind: 'reflex', project: 'p', agent: 'p', slugs: ['run-tests'] })
   await vault.getState().select(`${dir}/bare.md`)
   const { host, root } = await mount()
+  await click(tab(host, 'Neighbourhood'))
   await flush()
   const cls = (label: string) => byText(host, '.stub-node', label)!.className
   expect(host.querySelectorAll('.ve-glow')).toHaveLength(0)
@@ -226,4 +240,134 @@ test('a pulse naming a rule on the ego graph makes its node glow for GLOW_MS', a
   expect(host.querySelectorAll('.ve-glow')).toHaveLength(0)
   vi.useRealTimers()
   await act(async () => root.unmount())
+})
+
+test('the side panel opens on Page, runs vault_ego only when Neighbourhood is asked for, and closes with ×', async () => {
+  const { vault } = await import('./app-store')
+  vault.setState({ selected: null, page: null, ego: null })
+  const { host, root } = await mount()
+  const egoCalls = () => calls.filter(([c]) => c === 'vault_ego').length
+  const before = egoCalls()
+
+  await click(byText(host, '.vr-name-main', 'target-dir')!.closest('tr'))
+  await flush()
+  expect([...host.querySelectorAll('.vr-side [role="tab"]')].map((t) => [t.textContent, t.getAttribute('aria-selected')])).toEqual([
+    ['Page', 'true'],
+    ['Neighbourhood', 'false'],
+  ])
+  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('target-dir')
+  expect(host.querySelector('.vr-side .ve')).toBeNull()
+  // Clicking through rows reads pages, never the graph.
+  await click(byText(host, '.vr-name-main', 'bare')!.closest('tr'))
+  await flush()
+  expect(host.querySelector('.vr-side .vt-title')?.textContent).toBe('bare')
+  expect(egoCalls()).toBe(before)
+
+  await click(tab(host, 'Neighbourhood'))
+  await flush()
+  expect(egoCalls()).toBe(before + 1)
+  expect(host.querySelector('.stub-node.ve-centre')?.textContent).toBe('bare')
+
+  await click(host.querySelector('.vr-side-close'))
+  expect(host.querySelector('.vr-side')).toBeNull()
+  expect(host.querySelector('.vr-with-side')).toBeNull()
+  expect(host.querySelector('.vr-selected')).toBeNull()
+  expect(vault.getState().selected).toBeNull()
+
+  // Reopened, the panel starts on Page again.
+  await click(byText(host, '.vr-name-main', 'target-dir')!.closest('tr'))
+  await flush()
+  expect(tab(host, 'Page')?.getAttribute('aria-selected')).toBe('true')
+  expect(host.querySelector('.vr-side .ve')).toBeNull()
+  await act(async () => root.unmount())
+})
+
+test('Esc closes the side panel from the table, but not from the filter box', async () => {
+  const { vault } = await import('./app-store')
+  vault.setState({ selected: null, page: null, filter: '' })
+  const { host, root } = await mount()
+  await click(byText(host, '.vr-name-main', 'target-dir')!.closest('tr'))
+  await flush()
+  expect(host.querySelector('.vr-side')).not.toBeNull()
+
+  // In the filter box Esc clears the text and leaves the panel alone.
+  const input = host.querySelector('.vr-bar input') as HTMLInputElement
+  await key(input, 'Escape')
+  expect(host.querySelector('.vr-side')).not.toBeNull()
+
+  // A modified Esc is somebody else's chord.
+  await act(() => void host.querySelector('.vr-name-main')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', metaKey: true, bubbles: true })))
+  expect(host.querySelector('.vr-side')).not.toBeNull()
+
+  // From a row, or from inside the panel, it closes.
+  await key(host.querySelector('.vr-name-main')!, 'Escape')
+  expect(host.querySelector('.vr-side')).toBeNull()
+  expect(vault.getState().selected).toBeNull()
+  await click(byText(host, '.vr-name-main', 'bare')!.closest('tr'))
+  await flush()
+  await key(tab(host, 'Page')!, 'Escape')
+  expect(host.querySelector('.vr-side')).toBeNull()
+
+  // With nothing open Esc is let through to whoever is listening above the table.
+  let reached = false
+  const above = () => (reached = true)
+  document.addEventListener('keydown', above)
+  await key(host.querySelector('.vr-name-main')!, 'Escape')
+  expect(reached).toBe(true)
+  document.removeEventListener('keydown', above)
+  await act(async () => root.unmount())
+})
+
+test('the health strip shows a loading state, never a blank, while the first read runs', async () => {
+  const { vault } = await import('./app-store')
+  vault.setState({ health: null, healthLoading: false })
+  let open!: () => void
+  healthGate = new Promise((r) => (open = r))
+  const { host, root } = await mount()
+  const status = host.querySelector('.vr-strip .vt-loading')
+  expect(status?.getAttribute('role')).toBe('status')
+  expect(status?.textContent).toBe('running mnemo status, doctor, stale…')
+  healthGate = null
+  open()
+  await flush()
+  expect(host.querySelector('.vr-strip .vt-loading')).toBeNull()
+  expect(host.querySelector('.vr-strip .vh-tile')).not.toBeNull()
+  await act(async () => root.unmount())
+})
+
+test('a health error and a neighbourhood error can each be dismissed, and come back on the next read', async () => {
+  const { vault } = await import('./app-store')
+  vault.setState({ health: null, selected: null, page: null, ego: null })
+  healthError = 'mnemo: not found'
+  egoError = 'vault_ego: boom'
+  try {
+    const { host, root } = await mount()
+    const healthErr = () => host.querySelector('.vr .vt-error-line')
+    expect(healthErr()?.textContent).toContain('mnemo: not found')
+    await click(healthErr()!.querySelector('button'))
+    expect(healthErr()).toBeNull()
+    await click(byText(host, '.vr-strip button', '↻'))
+    await flush()
+    expect(healthErr()?.textContent).toContain('mnemo: not found')
+    await click(healthErr()!.querySelector('button'))
+
+    await click(byText(host, '.vr-name-main', 'bare')!.closest('tr'))
+    await flush()
+    await click(tab(host, 'Neighbourhood'))
+    await flush()
+    const egoErr = () => host.querySelector('.ve .vt-error-line')
+    expect(egoErr()?.textContent).toContain('vault_ego: boom')
+    await click(egoErr()!.querySelector('button'))
+    expect(egoErr()).toBeNull()
+    await click(tab(host, 'Page'))
+    await click(byText(host, '.vr-name-main', 'target-dir')!.closest('tr'))
+    await flush()
+    await click(tab(host, 'Neighbourhood'))
+    await flush()
+    expect(egoErr()?.textContent).toContain('vault_ego: boom')
+    await act(async () => root.unmount())
+  } finally {
+    healthError = null
+    egoError = null
+  }
 })
