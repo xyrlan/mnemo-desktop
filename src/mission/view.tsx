@@ -9,6 +9,9 @@ import { attachChild, openMissionPane, ReplyBox } from './rows'
 import { estimateUsd, fmtUsd } from './cost'
 import { clock, timelineRows } from './timeline'
 import { settingsStore } from '../settings/app-store'
+import { MemoryPanel } from './memory/MemoryPanel'
+import { memoryClient } from './memory/client'
+import type { ChildMemory } from './memory/types'
 
 function MissionPane({ id: paneId, props }: PaneViewProps) {
   const id = String(props.id ?? '')
@@ -18,6 +21,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   // useSyncExternalStore then re-renders until React throws and unmounts the app.
   const sentList = useMission((s) => s.sent[id]) ?? []
   const [lines, setLines] = useState<TimelineLine[]>([])
+  const [memory, setMemory] = useState<ChildMemory | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
   const seenAtOpen = useRef<number | undefined>(looked)
   const bottom = useRef<HTMLDivElement>(null)
@@ -35,6 +39,25 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
       window.clearInterval(timer)
     }
   }, [id])
+
+  const sessionId = child?.session_id ?? null
+  useEffect(() => {
+    if (!sessionId) {
+      setMemory(null)
+      return
+    }
+    let alive = true
+    const load = async () => {
+      const m = await memoryClient.childMemory(sessionId)
+      if (alive) setMemory(m)
+    }
+    void load()
+    const timer = window.setInterval(load, 5000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [sessionId])
 
   // Depend on the length, not the child: every poll deserialises a new object graph.
   const timelineLen = child?.timeline_len
@@ -88,6 +111,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
           </button>
         </div>
       </div>
+      <MemoryPanel memory={memory} hasSession={!!sessionId} />
       <div className="mission-timeline">
         {rows.map((r) =>
           r.kind === 'you' ? (

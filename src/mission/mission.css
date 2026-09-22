@@ -62,6 +62,27 @@
 .ws-pane.active .ws-name { font-weight: 600; }
 .ws-pane .ws-sub { font-size: 10px; }
 
+/* ---- mission memory: what the vault gave this child and what it pushed back against
+   (round18 · child-memory), between the head and the timeline it sits beside. ---- */
+.mm-empty { padding: 4px 10px; color: var(--fg-muted); font-size: 11px; }
+.mm-head { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 10px; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; text-align: left; }
+.mm-head:hover { color: var(--fg); }
+.mm-title { font-weight: 700; }
+.mm-badge { color: var(--fg-muted); text-transform: none; letter-spacing: 0; }
+.mm-body { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.mm-section { min-width: 160px; flex: 1 1 200px; }
+.mm-label { color: var(--fg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+.mm-none { color: var(--fg-muted); font-size: 11px; }
+.mm-briefing { font-size: 12px; }
+.mm-since { color: var(--fg-muted); font-size: 10px; margin-left: 6px; }
+.mm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.mm-list li { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-slug { font-family: var(--font-mono, ui-monospace, monospace); }
+.mm-count { color: var(--fg-muted); font-size: 10px; margin-left: 4px; }
+.mm-friction li { white-space: normal; margin-bottom: 4px; }
+.mm-rule-text { color: var(--fg); }
+.mm-contradicts { color: var(--ansi-yellow); font-size: 11px; }
+
 /* Where a dragged pane would land: the whole line for a swap, the edge it would be grafted onto. */
 .ws-drop.ws-over { background: var(--bg); }
 .ws-drop.ws-over-center { box-shadow: inset 0 0 0 1px var(--accent); }

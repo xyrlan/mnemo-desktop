@@ -1,0 +1,5 @@
+{"timestamp": "2026-09-22T22:06:20Z", "tool": "session_start.inject", "project": "mnemo", "agent": "mnemo", "session_id": "sess-b", "result_count": 1}
+{"timestamp": "2026-09-22T22:06:31Z", "tool": "list_rules_by_topic", "project": "mnemo-desktop", "session_id": "sess-b", "hit_slugs": ["stream-state-persist-with-overlay-not-swap", "show-toast-feedback-on-all-state-changing-operations"], "result_count": 2}
+{"timestamp": "2026-09-22T22:06:37Z", "tool": "read_mnemo_rule", "project": "mnemo-desktop", "session_id": "sess-b", "hit_slugs": ["stream-state-persist-with-overlay-not-swap"], "result_count": 1}
+{"timestamp": "2026-09-22T22:08:20Z", "tool": "session_start.inject", "project": "mnemo", "agent": "mnemo", "session_id": "sess-no-reads", "result_count": 1}
+{"timestamp": "2026-09-22T22:08:31Z", "tool": "list_rules_by_topic", "project": "mnemo-desktop", "session_id": "sess-no-reads", "hit_slugs": ["some-other-rule"], "result_count": 1}

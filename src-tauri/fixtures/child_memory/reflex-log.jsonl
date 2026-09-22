@@ -1,0 +1,3 @@
+{"session_id": "sess-b", "project": "mnemo-desktop", "prompt_hash": "sha256:3", "emitted": ["mnemo__run-the-tests", "shared/bg-spare-pool-is-one-spare"], "scores": [5.0, 4.0], "silence_reason": null, "ts": "2026-09-21T10:00:00Z"}
+{"session_id": "sess-other", "project": "mnemo-desktop", "prompt_hash": "sha256:4", "emitted": ["nope"], "scores": [1.0], "silence_reason": null, "ts": "2026-09-21T09:00:00Z"}
+not json

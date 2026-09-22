@@ -1,0 +1,2 @@
+{"timestamp": "2026-09-15T10:00:00Z", "tool": "read_mnemo_rule", "project": "mnemo-desktop", "hit_slugs": ["some-rule"], "result_count": 1}
+{"timestamp": "2026-09-15T10:01:00Z", "tool": "list_rules_by_topic", "project": "mnemo-desktop", "hit_slugs": ["some-other-rule"], "result_count": 1}
