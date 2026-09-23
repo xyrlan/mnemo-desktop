@@ -10,6 +10,9 @@ pub mod proc;
 // -- editor (src/fs.rs) --
 pub mod fs;
 
+// -- tool-path (src/tools.rs) --
+pub mod tools;
+
 // -- browser (src/browser.rs) --
 pub mod browser;
 
@@ -118,6 +121,9 @@ pub fn run() {
             fs::fs_read,
             fs::fs_write,
             fs::fs_list,
+
+            // -- tool-path commands --
+            tools::tools_status,
 
             // -- browser commands --
             browser::browser_create,
