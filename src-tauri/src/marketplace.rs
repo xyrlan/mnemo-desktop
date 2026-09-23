@@ -17,7 +17,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The source a fresh install lists.
 pub const DEFAULT_SOURCE: &str = "https://github.com/xyrlan/mnemo-rules";
@@ -712,7 +711,7 @@ impl Marketplace {
     }
 
     fn git(&self, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
-        let mut cmd = Command::new("git");
+        let mut cmd = crate::proc::command("git");
         cmd.args(args).env("PATH", &self.path_env).env("GIT_TERMINAL_PROMPT", "0").stdin(std::process::Stdio::null());
         if let Some(d) = cwd {
             cmd.current_dir(d);
@@ -837,7 +836,7 @@ pub fn import_with(program: &str, path_env: &str, path: &str, cwd: &str) -> Resu
     if cwd.trim().is_empty() || !Path::new(cwd).is_dir() {
         return Err(format!("no project to import into: {cwd:?} is not a directory"));
     }
-    let out = Command::new(program)
+    let out = crate::proc::command(program)
         .args(["import", path])
         .current_dir(cwd)
         .env("PATH", path_env)
@@ -867,7 +866,7 @@ fn combined(out: &std::process::Output) -> String {
 /// up), no stdin, no colour, no credential prompts. Ok with stdout on exit 0, Err
 /// with what it said otherwise.
 fn run_in(program: &str, args: &[&str], cwd: &Path, path_env: &str) -> Result<String, String> {
-    let out = Command::new(program)
+    let out = crate::proc::command(program)
         .args(args)
         .current_dir(cwd)
         .env("PATH", path_env)
@@ -972,7 +971,7 @@ pub fn repo_with(path_env: &str, cwd: &str, vault: Option<&Path>) -> RepoRules {
 /// exit 0 (and whether the tree now has something to commit), Err with it otherwise.
 pub fn publish_with(program: &str, path_env: &str, root: &str) -> Result<Published, String> {
     let root = checked_root(root, path_env)?;
-    let out = Command::new(program)
+    let out = crate::proc::command(program)
         .arg("publish")
         .current_dir(&root)
         .env("PATH", path_env)
@@ -1215,7 +1214,7 @@ mod tests {
     }
 
     fn git(args: &[&str], cwd: &Path) {
-        let out = Command::new("git")
+        let out = crate::proc::command("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(cwd)
@@ -1230,7 +1229,7 @@ mod tests {
         copy_dir(Path::new(FIXTURE), &repo);
         git(&["init", "--quiet", "-b", "main"], &repo);
         git(&["add", "-A"], &repo);
-        let out = Command::new("git")
+        let out = crate::proc::command("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "rules"])
             .env("GIT_COMMITTER_DATE", "2026-09-10T12:00:00+00:00")
             .env("GIT_AUTHOR_DATE", "2026-09-10T12:00:00+00:00")
@@ -1588,7 +1587,7 @@ mod tests {
     }
 
     fn git_out(args: &[&str], cwd: &Path) -> String {
-        let out = Command::new("git").args(args).current_dir(cwd).output().unwrap();
+        let out = crate::proc::command("git").args(args).current_dir(cwd).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }

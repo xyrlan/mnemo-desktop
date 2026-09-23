@@ -15,7 +15,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Page types in the order the tree shows them; anything else follows, `untyped` last.
 pub const TYPES: &[&str] = &["feedback", "project", "reference", "user"];
@@ -1255,7 +1254,7 @@ fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str)
     if !dir.is_dir() {
         return refuse(format!("{}: not a directory", dir.display()));
     }
-    let out = Command::new(program)
+    let out = crate::proc::command(program)
         .arg(action)
         .args(args)
         .current_dir(&dir)

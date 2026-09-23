@@ -9,7 +9,6 @@
 //! `gh pr view`, with the reason in `diff_error`, and the webview is one click away.
 
 use std::path::Path;
-use std::process::Command;
 
 use serde::Serialize;
 
@@ -311,7 +310,7 @@ pub fn parse_view(json: &str) -> Result<Review, String> {
 // ------------------------------------------------------------- running --
 
 fn run_gh(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let out = Command::new("gh")
+    let out = crate::proc::command("gh")
         .args(args)
         .current_dir(cwd)
         .env("PATH", login_path())

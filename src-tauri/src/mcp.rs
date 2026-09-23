@@ -243,7 +243,7 @@ fn install() -> Result<(), String> {
         let _ = std::fs::write(&marker, "");
         return Ok(());
     }
-    let out = std::process::Command::new(crate::pty::default_shell())
+    let out = crate::proc::command(crate::pty::default_shell())
         .args(["-l", "-c", &add_command(&stable)])
         .stdin(std::process::Stdio::null())
         .output()

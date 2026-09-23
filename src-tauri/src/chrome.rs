@@ -163,8 +163,7 @@ pub async fn chrome_session(pane_pid: u32) -> Option<String> {
 mod tests {
     use super::*;
     use std::cell::Cell;
-    use std::process::Command;
-
+    
     #[test]
     fn cache_reuses_within_the_ttl_and_recomputes_after() {
         let c = Cache::new(Duration::from_secs(5));
@@ -254,7 +253,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn children_of_asks_pgrep_for_several_parents() {
-        let spawn = || Command::new("sh").args(["-c", "sleep 30; true"]).spawn().unwrap();
+        let spawn = || crate::proc::command("sh").args(["-c", "sleep 30; true"]).spawn().unwrap();
         let (mut a, mut b) = (spawn(), spawn());
         // The shells fork their sleep a moment after they start.
         let sleep_of = |sh: u32| {
@@ -276,7 +275,7 @@ mod tests {
         assert!(children_of(&[sa]).is_empty());
         assert_eq!(session_below(b.id(), &HashMap::from([(sb, ("live".to_string(), 0))]), children_of).as_deref(), Some("live"));
         for pid in [sa, sb] {
-            let _ = Command::new("kill").arg(pid.to_string()).status();
+            let _ = crate::proc::command("kill").arg(pid.to_string()).status();
         }
         let _ = (a.wait(), b.wait());
     }
@@ -315,7 +314,7 @@ mod tests {
         std::fs::create_dir_all(&main).unwrap();
         std::fs::create_dir_all(&plain).unwrap();
         let git = |args: &[&str], cwd: &Path| {
-            let out = Command::new("git").args(args).current_dir(cwd).output().unwrap();
+            let out = crate::proc::command("git").args(args).current_dir(cwd).output().unwrap();
             assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         };

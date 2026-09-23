@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 // ---------------------------------------------------------------- model --
 
@@ -626,7 +625,7 @@ pub fn login_path() -> String {
                 return inherited;
             }
             let shell = crate::pty::default_shell();
-            let probed = Command::new(&shell)
+            let probed = crate::proc::command(&shell)
                 .args(["-lic", "printf '\\037MNEMO_PATH=%s\\037' \"$PATH\""])
                 .env("TERM", "dumb")
                 .env("MNEMO_NO_SHELL_INTEGRATION", "1")
@@ -636,7 +635,7 @@ pub fn login_path() -> String {
                 .and_then(|o| extract_marked_path(&String::from_utf8_lossy(&o.stdout)))
                 .or_else(|| {
                     // A broken interactive rc: fall back to the plain login probe.
-                    Command::new(&shell)
+                    crate::proc::command(&shell)
                         .args(["-lc", "printf %s \"$PATH\""])
                         .stdin(std::process::Stdio::null())
                         .output()
@@ -693,7 +692,7 @@ pub fn merge_paths(probed: &str, inherited: &str, extra: &[String]) -> String {
 }
 
 pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
-    let mut cmd = Command::new(program);
+    let mut cmd = crate::proc::command(program);
     cmd.args(args);
     cmd.env("PATH", login_path());
     if let Some(d) = cwd {
@@ -1471,7 +1470,7 @@ mod tests {
         let main = tmp.join("main");
         std::fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str], cwd: &Path| {
-            let ok = Command::new("git").args(args).current_dir(cwd).output().unwrap().status.success();
+            let ok = crate::proc::command("git").args(args).current_dir(cwd).output().unwrap().status.success();
             assert!(ok, "git {:?}", args);
         };
         git(&["init", "-q", "-b", "main"], &main);
