@@ -5,10 +5,11 @@ import { missionStore, useMission } from '../mission/app-store'
 import { homeStore, useHome } from '../home/app-store'
 import { useSettings } from '../settings/app-store'
 import { githubStore, selectionStore, useGithub, useSelection } from '../github/app-store'
-import { dispatchIssue, dispatchIssues, ghLogin, installGh, openIssue, openUrl, refreshScope } from '../github/actions'
+import { dispatchContract, dispatchIssue, dispatchIssues, ghLogin, installGh, openIssue, openUrl, refreshScope, resumeChildren } from '../github/actions'
 import { filterByLabels, labelsOf, linkIssues, linkWord, NEEDS_SCOPE, SCOPE_FIX, type BoardItem, type Issue, type IssueLink } from '../github/types'
 import type { Pr } from '../mission/types'
 import LabelPicker from '../github/LabelPicker'
+import { JobDrawer } from '../cockpit/JobLog'
 import { boardRoot, knownRoots } from './root'
 import './board.css'
 
@@ -171,6 +172,69 @@ function DispatchSheet({ root, ns, onClose }: { root: string; ns: number[]; onCl
   )
 }
 
+/** The confirm sheet for a contract dispatch: unlike issue numbers, a contract's path is not a
+ *  closed set, so it is the one free-text field the board offers — everything else it sends
+ *  (`--model`, `--effort`, `--may`) stays a closed select like the issue sheet's. */
+function ContractSheet({ root, onClose }: { root: string; onClose: () => void }) {
+  const [path, setPath] = useState('')
+  const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('')
+  const [may, setMay] = useState('')
+  const go = () => {
+    const p = path.trim()
+    if (!p) return
+    dispatchContract(root, p, { model: model.trim() || undefined, effort: effort.trim() || undefined, may: may.trim() || undefined })
+    onClose()
+  }
+  return (
+    <div className="bd-sheet-backdrop" onClick={onClose}>
+      <div className="bd-sheet" onClick={(e) => e.stopPropagation()}>
+        <h3>dispatch a contract</h3>
+        <label>
+          contract path
+          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="docs/contracts/round18.md" />
+        </label>
+        <label>
+          model
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          effort
+          <select value={effort} onChange={(e) => setEffort(e.target.value)}>
+            {EFFORTS.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          may
+          <select value={may} onChange={(e) => setMay(e.target.value)}>
+            {MAY.map((m) => (
+              <option key={m} value={m}>
+                {m || 'default'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="bd-sheet-actions">
+          <button onClick={onClose}>cancel</button>
+          <button className="bd-primary" onClick={go} disabled={!path.trim()}>
+            dispatch
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** The GitHub Project linked to a repo as a kanban of its Status field; without a Project (or
  *  without the `project` scope) the repo's open issues as a list, with the cockpit's label
  *  filter. Cards carry what the mission snapshot knows: the linked child or PR. */
@@ -221,10 +285,12 @@ export default function Board(_: PaneViewProps) {
   const selRoot = useSelection((s) => s.root)
   const selNs = useSelection((s) => s.ns)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [contractOpen, setContractOpen] = useState(false)
   const selected = root && selRoot === root ? selNs : []
 
   useEffect(() => {
     setSheetOpen(false)
+    setContractOpen(false)
   }, [root])
 
   let body
@@ -319,10 +385,24 @@ export default function Board(_: PaneViewProps) {
             </button>
           </span>
         )}
+        {root && (
+          <button className="bd-link" onClick={() => setContractOpen(true)} title="mnemo dispatch --contract <path>: dispatch every piece of a decomposition contract">
+            dispatch contract
+          </button>
+        )}
+        {root && (
+          <button className="bd-link" onClick={() => resumeChildren(root)} title="mnemo resume: wake this repo's children the account's rate limit stopped">
+            resume
+          </button>
+        )}
         {root && b && !b.board && auth?.logged && <LabelPicker root={root} labels={labelsOf(issues)} selected={labels} />}
       </div>
-      {body}
+      <div className="bd-body">
+        <div className="bd-body-inner">{body}</div>
+        <JobDrawer />
+      </div>
       {sheetOpen && root && selected.length > 0 && <DispatchSheet root={root} ns={selected} onClose={() => setSheetOpen(false)} />}
+      {contractOpen && root && <ContractSheet root={root} onClose={() => setContractOpen(false)} />}
     </div>
   )
 }
