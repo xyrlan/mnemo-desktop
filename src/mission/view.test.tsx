@@ -3,7 +3,15 @@ import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 
 const timeline = vi.hoisted(() => ({ lines: [] as { at: string; state: string; detail: string; text: string }[] }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({ lines: timeline.lines, total: timeline.lines.length })) }))
+const memory = vi.hoisted(
+  () => ({ value: null }) as { value: { briefing: unknown; injected: unknown[]; friction: unknown[]; mcp_reads: unknown } | null },
+)
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async (cmd: string) => {
+    if (cmd === 'child_memory') return memory.value ?? { briefing: null, injected: [], friction: [], mcp_reads: null }
+    return { lines: timeline.lines, total: timeline.lines.length }
+  }),
+}))
 
 import { missionStore } from './app-store'
 import { paneView } from '../panes/registry'
@@ -24,6 +32,7 @@ beforeEach(() => {
   root = createRoot(host)
   missionStore.setState({ snapshot, lastError: null, looked: {}, drafts: {}, sent: {} })
   timeline.lines = []
+  memory.value = null
 })
 
 afterEach(() => {
@@ -123,4 +132,44 @@ test('the pane folds repeated status lines and places a sent reply at its time',
   expect(host.querySelectorAll('.tl-run-line')).toHaveLength(3)
   await act(async () => head.click())
   expect(host.querySelectorAll('.tl-run-line')).toHaveLength(0)
+})
+
+test('a child with no session yet shows the mission pane says so, and fetches no memory', async () => {
+  const child = allChildren(snapshot).find((c) => c.session_id === null)!
+  const Pane = paneView('mission')!
+  await act(async () => {
+    root.render(<Pane id={1} props={{ id: child.id }} />)
+  })
+  expect(host.querySelector('.mm')?.textContent).toBe('memory: no session yet')
+})
+
+test('a child with a session_id shows what the vault gave it and what it pushed back against', async () => {
+  const [first] = allChildren(snapshot)
+  const withSession = { ...first, session_id: 'sess-a43d' }
+  missionStore.setState({
+    snapshot: {
+      ...snapshot,
+      repos: snapshot.repos.map((r) => ({
+        ...r,
+        children: r.children.map((c) => (c.id === withSession.id ? withSession : c)),
+        missions: r.missions.map((m) => ({
+          ...m,
+          pieces: m.pieces.map((p) => ({ ...p, child: p.child?.id === withSession.id ? withSession : p.child })),
+        })),
+      })),
+    },
+  })
+  memory.value = {
+    briefing: { path: 'bots/mnemo-desktop/briefings/sessions/aa11.md', at: Date.now() },
+    injected: [{ slug: 'run-the-tests', at: Date.now() }],
+    friction: [{ rule_text: 'Ask before rewriting a whole file.', contradicts: ['some-stale-rule'], injected_in_session: [], at: Date.now() }],
+    mcp_reads: null,
+  }
+  const Pane = paneView('mission')!
+  await act(async () => {
+    root.render(<Pane id={1} props={{ id: withSession.id }} />)
+  })
+  expect(host.querySelector('.mm-briefing')?.textContent).toContain('aa11.md')
+  expect(host.querySelector('.mm-slug')?.textContent).toBe('run-the-tests')
+  expect(host.querySelector('.mm-rule-text')?.textContent).toBe('Ask before rewriting a whole file.')
 })

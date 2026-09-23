@@ -17,6 +17,9 @@ pub mod settings;
 pub mod mission;
 pub mod mission_commands;
 
+// -- child-memory (src-tauri/src/child_memory.rs) --
+pub mod child_memory;
+
 // -- voice (src/voice.rs) --
 pub mod voice;
 
@@ -133,6 +136,9 @@ pub fn run() {
             mission_commands::mission_looked,
             mission_commands::mission_translate,
             mission_commands::mission_waiting_for,
+
+            // -- child-memory commands --
+            child_memory::child_memory,
             settings::settings_read,
             settings::settings_write,
 
