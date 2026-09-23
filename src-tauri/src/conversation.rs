@@ -50,6 +50,8 @@ const BATCH: Duration = Duration::from_millis(50);
 const MAX_EVENT: u64 = 4 << 20;
 /// Backward scans read this much at a time.
 const BLOCK: u64 = 64 << 10;
+/// How much of the first line fingerprints a file.
+const HEAD: u64 = 4 << 10;
 
 /// Starts following `session_id`'s transcript: the last `tail` complete lines first, then each
 /// line appended. Returns the follow's id for `conversation_unfollow`.
@@ -159,11 +161,13 @@ struct Tailer<F, S> {
     woken: Receiver<()>,
 }
 
-/// Where a follow is in its file: the end of the last complete line sent, and which file that was.
+/// Where a follow is in its file: the end of the last complete line sent, and which file that was
+/// (its identity where the OS gives one, and its first line everywhere).
 #[derive(Default)]
 struct Cursor {
     offset: u64,
     file: Option<FileId>,
+    head: Option<Vec<u8>>,
 }
 
 /// What a read of the file asks the follow to do next.
@@ -247,11 +251,12 @@ where
             let end = boundary_before(&mut f, meta.len())?;
             let start = start_of_lines(&mut f, end, self.tail)?;
             let lines = split_lines(&read_range(&mut f, start, end)?);
-            Ok::<_, io::Error>((file_id(&meta), start, end, lines))
+            Ok::<_, io::Error>((Cursor { offset: end, file: file_id(&meta), head: head(&mut f, meta.len())? }, start, lines))
         })();
         match read {
-            Ok((file, start, end, lines)) => {
-                *cursor = Cursor { offset: end, file };
+            Ok((now, start, lines)) => {
+                let end = now.offset;
+                *cursor = now;
                 if self.send(FollowEvent::Lines { start, end, lines }) {
                     Flow::Go
                 } else {
@@ -270,7 +275,10 @@ where
             let meta = f.metadata()?;
             let len = meta.len();
             let file = file_id(&meta);
-            let replaced = cursor.file.is_some() && file != cursor.file;
+            let first = head(&mut f, len)?;
+            // Another file under the same name: a new inode, or (where the OS has no stable
+            // identity: NTFS hands a renamed-over name the old file's creation time) a new first line.
+            let replaced = (cursor.file.is_some() && file != cursor.file) || (cursor.head.is_some() && first.is_some() && first != cursor.head);
             // Rewritten in place past our offset: the byte before it is no longer a newline.
             let rewritten = cursor.offset > 0 && len >= cursor.offset && read_range(&mut f, cursor.offset - 1, cursor.offset)? != b"\n";
             if replaced || len < cursor.offset || rewritten {
@@ -280,6 +288,9 @@ where
                 cursor.offset = 0;
             }
             cursor.file = file;
+            if cursor.offset == 0 || cursor.head.is_none() {
+                cursor.head = first;
+            }
             self.forward(&mut f, cursor, len)
         })();
         read.unwrap_or_else(|e| self.failed(e, path))
@@ -356,10 +367,23 @@ fn file_id(meta: &std::fs::Metadata) -> Option<FileId> {
     Some((meta.dev(), meta.ino()))
 }
 
+/// Stable Rust has no file index on Windows, and a creation time is no identity there (NTFS
+/// tunnelling): the first line alone tells a replaced file.
 #[cfg(not(unix))]
-fn file_id(meta: &std::fs::Metadata) -> Option<FileId> {
-    let born = meta.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
-    Some((born.as_secs(), born.subsec_nanos().into()))
+fn file_id(_: &std::fs::Metadata) -> Option<FileId> {
+    None
+}
+
+/// The file's first complete line, newline included, or its first 4 KB when that line is longer:
+/// bytes appending never changes. `None` while the file has neither.
+fn head(f: &mut File, len: u64) -> io::Result<Option<Vec<u8>>> {
+    let mut first = read_range(f, 0, len.min(HEAD))?;
+    match first.iter().position(|&b| b == b'\n') {
+        Some(i) => first.truncate(i + 1),
+        None if first.len() as u64 == HEAD => {}
+        None => return Ok(None),
+    }
+    Ok(Some(first))
 }
 
 fn read_range(f: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>> {
@@ -581,9 +605,13 @@ mod tests {
         std::fs::write(&path, numbered(3)).unwrap();
         let (id, rx) = follow(&path, 10);
         assert_eq!(lines_of(next(&rx)).2.len(), 3);
-        std::fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(b"new\n").unwrap();
+        // The same first line, so only the length tells.
+        std::fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(numbered(1).as_bytes()).unwrap();
         assert_eq!(next(&rx), FollowEvent::Reset);
-        assert_eq!(lines_of(next(&rx)), (0, 4, vec!["new".into()]));
+        assert_eq!(lines_of(next(&rx)), (0, 8, vec!["{\"n\":0}".into()]));
+        // The new file is followed as itself: an append is just lines, not another reset.
+        append(&path, b"more\n");
+        assert_eq!(lines_of(next(&rx)), (8, 13, vec!["more".into()]));
         drop(stop(id));
     }
 
@@ -603,15 +631,46 @@ mod tests {
     }
 
     #[test]
+    fn after_a_reset_the_new_file_is_followed_as_itself() {
+        let dir = temp_dir("conv-replace-then");
+        let path = dir.join("s.jsonl");
+        std::fs::write(&path, "old\n").unwrap();
+        let (id, rx) = follow(&path, 10);
+        lines_of(next(&rx));
+        std::fs::write(dir.join("next"), "new\n").unwrap();
+        std::fs::rename(dir.join("next"), &path).unwrap();
+        assert_eq!(next(&rx), FollowEvent::Reset);
+        assert_eq!(lines_of(next(&rx)).2, ["new"]);
+        append(&path, b"more\n");
+        assert_eq!(lines_of(next(&rx)), (4, 9, vec!["more".into()]));
+        drop(stop(id));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_file_with_the_same_first_line_is_told_by_its_inode() {
+        let dir = temp_dir("conv-replace-inode");
+        let path = dir.join("s.jsonl");
+        std::fs::write(&path, "a\n").unwrap();
+        let (id, rx) = follow(&path, 10);
+        assert_eq!(lines_of(next(&rx)).2, ["a"]);
+        std::fs::write(dir.join("next"), "a\nb\n").unwrap();
+        std::fs::rename(dir.join("next"), &path).unwrap();
+        assert_eq!(next(&rx), FollowEvent::Reset);
+        assert_eq!(lines_of(next(&rx)), (0, 4, vec!["a".into(), "b".into()]));
+        drop(stop(id));
+    }
+
+    #[test]
     fn a_file_rewritten_in_place_past_the_offset_sends_reset() {
         let path = temp_dir("conv-rewrite").join("s.jsonl");
-        std::fs::write(&path, "ab\n").unwrap();
+        std::fs::write(&path, "a\nb\n").unwrap();
         let (id, rx) = follow(&path, 10);
-        assert_eq!(lines_of(next(&rx)).2, ["ab"]);
-        // Same file, grown, but byte 2 is no longer the newline we stopped after.
-        std::fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(b"abcd\n").unwrap();
+        assert_eq!(lines_of(next(&rx)).2, ["a", "b"]);
+        // Same file, same first line, grown, but byte 3 is no longer the newline we stopped after.
+        std::fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(b"a\nbc\nd\n").unwrap();
         assert_eq!(next(&rx), FollowEvent::Reset);
-        assert_eq!(lines_of(next(&rx)).2, ["abcd"]);
+        assert_eq!(lines_of(next(&rx)).2, ["a", "bc", "d"]);
         drop(stop(id));
     }
 
