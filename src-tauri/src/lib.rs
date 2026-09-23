@@ -77,6 +77,9 @@ pub mod build_info;
 // -- usage (src/usage.rs) --
 pub mod usage;
 
+// -- app dir (src/app_dir.rs) --
+pub mod app_dir;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -195,6 +198,7 @@ pub fn run() {
             // -- workspace commands --
             workspace::workspace_read,
             workspace::workspace_write,
+            workspace::workspace_live_sessions,
 
             // -- mcp commands --
             mcp::mcp_socket_path,

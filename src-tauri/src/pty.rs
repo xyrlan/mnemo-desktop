@@ -80,7 +80,7 @@ fn default_shell_dir() -> Option<PathBuf> {
     if cfg!(windows) || std::env::var("MNEMO_NO_SHELL_INTEGRATION").is_ok_and(|v| v == "1") {
         return None;
     }
-    home_dir().map(|h| h.join(".mnemo-desktop").join("shell"))
+    home_dir().map(|h| crate::app_dir::app_dir_in(&h).join("shell"))
 }
 
 fn write_if_changed(path: &Path, contents: &str) -> std::io::Result<()> {
@@ -198,6 +198,10 @@ impl PtyManager {
         cmd.env("TERM_PROGRAM", "mnemo");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         cmd.env("MNEMO_DESKTOP", "1");
+        // A session in this pane reaches this app's MCP socket, whichever build registered the
+        // binary, and never an instance whose pane started this app (#168).
+        let (var, socket) = crate::mcp::pane_env();
+        cmd.env(var, socket);
         cmd
     }
 
@@ -507,11 +511,15 @@ mod tests {
         assert_eq!(off.get_argv()[1..], ["-l"]);
         assert_eq!(off.get_env("TERM_PROGRAM"), Some("mnemo".as_ref()));
 
-        // A Claude Code session that launched the app does not leak into its panes.
+        // A Claude Code session that launched the app does not leak into its panes, and each
+        // pane points the MCP binary at this app's socket, over any inherited one.
+        let socket = crate::mcp::socket_path();
+        assert!(socket.starts_with(crate::app_dir::app_dir()));
         for (i, cmd) in [&zsh, &bash, &explicit, &off].into_iter().enumerate() {
             for var in CLAUDE_SESSION_ENV {
                 assert_eq!(cmd.get_env(var), None, "{var} in command {i}");
             }
+            assert_eq!(cmd.get_env(crate::mcp::SOCKET_ENV), Some(socket.as_os_str()), "socket in command {i}");
         }
     }
 

@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 fn path() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("usage.jsonl")
+    crate::app_dir::app_dir().join("usage.jsonl")
 }
 
 /// Appends `row` to `p` as one line. A row that is not a JSON object is refused.

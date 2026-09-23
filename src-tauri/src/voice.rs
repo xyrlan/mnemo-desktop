@@ -253,8 +253,9 @@ pub fn clean_transcript(raw: &str) -> String {
 // Model and transcription
 
 pub fn models_dir() -> PathBuf {
+    // Shared by a debug build: the model is large and lands by a rename into place.
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    home.map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("models")
+    crate::app_dir::shared_dir_in(&home.map(PathBuf::from).unwrap_or_default()).join("models")
 }
 
 /// Returns the model in `dir`, downloading it first if it is missing or truncated.

@@ -35,7 +35,8 @@ pub fn managed_dir(tool: &str) -> PathBuf {
 }
 
 fn managed_dir_in(home: &Path, tool: &str) -> PathBuf {
-    home.join(".mnemo-desktop").join("tools").join(tool)
+    // Shared by a debug build: the user's shell rc puts this dir on PATH.
+    crate::app_dir::shared_dir_in(home).join("tools").join(tool)
 }
 
 /// Every directory the app puts on `PATH` beyond what the system gives it: the managed dirs,

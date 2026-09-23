@@ -13,18 +13,25 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-/// Keep in step with `mnemo_desktop_lib::mcp::{socket_path, SOCKET_ENV}`.
+/// Keep in step with `mnemo_desktop_lib::mcp::{socket_path, SOCKET_ENV}`: the app exports this
+/// into its panes, so a session reaches the app it runs in whichever build's binary it started.
 const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
+/// Keep in step with `mnemo_desktop_lib::app_dir::NAME`: the fallback for a session outside
+/// any pane is the app dir of this binary's own build.
+const APP_DIR: &str = if cfg!(debug_assertions) { ".mnemo-desktop-dev" } else { ".mnemo-desktop" };
 /// Sent back when a client asks for a version this server has not seen.
 const LATEST_PROTOCOL: &str = "2025-06-18";
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn socket_path() -> PathBuf {
-    if let Some(p) = std::env::var_os(SOCKET_ENV) {
-        return PathBuf::from(p);
+    socket_path_from(std::env::var_os(SOCKET_ENV), std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))
+}
+
+fn socket_path_from(exported: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> PathBuf {
+    match exported.filter(|p| !p.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => home.map(PathBuf::from).unwrap_or_default().join(APP_DIR).join("mcp.sock"),
     }
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_default();
-    home.join(".mnemo-desktop").join("mcp.sock")
 }
 
 fn tools() -> Value {
@@ -213,6 +220,15 @@ mod tests {
         let r = req(json!({ "id": 7, "method": "resources/list" }));
         assert_eq!(r["error"]["code"], -32601);
         assert_eq!(req(json!({ "id": "p", "method": "ping" }))["result"], json!({}));
+    }
+
+    #[test]
+    fn the_socket_a_pane_exports_wins_over_the_build_default() {
+        let home = Some("/home/u".into());
+        assert_eq!(socket_path_from(Some("/tmp/dev/mcp.sock".into()), home.clone()), PathBuf::from("/tmp/dev/mcp.sock"));
+        // Outside a pane: this build's own app dir (`cargo test` is a debug build, like `tauri dev`).
+        assert_eq!(socket_path_from(None, home.clone()), PathBuf::from("/home/u/.mnemo-desktop-dev/mcp.sock"));
+        assert_eq!(socket_path_from(Some("".into()), home), PathBuf::from("/home/u/.mnemo-desktop-dev/mcp.sock"));
     }
 
     #[cfg(unix)]

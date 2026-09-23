@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 fn path() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("settings.json")
+    crate::app_dir::app_dir().join("settings.json")
 }
 
 pub fn read() -> serde_json::Value {
