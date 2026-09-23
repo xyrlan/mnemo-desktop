@@ -3,6 +3,7 @@ import { cockpitStore } from '../cockpit/app-store'
 import { runJob } from '../cockpit/job'
 import { settingsStore } from '../settings/app-store'
 import { githubStore } from './app-store'
+import { currentOs, installRoute } from '../setup/tools'
 import { SCOPE_FIX, type Issue } from './types'
 
 /** What a click does with GitHub: a dispatch runs headless with `runJob`, its output captured
@@ -72,7 +73,10 @@ export function ghLogin() {
   githubStore.getState().watchLogin()
 }
 
-export const installGh = () => void layout.getState().openCommandTab(undefined, 'brew install gh')
+/** This OS's own route to `gh`: `brew` exists only on a Mac. */
+export const ghInstall = () => installRoute('gh', currentOs())
+
+export const installGh = () => void layout.getState().openCommandTab(undefined, ghInstall().command)
 
 export const refreshScope = () => void layout.getState().openCommandTab(undefined, SCOPE_FIX)
 

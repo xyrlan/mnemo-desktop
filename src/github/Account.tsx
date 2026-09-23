@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { githubStore, useGithub } from './app-store'
-import { ghLogin, installGh } from './actions'
+import { ghInstall, ghLogin, installGh } from './actions'
 import './github.css'
 
 /** Home's header, right side: install `gh`, log in through it, or who is logged in. */
@@ -13,15 +13,17 @@ export default function Account() {
     return () => window.removeEventListener('focus', again)
   }, [])
   if (!auth) return null
-  if (!auth.installed)
+  if (!auth.installed) {
+    const route = ghInstall()
     return (
       <span className="gh-account">
-        <button className="hm-btn" onClick={installGh} title="opens a terminal with brew install gh">
+        <button className="hm-btn" onClick={installGh} title={`opens a terminal with ${route.shows}`}>
           install gh
         </button>
-        <code className="gh-quiet">brew install gh</code>
+        <code className="gh-quiet">{route.shows}</code>
       </span>
     )
+  }
   if (!auth.logged)
     return (
       <span className="gh-account">
