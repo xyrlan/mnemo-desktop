@@ -7,79 +7,79 @@ import { groupHits, since } from './derive'
 export function MemoryPanel({ memory, hasSession }: { memory: ChildMemory | null; hasSession: boolean }) {
   const [open, setOpen] = useState(true)
 
-  if (!hasSession) return <div className="mm mm-empty">memory: no session yet</div>
+  if (!hasSession) return <div className="cmem cmem-empty">memory: no session yet</div>
   if (!memory) return null
 
   const injected = groupHits(memory.injected)
   const badge = `${injected.length} rule${injected.length === 1 ? '' : 's'} · ${memory.friction.length} pushback${memory.friction.length === 1 ? '' : 's'}`
 
   return (
-    <div className="mm">
-      <button className="mm-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="mm-title">memory</span>
-        <span className="mm-badge">{badge}</span>
+    <div className="cmem">
+      <button className="cmem-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="cmem-title">memory</span>
+        <span className="cmem-badge">{badge}</span>
       </button>
       {open && (
-        <div className="mm-body">
-          <div className="mm-section">
-            <div className="mm-label">briefing</div>
+        <div className="cmem-body">
+          <div className="cmem-section">
+            <div className="cmem-label">briefing</div>
             {memory.briefing ? (
-              <div className="mm-briefing" title={memory.briefing.path}>
-                {memory.briefing.path.split('/').pop()} <span className="mm-since">{since(memory.briefing.at)}</span>
+              <div className="cmem-briefing" title={memory.briefing.path}>
+                {memory.briefing.path.split('/').pop()} <span className="cmem-since">{since(memory.briefing.at)}</span>
               </div>
             ) : (
-              <div className="mm-none">not recorded</div>
+              <div className="cmem-none">not recorded</div>
             )}
           </div>
 
-          <div className="mm-section">
-            <div className="mm-label">rules injected</div>
+          <div className="cmem-section">
+            <div className="cmem-label">rules injected</div>
             {injected.length ? (
-              <ul className="mm-list">
+              <ul className="cmem-list">
                 {injected.map((g) => (
                   <li key={g.slug}>
-                    <span className="mm-slug">{g.slug}</span>
-                    {g.count > 1 && <span className="mm-count">×{g.count}</span>}
-                    <span className="mm-since">{since(g.last)}</span>
+                    <span className="cmem-slug">{g.slug}</span>
+                    {g.count > 1 && <span className="cmem-count">×{g.count}</span>}
+                    <span className="cmem-since">{since(g.last)}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <div className="mm-none">none yet</div>
+              <div className="cmem-none">none yet</div>
             )}
           </div>
 
-          <div className="mm-section">
-            <div className="mm-label">pushback</div>
+          <div className="cmem-section">
+            <div className="cmem-label">pushback</div>
             {memory.friction.length ? (
-              <ul className="mm-list mm-friction">
+              <ul className="cmem-list cmem-friction">
                 {memory.friction.map((p, i) => (
                   <li key={`${p.rule_text}-${p.at ?? i}`}>
-                    <div className="mm-rule-text">{p.rule_text}</div>
-                    {p.contradicts.length > 0 && <div className="mm-contradicts">against: {p.contradicts.join(', ')}</div>}
-                    <span className="mm-since">{since(p.at)}</span>
+                    <div className="cmem-rule-text">{p.rule_text}</div>
+                    {p.contradicts.length > 0 && <div className="cmem-contradicts">against: {p.contradicts.join(', ')}</div>}
+                    <span className="cmem-since">{since(p.at)}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <div className="mm-none">none yet</div>
+              <div className="cmem-none">none yet</div>
             )}
           </div>
 
-          <div className="mm-section">
-            <div className="mm-label">read over MCP</div>
+          <div className="cmem-section">
+            <div className="cmem-label">read over MCP</div>
             {memory.mcp_reads === null ? (
-              <div className="mm-none">not recorded</div>
+              <div className="cmem-none">not recorded</div>
             ) : memory.mcp_reads.length ? (
-              <ul className="mm-list">
+              <ul className="cmem-list">
                 {memory.mcp_reads.map((slug) => (
                   <li key={slug}>
-                    <span className="mm-slug">{slug}</span>
+                    <span className="cmem-slug">{slug}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <div className="mm-none">none yet</div>
+              <div className="cmem-none">none yet</div>
             )}
           </div>
         </div>
