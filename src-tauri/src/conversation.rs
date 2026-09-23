@@ -187,10 +187,16 @@ where
     fn run(mut self) {
         loop {
             let Some(path) = self.look() else { return };
-            // Watched before the first read, so a line written in between still wakes us.
-            let _watch = watch(&path, self.wake.clone());
             let mut cursor = Cursor::default();
             let mut flow = self.first(&path, &mut cursor);
+            // Watched only after the first send: starting an FSEvents stream took up to ~3 s with
+            // twenty follows starting on a loaded machine. What landed meanwhile woke nothing, so
+            // it is read at once.
+            let mut _watch = None;
+            if let Flow::Go = flow {
+                _watch = watch(&path, self.wake.clone());
+                flow = self.catch_up(&path, &mut cursor);
+            }
             loop {
                 match flow {
                     Flow::Go => {}
@@ -453,7 +459,10 @@ mod tests {
     use std::io::Write;
     use std::time::Instant;
 
-    const WAIT: Duration = Duration::from_secs(5);
+    /// How long a test waits for what must come. Only a failing test waits it out. It is long
+    /// because notify's FSEvents watch spins until its run loop idles: with the whole suite on a
+    /// machine whose cores were all busy, starting one took a median 5 s and stopping one up to 20 s.
+    const WAIT: Duration = Duration::from_secs(60);
 
     #[test]
     fn follow_event_serialises_as_the_front_end_reads_it() {
@@ -492,6 +501,16 @@ mod tests {
             }
         }
         false
+    }
+
+    /// Appends a line and waits for it. Once it is back the follow's watch is running: the watch
+    /// starts after the first send (seconds, on a loaded machine) and only then is the file read
+    /// again. A test that times what comes after waits for this first.
+    fn until_watching(path: &Path, rx: &Receiver<FollowEvent>) -> u64 {
+        append(path, b"warm\n");
+        let (_, end, lines) = lines_of(next(rx));
+        assert_eq!(lines, ["warm"]);
+        end
     }
 
     fn append(path: &Path, bytes: &[u8]) {
@@ -538,27 +557,39 @@ mod tests {
         std::fs::write(&path, "one\n").unwrap();
         let (id, rx) = follow(&path, 10);
         assert_eq!(lines_of(next(&rx)).2, ["one"]);
+        let at = until_watching(&path, &rx);
         append(&path, b"{\"half\":");
         assert!(rx.recv_timeout(Duration::from_millis(1500)).is_err(), "a partial line was sent");
         append(&path, b"true}\r\n");
-        assert_eq!(lines_of(next(&rx)), (4, 19, vec!["{\"half\":true}".into()]));
+        assert_eq!(lines_of(next(&rx)), (at, at + 15, vec!["{\"half\":true}".into()]));
         drop(stop(id));
     }
 
     #[test]
-    fn lines_written_together_travel_in_one_event() {
+    fn lines_written_close_together_share_an_event() {
         let path = temp_dir("conv-batch").join("s.jsonl");
         std::fs::write(&path, "").unwrap();
         let (id, rx) = follow(&path, 10);
         assert_eq!(lines_of(next(&rx)), (0, 0, vec![]));
-        // 30 ms from first to last: each write wakes the follow, and the window gathers them.
+        let from = until_watching(&path, &rx);
+        // 15 ms apart: each write wakes the follow, and without the 50 ms window each is its own
+        // event. Usually all three share one; a loaded runner can oversleep one gap (seen on CI),
+        // so this asks only that some did.
         for (i, l) in ["a\n", "b\n", "c\n"].iter().enumerate() {
             if i > 0 {
                 std::thread::sleep(Duration::from_millis(15));
             }
             append(&path, l.as_bytes());
         }
-        assert_eq!(lines_of(next(&rx)), (0, 6, vec!["a".into(), "b".into(), "c".into()]));
+        let (mut got, mut at, mut events) = (Vec::new(), from, 0);
+        while got.len() < 3 {
+            let (start, end, lines) = lines_of(next(&rx));
+            assert_eq!(start, at, "events are contiguous");
+            (at, events) = (end, events + 1);
+            got.extend(lines);
+        }
+        assert_eq!((got, at), (vec!["a".to_string(), "b".into(), "c".into()], from + 6));
+        assert!(events < 3, "three lines 15 ms apart came in {events} events");
         drop(stop(id));
     }
 
@@ -568,6 +599,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let (id, rx) = follow(&path, 10);
         lines_of(next(&rx));
+        until_watching(&path, &rx);
         // Each append follows a send at once, when the 1 s poll has just started over.
         for i in 0..5 {
             let sent = Instant::now();
