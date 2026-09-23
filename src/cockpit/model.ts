@@ -84,7 +84,7 @@ export function buildMissionMap(repo: RepoGroup, m: Mission, looked: Record<stri
     const ready = open && pr.ci === 'pass' && !m.landable
     add(prId, {
       label: `PR #${pr.number}`,
-      sub: `${pr.state.toLowerCase()} · CI ${CI_MARK[pr.ci]}${pr.ci === 'none' ? '' : ` ${pr.ci}`}`,
+      sub: `${pr.state.toLowerCase()}${open && pr.draft ? ' draft' : ''} · CI ${CI_MARK[pr.ci]}${pr.ci === 'none' ? '' : ` ${pr.ci}`}`,
       tone: open ? CI_TONE[pr.ci] : pr.state === 'MERGED' ? 'ok' : 'muted',
       actions: [{ kind: 'pr', pr }, ...(open && pr.ci === 'fail' ? [{ kind: 'job', pr } as const] : ready ? [{ kind: 'merge', pr } as const] : [])],
     })

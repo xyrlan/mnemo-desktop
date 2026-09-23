@@ -43,3 +43,21 @@ export const merged: RepoGroup = {
     },
   ],
 }
+
+/** Children dispatched by issue, outside any contract, each with the PR it opened: a red one
+ *  (naming its red job), a green draft, a green one, a pending one and one already merged. #45's
+ *  child finished days ago and its worktree is gone; its PR is still open. */
+export const issuePrs: RepoGroup = {
+  root: '/Users/me/github/mnemo-desktop',
+  name: 'mnemo-desktop',
+  parents: [],
+  missions: [],
+  children: [
+    child({ id: 'i40', branch: 'fix/issue-40', cwd: '/Users/me/github/mnemo-desktop-wt-40', pr: { number: 50, url: 'https://github.com/me/mnemo-desktop/pull/50', state: 'OPEN', head: 'fix/issue-40', ci: 'fail', failing: ['test (windows-latest)'] } }),
+    child({ id: 'i41', branch: 'fix/issue-41', cwd: '/Users/me/github/mnemo-desktop-wt-41', state: 'done', live: false, pr: { number: 49, url: 'https://github.com/me/mnemo-desktop/pull/49', state: 'OPEN', head: 'fix/issue-41', ci: 'pass', draft: true } }),
+    child({ id: 'i42', branch: 'fix/issue-42', cwd: '/Users/me/github/mnemo-desktop-wt-42', pr: { number: 51, url: 'https://github.com/me/mnemo-desktop/pull/51', state: 'OPEN', head: 'fix/issue-42', ci: 'pass' } }),
+    child({ id: 'i43', branch: 'fix/issue-43', cwd: '/Users/me/github/mnemo-desktop-wt-43', pr: { number: 52, url: 'https://github.com/me/mnemo-desktop/pull/52', state: 'OPEN', head: 'fix/issue-43', ci: 'pending' } }),
+    child({ id: 'i44', branch: 'fix/issue-44', cwd: '/Users/me/github/mnemo-desktop-wt-44', state: 'done', live: false, pr: { number: 48, url: 'https://github.com/me/mnemo-desktop/pull/48', state: 'MERGED', head: 'fix/issue-44', ci: 'fail' } }),
+    child({ id: 'i45', branch: null, cwd: '/Users/me/github/mnemo-desktop-wt-45', state: 'done', live: false, updated_at: '2026-09-01T00:00:00Z', pr: { number: 47, url: 'https://github.com/me/mnemo-desktop/pull/47', state: 'OPEN', head: 'fix/issue-45', ci: 'pass' } }),
+  ],
+}

@@ -1,5 +1,6 @@
 import { childLabel, needsYou, pruneGone } from './needs'
 import { child, desktop, snapshot } from '../mission/fixtures'
+import * as fixtures from './fixtures'
 import { merged, withPrs } from './fixtures'
 import type { Snapshot } from '../mission/types'
 
@@ -63,4 +64,30 @@ test('a finished child whose worktree is gone is dropped, with the repo named af
   const out = pruneGone(snap)
   expect(out.repos.map((r) => r.name)).toEqual(['mnemo-desktop'])
   expect(out.repos[0].children.map((c) => c.id)).toEqual(['done0002', 'live0003'])
+})
+
+test('a PR a child opened outside any contract is a row too: red CI to open, green to merge, a draft as ready', () => {
+  const { issuePrs } = fixtures
+  const needs = needsYou({ ...snapshot, repos: [issuePrs] })
+  const root = issuePrs.root
+  expect(needs.map((n) => n.key)).toEqual([`ci:${root}#50`, `ready:${root}#49`, `ready:${root}#51`, `ready:${root}#47`])
+  expect(needs[0]).toMatchObject({ kind: 'ci', piece: '#40', mission: null, pr: { failing: ['test (windows-latest)'] } })
+  expect(needs[1]).toMatchObject({ kind: 'ready', piece: '#41', mission: null, pr: { draft: true } })
+  // Pending CI needs nobody yet, and a merged PR is history.
+  expect(needs.some((n) => n.key.endsWith('#52') || n.key.endsWith('#48'))).toBe(false)
+})
+
+test('a child whose worktree is gone stays while its PR is open, so the PR keeps its row', () => {
+  const out = pruneGone({ ...snapshot, repos: [fixtures.issuePrs] })
+  expect(out.repos[0].children.map((c) => c.id)).toContain('i45')
+  // Without an open PR, the same child is dropped.
+  const closed = { ...fixtures.issuePrs, children: fixtures.issuePrs.children.map((c) => (c.id === 'i45' ? { ...c, pr: { ...c.pr!, state: 'CLOSED' } } : c)) }
+  expect(pruneGone({ ...snapshot, repos: [closed] }).repos[0].children.map((c) => c.id)).not.toContain('i45')
+})
+
+test('one PR is one row, even when a contract piece and a child both carry it', () => {
+  const m = desktop.missions[0]
+  const shared = { number: 60, url: 'u60', state: 'OPEN', head: 'feat/round3/cockpit', ci: 'pass' as const }
+  const repo = { ...desktop, missions: [{ ...m, pieces: [{ ...m.pieces[0], pr: shared }] }], children: [child({ id: 'dup', branch: 'feat/round3/cockpit', pr: shared })] }
+  expect(needsYou({ ...snapshot, repos: [repo] }).filter((n) => n.kind === 'ready').map((n) => n.key)).toEqual([`ready:${desktop.root}#60`])
 })

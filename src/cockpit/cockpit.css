@@ -20,6 +20,8 @@
 .ck-row-head { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; cursor: pointer; min-width: 0; }
 .ck-label { color: var(--fg); font-weight: 600; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 2em; }
 .ck-detail { color: var(--fg-muted); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Why a merge or land did not go through, where the row's detail was. */
+.ck-detail.ck-reason { color: var(--ansi-red); }
 /* A child's state is its octopus (ChildMark), centred on the text line; the word stays for
    screen readers only. */
 .ck-mark { flex: 0 0 auto; align-self: center; display: inline-flex; }
@@ -108,6 +110,8 @@
 .ck-log-stream { flex: 0 0 auto; width: 2.2em; color: var(--fg-muted); user-select: none; }
 .ck-log-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .ck-log-err .ck-log-text { color: var(--ansi-red); }
+/* The app's own lines between a job's steps (what the merge gate read): not a process's output. */
+.ck-log-app .ck-log-text { color: var(--fg-muted); font-style: italic; }
 .ck-log-end { margin-top: 6px; color: var(--fg-muted); }
 .ck-log-failed { color: var(--ansi-red); }
 .ck-log-ok { color: var(--ansi-green); }

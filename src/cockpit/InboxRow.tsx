@@ -5,7 +5,7 @@ import { paneForSession } from '../layout/tabs'
 import { fmtTokens } from '../mission/tokens'
 import { attachChild, openContract, openMissionPane, openPr, ReplyBox } from '../mission/rows'
 import { rowChild, type Row } from './inbox'
-import { landArgv, landMission, mergeArgv, mergePr, openJob, stopChild } from './actions'
+import { landArgv, landMission, mergePlan, mergePr, openJob, stopChild } from './actions'
 import { cockpitStore, useCockpit } from './app-store'
 import { jobState, type Job } from './store'
 import { answerPane, detachAnswer, useAnswer } from './approve'
@@ -22,6 +22,17 @@ export function jobWord(kind: 'ready' | 'land', j: Job): string {
   const s = jobState(j)
   return s === 'running' ? (kind === 'ready' ? 'merging…' : 'landing…') : s === 'ok' ? (kind === 'ready' ? 'merged ✓' : 'landed ✓') : 'failed ✗'
 }
+
+/** Why a row's merge or land did not go through, in a line: what the app refused on, else the
+ *  first thing the process said on stderr (gh's own reason). */
+export function jobReason(j: Job): string | null {
+  if (jobState(j) !== 'failed') return null
+  return j.error ?? j.lines.find((l) => l.stream === 'err' && l.line.trim())?.line.trim() ?? (j.code !== null ? `exit ${j.code}` : null)
+}
+
+/** A PR row's detail: which checks are red, or that it is green; a draft says so first. */
+const prDetail = (pr: { draft?: boolean; failing?: string[]; head: string; ci: string }) =>
+  `${pr.draft ? 'draft · ' : ''}${pr.ci === 'fail' ? (pr.failing?.length ? `${pr.failing.join(', ')} ✗` : pr.head) : 'CI ✓ · open'}`
 
 /** Enter on a row: the one thing that row is there for. Merge, land and stop ask twice. */
 export const PRIMARY: Record<Row['kind'], string> = { blocked: 'open', ci: 'open job', ready: 'merge', land: 'land', working: 'open', done: 'open' }
@@ -95,12 +106,15 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
   // While it runs there is nothing to confirm; once it merged there is nothing left to merge.
   const canRun = !job || jobState(job) === 'failed'
 
+  // What stopped this row's merge or land, where its detail would be: gh's reason, on the row.
+  const reason = job ? jobReason(job) : null
+
   // `word` is the pill for rows that are not a child's state; `null` means the child's avatar.
   const [word, label, detail] =
     row.kind === 'blocked' ? [replied ? 'replied' : null, row.label, '']
-    : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, row.pr.head]
-    : row.kind === 'ready' ? [job ? jobWord('ready', job) : 'ready', `${row.piece} · PR #${row.pr.number}`, 'CI ✓ · open']
-    : row.kind === 'land' ? [job ? jobWord('land', job) : 'land', row.mission.feature, `${row.mission.pieces.length} PRs green`]
+    : row.kind === 'ci' ? ['CI ✗', `${row.piece} · PR #${row.pr.number}`, prDetail(row.pr)]
+    : row.kind === 'ready' ? [job ? jobWord('ready', job) : row.pr.draft ? 'draft' : 'ready', `${row.piece} · PR #${row.pr.number}`, reason ?? prDetail(row.pr)]
+    : row.kind === 'land' ? [job ? jobWord('land', job) : 'land', row.mission.feature, reason ?? `${row.mission.pieces.length} PRs green`]
     : [null, row.label, row.child.detail]
 
   const btn = (text: string, run: () => void, cls = '', title?: string) => (
@@ -134,14 +148,18 @@ export default function InboxRow({ row, selected, showRepo, narrow, armed, fire,
         {word === null && child ? <ChildMark child={child} /> : <span className="nd-word">{word}</span>}
         <span className="ck-label">{label}</span>
         {here !== null && <span className="ck-tab-link">↗ tab</span>}
-        {detail && <span className="ck-detail">{detail}</span>}
+        {detail && (
+          <span className={`ck-detail${reason ? ' ck-reason' : ''}`} title={reason ?? undefined}>
+            {detail}
+          </span>
+        )}
         <span className="ck-spacer" />
         {showRepo && <span className="nd-repo">{row.repo.name}</span>}
         {d > 0 && <span className="m-delta">+{d}</span>}
         {child && child.tokens > 0 && <span className="ck-tokens">{fmtTokens(child.tokens)}</span>}
         {row.mission && onMap && btn(narrow ? '⤢' : `⤢ ${row.mission.feature}`, () => onMap(row.mission!), 'ck-mission', `Open the mission map of ${row.mission.feature}`)}
         {row.kind === 'ci' && btn('open job', () => openJob(row.pr), 'ck-primary', 'The PR checks page')}
-        {row.kind === 'ready' && canRun && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, mergeArgv(row.pr).join(' '))}
+        {row.kind === 'ready' && canRun && btn(isArmed ? 'confirm merge?' : 'merge', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, mergePlan(row.pr))}
         {row.kind === 'land' && canRun && btn(isArmed ? 'confirm land?' : 'land', () => runPrimary(row, fire), `ck-primary${isArmed ? ' ck-armed' : ''}`, landArgv(row.mission).join(' '))}
         {job && btn('log', () => cockpitStore.getState().toggleDrawer(row.key), logOpen ? 'ck-log-open' : '', logOpen ? 'Close the log' : 'What it printed')}
         {row.kind === 'land' && btn('contract', () => openContract(row.mission))}

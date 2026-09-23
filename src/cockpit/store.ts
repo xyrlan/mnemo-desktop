@@ -1,8 +1,9 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 
 /** One line a job printed. `out` and `err` are read apart, so two lines of different streams
- *  are in the order they arrived, which is not necessarily the order they were written. */
-export type JobLine = { stream: 'out' | 'err'; line: string }
+ *  are in the order they arrived, which is not necessarily the order they were written. `app`
+ *  is the app's own line between the steps of a job (`merge.ts`: what the gate read). */
+export type JobLine = { stream: 'out' | 'err' | 'app'; line: string }
 
 /** A process the cockpit ran headless (`merge`, `land`) and everything it said. */
 export type Job = {
@@ -44,8 +45,9 @@ export type CockpitActions = {
   /** Registers a new run for `key`; false (and nothing changes) while one is still running. */
   jobStart(key: string, title: string): boolean
   jobLine(key: string, line: JobLine): void
-  /** The job ended. A failure opens its drawer by itself; a success does not — success is silence. */
-  jobExit(key: string, code: number | null): void
+  /** The job ended. A failure opens its drawer by itself; a success does not — success is silence.
+   *  `error` fails it whatever the code: the process ran, but what it was for did not happen. */
+  jobExit(key: string, code: number | null, error?: string): void
   /** It could not be started (or its exit was never heard): failed, and its drawer opens. */
   jobFailed(key: string, error: string): void
 }
@@ -82,7 +84,7 @@ export function createCockpitStore(): CockpitStore {
         const lines = j.lines.length < MAX_LINES ? [...j.lines, line] : [...j.lines.slice(1 - MAX_LINES), line]
         set({ jobs: { ...get().jobs, [key]: { ...j, lines } } })
       },
-      jobExit: (key, code) => end(key, { code }),
+      jobExit: (key, code, error) => end(key, error === undefined ? { code } : { code, error }),
       jobFailed: (key, error) => end(key, { error }),
     }
   })

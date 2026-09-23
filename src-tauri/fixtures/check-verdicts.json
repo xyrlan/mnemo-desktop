@@ -1,0 +1,20 @@
+[
+  { "check": { "__typename": "CheckRun", "name": "test (ubuntu-latest)", "status": "COMPLETED", "conclusion": "SUCCESS" }, "verdict": "pass" },
+  { "check": { "__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SKIPPED" }, "verdict": "pass" },
+  { "check": { "__typename": "CheckRun", "name": "optional", "status": "COMPLETED", "conclusion": "NEUTRAL" }, "verdict": "pass" },
+  { "check": { "__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS" }, "verdict": "pass" },
+  { "check": { "__typename": "CheckRun", "name": "test (windows-latest)", "status": "COMPLETED", "conclusion": "FAILURE" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "cancelled", "status": "COMPLETED", "conclusion": "CANCELLED" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "slow", "status": "COMPLETED", "conclusion": "TIMED_OUT" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "gate", "status": "COMPLETED", "conclusion": "ACTION_REQUIRED" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "broken yaml", "status": "COMPLETED", "conclusion": "STARTUP_FAILURE" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "forgotten", "status": "COMPLETED", "conclusion": "STALE" }, "verdict": "fail" },
+  { "check": { "__typename": "StatusContext", "context": "ci/legacy", "state": "FAILURE" }, "verdict": "fail" },
+  { "check": { "__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR" }, "verdict": "fail" },
+  { "check": { "__typename": "CheckRun", "name": "test (macos-latest)", "status": "IN_PROGRESS", "conclusion": "" }, "verdict": "pending" },
+  { "check": { "__typename": "CheckRun", "name": "queued", "status": "QUEUED", "conclusion": null }, "verdict": "pending" },
+  { "check": { "__typename": "StatusContext", "context": "ci/legacy", "state": "PENDING" }, "verdict": "pending" },
+  { "check": { "__typename": "StatusContext", "context": "required", "state": "EXPECTED" }, "verdict": "pending" },
+  { "check": { "__typename": "CheckRun", "name": "from the future", "status": "COMPLETED", "conclusion": "SOMETHING_NEW" }, "verdict": "pending" },
+  { "check": {}, "verdict": "pending" }
+]

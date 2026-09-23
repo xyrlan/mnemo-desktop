@@ -84,3 +84,14 @@ test('permissionAsk drops the approve prefix', () => {
   expect(permissionAsk({ needs: 'Edit src/x.ts' })).toBe('Edit src/x.ts')
   expect(permissionAsk({ needs: null })).toBeNull()
 })
+
+test('pruneSnapshot keeps a finished child of any age while the PR it opened is open', () => {
+  const now = Date.parse('2026-09-15T12:00:00Z')
+  const pr = (state: string) => ({ number: 1, url: '', state, head: 'fix/issue-1', ci: 'pass' as const })
+  const old = { live: false, updated_at: '2026-09-01T00:00:00Z' }
+  const snap: Snapshot = {
+    at: '', errors: [],
+    repos: [{ root: '/a', name: 'a', parents: [], missions: [], children: [child({ id: 'open', ...old, pr: pr('OPEN') }), child({ id: 'merged', ...old, pr: pr('MERGED') }), child({ id: 'none', ...old })] }],
+  }
+  expect(pruneSnapshot(snap, now).repos[0].children.map((c) => c.id)).toEqual(['open'])
+})

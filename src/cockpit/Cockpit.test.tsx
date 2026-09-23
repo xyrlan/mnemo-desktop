@@ -35,7 +35,7 @@ import { store as appStore } from '../layout/app-store'
 import { settingsStore } from '../settings/app-store'
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'
-import { merged, withPrs, shipped } from './fixtures'
+import { issuePrs, merged, withPrs, shipped } from './fixtures'
 import { cockpitStore } from './app-store'
 import { githubStore } from '../github/app-store'
 import { mnemoIssues } from '../github/fixtures'
@@ -163,18 +163,46 @@ test('land and merge run headless only after a second press: no tab, no pane, th
   act(() => button(merge(), 'merge')!.click())
   act(() => button(merge(), 'confirm merge?')!.click())
   await settle()
-  expect(jobs.runs.at(-1)).toEqual({ id: mergeKey, cwd: desktop.root, argv: ['gh', 'pr', 'merge', '7', '--squash'] })
+  // It reads the PR's checks first, as gh has them now, not as the row last saw them.
+  expect(jobs.runs.at(-1)).toEqual({ id: `${mergeKey}:read`, cwd: desktop.root, argv: ['gh', 'pr', 'view', '7', '--json', 'number,state,isDraft,headRefOid,statusCheckRollup'] })
   expect(pill(merge())).toBe('merging…')
-  emit('job-line', { id: mergeKey, stream: 'err', line: 'Pull request #7 is not mergeable' })
-  emit('job-exit', { id: mergeKey, code: 1 })
+  const read = { number: 7, state: 'OPEN', isDraft: false, headRefOid: 'abc1234def', statusCheckRollup: [{ name: 'test (windows-latest)', conclusion: 'SUCCESS' }] }
+  emit('job-line', { id: `${mergeKey}:read`, stream: 'out', line: JSON.stringify(read) })
+  emit('job-exit', { id: `${mergeKey}:read`, code: 0 })
+  await settle()
+  expect(jobs.runs.at(-1)).toEqual({ id: `${mergeKey}:merge`, cwd: desktop.root, argv: ['gh', 'pr', 'merge', '7', '--squash', '--match-head-commit', 'abc1234def'] })
+  expect(pill(merge())).toBe('merging…')
+  emit('job-line', { id: `${mergeKey}:merge`, stream: 'err', line: 'X Pull request #7 is not mergeable: the base branch policy prohibits the merge.' })
+  emit('job-exit', { id: `${mergeKey}:merge`, code: 1 })
+  await settle()
   expect(pill(merge())).toBe('failed ✗')
-  // A failure opens its drawer by itself, with what it printed.
+  // gh's reason is on the row itself, where its detail was.
+  expect(merge().querySelector('.ck-reason')?.textContent).toBe('not merged: Pull request #7 is not mergeable: the base branch policy prohibits the merge.')
+  // A failure opens its drawer by itself, with what the gate read and what gh printed.
   expect(drawer()!.getAttribute('aria-label')).toBe('merge · PR #7')
-  expect(drawer()!.querySelector('.ck-log-err')?.textContent).toBe('errPull request #7 is not mergeable')
+  expect(drawer()!.querySelector('.ck-log-app')?.textContent).toBe('appPR #7 at abc1234: 1 check passed')
+  expect(drawer()!.querySelector('.ck-log-err')?.textContent).toBe('errX Pull request #7 is not mergeable: the base branch policy prohibits the merge.')
   expect(drawer()!.querySelector('.ck-log-end')?.textContent).toBe('exit 1')
   // And it can be tried again, still asking twice.
   expect(button(merge(), 'merge')).toBeDefined()
   expect(typed).toEqual([])
+})
+
+test("a PR a child opened by issue is a row: red names its job, a green draft says draft, the merge says what it runs", async () => {
+  missionStore.setState({ snapshot: { ...withPrs, repos: [issuePrs] } })
+  await render()
+  const root = issuePrs.root
+  expect(rows().map((r) => r.dataset.key)).toEqual([`ci:${root}#50`, `ready:${root}#49`, `ready:${root}#51`, `ready:${root}#47`])
+  const [red, draft, green] = [row(`ci:${root}#50`), row(`ready:${root}#49`), row(`ready:${root}#51`)]
+  expect(red.querySelector('.ck-label')?.textContent).toBe('#40 · PR #50')
+  expect(red.querySelector('.ck-detail')?.textContent).toBe('test (windows-latest) ✗')
+  expect(pill(draft)).toBe('draft')
+  expect(draft.querySelector('.ck-detail')?.textContent).toBe('draft · CI ✓ · open')
+  expect(button(draft, 'merge')!.title).toBe('reads every check of PR #49, then gh pr ready 49 && gh pr merge 49 --squash --match-head-commit <the head it read>')
+  expect(pill(green)).toBe('ready')
+  expect(button(green, 'merge')!.title).toBe('reads every check of PR #51, then gh pr merge 51 --squash --match-head-commit <the head it read>')
+  // No contract, so no map to open.
+  expect(green.querySelector('.ck-mission')).toBeNull()
 })
 
 test('a job that cannot start fails in its row, and its log says why', async () => {
