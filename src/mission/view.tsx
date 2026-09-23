@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register, registerProvider } from '../actions/registry'
 import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
-import { allChildren, childWord, isRecent, type TimelineLine } from './types'
+import { allChildren, childWord, isRecent, needKind, type TimelineLine } from './types'
 import { attachChild, openMissionPane, ReplyBox } from './rows'
 import { estimateUsd, fmtUsd } from './cost'
-import { clock, timelineRows } from './timeline'
+import { statusMarkers } from './timeline'
+import { ConversationView } from '../conversation/ConversationView'
+import type { SessionStatus } from '../conversation/types'
 import { settingsStore } from '../settings/app-store'
 import { MemoryPanel } from './memory/MemoryPanel'
 import { memoryClient } from './memory/client'
@@ -16,21 +18,16 @@ import type { ChildMemory } from './memory/types'
 function MissionPane({ id: paneId, props }: PaneViewProps) {
   const id = String(props.id ?? '')
   const child = useMission((s) => allChildren(s.snapshot).find((c) => c.id === id))
-  const looked = useMission((s) => s.looked[id])
-  // Default outside the selector: a fresh `[]` per read is never Object.is-equal, and
-  // useSyncExternalStore then re-renders until React throws and unmounts the app.
-  const sentList = useMission((s) => s.sent[id]) ?? []
   const [lines, setLines] = useState<TimelineLine[]>([])
   const [memory, setMemory] = useState<ChildMemory | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
-  const seenAtOpen = useRef<number | undefined>(looked)
-  const bottom = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let alive = true
     const load = async () => {
       const t = await tauriMission.timeline(id, 0)
-      if (alive) setLines(t.lines)
+      // The file only grows: an unchanged length keeps the array, so the markers keep theirs.
+      if (alive) setLines((prev) => (prev.length === t.lines.length ? prev : t.lines))
     }
     void load()
     const timer = window.setInterval(load, 3000)
@@ -65,23 +62,13 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
     if (timelineLen !== undefined) void missionStore.getState().markLooked(id, timelineLen)
   }, [id, timelineLen])
 
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'end' })
-  }, [lines.length, sentList.length])
-
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set())
-  const toggle = (first: number) =>
-    setOpen((o) => {
-      const n = new Set(o)
-      if (!n.delete(first)) n.add(first)
-      return n
-    })
-  const rows = useMemo(() => timelineRows(lines, sentList, seenAtOpen.current), [lines, sentList])
+  const markers = useMemo(() => statusMarkers(lines), [lines])
 
   const attach = () => attachChild(id, 'split-col')
 
   const word = child ? childWord(child) : 'stopped'
-  const final = [...lines].reverse().find((l) => l.text)
+  // What the transcript cannot say: the snapshot knows whether the child is working or parked.
+  const status: SessionStatus = { busy: word === 'active', waiting: word === 'BLOCKED' && child ? needKind(child) : null }
   return (
     <div className="mission-pane" data-pane={paneId}>
       <div className="mission-head">
@@ -112,54 +99,16 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
         </div>
       </div>
       <MemoryPanel memory={memory} hasSession={!!sessionId} />
-      <div className="mission-timeline">
-        {rows.map((r) =>
-          r.kind === 'you' ? (
-            <div key={`you-${r.at}-${r.sent.text}`} className="tl-line fresh tl-you">
-              <span className="tl-at">{clock(r.at)}</span>
-              <span className="tl-state">you</span>
-              <span className="tl-detail" title={r.sent.original !== r.sent.text ? `typed: ${r.sent.original}` : undefined}>{r.sent.text}</span>
-            </div>
-          ) : r.lines.length === 1 ? (
-            <div key={r.lines[0].index} className={`tl-line${r.fresh ? ' fresh' : ''}`}>
-              <span className="tl-at">{clock(r.first)}</span>
-              <span className="tl-state">{r.state}</span>
-              <span className="tl-detail">{r.detail}</span>
-            </div>
-          ) : (
-            <div key={r.lines[0].index} className="tl-run">
-              <button
-                className={`tl-line tl-run-head${r.fresh ? ' fresh' : ''}`}
-                aria-expanded={open.has(r.lines[0].index)}
-                onClick={() => toggle(r.lines[0].index)}
-              >
-                <span className="tl-at">{clock(r.last)}</span>
-                <span className="tl-state">{r.state}</span>
-                <span className="tl-detail">{r.detail}</span>
-                <span className="tl-count">
-                  {r.lines.length}× · {clock(r.first, false)}–{clock(r.last, false)}
-                </span>
-              </button>
-              {open.has(r.lines[0].index) &&
-                r.lines.map((l) => (
-                  <div key={l.index} className="tl-line tl-run-line">
-                    <span className="tl-at">{clock(l.ms)}</span>
-                    <span className="tl-state">{l.state}</span>
-                    <span className="tl-detail">{l.detail}</span>
-                  </div>
-                ))}
-            </div>
-          ),
-        )}
-        {final && (
-          <div className="tl-final">
-            <div className="tl-final-head">report</div>
-            <pre>{final.text}</pre>
-          </div>
-        )}
-        <div ref={bottom} />
+      <div className="mission-conversation">
+        <ConversationView
+          sessionId={sessionId}
+          cwd={child?.cwd ?? ''}
+          status={status}
+          markers={markers}
+          footer={child && <ReplyBox c={child} rows={3} className="mission-reply" />}
+          onOpenTerminal={attach}
+        />
       </div>
-      {child && <ReplyBox c={child} rows={3} className="mission-reply" />}
     </div>
   )
 }
