@@ -223,7 +223,7 @@ test('a child with no session yet shows the mission pane says so, and fetches no
   })
   expect(host.querySelector('.mm')?.textContent).toBe('memory: no session yet')
   // It still gets the conversation (its empty state) and its markers.
-  expect(conversation.props).toMatchObject({ sessionId: null, markers: [{ at: '2026-09-15T17:10:00Z', label: 'working · starting' }] })
+  expect(conversation.props).toMatchObject({ sessionId: null, markers: [{ at: '2026-09-15T17:10:00Z', label: 'working' }] })
 })
 
 test('a child with a session_id shows what the vault gave it and what it pushed back against', async () => {
