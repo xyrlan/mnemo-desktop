@@ -58,6 +58,16 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
             <div className="vh-tile-label">needs review</div>
           </button>
         )}
+        {health && (
+          <button
+            className={`vh-tile ${health.inbox ? 'vh-warn' : 'vh-ok'}`}
+            title="Pages staged in shared/_inbox/: click to read, promote or drop them"
+            onClick={() => vault.getState().setMode('inbox')}
+          >
+            <div className="vh-tile-value">{health.inbox}</div>
+            <div className="vh-tile-label">inbox</div>
+          </button>
+        )}
         {/* No health is always a read in flight: the mount starts one before the first paint. */}
         {!health && (
           <div className="vt-empty vt-loading" role="status">
