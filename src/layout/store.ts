@@ -21,7 +21,11 @@ export type Pane = {
   error?: string
   /** The Claude Code session this terminal runs, when opened for one (Home focuses it instead of forking). */
   sessionId?: string
+  /** Which face a terminal pane shows: the xterm (default) or its Claude session as cards (round 20).
+   *  The PTY runs underneath either way. */
+  face?: Face
 }
+export type Face = 'terminal' | 'conversation'
 /** `auto`: reuse a pane of the same view in the active tab, else split right when the
  *  focused pane is wide, else split down when it is tall, else open a tab. */
 export type Place = 'auto' | 'tab' | 'split-row' | 'split-col'
@@ -86,6 +90,8 @@ export type Actions = {
   setCwd(id: PaneId, cwd: string): void
   /** Record (or clear) the Claude Code session a pane runs; Home and the workspace restore read it. */
   setSessionId(id: PaneId, sessionId: string | undefined): void
+  /** Show pane `id`'s terminal or its conversation face. Only terminal panes have two faces. */
+  setFace(id: PaneId, face: Face): void
   setTitle(id: PaneId, title: string): void
   paneExited(id: PaneId, code: number | null): void
   attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
@@ -361,6 +367,9 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       setSessionId(id, sessionId) {
         set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], sessionId } } } : {}))
       },
+      setFace(id, face) {
+        set((s) => (s.panes[id]?.view === 'terminal' ? { panes: { ...s.panes, [id]: { ...s.panes[id], face } } } : {}))
+      },
 
       setCwd(id, cwd) {
         set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], id, cwd } } }))
@@ -392,13 +401,14 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           if (!root) continue
           const ids = leaves(root)
           for (const id of ids) {
-            const { view, props, cwd, title, sessionId } = panes[id]
+            const { view, props, cwd, title, sessionId, face } = panes[id]
             out.panes[String(id)] = {
               view,
               ...(props === undefined ? {} : { props }),
               ...(cwd ? { cwd } : {}),
               ...(title ? { title } : {}),
               ...(sessionId ? { sessionId } : {}),
+              ...(face === 'conversation' ? { face } : {}),
             }
           }
           out.tabs.push({ id: t.id, root, focused: ids.includes(t.focused) ? t.focused : ids[0], ...(t.name ? { name: t.name } : {}) })
@@ -418,6 +428,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             if (p.view === 'terminal') {
               const id = await spawnPane(p.cwd)
               ids.set(old, id)
+              if (p.face) get().setFace(id, p.face)
               if (p.sessionId) {
                 get().setSessionId(id, p.sessionId)
                 // The session died with the app: resuming it never forks.

@@ -508,6 +508,40 @@ test('setSessionId tags an existing pane and ignores unknown ids', async () => {
   expect(s.getState().panes[99]).toBeUndefined()
 })
 
+test('setFace flips a terminal pane between faces and leaves other views alone', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab()
+  expect(s.getState().panes[1].face).toBeUndefined()
+  s.getState().setFace(1, 'conversation')
+  expect(s.getState().panes[1].face).toBe('conversation')
+  s.getState().setFace(1, 'terminal')
+  expect(s.getState().panes[1].face).toBe('terminal')
+  s.getState().openView('vault', {}, 'tab')
+  const vault = Object.values(s.getState().panes).find((p) => p.view === 'vault')!
+  s.getState().setFace(vault.id, 'conversation')
+  expect(s.getState().panes[vault.id].face).toBeUndefined()
+  s.getState().setFace(99, 'conversation')
+  expect(s.getState().panes[99]).toBeUndefined()
+})
+
+test('a conversation face survives save and restore; the terminal face is the default and not saved', async () => {
+  const s = createStore(fakePty())
+  await s.getState().newTab('/a')
+  await s.getState().split('row', '/b')
+  s.getState().setFace(1, 'conversation')
+  s.getState().setFace(2, 'terminal')
+  const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave()))
+  expect(saved.panes['1'].face).toBe('conversation')
+  expect(saved.panes['2'].face).toBeUndefined()
+  const again = createStore(fakePty())
+  await again.getState().restore(saved)
+  const faces = Object.values(again.getState().panes).map((p) => [p.cwd, p.face])
+  expect(faces).toEqual([
+    ['/a', 'conversation'],
+    ['/b', undefined],
+  ])
+})
+
 test('goToPane shows the tab holding a pane with it focused; renameTab sets and clears a name', async () => {
   const s = createStore(fakePty())
   await s.getState().newTab()

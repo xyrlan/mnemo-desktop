@@ -4,7 +4,7 @@ import { closeLeaf, leaves } from './tree'
 /** What `~/.mnemo-desktop/workspace.json` holds: the tabs with their split trees and ratios,
  *  and what each pane was (never its PTY, its scrollback or its exit code). Pane ids are the
  *  ids of the run that saved it; `restore` issues new ones. */
-export type SavedPane = { view: string; props?: Record<string, unknown>; cwd?: string; title?: string; sessionId?: string }
+export type SavedPane = { view: string; props?: Record<string, unknown>; cwd?: string; title?: string; sessionId?: string; face?: 'conversation' }
 export type SavedTab = { id: string; root: Node; focused: PaneId; name?: string }
 export type Saved = { version: 1; tabs: SavedTab[]; panes: Record<string, SavedPane>; activeTab: string }
 
@@ -40,6 +40,7 @@ function parsePane(x: unknown): SavedPane | null {
   if (str(x.cwd)) p.cwd = x.cwd as string
   if (str(x.title)) p.title = x.title as string
   if (typeof x.sessionId === 'string' && SESSION_ID.test(x.sessionId)) p.sessionId = x.sessionId
+  if (x.face === 'conversation' && p.view === 'terminal') p.face = 'conversation'
   return p
 }
 

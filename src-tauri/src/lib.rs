@@ -61,6 +61,9 @@ pub mod tools_path;
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
+// -- conversation (src/conversation.rs) --
+pub mod conversation;
+
 // -- github (src/github.rs) --
 pub mod github;
 
@@ -70,6 +73,9 @@ pub mod tools_install;
 
 // -- build info (src/build_info.rs) --
 pub mod build_info;
+
+// -- usage (src/usage.rs) --
+pub mod usage;
 
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
@@ -205,6 +211,11 @@ pub fn run() {
             // -- pulse commands --
             pulse::pulse_start,
 
+            // -- conversation commands --
+            conversation::conversation_follow,
+            conversation::conversation_unfollow,
+            conversation::conversation_earlier,
+
             // -- github commands --
             github::gh_auth,
             github::gh_issues,
@@ -216,6 +227,9 @@ pub fn run() {
 
             // -- build info commands --
             build_info::app_build_info,
+
+            // -- usage commands --
+            usage::usage_log,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
@@ -272,6 +286,7 @@ pub fn run() {
                     ("palette.open", "Command Palette", "CmdOrCtrl+K"),
                     ("mission.toggle-sidebar", "Toggle Mission Sidebar", "CmdOrCtrl+B"),
                     ("home.show", "Home", "CmdOrCtrl+Shift+H"),
+                    ("pane.toggle-face", "Toggle Conversation", "CmdOrCtrl+Shift+C"),
                 ];
                 const PREFIX: &str = "action:";
 

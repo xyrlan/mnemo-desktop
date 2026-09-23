@@ -14,6 +14,7 @@ import { bufferLines, registerBuffer } from './buffer'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { openUrl } from '../github/actions'
 import { openTerminalLink } from './links'
+import ConversationFace from '../conversation/Face'
 
 export default function TerminalPane({ id }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -119,6 +120,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
       tabIndex={exited || broken ? 0 : -1}
     >
       {!broken && <div ref={host} style={{ height: '100%' }} />}
+      {!broken && pane?.face === 'conversation' && <ConversationFace paneId={id} />}
       {exited && (
         <div className="pane-message">[process exited with code {pane?.exitCode ?? '?'}] press any key to close</div>
       )}

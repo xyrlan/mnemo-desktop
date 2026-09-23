@@ -54,3 +54,15 @@ test('tab.close closes the active tab and pane.close-others collapses it to the 
   await latest('pane.close-others')
   expect(store.getState().tabs[0].root).toEqual({ kind: 'leaf', pane: 2 })
 })
+
+test('pane.toggle-face flips the focused terminal between its faces', async () => {
+  let next = 1
+  const store = createStore({ ...fake, spawn: async () => next++ })
+  registerBuiltins(store)
+  const latest = (id: string) => all().filter((a) => a.id === id).at(-1)!.run()
+  await store.getState().newTab()
+  await latest('pane.toggle-face')
+  expect(store.getState().panes[1].face).toBe('conversation')
+  await latest('pane.toggle-face')
+  expect(store.getState().panes[1].face).toBe('terminal')
+})
