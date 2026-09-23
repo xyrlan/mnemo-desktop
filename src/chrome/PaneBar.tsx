@@ -94,6 +94,12 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
     void store.getState().closePane()
   }
 
+  const toggleFace = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    store.getState().focusPane(id)
+    store.getState().setFace(id, pane?.face === 'conversation' ? 'terminal' : 'conversation')
+  }
+
   const openPulse = (e: React.MouseEvent) => {
     e.stopPropagation()
     // The rule of the flash, else the last rule that fired here (a briefing names none).
@@ -126,6 +132,20 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
           </button>
         )}
         {info.tokens && <span className="pane-bar-tokens">{info.tokens}</span>}
+        {pane?.view === 'terminal' && (
+          <button
+            className={`pane-bar-face${pane.face === 'conversation' ? ' on' : ''}`}
+            title="Toggle conversation (⌘⇧C)"
+            aria-pressed={pane.face === 'conversation'}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onClick={toggleFace}
+          >
+            {pane.face === 'conversation' ? 'conversation' : 'terminal'}
+          </button>
+        )}
         <button
           className="pane-close"
           title="Close pane (⌘W)"

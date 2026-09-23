@@ -1,0 +1,106 @@
+/* The conversation face (round 20): a Claude session's transcript as cards, over the xterm. */
+
+/* The face sits over the xterm without a z-index of its own, so the pane's exit message and the
+ * drag-and-drop highlights still paint above it. For that the xterm's internal layers (its
+ * helpers, rulers and scrollbar go up to z-index 11) must stay inside the xterm: isolating it
+ * does that, only while the face is there. */
+.pane-body:has(> .conversation-face) .xterm { isolation: isolate; }
+.conversation-face { position: absolute; inset: 0; background: var(--bg); color: var(--fg); display: flex; flex-direction: column; min-height: 0; }
+
+.conversation { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; font-size: 13px; }
+.cv-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 4px 14px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: 12px; white-space: nowrap; overflow: hidden; }
+.cv-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.cv-stream { position: relative; flex: 1 1 auto; min-height: 0; }
+.cv-list { height: 100%; }
+/* Padding, never margin, on a row: the list measures each row's box. flow-root keeps the
+ * markdown's paragraph margins inside it. */
+.cv-list [data-index] { display: flow-root; padding: 3px 14px; }
+.cv-footer { flex: 0 0 auto; border-top: 1px solid var(--border); }
+.cv-end { height: 8px; }
+
+.cv-note, .cv-empty { padding: 24px 16px; color: var(--fg-muted); text-align: center; }
+.cv-empty { margin: auto; display: flex; flex-direction: column; gap: 6px; }
+.cv-empty kbd, .cv-empty code { font-family: var(--font-mono); font-size: 12px; color: var(--fg); }
+.cv-muted { color: var(--fg-muted); }
+.cv-err { color: var(--ansi-red); }
+
+/* Cards. */
+.cv-card { max-width: 100ch; border-radius: 6px; }
+.cv-card .vt-md { max-width: none; }
+.cv-user { padding: 6px 10px; background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); }
+.cv-queued { border-style: dashed; opacity: .85; }
+.cv-assistant { padding: 0 2px; }
+.cv-tool, .cv-agent, .cv-session { padding: 4px 8px; background: var(--bg-elev); border: 1px solid var(--border); }
+.cv-peer { padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--ansi-magenta) 40%, var(--border)); }
+.cv-peer-from { color: var(--ansi-magenta); font-size: 11px; }
+.cv-pending { border-color: var(--ansi-yellow); }
+.cv-pending-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--ansi-yellow) 40%, transparent); color: var(--ansi-yellow); }
+
+.cv-tool-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; width: 100%; font-size: 12px; }
+.cv-chip-head { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.cv-chip-head:hover .cv-tool-summary { color: var(--fg); }
+.cv-caret { flex: 0 0 auto; color: var(--fg-muted); width: 1ch; }
+.cv-tool-name { flex: 0 0 auto; color: var(--ansi-cyan); font-weight: 600; }
+.cv-tool-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); font-family: var(--font-mono); }
+.cv-tool-mark { flex: 0 0 auto; color: var(--fg-muted); }
+.cv-bash-cmd { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-all; }
+.cv-tool .rv-counts { flex: 0 0 auto; }
+.cv-badge { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--fg-muted); font-size: 11px; }
+
+.cv-out { margin: 4px 0 0; padding: 6px 8px; max-height: 320px; overflow: auto; background: var(--bg); border-radius: 4px; font-family: var(--font-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.cv-input { color: var(--fg-muted); }
+.cv-diff { margin-top: 4px; border-radius: 4px; background: var(--bg); }
+.cv-denied { margin-top: 4px; color: var(--ansi-red); font-size: 12px; }
+.cv-denied blockquote { margin: 4px 0 0; padding-left: 8px; border-left: 2px solid var(--border); color: var(--fg); }
+.cv-answers { margin: 4px 0 0; font-size: 12px; }
+.cv-answers dt { color: var(--fg-muted); }
+.cv-answers dd { margin: 0 0 4px 12px; }
+
+.cv-more, .cv-link, .cv-btn { font: inherit; font-size: 12px; cursor: pointer; }
+.cv-more, .cv-link { background: transparent; border: 0; padding: 2px 0; color: var(--accent); }
+.cv-more:hover, .cv-link:hover { text-decoration: underline; }
+.cv-btn { padding: 2px 10px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; }
+.cv-btn:hover { border-color: var(--accent); }
+
+.cv-session-head { color: var(--fg-muted); font-size: 12px; }
+.cv-briefing { max-height: 400px; overflow: auto; padding: 0 4px; border-left: 2px solid var(--border); }
+
+/* Rule chips. */
+.cv-rules { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.cv-rules-label { color: var(--fg-muted); font-size: 11px; }
+.cv-rule { display: inline-flex; align-items: center; height: 20px; border: 1px solid color-mix(in srgb, var(--rule-tone, var(--accent)) 45%, transparent); border-radius: 10px; font-size: 11px; overflow: hidden; }
+.cv-rule-reflex { --rule-tone: var(--accent); }
+.cv-rule-enrichment { --rule-tone: var(--ansi-cyan); }
+.cv-rule-mcp { --rule-tone: var(--ansi-magenta); }
+.cv-rule-briefing, .cv-rule-learned { --rule-tone: var(--ansi-green); }
+.cv-rule-off { opacity: .55; }
+.cv-rule-off .cv-rule-open { text-decoration: line-through; }
+.cv-rule button { height: 100%; background: transparent; border: 0; font: inherit; cursor: pointer; }
+.cv-rule-open { padding: 0 4px 0 8px; color: var(--rule-tone, var(--accent)); }
+.cv-rule-open:hover { background: color-mix(in srgb, var(--rule-tone, var(--accent)) 15%, transparent); }
+.cv-rule-veto { padding: 0 7px 0 4px; color: var(--fg-muted); }
+.cv-rule-veto:hover, .cv-rule-veto.cv-armed { color: var(--ansi-red); }
+.cv-rule-state { padding: 0 8px 0 4px; color: var(--fg-muted); }
+
+/* Images. */
+.cv-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.cv-thumb { width: 96px; height: 72px; padding: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; cursor: zoom-in; }
+.cv-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cv-thumb-wait { color: var(--fg-muted); font-size: 11px; }
+.cv-lightbox { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .8); cursor: zoom-out; }
+.cv-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* Thin rows. */
+.cv-thin { color: var(--fg-muted); font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-notification { text-align: left; }
+.cv-notification::before { content: '· '; }
+.cv-marker { color: var(--ansi-yellow); }
+.cv-line-chip { font-size: 12px; }
+.cv-chip { display: inline-block; padding: 1px 8px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--fg); font: inherit; font-size: 11px; }
+.cv-command { font-family: var(--font-mono); }
+.cv-unknown { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 12%, transparent); }
+.cv-pr { cursor: pointer; color: var(--ansi-green); }
+.cv-clear { padding: 8px 0; color: var(--fg-muted); font-family: var(--font-mono); font-size: 12px; text-align: center; }
+.cv-working { padding: 6px 14px 10px; color: var(--ansi-yellow); font-family: var(--font-mono); font-size: 12px; }
+
+.cv-new { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 3px 12px; background: var(--accent); color: var(--bg); border: 0; border-radius: 12px; font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .4); }

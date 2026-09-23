@@ -18,3 +18,9 @@
 @media (prefers-reduced-motion: reduce) {
   .pane-drop-zone { animation: none; }
 }
+
+/* The face toggle of a terminal pane (round 20): which face it shows, and a click flips it. */
+.pane-bar-face { flex: 0 0 auto; height: 18px; padding: 0 6px; background: transparent; border: 1px solid var(--border); border-radius: 9px; color: var(--fg-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.pane-bar-face:hover { color: var(--fg); background: var(--bg); }
+.pane-bar-face.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.pane.drop-target .pane-bar .pane-bar-face { border-color: currentColor; }
