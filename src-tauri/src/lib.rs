@@ -60,6 +60,10 @@ pub mod github;
 
 // -- job (src/job.rs) --
 pub mod job;
+pub mod tools_install;
+// Stand-in for tool-path's `crate::tools` until it merges; delete both then (see the file).
+#[path = "tools_stub.rs"]
+pub mod tools;
 
 // -- build info (src/build_info.rs) --
 pub mod build_info;
@@ -199,6 +203,7 @@ pub fn run() {
 
             // -- job commands --
             job::job_run,
+            tools_install::tools_install_mnemo,
 
             // -- build info commands --
             build_info::app_build_info,
