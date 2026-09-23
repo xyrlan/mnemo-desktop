@@ -319,10 +319,10 @@ pub fn external_launches(url: &Url, os: &str) -> Vec<Launch> {
 }
 
 fn run_launches(launches: &[Launch]) -> Result<(), String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let mut failures = Vec::new();
     for l in launches {
-        let mut cmd = Command::new(l.program);
+        let mut cmd = crate::proc::command(l.program);
         cmd.args(&l.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         if l.wait {
             match cmd.status() {
@@ -355,11 +355,11 @@ pub async fn browser_pr_url(cwd: Option<String>) -> Option<String> {
 fn pr_url(cwd: Option<String>) -> Option<String> {
     const GH: &str = "gh pr view --json url --jq .url";
     let mut cmd = if cfg!(windows) {
-        let mut c = std::process::Command::new("gh");
+        let mut c = crate::proc::command("gh");
         c.args(["pr", "view", "--json", "url", "--jq", ".url"]);
         c
     } else {
-        let mut c = std::process::Command::new(crate::pty::default_shell());
+        let mut c = crate::proc::command(crate::pty::default_shell());
         c.args(["-l", "-c", GH]);
         c
     };

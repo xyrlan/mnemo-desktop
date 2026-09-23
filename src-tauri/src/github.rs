@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -353,7 +352,7 @@ enum Gh {
 }
 
 fn gh(args: &[&str], cwd: Option<&Path>) -> Gh {
-    let mut cmd = Command::new("gh");
+    let mut cmd = crate::proc::command("gh");
     cmd.args(args).env("PATH", login_path()).stdin(std::process::Stdio::null());
     if let Some(d) = cwd {
         cmd.current_dir(d);

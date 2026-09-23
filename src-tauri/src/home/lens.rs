@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -207,7 +206,7 @@ pub type GhRun<'a> = &'a (dyn Fn(&[&str], &Path) -> Result<String, String> + Syn
 pub const GH_MISSING: &str = "gh not found in PATH (brew install gh)";
 
 fn run_gh(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let out = Command::new("gh")
+    let out = crate::proc::command("gh")
         .args(args)
         .current_dir(cwd)
         .env("PATH", crate::mission::login_path())

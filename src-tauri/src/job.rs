@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
@@ -74,7 +74,7 @@ pub fn run(id: &str, cwd: &str, argv: &[String], sink: Arc<dyn Fn(JobEvent) + Se
     if !live().lock().unwrap().insert(id.to_string()) {
         return Err(format!("job {id} is already running"));
     }
-    let spawned = Command::new(program)
+    let spawned = crate::proc::command(program)
         .args(args)
         .current_dir(cwd)
         // Apps started from Finder or the Dock get a bare PATH, without Homebrew's `gh` or `mnemo`.

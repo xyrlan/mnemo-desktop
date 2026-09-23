@@ -29,7 +29,7 @@ pub fn write_script(path: &std::path::Path, body: &str) {
     std::fs::write(path, format!("{shebang}\n[ -n \"$MNEMO_TEST_PROBE\" ] && exit 0\n{rest}")).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     for _ in 0..100 {
-        match std::process::Command::new(path).env("MNEMO_TEST_PROBE", "1").output() {
+        match crate::proc::command(path).env("MNEMO_TEST_PROBE", "1").output() {
             Err(e) if e.raw_os_error() == Some(ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(20)),
             r => {
                 assert!(r.unwrap().status.success(), "probe of {} failed", path.display());

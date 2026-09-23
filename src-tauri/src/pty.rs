@@ -394,7 +394,7 @@ mod tests {
         let m = PtyManager::new();
         let (id, rx) = sh(&m, "read x");
         let pid = m.pid(id).expect("a live pane has a pid");
-        let ppid = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
+        let ppid = crate::proc::command("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&ppid.stdout).trim(), std::process::id().to_string());
         m.write(id, b"\n").unwrap();
         let _ = collect(&rx);
