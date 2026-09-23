@@ -32,6 +32,10 @@ tauri-plugin-dialog = "2"
 notify = "8"
 # Browser pane snapshots travel as base64 image content (mcp.rs).
 base64 = "0.22"
+# Installing mnemo (tools_install.rs): its release is a .tar.gz, checked against a .sha256.
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
