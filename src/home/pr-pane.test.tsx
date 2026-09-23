@@ -6,16 +6,79 @@ import type { HomeRepo, HomeSession, HomeSnapshot, Pr } from './types'
 
 /** Every webview command the view sent, as `<cmd> <id> [url]`. */
 const sent: string[] = []
+/** What `review_pr` answers next, and every read asked of it as `<root>#<n>`. */
+let answer: () => Promise<unknown> = async () => review()
+const reads: string[] = []
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd.startsWith('browser_')) sent.push(`${cmd} ${args?.id}${args?.url ? ` ${args.url}` : ''}${cmd.endsWith('set_bounds') ? ` w=${args?.w}` : ''}`)
+    if (cmd === 'review_pr') {
+      reads.push(`${args?.root}#${args?.number}`)
+      return answer()
+    }
     return undefined
   }),
+}))
+/** The merge is the cockpit's (`mergePr`, owned by pr-rows); only that it is called, and with
+ *  what, is this view's. */
+const merged: [string, unknown][] = []
+vi.mock('../cockpit/actions', async (orig) => ({
+  ...(await orig<typeof import('../cockpit/actions')>()),
+  mergePr: (root: string, pr: unknown) => void merged.push([root, pr]),
 }))
 
 import PrPane, { PR_WEBVIEW } from './pr-pane'
 import { homeStore } from './app-store'
 import { store as layout } from '../layout/app-store'
+import { cockpitStore } from '../cockpit/app-store'
+import { mergeKey } from '../cockpit/actions'
+import type { FileDiff, Review } from './review/types'
+import type { Pr as MissionPr } from '../mission/types'
+import { PAGE } from './review/types'
+
+/** A file of `n` context-free added lines, numbered from 1. */
+const file = (path: string, n: number, o: Partial<FileDiff> = {}): FileDiff => ({
+  path,
+  old_path: null,
+  status: 'modified',
+  additions: n,
+  deletions: 0,
+  binary: false,
+  hunks: n ? [{ header: `@@ -0,0 +1,${n} @@`, lines: Array.from({ length: n }, (_, i) => ({ kind: 'add' as const, old: null, new: i + 1, text: `line ${i + 1}` })) }] : [],
+  lines: n,
+  ...o,
+})
+const review = (o: Partial<Review> = {}): Review => ({
+  head: 'feat/pr-view',
+  base: 'main',
+  state: 'OPEN',
+  draft: false,
+  files: [
+    {
+      path: 'src/a.rs',
+      old_path: null,
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      binary: false,
+      lines: 3,
+      hunks: [
+        {
+          header: '@@ -10,2 +10,2 @@ fn run()',
+          lines: [
+            { kind: 'ctx', old: 10, new: 10, text: 'one' },
+            { kind: 'del', old: 11, new: null, text: 'two' },
+            { kind: 'add', old: null, new: 11, text: 'deux' },
+          ],
+        },
+      ],
+    },
+    file('docs/new.md', 2, { status: 'added' }),
+  ],
+  diff_error: null,
+  truncated: false,
+  ...o,
+})
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -61,6 +124,10 @@ beforeEach(() => {
   document.body.appendChild(host)
   root = createRoot(host)
   sent.length = 0
+  reads.length = 0
+  merged.length = 0
+  answer = async () => review()
+  cockpitStore.setState({ jobs: {} })
   homeStore.setState({ snapshot: snapOf([]), openedPr: null, notice: null })
 })
 afterEach(async () => {
@@ -167,4 +234,121 @@ test('a different PR opened inside the grace period is navigated to, not left on
     `browser_set_bounds ${PR_WEBVIEW} w=0`,
     `browser_navigate ${PR_WEBVIEW} https://github.com/o/a/pull/373`,
   ])
+})
+
+const tab = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[role=tab]')].find((b) => b.textContent === label)!
+const lines = () => host.querySelectorAll('.rv-line').length
+
+test('the change is read natively by default, from the repo root, beside the lens', async () => {
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  expect(reads).toEqual(['/gh/a#372'])
+  expect(tab('Diff').getAttribute('aria-selected')).toBe('true')
+  // The webview loads behind the diff at zero size; the diff is what is on screen.
+  expect(host.querySelector<HTMLElement>('.hm-pr-page')!.hidden).toBe(true)
+  expect(text('.rv-bar')).toBe('2 files+3 −1main ← feat/pr-view')
+  const heads = [...host.querySelectorAll('.rv-file-head .rv-path')].map((e) => e.textContent)
+  expect(heads).toEqual(['src/a.rs', 'docs/new.md'])
+  expect(text('.rv-hunk')).toBe('@@ -10,2 +10,2 @@ fn run()')
+  const first = [...host.querySelectorAll('.rv-file')[0].querySelectorAll('.rv-line')].map((l) => [l.className, l.textContent])
+  expect(first).toEqual([
+    ['rv-line rv-ctx', '1010one'],
+    ['rv-line rv-del', '11-two'],
+    ['rv-line rv-add', '11+deux'],
+  ])
+  // The side column lists the same files.
+  expect([...host.querySelectorAll('.hm-pr-files .rv-list-name')].map((e) => e.textContent)).toEqual(['a.rs src', 'new.md docs'])
+})
+
+test('GitHub is one tab away, on the webview that was loading behind the diff', async () => {
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  expect(sent).toEqual([`browser_create ${PR_WEBVIEW} https://github.com/o/a/pull/372`])
+  act(() => tab('GitHub').click())
+  expect(host.querySelector<HTMLElement>('.hm-pr-page')!.hidden).toBe(false)
+  expect(host.querySelector('.rv')).toBeNull()
+  // Switching never makes a second webview.
+  expect(sent.filter((c) => c.startsWith('browser_create'))).toHaveLength(1)
+  act(() => tab('Diff').click())
+  expect(host.querySelector('.rv')).toBeTruthy()
+})
+
+test('a diff of thousands draws a bounded page, and the rest is a click away', async () => {
+  const big = [file('src/small.ts', 40), file('src/huge.ts', 3000), file('src/after.ts', 30), file('pnpm-lock.yaml', 12)]
+  answer = async () => review({ files: big })
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  // The huge file does not fit the opening budget; the small ones around it do. A lock file
+  // starts folded whatever its size.
+  const open = [...host.querySelectorAll('.rv-file-head')].map((h) => h.getAttribute('aria-expanded'))
+  expect(open).toEqual(['true', 'false', 'true', 'false'])
+  expect(lines()).toBe(70)
+  expect(text('.rv-file:nth-child(4) .hm-agent')).toBe('generated')
+
+  // Opened by hand, it draws one page, then one more per click.
+  act(() => host.querySelectorAll<HTMLButtonElement>('.rv-file-head')[1].click())
+  expect(lines()).toBe(70 + PAGE)
+  const more = () => host.querySelector<HTMLButtonElement>('.rv-more')!
+  expect(more().textContent).toBe(`show ${PAGE} more of ${3000 - PAGE} lines`)
+  act(() => more().click())
+  expect(lines()).toBe(70 + 2 * PAGE)
+})
+
+test('picking a file in the side column opens it in the diff', async () => {
+  answer = async () => review({ files: [file('a.ts', 10), file('huge.ts', 3000)] })
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  act(() => tab('GitHub').click())
+  act(() => host.querySelectorAll<HTMLButtonElement>('.rv-list-row')[1].click())
+  // Back on the diff, with that file open.
+  expect(tab('Diff').getAttribute('aria-selected')).toBe('true')
+  expect(host.querySelectorAll('.rv-file-head')[1].getAttribute('aria-expanded')).toBe('true')
+})
+
+test('a read gh refused says why, and offers another try or GitHub', async () => {
+  answer = async () => {
+    throw 'gh not found in PATH (brew install gh)'
+  }
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  expect(text('.rv-error')).toBe('gh not found in PATH (brew install gh)')
+  // Nothing to merge without the PR's head.
+  expect(button('Merge')!.disabled).toBe(true)
+  answer = async () => review()
+  await act(async () => button('Try again')!.click())
+  expect(reads).toHaveLength(2)
+  expect(host.querySelectorAll('.rv-file')).toHaveLength(2)
+
+  answer = async () => review({ files: [file('big.lock', 0, { additions: 30000 })], diff_error: 'diff exceeded the maximum number of lines (20000)' })
+  await act(async () => host.querySelector<HTMLButtonElement>('.hm-pr-reload')!.click())
+  expect(text('.rv-warn span')).toBe('gh gave no diff: diff exceeded the maximum number of lines (20000)')
+  // The file list came from `gh pr view`: opening a file never claims it did not change.
+  act(() => host.querySelector<HTMLButtonElement>('.rv-file-head')!.click())
+  expect(text('.rv-msg')).toBe('gh gave no diff to show; it is on GitHub')
+  act(() => button('Read it on GitHub')!.click())
+  expect(tab('GitHub').getAttribute('aria-selected')).toBe('true')
+})
+
+test('merge goes through mergePr, only on the second click, and says what its job said', async () => {
+  homeStore.setState({ snapshot: snapOf([repo({ prs: [pr({ checks: 'pass' })] })]) })
+  await render({ repo: '/gh/a', pr: pr() })
+  act(() => button('Merge')!.click())
+  expect(merged).toEqual([])
+  act(() => button('really merge?')!.click())
+  const target: MissionPr = { number: 372, url: 'https://github.com/o/a/pull/372', state: 'OPEN', head: 'feat/pr-view', ci: 'pass' }
+  expect(merged).toEqual([['/gh/a', target]])
+
+  // The job is the cockpit row's, by its key: a merge run there reads here too.
+  const key = mergeKey('/gh/a', target)
+  act(() => void cockpitStore.getState().jobStart(key, 'merge · PR #372'))
+  expect(text('.hm-pr-merge-state')).toBe('merging…')
+  expect(button('Merge')!.disabled).toBe(true)
+  act(() => {
+    cockpitStore.getState().jobLine(key, { stream: 'err', line: 'X Pull request o/a#372 is not mergeable: the base branch policy prohibits the merge.' })
+    cockpitStore.getState().jobExit(key, 1)
+  })
+  // Refused is refused, in gh's words, and the button is back.
+  expect(text('.hm-pr-merge-state')).toBe('merge failed ✗')
+  expect(text('.hm-pr-merge-why')).toBe('X Pull request o/a#372 is not mergeable: the base branch policy prohibits the merge.')
+  expect(button('Merge')!.disabled).toBe(false)
 })
