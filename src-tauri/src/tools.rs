@@ -400,10 +400,11 @@ mod tests {
 
     #[test]
     fn extra_dirs_are_the_managed_dirs_then_the_claude_installers_bin() {
-        let home = Path::new("/home/u");
+        // Absolute on this OS: `/home/u` has no drive letter, so Windows would call it relative.
+        let home = std::env::temp_dir().join("u");
         assert_eq!(
-            extra_dirs_in(home),
-            vec![PathBuf::from("/home/u/.mnemo-desktop/tools/mnemo"), PathBuf::from("/home/u/.local/bin")]
+            extra_dirs_in(&home),
+            vec![home.join(".mnemo-desktop").join("tools").join("mnemo"), home.join(".local").join("bin")]
         );
         assert!(extra_dirs_in(Path::new("")).is_empty(), "no home, no relative PATH entries");
         assert_eq!(extra_dirs().first(), Some(&managed_dir("mnemo")));
@@ -432,9 +433,9 @@ mod tests {
 
     #[test]
     fn with_extra_dirs_uses_the_real_extra_dirs() {
-        let p = with_extra_dirs("/usr/bin", ':');
+        let p = with_extra_dirs("/usr/bin", separator());
         for d in extra_dirs() {
-            assert!(p.split(':').any(|x| Path::new(x) == d), "{} missing from {p}", d.display());
+            assert!(p.split(separator()).any(|x| Path::new(x) == d), "{} missing from {p}", d.display());
         }
     }
 
