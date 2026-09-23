@@ -90,3 +90,8 @@
 .ws-drop.ws-over-right { box-shadow: inset -2px 0 0 0 var(--accent); }
 .ws-drop.ws-over-up { box-shadow: inset 0 2px 0 0 var(--accent); }
 .ws-drop.ws-over-down { box-shadow: inset 0 -2px 0 0 var(--accent); }
+
+/* ---- a child's conversation (round 20): fills the pane under the head and memory panel;
+   the conversation view scrolls inside it and pins the reply box under its stream. ---- */
+.mission-conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.mission-conversation > * { flex: 1; min-height: 0; }
