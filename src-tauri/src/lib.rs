@@ -52,6 +52,13 @@ pub mod workspace;
 // -- mcp (src/mcp.rs) --
 pub mod mcp;
 
+// TEMPORARY: stand-in for `tool-path`'s `crate::tools`, which `system-path` consumes but does
+// not own. See src-tauri/src/tools.rs — drop this line and that file once `tool-path` lands.
+pub mod tools;
+
+// -- system-path (src/tools_path.rs) --
+pub mod tools_path;
+
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
@@ -189,6 +196,9 @@ pub fn run() {
             mcp::mcp_answer,
             mcp::mcp_browser_eval,
             mcp::mcp_browser_snapshot,
+
+            // -- system-path commands --
+            tools_path::tools_add_to_path,
 
             chrome::chrome_branch,
             chrome::chrome_repo,
