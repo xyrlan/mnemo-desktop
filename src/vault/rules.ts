@@ -9,7 +9,7 @@ export const BADGE_TITLE: Record<Badge, string> = {
   never: 'no reflex emission or MCP read on record',
   stale: 'mnemo stale: cites code that changed in this repo',
   review: 'verified without evidence, or an activation that stopped firing',
-  inbox: 'a proposal for this slug is staged in _inbox',
+  inbox: 'a rewrite of this rule is staged: mnemo rewrites',
 }
 
 /** `mnemo__x`, `project/x` and `x` all name `x`. */

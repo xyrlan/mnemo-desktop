@@ -11,7 +11,7 @@ export type VaultLevel = {
   fired_recent: number
   dormant: number
   label_only: number
-  /** Proposals staged in `_inbox` folders. */
+  /** Pages staged in `shared/_inbox/<type>/`, as `mnemo inbox` counts them; rewrites left out. */
   inbox: number
   error: string | null
 }

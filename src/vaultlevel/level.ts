@@ -24,7 +24,7 @@ export const HEALTH_WEIGHTS = {
   dormant: 0.35,
   /** Share of pages not verified-without-evidence, against `LABEL_ONLY_CEILING`. */
   labelOnly: 0.1,
-  /** Staged proposals waiting, against `INBOX_CEILING`. */
+  /** Staged pages waiting, against `INBOX_CEILING`. */
   inbox: 0.2,
 } as const
 /** This share of pages having fired scores full reach. */
@@ -33,7 +33,7 @@ export const REACH_TARGET = 0.2
 export const DORMANT_CEILING = 0.5
 /** This share of pages label-only scores zero. */
 export const LABEL_ONLY_CEILING = 0.1
-/** This many staged proposals scores zero. */
+/** This many staged pages scores zero. */
 export const INBOX_CEILING = 200
 /** Five tones so the slide is legible before it is bad, each the floor of its band.
  *  Three poses group them (`POSE_OF`): the eye reads colour better than silhouette. */

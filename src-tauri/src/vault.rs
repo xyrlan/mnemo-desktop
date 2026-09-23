@@ -542,8 +542,8 @@ pub struct RuleRow {
     pub last_fired: Option<u64>,
     /// Fires decayed with a `HEAT_HALF_LIFE_DAYS` half-life; the rows come sorted by it.
     pub heat: f64,
-    /// `never` (no fire on record), `review` (see `reasons`), `inbox` (a proposal with this
-    /// slug is staged in an `_inbox`). `stale` is the front-end's to add: `mnemo stale` checks
+    /// `never` (no fire on record), `review` (see `reasons`), `inbox` (a rewrite of this rule
+    /// is staged, see `rewrite_targets`). `stale` is the front-end's to add: `mnemo stale` checks
     /// a repo, and this command has none.
     pub badges: Vec<String>,
     /// Why `review`: `verified without evidence`, `has activates_on, never fired`, …
@@ -579,7 +579,7 @@ fn read_scope(scope: &str) -> Result<Option<Scope>, String> {
 }
 
 /// The table's rows: the pages in `scope` matching `filter`, hottest first, then by fires and name.
-pub fn rule_rows(pages: &[LivePage], scope: &str, filter: &str, fires: &Fires, inbox: &HashSet<String>, now: u64) -> Result<Vec<RuleRow>, String> {
+pub fn rule_rows(pages: &[LivePage], scope: &str, filter: &str, fires: &Fires, rewrites: &HashSet<String>, now: u64) -> Result<Vec<RuleRow>, String> {
     let scope = read_scope(scope)?;
     let mut rows: Vec<RuleRow> = pages
         .iter()
@@ -595,7 +595,7 @@ pub fn rule_rows(pages: &[LivePage], scope: &str, filter: &str, fires: &Fires, i
             if !reasons.is_empty() {
                 badges.push("review".to_string());
             }
-            if inbox.contains(&info.slug) {
+            if rewrites.contains(&info.path) {
                 badges.push("inbox".to_string());
             }
             RuleRow {
@@ -904,7 +904,7 @@ pub struct Health {
     /// Shared and project pages, and how many of them never fired at all.
     pub pages: usize,
     pub never_fired: usize,
-    /// Proposals staged in `_inbox` folders, rejected ones not counted.
+    /// Pages staged in `shared/_inbox/<type>/`, rewrites not counted (`count_inbox`).
     pub inbox: usize,
     pub error: Option<String>,
 }
@@ -1009,40 +1009,51 @@ pub fn review(pages: &[Page], fires: &Fires, now: u64) -> (Vec<Review>, Vec<Revi
     (label_only, dormant, never)
 }
 
-/// `.md` files under `shared/_inbox` and each agent's `memory/_inbox`, `rejected-*` folders skipped.
-pub fn inbox_files(root: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
-        entries.sort();
-        for p in entries {
-            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if name.starts_with('.') || name.starts_with("rejected") {
-                continue;
-            }
-            if p.is_dir() {
-                if depth > 1 {
-                    walk(&p, depth - 1, out);
-                }
-            } else if name.ends_with(".md") {
-                out.push(p);
-            }
-        }
-    }
+/// mnemo's staged-rewrite suffixes (`filters.PROPOSED_SUFFIXES`): a rewrite of a live rule,
+/// not a page of its own.
+const PROPOSED_SUFFIXES: &[&str] = &[".proposed.md", ".update-proposed.md"];
+/// The one suffix `mnemo rewrites` pairs with a live rule (`rewrites.classify.PROPOSED_SUFFIX`).
+const PROPOSED_SUFFIX: &str = ".proposed.md";
+
+/// mnemo's review queue, sorted: the `.md` files directly in `shared/_inbox/<type>/`, one
+/// folder per page type (`filters.iter_staged_pages`; `TYPES` is `extract.scanner._VALID_TYPES`).
+/// Not a walk of all of `_inbox`: `proposals/` and `rejected-*/` hold archive copies no mnemo
+/// command acts on, and mnemo stages nothing in an agent's `memory/`.
+fn staged_files(root: &Path) -> Vec<(&'static str, PathBuf)> {
+    let inbox = root.join("shared").join("_inbox");
     let mut out = Vec::new();
-    for (_, _, dir) in agent_dirs(root) {
-        walk(&dir.join("_inbox"), 3, &mut out);
+    for t in TYPES {
+        let Ok(rd) = std::fs::read_dir(inbox.join(t)) else { continue };
+        let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "md")).collect();
+        files.sort();
+        out.extend(files.into_iter().map(|f| (*t, f)));
     }
     out
 }
 
-pub fn count_inbox(root: &Path) -> usize {
-    inbox_files(root).len()
+fn file_name(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
 }
 
-/// The slugs the staged proposals would write: a live page with one of them has a rewrite waiting.
-pub fn inbox_slugs(root: &Path) -> HashSet<String> {
-    inbox_files(root).iter().filter_map(|f| read_page(f)).map(|p| p.info.slug).collect()
+/// The staged pages, as `mnemo inbox` counts them (`inbox.staged_pages`): the queue less its
+/// rewrites. Rewrites are left out of this number; each one badges the rule it rewrites.
+pub fn count_inbox(root: &Path) -> usize {
+    staged_files(root).iter().filter(|(_, f)| !PROPOSED_SUFFIXES.iter().any(|s| file_name(f).ends_with(s))).count()
+}
+
+/// The paths of the live rules a rewrite is waiting for, as `mnemo rewrites` pairs them
+/// (`rewrites.classify`): `_inbox/<type>/<slug>.proposed.md` rewrites `shared/<type>/<slug>.md`
+/// when that file exists. `x.update-proposed.md` does not end in `.proposed.md`, so it pairs
+/// with nothing, there or here.
+pub fn rewrite_targets(root: &Path) -> HashSet<String> {
+    staged_files(root)
+        .into_iter()
+        .filter_map(|(t, f)| {
+            let slug = file_name(&f).strip_suffix(PROPOSED_SUFFIX)?.to_string();
+            let live = root.join("shared").join(t).join(format!("{slug}.md"));
+            live.is_file().then(|| live.to_string_lossy().replace('\\', "/"))
+        })
+        .collect()
 }
 
 /// Every shared and project page, noise agents left out, in `agent_dirs` order.
@@ -1089,7 +1100,7 @@ pub struct VaultLevel {
     pub fired_recent: usize,
     pub dormant: usize,
     pub label_only: usize,
-    /// Proposals staged in `_inbox` folders, rejected ones not counted.
+    /// Pages staged in `shared/_inbox/<type>/`, rewrites not counted (`count_inbox`).
     pub inbox: usize,
     pub error: Option<String>,
 }
@@ -1319,7 +1330,7 @@ struct PagesCache {
     root: PathBuf,
     at: std::time::Instant,
     pages: std::sync::Arc<Vec<LivePage>>,
-    inbox: std::sync::Arc<HashSet<String>>,
+    rewrites: std::sync::Arc<HashSet<String>>,
     fires: std::sync::Arc<Fires>,
 }
 
@@ -1329,21 +1340,21 @@ static PAGES: std::sync::Mutex<Option<PagesCache>> = std::sync::Mutex::new(None)
 
 type Snapshot = (std::sync::Arc<Vec<LivePage>>, std::sync::Arc<HashSet<String>>, std::sync::Arc<Fires>);
 
-/// The live pages, inbox slugs and fires of the vault at `root`, from the cache when fresh.
+/// The live pages, rewrite targets and fires of the vault at `root`, from the cache when fresh.
 fn snapshot(root: &Path) -> Snapshot {
     if let Ok(guard) = PAGES.lock() {
         if let Some(c) = guard.as_ref().filter(|c| c.root == root && c.at.elapsed() < PAGES_TTL) {
-            return (c.pages.clone(), c.inbox.clone(), c.fires.clone());
+            return (c.pages.clone(), c.rewrites.clone(), c.fires.clone());
         }
     }
     let fresh = PagesCache {
         root: root.to_path_buf(),
         at: std::time::Instant::now(),
         pages: std::sync::Arc::new(live_pages(root)),
-        inbox: std::sync::Arc::new(inbox_slugs(root)),
+        rewrites: std::sync::Arc::new(rewrite_targets(root)),
         fires: std::sync::Arc::new(read_fires(root)),
     };
-    let out = (fresh.pages.clone(), fresh.inbox.clone(), fresh.fires.clone());
+    let out = (fresh.pages.clone(), fresh.rewrites.clone(), fresh.fires.clone());
     if let Ok(mut guard) = PAGES.lock() {
         *guard = Some(fresh);
     }
@@ -1742,7 +1753,7 @@ mod tests {
 
     fn rows_of(scope: &str, filter: &str) -> Result<Vec<RuleRow>, String> {
         let root = Path::new(FIXTURE);
-        rule_rows(&live_pages(root), scope, filter, &fixture_fires(), &inbox_slugs(root), NOW)
+        rule_rows(&live_pages(root), scope, filter, &fixture_fires(), &rewrite_targets(root), NOW)
     }
 
     fn slugs(rows: &[RuleRow]) -> Vec<&str> {
@@ -1805,10 +1816,39 @@ mod tests {
         assert!(rows_of("agent:../x", "").is_err());
     }
 
+    // The fixture's `shared/_inbox`, one file per case, as mnemo 1.6 reads it:
+    //   feedback/staged-page.md                        plain staged page      counted
+    //   project/dormant-activation.md                  plain, a live slug     counted, no badge
+    //   feedback/run-tests-before-commit.proposed.md   rewrite, live target   badge
+    //   project/no-live-target.proposed.md             rewrite, no target     neither
+    //   project/dormant-activation.update-proposed.md  update-proposal        neither
+    //   proposals/verified-without-evidence.proposed.md       archive copy    neither
+    //   rejected-20260912T164010/{old-proposal,dormant-activation.proposed}.md  neither
+    // plus `bots/mnemo-desktop/memory/_inbox/project/`, where mnemo stages nothing: neither.
+
     #[test]
-    fn inbox_slugs_are_the_staged_proposals_not_the_rejected_ones() {
-        assert_eq!(inbox_slugs(Path::new(FIXTURE)), HashSet::from(["run-tests-before-commit".to_string()]));
-        assert_eq!(count_inbox(Path::new(FIXTURE)), 1);
+    fn the_inbox_counts_the_staged_pages_mnemo_inbox_lists() {
+        assert_eq!(count_inbox(Path::new(FIXTURE)), 2);
+        let staged: Vec<String> = staged_files(Path::new(FIXTURE)).iter().map(|(_, f)| f.to_string_lossy().replace('\\', "/").replace(&fixture(), "")).collect();
+        assert_eq!(
+            staged,
+            [
+                "/shared/_inbox/feedback/run-tests-before-commit.proposed.md",
+                "/shared/_inbox/feedback/staged-page.md",
+                "/shared/_inbox/project/dormant-activation.md",
+                "/shared/_inbox/project/dormant-activation.update-proposed.md",
+                "/shared/_inbox/project/no-live-target.proposed.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rewrite_badges_only_the_live_rule_mnemo_rewrites_pairs_it_with() {
+        assert_eq!(rewrite_targets(Path::new(FIXTURE)), HashSet::from([format!("{}/shared/feedback/run-tests-before-commit.md", fixture())]));
+        let badged: Vec<String> = rows_of("", "").unwrap().into_iter().filter(|r| r.badges.iter().any(|b| b == "inbox")).map(|r| r.slug).collect();
+        // Not dormant-activation (staged plain, and archived in `rejected-*`), not
+        // verified-without-evidence (archived in `proposals/`), not shared-target-dir (an agent's `_inbox`).
+        assert_eq!(badged, ["run-tests-before-commit"]);
     }
 
     #[test]
@@ -1941,7 +1981,7 @@ mod tests {
 
     #[test]
     fn ego_of_a_path_that_is_no_rule_is_an_error() {
-        let g = ego_of("/shared/_inbox/run-tests-before-commit.md", 30);
+        let g = ego_of("/shared/_inbox/feedback/run-tests-before-commit.proposed.md", 30);
         assert!(g.error.unwrap().contains("not a rule in the vault"));
         assert!(g.nodes.is_empty());
         let v = serde_json::to_value(&ego_of("/shared/feedback/run-tests-before-commit.md", 30)).unwrap();
@@ -2020,8 +2060,8 @@ mod tests {
             ]
         );
         assert_eq!(h.dormant[0].path, format!("{}/shared/project/dormant-activation.md", fixture()));
-        // Noise agents are not counted; `rejected-*` proposals are not inbox.
-        assert_eq!((h.pages, h.never_fired, h.inbox), (5, 1, 1));
+        // Noise agents are not counted; the inbox is the staged pages alone.
+        assert_eq!((h.pages, h.never_fired, h.inbox), (5, 1, 2));
         assert_eq!(h.root.as_deref(), Some(FIXTURE.replace('\\', "/").as_str()));
         assert_eq!(h.error, None);
     }
