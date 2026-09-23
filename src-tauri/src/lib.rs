@@ -55,6 +55,9 @@ pub mod workspace;
 // -- mcp (src/mcp.rs) --
 pub mod mcp;
 
+// -- system-path (src/tools_path.rs) --
+pub mod tools_path;
+
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
@@ -63,6 +66,7 @@ pub mod github;
 
 // -- job (src/job.rs) --
 pub mod job;
+pub mod tools_install;
 
 // -- build info (src/build_info.rs) --
 pub mod build_info;
@@ -192,6 +196,9 @@ pub fn run() {
             mcp::mcp_browser_eval,
             mcp::mcp_browser_snapshot,
 
+            // -- system-path commands --
+            tools_path::tools_add_to_path,
+
             chrome::chrome_branch,
             chrome::chrome_repo,
 
@@ -205,6 +212,7 @@ pub fn run() {
 
             // -- job commands --
             job::job_run,
+            tools_install::tools_install_mnemo,
 
             // -- build info commands --
             build_info::app_build_info,
