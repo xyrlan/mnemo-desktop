@@ -225,7 +225,7 @@ The face itself. `ConversationView`'s props are final on `main`; this piece writ
 
 ## children
 
-- **files:** src/mission/view.tsx, src/mission/timeline.ts, src/mission/timeline.test.ts, src/mission/mission.css
+- **files:** src/mission/view.tsx, src/mission/view.test.tsx, src/mission/timeline.ts, src/mission/timeline.test.ts, src/mission/mission.css
 - **exposes:** `statusMarkers(lines: TimelineLine[]): StatusMarker[]`
 - **consumes:** `ConversationView(props: ConversationViewProps)` from view
 - **model:** opus
@@ -250,3 +250,6 @@ A `--bg` child's mission pane shows its conversation instead of the timeline (sp
   code and its tests.
 - A child with no `session_id` yet still gets the view (it shows its empty state) and its
   markers.
+- `src/mission/view.test.tsx` checks the timeline this piece removes: rewrite those tests for the
+  new pane (conversation, markers, footer), keep the rest. The `tl-*` rules in `src/theme.css`
+  become dead; leave them (not in this boundary), the parent removes them at landing.
