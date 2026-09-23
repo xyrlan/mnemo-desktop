@@ -2,6 +2,10 @@ name: release
 on:
   push:
     tags: ['v*']
+# The repo's default token is read-only; creating the release and uploading
+# its assets needs write on contents.
+permissions:
+  contents: write
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 jobs:
@@ -42,5 +46,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: mnemo-desktop ${{ github.ref_name }}
-          releaseDraft: false
+          # A draft until every platform has uploaded: a job that fails must not
+          # leave a public release with a platform missing. Publish by hand.
+          releaseDraft: true
           args: ${{ matrix.args }}
