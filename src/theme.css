@@ -171,28 +171,12 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 .mission-title { font-weight: 700; }
 .mission-meta { display: flex; gap: 14px; color: var(--fg-muted); }
 .mission-actions { display: flex; gap: 8px; }
-.mission-timeline { flex: 1; overflow: auto; padding: 6px 8px; }
-.tl-line { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg-muted); }
-.tl-line.fresh { color: var(--fg); }
-.tl-line.fresh::before { content: '•'; color: var(--accent); }
-.tl-at { flex: 0 0 70px; }
-.tl-state { flex: 0 0 64px; }
-.tl-detail { overflow: hidden; text-overflow: ellipsis; }
-/* A run of identical status lines, folded into one row that opens to show each (#82). */
-.tl-run-head { width: 100%; background: transparent; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; }
-.tl-run-head:hover { background: var(--bg-elev); }
-.tl-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; color: var(--fg-muted); }
-.tl-run-line { padding-left: 12px; opacity: .8; }
-.tl-final { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
-.tl-final-head { color: var(--ansi-magenta); margin-bottom: 4px; }
-.tl-final pre { white-space: pre-wrap; font: inherit; margin: 0; color: var(--fg); }
 .mission-reply { margin: 0; border-left: 0; border-top: 2px solid var(--ansi-yellow); }
 
 .m-sent { margin-top: 4px; color: var(--ansi-green); font-size: 11px; }
 .m-sent-text { color: var(--fg-muted); }
 .m-reply-note { margin-top: 4px; color: var(--fg-muted); font-size: 11px; }
 .m-replied .m-word { color: var(--bg); background: var(--ansi-green); }
-.tl-you .tl-state { color: var(--ansi-green); }
 
 /* A view that threw during render (src/panes/ErrorBoundary.tsx). */
 .crashed { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; padding: 24px; background: var(--bg); color: var(--fg); overflow: auto; }
