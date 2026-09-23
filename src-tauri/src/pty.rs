@@ -191,6 +191,8 @@ impl PtyManager {
         for var in CLAUDE_SESSION_ENV {
             cmd.env_remove(var);
         }
+        // `mnemo` and `claude` in the app's own dirs work typed into a pane too.
+        cmd.env("PATH", crate::tools::pane_path());
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "mnemo");
@@ -481,6 +483,10 @@ mod tests {
         let zsh = m.command(default_shell_opts(&dir), "/bin/zsh".into());
         assert_eq!(zsh.get_env("ZDOTDIR"), Some(dir.join("zsh").as_os_str()));
         assert_eq!(zsh.get_env("TERM_PROGRAM"), Some("mnemo".as_ref()));
+        let path = zsh.get_env("PATH").expect("a pane gets a PATH").to_string_lossy().into_owned();
+        for d in crate::tools::extra_dirs() {
+            assert!(path.split(crate::tools::separator()).any(|x| Path::new(x) == d), "{} missing from {path}", d.display());
+        }
         assert_eq!(zsh.get_env("TERM_PROGRAM_VERSION"), Some(env!("CARGO_PKG_VERSION").as_ref()));
         assert_eq!(zsh.get_argv()[1..], ["-l"]);
 

@@ -608,46 +608,73 @@ pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
 
 // ------------------------------------------------------------------ io --
 
-/// PATH as the user's *interactive* login shell sees it. An app launched from the Dock or
-/// Finder inherits launchd's minimal PATH, which has neither `~/.local/bin` (claude, mnemo)
-/// nor Homebrew (gh); the terminal panes are fine because they run a login shell, but
-/// every `Command` here must be given the same PATH explicitly. The probe is `-lic`, not
-/// `-lc`: a non-interactive login zsh never reads `.zshrc`, which is where most people
-/// (this user included) export `~/.local/bin`, so `-lc` found no `claude` at all.
-/// Between markers, because an interactive rc may print. Well-known tool dirs are
-/// appended as a last resort when the shell probe misses them.
+/// PATH as the user's *interactive* login shell sees it, plus `tools::extra_dirs()`. An app
+/// launched from the Dock or Finder inherits launchd's minimal PATH, which has neither
+/// `~/.local/bin` (claude, mnemo) nor Homebrew (gh); the terminal panes are fine because they
+/// run a login shell, but every `Command` here must be given the same PATH explicitly. The
+/// probe is `-lic`, not `-lc`: a non-interactive login zsh never reads `.zshrc`, which is where
+/// most people (this user included) export `~/.local/bin`, so `-lc` found no `claude` at all.
+/// Between markers, because an interactive rc may print. Well-known tool dirs are appended as
+/// a last resort when the shell probe misses them.
+///
+/// On Windows it starts from the machine and user `Path` as the registry holds them now, the
+/// PATH a newly opened terminal would get: a tool installed after launch is on it.
+///
+/// Cached until `tools::refresh()`; the next call after that reads PATH again.
 pub fn login_path() -> String {
-    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    CACHE
-        .get_or_init(|| {
-            let inherited = std::env::var("PATH").unwrap_or_default();
-            if cfg!(windows) {
-                return inherited;
-            }
-            let shell = crate::pty::default_shell();
-            let probed = crate::proc::command(&shell)
-                .args(["-lic", "printf '\\037MNEMO_PATH=%s\\037' \"$PATH\""])
-                .env("TERM", "dumb")
-                .env("MNEMO_NO_SHELL_INTEGRATION", "1")
+    let mut cache = LOGIN_PATH.lock().unwrap_or_else(|e| e.into_inner());
+    // Held while reading, so a refresh never races a read that started before it.
+    cache.get_or_insert_with(read_login_path).clone()
+}
+
+static LOGIN_PATH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Drops the cached `login_path()`. Called through `tools::refresh()`.
+pub(crate) fn forget_login_path() {
+    *LOGIN_PATH.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// How many times PATH was read, so a test can tell a refresh from a cache hit.
+#[cfg(test)]
+pub(crate) static LOGIN_PATH_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// `login_path()` read now, bypassing the cache.
+pub(crate) fn read_login_path() -> String {
+    #[cfg(test)]
+    LOGIN_PATH_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    let sep = crate::tools::separator();
+    let merged = if cfg!(windows) {
+        merge_paths(sep, &crate::tools::system_path().unwrap_or_default(), &inherited, &[])
+    } else {
+        merge_paths(sep, &probe_shell_path(), &inherited, &well_known_dirs())
+    };
+    crate::tools::with_extra_dirs(&merged, sep)
+}
+
+/// PATH from the user's interactive login shell, or empty when it cannot be read.
+fn probe_shell_path() -> String {
+    let shell = crate::pty::default_shell();
+    crate::proc::command(&shell)
+        .args(["-lic", "printf '\\037MNEMO_PATH=%s\\037' \"$PATH\""])
+        .env("TERM", "dumb")
+        .env("MNEMO_NO_SHELL_INTEGRATION", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()
+        .and_then(|o| extract_marked_path(&String::from_utf8_lossy(&o.stdout)))
+        .or_else(|| {
+            // A broken interactive rc: fall back to the plain login probe.
+            crate::proc::command(&shell)
+                .args(["-lc", "printf %s \"$PATH\""])
                 .stdin(std::process::Stdio::null())
                 .output()
                 .ok()
-                .and_then(|o| extract_marked_path(&String::from_utf8_lossy(&o.stdout)))
-                .or_else(|| {
-                    // A broken interactive rc: fall back to the plain login probe.
-                    crate::proc::command(&shell)
-                        .args(["-lc", "printf %s \"$PATH\""])
-                        .stdin(std::process::Stdio::null())
-                        .output()
-                        .ok()
-                        .filter(|o| o.status.success())
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .filter(|p| !p.is_empty())
-                })
-                .unwrap_or_default();
-            merge_paths(&probed, &inherited, &well_known_dirs())
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|p| !p.is_empty())
         })
-        .clone()
+        .unwrap_or_default()
 }
 
 /// The PATH printed between `\x1f` markers by the interactive probe, or None.
@@ -669,26 +696,17 @@ fn well_known_dirs() -> Vec<String> {
 }
 
 /// `probed` first, then anything in `inherited` it lacks, then any `extra` dir that exists
-/// on disk and is still missing. Order is preserved, duplicates and empties dropped.
-pub fn merge_paths(probed: &str, inherited: &str, extra: &[String]) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    let mut push = |p: &str| {
-        if !p.is_empty() && !parts.iter().any(|q| q == p) {
-            parts.push(p.to_string());
-        }
-    };
-    for p in probed.split(':') {
-        push(p);
-    }
-    for p in inherited.split(':') {
-        push(p);
-    }
-    for p in extra {
-        if Path::new(p).is_dir() {
-            push(p);
-        }
-    }
-    parts.join(":")
+/// on disk and is still missing, all split and joined on `sep`. Order is preserved,
+/// duplicates and empties dropped.
+pub fn merge_paths(sep: char, probed: &str, inherited: &str, extra: &[String]) -> String {
+    crate::tools::join_unique(
+        sep,
+        probed
+            .split(sep)
+            .chain(inherited.split(sep))
+            .map(String::from)
+            .chain(extra.iter().filter(|p| Path::new(p).is_dir()).cloned()),
+    )
 }
 
 pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
@@ -1497,9 +1515,23 @@ mod tests {
         let tmp = std::env::temp_dir();
         let existing = tmp.to_string_lossy().to_string();
         let missing = tmp.join("definitely-missing-dir-xyz").to_string_lossy().to_string();
-        let merged = merge_paths("/a:/b", "/b:/c:", &[existing.clone(), missing.clone()]);
+        let merged = merge_paths(':', "/a:/b", "/b:/c:", &[existing.clone(), missing.clone()]);
         assert_eq!(merged, format!("/a:/b:/c:{existing}"));
         assert!(!merged.contains(&missing));
+    }
+
+    #[test]
+    fn merge_paths_on_windows_splits_on_semicolons_only() {
+        let merged = merge_paths(';', r"C:\Windows;C:\Program Files\Git\cmd", r"c:\windows;D:\tools;", &[]);
+        assert_eq!(merged, r"C:\Windows;C:\Program Files\Git\cmd;D:\tools");
+    }
+
+    #[test]
+    fn login_path_carries_the_apps_tool_dirs() {
+        let p = login_path();
+        for d in crate::tools::extra_dirs() {
+            assert!(p.split(crate::tools::separator()).any(|x| Path::new(x) == d), "{} missing from {p}", d.display());
+        }
     }
 
     #[test]

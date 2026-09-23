@@ -10,6 +10,9 @@ pub mod proc;
 // -- editor (src/fs.rs) --
 pub mod fs;
 
+// -- tool-path (src/tools.rs) --
+pub mod tools;
+
 // -- browser (src/browser.rs) --
 pub mod browser;
 
@@ -52,10 +55,6 @@ pub mod workspace;
 // -- mcp (src/mcp.rs) --
 pub mod mcp;
 
-// TEMPORARY: stand-in for `tool-path`'s `crate::tools`, which `system-path` consumes but does
-// not own. See src-tauri/src/tools.rs — drop this line and that file once `tool-path` lands.
-pub mod tools;
-
 // -- system-path (src/tools_path.rs) --
 pub mod tools_path;
 
@@ -68,9 +67,6 @@ pub mod github;
 // -- job (src/job.rs) --
 pub mod job;
 pub mod tools_install;
-// Stand-in for tool-path's `crate::tools` until it merges; delete both then (see the file).
-#[path = "tools_stub.rs"]
-pub mod tools;
 
 // -- build info (src/build_info.rs) --
 pub mod build_info;
@@ -129,6 +125,9 @@ pub fn run() {
             fs::fs_read,
             fs::fs_write,
             fs::fs_list,
+
+            // -- tool-path commands --
+            tools::tools_status,
 
             // -- browser commands --
             browser::browser_create,

@@ -246,8 +246,10 @@ fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
     }
     let mut child = cmd.spawn().map_err(|e| format!("mnemo init could not start ({e})."))?;
     let (out, err) = (child.stdout.take(), child.stderr.take());
-    let last = std::sync::Mutex::new(String::new());
-    let pump = |from: Box<dyn Read + Send>| {
+    // One last line per stream: the two are read by two threads, so a single shared "last line"
+    // would be whichever thread got there last, not what mnemo said last.
+    let (last_out, last_err) = (std::sync::Mutex::new(String::new()), std::sync::Mutex::new(String::new()));
+    let pump = |from: Box<dyn Read + Send>, last: &std::sync::Mutex<String>| {
         let mut reader = BufReader::new(from);
         let mut buf = Vec::new();
         while matches!(reader.read_until(b'\n', &mut buf), Ok(n) if n > 0) {
@@ -261,10 +263,10 @@ fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
     };
     std::thread::scope(|s| {
         if let Some(o) = out {
-            s.spawn(|| pump(Box::new(o)));
+            s.spawn(|| pump(Box::new(o), &last_out));
         }
         if let Some(e) = err {
-            s.spawn(|| pump(Box::new(e)));
+            s.spawn(|| pump(Box::new(e), &last_err));
         }
     });
     let status = child.wait().map_err(|e| format!("mnemo init did not finish ({e})."))?;
@@ -272,7 +274,9 @@ fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
         return Ok(());
     }
     let code = status.code().map_or("a signal".to_string(), |c| format!("code {c}"));
-    let last = last.into_inner().unwrap();
+    // The reason a failure gives is on stderr; stdout's last line stands in only when stderr was silent.
+    let (last_out, last_err) = (last_out.into_inner().unwrap(), last_err.into_inner().unwrap());
+    let last = if last_err.is_empty() { last_out } else { last_err };
     Err(if last.is_empty() { format!("mnemo init stopped with {code}.") } else { format!("mnemo init stopped with {code}: {last}") })
 }
 
@@ -577,7 +581,8 @@ mod tests {
     fn init_output_is_said_line_by_line_and_a_failure_names_its_last_line() {
         let root = temp_dir("mnemo-install-init");
         let exe = root.join("mnemo");
-        crate::testutil::write_script(&exe, "#!/bin/sh\necho \"args: $*\"\necho 'vault ready'\necho 'settings.json is locked' >&2\nexit 3\n");
+        // stdout speaks again after the error, so a "last line" shared by both streams names the wrong one.
+        crate::testutil::write_script(&exe, "#!/bin/sh\necho \"args: $*\"\necho 'settings.json is locked' >&2\nsleep 0.2\necho 'vault ready'\nexit 3\n");
         let said = std::sync::Mutex::new(Vec::new());
         let err = run_init(&exe, &|l| said.lock().unwrap().push(l)).unwrap_err();
         let said = said.into_inner().unwrap();
