@@ -104,6 +104,45 @@ test('restore recreates the tabs with new ids, spawns shells in their cwd and re
   }
 })
 
+test('restore leaves a session another instance runs alone, and resumes nothing when it cannot tell', async () => {
+  vi.useFakeTimers()
+  try {
+    const src = await sample()
+    src.getState().setSessionId(1, 'sess-0')
+    const saved = JSON.parse(JSON.stringify(src.getState().snapshotForSave()))
+
+    const asked: string[][] = []
+    const one = fakePty(10)
+    const s = createStore(one.pty, { workspace: () => null, liveSessions: async (ids) => (asked.push(ids), ['sess-1']) })
+    await s.getState().restore(saved)
+    expect(asked).toEqual([['sess-0', 'sess-1']])
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(one.writes).toEqual([[10, 'claude --resume sess-0\n']])
+    // The live one stays on its pane, so the layout saves it and a later restore can resume it.
+    expect(s.getState().panes[11].sessionId).toBe('sess-1')
+    expect(s.getState().snapshotForSave().panes['11']).toMatchObject({ sessionId: 'sess-1' })
+
+    const two = fakePty(10)
+    const blind = createStore(two.pty, { workspace: () => null, liveSessions: () => Promise.reject(new Error('claude: not found')) })
+    await blind.getState().restore(saved)
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(two.writes).toEqual([])
+    expect([10, 11].map((id) => blind.getState().panes[id].sessionId)).toEqual(['sess-0', 'sess-1'])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('restore asks nothing when no pane ran a session', async () => {
+  const src = createStore(fakePty().pty, { workspace: () => null })
+  await src.getState().newTab('/repo')
+  let asked = 0
+  const s = createStore(fakePty(10).pty, { workspace: () => null, liveSessions: async () => (asked++, []) })
+  await s.getState().restore(JSON.parse(JSON.stringify(src.getState().snapshotForSave())))
+  expect(asked).toBe(0)
+  expect(s.getState().tabs).toHaveLength(1)
+})
+
 test('a moved layout saves and restores with the same panes in the same places', async () => {
   const s = await sample()
   s.getState().focusPane(2)

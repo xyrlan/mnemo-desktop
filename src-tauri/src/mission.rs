@@ -1044,7 +1044,7 @@ fn chrono_now() -> String {
 // ------------------------------------------------------------- looked --
 
 fn looked_path() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("looked.json")
+    crate::app_dir::app_dir().join("looked.json")
 }
 
 pub fn read_looked() -> HashMap<String, usize> {

@@ -37,6 +37,9 @@ export const SPLIT_MIN_H = 600
 export type StoreOptions = {
   /** The box tabs are laid out in; null when unknown (placement then opens a tab). */
   workspace?: () => Rect | null
+  /** Which of the saved sessions a running `claude` already holds (another app instance may run
+   *  them); rejects when that cannot be told. None given: every saved session is resumed. */
+  liveSessions?: (ids: string[]) => Promise<string[]>
 }
 
 export type State = {
@@ -101,7 +104,8 @@ export type Actions = {
   snapshotForSave(): Saved
   /** Recreate the tabs of a saved workspace (what `workspace_read` returned) after the open ones:
    *  a terminal spawns a shell in its saved cwd (the core falls back to home when it is gone) and,
-   *  when it ran a Claude session, types `claude --resume <id>` after the prompt; other views
+   *  when it ran a Claude session, types `claude --resume <id>` after the prompt unless that session
+   *  is live elsewhere (or liveness cannot be told), keeping the id on the pane either way; other views
    *  reopen with their props. Resolves once every pane exists; rejects when the file holds tabs
    *  but none could be read. A missing or empty workspace restores nothing. */
   restore(saved: unknown): Promise<void>
@@ -116,6 +120,7 @@ export const PROMPT_DELAY_MS = 700
 
 export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
   const workspace = opts.workspace ?? (() => workspaceRect())
+  const liveSessions = opts.liveSessions ?? (async () => [])
   return createZustand<State & Actions>((set, get) => {
     const active = () => get().tabs.find((t) => t.id === get().activeTab)
     let synthetic = -1
@@ -419,6 +424,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       async restore(saved) {
         const parsed = parseSaved(saved)
         if (!parsed) return
+        // A session still running (another instance of the app has it) would get a second copy,
+        // with its hooks and MCP servers, from `claude --resume` (#168). Unknown counts as running.
+        const sessions = Object.values(parsed.panes).flatMap((p) => (p.view === 'terminal' && p.sessionId ? [p.sessionId] : []))
+        const running: Set<string> | 'unknown' =
+          sessions.length === 0 ? new Set() : await liveSessions(sessions).then((ids) => new Set(ids), () => 'unknown' as const)
         const made: Tab[] = []
         let active: string | undefined
         for (const t of parsed.tabs) {
@@ -430,9 +440,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
               ids.set(old, id)
               if (p.face) get().setFace(id, p.face)
               if (p.sessionId) {
+                // Kept on the pane even when not resumed, so the saved layout keeps it too.
                 get().setSessionId(id, p.sessionId)
-                // The session died with the app: resuming it never forks.
-                if (id > 0) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+                const resumable = running !== 'unknown' && !running.has(p.sessionId)
+                if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
               }
             } else {
               const id = synthetic--

@@ -660,7 +660,7 @@ pub struct Marketplace {
 
 impl Marketplace {
     pub fn at_home() -> Marketplace {
-        let base = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop");
+        let base = crate::app_dir::app_dir();
         Marketplace {
             config: base.join("marketplace.json"),
             cache: base.join("marketplace"),

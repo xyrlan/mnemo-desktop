@@ -1119,7 +1119,7 @@ pub fn level_of(pages: &[LivePage], fires: &Fires, inbox: usize, now: u64) -> Va
 }
 
 fn level_best_path() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".mnemo-desktop").join("vault-level.json")
+    crate::app_dir::app_dir().join("vault-level.json")
 }
 
 /// The highest xp in the file at `path` after offering `xp`; written only when `xp` beats it.

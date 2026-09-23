@@ -29,24 +29,27 @@ pub const BIN_NAME: &str = "mnemo-desktop-mcp";
 pub const SERVER_NAME: &str = "desktop";
 /// The tools the binary may relay; anything else is refused before it reaches the webview.
 pub const TOOLS: &[&str] = &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot"];
-/// Overrides the socket path on both ends (tests, a second app instance).
+/// The socket the binary connects to; the app exports it into every pane (`pane_env`).
 pub const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
 
 const MAIN: &str = "main";
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn home() -> PathBuf {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
-}
+use crate::app_dir::{app_dir, home};
 
-/// `~/.mnemo-desktop`, shared with settings and shell integration.
-pub fn app_dir() -> PathBuf {
-    home().join(".mnemo-desktop")
-}
-
+/// Where this app serves: in its own app dir, so a debug build never takes the installed
+/// app's socket. `SOCKET_ENV` is not read here: the app exports it into its panes (see
+/// `pane_env`), so an app started from another app's pane would inherit that app's socket.
 pub fn socket_path() -> PathBuf {
-    std::env::var_os(SOCKET_ENV).map(PathBuf::from).unwrap_or_else(|| app_dir().join("mcp.sock"))
+    app_dir().join("mcp.sock")
+}
+
+/// What a pane's environment carries so a session in it reaches this app, not another
+/// instance: the binary Claude Code starts is found through the user's registration, which
+/// may be another build's, and falls back to the release socket without it.
+pub fn pane_env() -> (&'static str, PathBuf) {
+    (SOCKET_ENV, socket_path())
 }
 
 /// Where sessions are pointed at: a symlink to the binary of whichever app build started
