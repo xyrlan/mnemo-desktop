@@ -164,7 +164,7 @@ function EditorPane({ id, props }: PaneViewProps) {
   const hasBuffer = sessions.buffers.get(id)?.path === path
 
   return (
-    <div className="pane-body editor-pane" onKeyDown={onKeyDown}>
+    <div className="pane-body editor-pane" data-ui onKeyDown={onKeyDown}>
       <div className="editor-head">
         <button
           className={`editor-icon${session?.treeOpen ? ' on' : ''}`}
