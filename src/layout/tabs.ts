@@ -121,12 +121,13 @@ export function dropOnGroup(
 const trimSlash = (p: string) => p.replace(/\/+$/, '') || '/'
 
 /** The pane of this window a session runs in: the terminal tagged with its session id, else the
- *  only terminal sitting in exactly its cwd. `null` when it is not open here (or ambiguous). */
+ *  only terminal sitting in exactly its cwd, in any open worktree. `null` when it is not open (or ambiguous). */
 export function paneForSession(
-  s: { tabs: Tab[]; panes: Record<number, Pane> },
+  s: { tabs: Tab[]; panes: Record<number, Pane>; parked?: Record<string, { tabs: Tab[] }> },
   session: { session_id: string | null; cwd: string },
 ): number | null {
-  const open = s.tabs.flatMap((t) => leaves(t.root)).map((id) => s.panes[id]).filter((p): p is Pane => !!p)
+  const every = [...s.tabs, ...Object.values(s.parked ?? {}).flatMap((l) => l.tabs)]
+  const open = every.flatMap((t) => leaves(t.root)).map((id) => s.panes[id]).filter((p): p is Pane => !!p)
   const tagged = session.session_id ? open.find((p) => p.sessionId === session.session_id) : undefined
   if (tagged) return tagged.id
   if (!session.cwd) return null

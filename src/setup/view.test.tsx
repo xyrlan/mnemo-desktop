@@ -43,27 +43,28 @@ beforeAll(() => {
 })
 
 // The first launch: nothing restored, claude and mnemo missing. The import is the launch.
-test('at launch with claude and mnemo missing, setup opens by itself once the workspace is back', async () => {
+test('at launch with claude and mnemo missing, onboarding opens at setup once the workspace is back', async () => {
   t.status = [tool('git', '/usr/bin/git'), tool('gh', null), tool('claude', null), tool('mnemo', null)]
   const { store } = await import('../layout/app-store')
+  const { onboarding } = await import('../onboarding/app-store')
   await import('./view')
   await flush()
-  expect(store.getState().tabs).toHaveLength(0)
+  expect(onboarding.getState().open).toBe(false)
   await act(() => store.getState().restore({}))
   await flush()
-  const st = store.getState()
-  expect(st.tabs).toHaveLength(1)
-  expect(st.panes[st.tabs[0].focused]).toMatchObject({ view: 'setup', props: {} })
-  expect(st.activeTab).toBe(st.tabs[0].id)
+  expect(onboarding.getState()).toMatchObject({ open: true, step: 'setup' })
+  // A dialog, not a pane: the workspace stays as it was restored.
+  expect(store.getState().tabs).toHaveLength(0)
 
   const { all } = await import('../actions/registry')
   const action = all().find((a) => a.id === 'setup.open')!
   expect(action).toBeTruthy()
-  // From the palette, with setup already open: the same pane, not a second one.
-  store.getState().showHome()
+  // From the palette, with the dialog closed: the same dialog, at setup.
+  onboarding.getState().close()
   await act(() => action.run())
-  expect(store.getState().activeTab).toBe(st.tabs[0].id)
-  expect(Object.values(store.getState().panes).filter((p) => p.view === 'setup')).toHaveLength(1)
+  expect(onboarding.getState()).toMatchObject({ open: true, step: 'setup' })
+  expect(Object.values(store.getState().panes).filter((p) => p.view === 'setup')).toHaveLength(0)
+  onboarding.getState().close()
 })
 
 describe('the pane', () => {

@@ -16,7 +16,8 @@ function Leaf({ id, box }: { id: PaneId; box: Box }) {
   const target = paneTarget || fileTarget
   const source = useDrag((s) => s.from === id)
   const View = paneView(pane?.view ?? 'terminal')
-  const cls = `pane${focused ? ' focused' : ''}${target ? ' drop-target' : ''}${source ? ' drag-source' : ''}`
+  // `pane-drop`: a pane bar, not a file, is over it — DropZoneOverlay draws where it would land.
+  const cls = `pane${focused ? ' focused' : ''}${target ? ' drop-target' : ''}${paneTarget ? ' pane-drop' : ''}${source ? ' drag-source' : ''}`
   return (
     <div className={cls} data-pane={id} style={boxStyle(box)} onMouseDown={() => store.getState().focusPane(id)}>
       <PaneBar id={id} />
@@ -27,30 +28,53 @@ function Leaf({ id, box }: { id: PaneId; box: Box }) {
   )
 }
 
+/** A split never gives either side less than this share (Orca's clamp). */
+export const MIN_RATIO = 0.15
+export const MAX_RATIO = 0.85
+export const clampRatio = (r: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, r))
+
+// adapted from stablyai/orca src/renderer/src/components/tab-group/TabGroupSplitLayout.tsx (ResizeHandle)
+/** The seam between two panes: a 6px grab strip drawing a 3px line (chrome.css), that resizes the
+ *  split it cuts while dragged. The pointer is captured, so the drag keeps going over a terminal
+ *  or past the window's edge. */
 function Divider({ d, root }: { d: DividerBox; root: React.RefObject<HTMLDivElement | null> }) {
-  const onDown = (e: React.MouseEvent) => {
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
     e.preventDefault()
     const el = e.currentTarget
+    const pointer = e.pointerId
     const box = root.current!.getBoundingClientRect()
     const row = d.dir === 'row'
     const total = row ? box.width : box.height
     const split = { start: resolve(row ? d.split.x : d.split.y, total), size: resolve(row ? d.split.w : d.split.h, total) }
-    el.classList.add('dragging')
+    try {
+      el.setPointerCapture?.(pointer)
+    } catch {
+      // Best effort: a synthetic or already-released pointer cannot be captured.
+    }
+    el.classList.add('dragging', 'is-dragging')
     document.body.classList.add(row ? 'resizing-row' : 'resizing-col')
-    const move = (ev: MouseEvent) => {
+    const move = (ev: PointerEvent) => {
       const at = row ? ev.clientX - box.left : ev.clientY - box.top
-      store.getState().setRatio(d.path, ratioAt(split, at))
+      store.getState().setRatio(d.path, clampRatio(ratioAt(split, at)))
     }
     const up = () => {
-      el.classList.remove('dragging')
+      el.classList.remove('dragging', 'is-dragging')
       document.body.classList.remove('resizing-row', 'resizing-col')
-      window.removeEventListener('mousemove', move, true)
-      window.removeEventListener('mouseup', up, true)
+      try {
+        if (el.hasPointerCapture?.(pointer)) el.releasePointerCapture(pointer)
+      } catch {
+        // Already dropped by the browser.
+      }
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', up, true)
     }
-    window.addEventListener('mousemove', move, true)
-    window.addEventListener('mouseup', up, true)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
   }
-  return <div className={`divider ${d.dir}`} style={boxStyle(d.box)} onMouseDown={onDown} />
+  return <div className={`divider ${d.dir} ${d.dir === 'row' ? 'is-vertical' : 'is-horizontal'}`} style={boxStyle(d.box)} onPointerDown={onDown} role="separator" aria-orientation={d.dir === 'row' ? 'vertical' : 'horizontal'} />
 }
 
 /** A tab's panes as absolutely placed siblings keyed by pane id, in a stable order, with the
@@ -61,7 +85,8 @@ export default function SplitView({ node }: { node: Node }) {
   const { panes, dividers } = flatLayout(node)
   const ids = [...panes.keys()].sort((a, b) => a - b)
   return (
-    <div ref={root} className="split-root">
+    // `is-split`: more than one pane, so the ones without focus dim (chrome.css).
+    <div ref={root} className={`split-root${ids.length > 1 ? ' is-split' : ''}`}>
       {ids.map((id) => (
         <Leaf key={id} id={id} box={panes.get(id)!} />
       ))}
