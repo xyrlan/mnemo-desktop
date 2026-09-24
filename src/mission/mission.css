@@ -1,4 +1,5 @@
-/* The mission pane's own styles. Its words and reply box are in theme.css. */
+/* The mission pane's own styles. The head, memory strip and chat footer are Tailwind under
+   `data-ui`; the reply box they replace (the fallback until chat-input lands) is in theme.css. */
 
 /* A permission prompt: the tool call in full, then Aprovar / Negar (#81). */
 .m-permission:focus { outline: 1px solid var(--ansi-yellow); outline-offset: 1px; }
@@ -9,28 +10,10 @@
 .m-reply button.m-approve { border-color: var(--ansi-green); color: var(--ansi-green); }
 .m-reply button.m-deny { border-color: var(--ansi-red); color: var(--ansi-red); }
 
-/* ---- mission memory: what the vault gave this child and what it pushed back against
-   (round18 · child-memory), between the head and the timeline it sits beside. ---- */
-.cmem-empty { padding: 4px 10px; color: var(--fg-muted); font-size: 11px; }
-.cmem-head { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 10px; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--fg-muted); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; text-align: left; }
-.cmem-head:hover { color: var(--fg); }
-.cmem-title { font-weight: 700; }
-.cmem-badge { color: var(--fg-muted); text-transform: none; letter-spacing: 0; }
-.cmem-body { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-.cmem-section { min-width: 160px; flex: 1 1 200px; }
-.cmem-label { color: var(--fg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
-.cmem-none { color: var(--fg-muted); font-size: 11px; }
-.cmem-briefing { font-size: 12px; }
-.cmem-since { color: var(--fg-muted); font-size: 10px; margin-left: 6px; }
-.cmem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.cmem-list li { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmem-slug { font-family: var(--font-mono, ui-monospace, monospace); }
-.cmem-count { color: var(--fg-muted); font-size: 10px; margin-left: 4px; }
-.cmem-friction li { white-space: normal; margin-bottom: 4px; }
-.cmem-rule-text { color: var(--fg); }
-.cmem-contradicts { color: var(--ansi-yellow); font-size: 11px; }
-
-/* ---- a child's conversation (round 20): fills the pane under the head and memory panel;
-   the conversation view scrolls inside it and pins the reply box under its stream. ---- */
-.mission-conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.mission-conversation > * { flex: 1; min-height: 0; }
+/* ---- a child's session (orca-redesign-e · mission-session): head, memory, then the chat, which
+   fills the rest. The pane root and the conversation box sit outside `data-ui` (the conversation
+   view draws its own), so they are laid out here rather than with Tailwind utilities, which the
+   old scope would revert. ---- */
+.ms-pane { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.ms-conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ms-conversation > * { flex: 1; min-height: 0; }
