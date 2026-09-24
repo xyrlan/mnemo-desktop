@@ -146,6 +146,8 @@ pub fn run() {
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
+            commands::pty_list,
+            commands::pty_attach,
             // Feature commands, one block each, blank-line separated (see the
             // module anchors at the top of this file).
 
@@ -381,9 +383,11 @@ pub fn run() {
 
             Ok(())
         })
+        // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
+        // Only terminals the app held itself, with no daemon to hand them to, end here.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                window.state::<PtyState>().0.kill_all();
+                window.state::<PtyState>().0.release();
             }
         })
         .run(tauri::generate_context!())

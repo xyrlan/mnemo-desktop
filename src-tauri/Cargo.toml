@@ -3,8 +3,9 @@ name = "mnemo-desktop"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
-# Three binaries: the app, the desktop MCP server Claude Code starts (see src/mcp.rs), and the
-# hook command Claude Code runs on agent events (see src/agent_hooks.rs); the last two live in src/bin/.
+# Four binaries: the app, the desktop MCP server Claude Code starts (see src/mcp.rs), the hook
+# command Claude Code runs on agent events (see src/agent_hooks.rs), and the daemon that keeps the
+# terminals running while the app is closed (see src/pty.rs); the last three live in src/bin/.
 default-run = "mnemo-desktop"
 
 [lib]
@@ -22,6 +23,9 @@ serde = { version = "1", features = ["derive"] }
 # part it did not change as the text it read.
 serde_json = { version = "1", features = ["raw_value"] }
 portable-pty = "0.9"
+# The screen and scrollback of each terminal, kept beside its PTY so a pane that reattaches gets
+# them back (src/pty/screen.rs).
+vt100 = "0.16"
 log = "0.4"
 env_logger = "0.11"
 
@@ -41,6 +45,11 @@ flate2 = "1"
 sha2 = "0.10"
 # Native OS notifications for agents (agent_hooks.rs), sent from Rust: the front calls a command.
 tauri-plugin-notification = "2"
+
+# The terminal daemon (src/bin/mnemo-desktop-ptyd.rs) leaves the app's session and holds a lock on
+# its socket.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

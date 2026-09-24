@@ -1,29 +1,47 @@
 import { vi } from 'vitest'
-import { createStore } from './store'
+import { createStore, PROMPT_DELAY_MS } from './store'
 import { registerReuse } from './reuse'
 import { leaves } from './tree'
+import { startWorkspace } from './persist'
 import type { PtyClient } from '../pty/client'
+import { provideSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
 
-function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean } = {}): PtyClient & { killed: number[]; outputs: Record<number, (b: Uint8Array) => void> } {
-  let next = 1
+function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean; first?: number } = {}): PtyClient & {
+  killed: number[]
+  outputs: Record<number, (b: Uint8Array) => void>
+  spawned: (string | undefined)[]
+  writes: [number, string][]
+  exits: Record<number, (code: number | null) => void>
+} {
+  let next = opts.first ?? 1
   const killed: number[] = []
   const outputs: Record<number, (b: Uint8Array) => void> = {}
+  const spawned: (string | undefined)[] = []
+  const writes: [number, string][] = []
+  const exits: Record<number, (code: number | null) => void> = {}
   return {
     killed,
     outputs,
-    spawn: async ({ onOutput }) => {
+    spawned,
+    writes,
+    exits,
+    spawn: async ({ cwd, onOutput }) => {
       if (opts.failSpawn) throw new Error('boom')
       const id = next++
+      spawned.push(cwd)
       outputs[id] = onOutput
       if (opts.promptBeforeResolve) onOutput(new Uint8Array([36, 32])) // "$ " before invoke resolves
       return id
     },
-    write: async () => {},
+    write: async (id, data) => void writes.push([id, data]),
     resize: async () => {},
     kill: async (id) => {
       killed.push(id)
     },
-    onExit: async () => () => {},
+    onExit: async (id, cb) => {
+      exits[id] = cb
+      return () => delete exits[id]
+    },
   }
 }
 
@@ -728,5 +746,209 @@ describe('worktrees', () => {
     expect(s.getState().panes[1].cwd).toBe('/a')
     await s.getState().openCommandTab(undefined, 'claude')
     expect(s.getState().panes[2].cwd).toBe('/a')
+  })
+})
+
+describe('terminals that outlived the page', () => {
+  const text = (chunks: Uint8Array[]) => chunks.map((c) => new TextDecoder().decode(c)).join('')
+  const live = (id: number, cwd: string, alive = true): PtyInfo => ({ id, cwd, pid: 1000 + id, alive })
+
+  /** The core's terminals: `held` listed, each attach answered with `screens[id]`, `early` sent
+   *  through the channel before the answer. A terminal not alive refuses. */
+  function fakeSessions(held: PtyInfo[], screens: Record<number, string> = {}, early: Record<number, string> = {}) {
+    const attached: number[] = []
+    const outputs: Record<number, (b: Uint8Array) => void> = {}
+    const client: SessionClient = {
+      list: async () => held,
+      attach: async (id, onOutput) => {
+        if (!held.find((i) => i.id === id)?.alive) throw new Error(`pane ${id} has exited`)
+        attached.push(id)
+        outputs[id] = onOutput
+        if (early[id]) onOutput(new TextEncoder().encode(early[id]))
+        return new TextEncoder().encode(screens[id] ?? '')
+      },
+    }
+    return { client, attached, outputs }
+  }
+
+  /** A workspace of one tab: a shell in /a beside one in /b running Claude session `sess`. */
+  async function savedPair() {
+    const s = createStore(fakePty(), { workspace: () => null })
+    await s.getState().newTab('/a')
+    await s.getState().split('row', '/b')
+    s.getState().setSessionId(2, 'sess')
+    return JSON.parse(JSON.stringify(s.getState().snapshotForSave()))
+  }
+
+  test('a saved pane whose shell kept running attaches to it under its id, screen first, and nothing is spawned or typed', async () => {
+    vi.useFakeTimers()
+    try {
+      const pty = fakePty({ first: 100 })
+      const core = fakeSessions([live(1, '/a/moved'), live(2, '/b')], { 1: 'screen of 1' })
+      const s = createStore(pty, { workspace: () => null, sessions: core.client })
+      await s.getState().restore(await savedPair())
+      vi.advanceTimersByTime(PROMPT_DELAY_MS * 2)
+
+      expect(core.attached).toEqual([1, 2])
+      expect(pty.spawned).toEqual([])
+      // The Claude session in it runs on: no `claude --resume` typed into it.
+      expect(pty.writes).toEqual([])
+      expect(leaves(s.getState().tabs[0].root)).toEqual([1, 2])
+      expect(s.getState().tabs[0].id).toBe('tab-1')
+      expect(s.getState().panes[1]).toEqual({ id: 1, view: 'terminal', cwd: '/a/moved' })
+      expect(s.getState().panes[2].sessionId).toBe('sess')
+
+      const got: Uint8Array[] = []
+      s.getState().attachSink(1, (b) => got.push(b))
+      core.outputs[1](new TextEncoder().encode(' then live'))
+      expect(text(got)).toBe('screen of 1 then live')
+      // Its exit is heard.
+      pty.exits[1](0)
+      expect(s.getState().panes[1].exitCode).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('output that beats the attach answer goes after the screen', async () => {
+    const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: 'screen,' }, { 1: 'early' })
+    const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
+    await s.getState().restore(await savedPair())
+    const got: Uint8Array[] = []
+    s.getState().attachSink(1, (b) => got.push(b))
+    expect(text(got)).toBe('screen,early')
+  })
+
+  test('a shell that ended while away is forgotten, and the pane gets a new one with its Claude session resumed', async () => {
+    vi.useFakeTimers()
+    try {
+      const pty = fakePty({ first: 100 })
+      const core = fakeSessions([live(1, '/a'), live(2, '/b', false)])
+      const s = createStore(pty, { workspace: () => null, sessions: core.client })
+      await s.getState().restore(await savedPair())
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(core.attached).toEqual([1])
+      expect(pty.spawned).toEqual(['/b'])
+      expect(leaves(s.getState().tabs[0].root)).toEqual([1, 100])
+      expect(pty.writes).toEqual([[100, 'claude --resume sess\n']])
+      expect(pty.killed).toEqual([2])
+      expect(s.getState().panes[2]).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('a shell that cannot be attached leaves no pane behind and the pane gets a new one', async () => {
+    const pty = fakePty({ first: 100 })
+    const core = fakeSessions([live(1, '/a'), live(2, '/b')])
+    const s = createStore(pty, { workspace: () => null, sessions: core.client })
+    core.client.attach = async () => {
+      throw new Error('gone meanwhile')
+    }
+    await s.getState().restore(await savedPair())
+    expect(leaves(s.getState().tabs[0].root)).toEqual([100, 101])
+    expect(Object.keys(s.getState().panes).map(Number).sort()).toEqual([100, 101])
+    expect(pty.exits[1]).toBeUndefined()
+  })
+
+  test('shells no saved pane claims come back as tabs where their folder is, and what is shown stays shown', async () => {
+    const src = createStore(fakePty(), { workspace: () => null })
+    await src.getState().switchWorktree('/r')
+    await src.getState().newTab()
+    await src.getState().switchWorktree('/r-wt')
+    await src.getState().newTab()
+    await src.getState().switchWorktree('/r/.claude/worktrees/x')
+    await src.getState().newTab()
+    await src.getState().switchWorktree('/r')
+    const saved = JSON.parse(JSON.stringify(src.getState().snapshotForSave()))
+
+    const pty = fakePty({ first: 100 })
+    const orphans = [live(50, '/r-wt/src'), live(51, '/elsewhere'), live(52, '/r', false), live(53, '/r-wtx'), live(54, '/r/.claude/worktrees/x/src')]
+    const core = fakeSessions([live(1, '/r'), live(2, '/r-wt'), live(3, '/r/.claude/worktrees/x'), ...orphans])
+    const s = createStore(pty, { workspace: () => null, sessions: core.client })
+    await s.getState().restore(saved)
+
+    expect(s.getState().activeWorktree).toBe('/r')
+    expect(s.getState().activeTab).toBe('tab-1')
+    // Deepest open worktree holding the folder; a sibling whose name only starts the same is not it.
+    expect(s.getState().worktreeTabs('/r-wt').map((t) => t.id)).toEqual(['tab-2', 'tab-50'])
+    expect(s.getState().parked['/r-wt'].activeTab).toBe('tab-2')
+    expect(s.getState().worktreeTabs('/r/.claude/worktrees/x').map((t) => t.id)).toEqual(['tab-3', 'tab-54'])
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1', 'tab-51', 'tab-53'])
+    expect(s.getState().panes[50]).toEqual({ id: 50, view: 'terminal', cwd: '/r-wt/src' })
+    expect(pty.killed).toEqual([52])
+    expect(pty.spawned).toEqual([])
+  })
+
+  test('a workspace file that cannot be read still brings the shells back, and still says so', async () => {
+    const core = fakeSessions([live(7, '/x')])
+    const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
+    await expect(s.getState().restore('not a workspace')).rejects.toThrow()
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-7'])
+    expect(s.getState().activeTab).toBe('')
+
+    // No file at all: the same.
+    const t = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: fakeSessions([live(8, '/y')]).client })
+    await t.getState().restore({})
+    expect(t.getState().tabs.map((tab) => tab.id)).toEqual(['tab-8'])
+  })
+
+  test('a shell is claimed by one saved pane only', async () => {
+    const one = (path: string) => ({ path, activeTab: 'tab-1', tabs: [{ id: 'tab-1', root: { kind: 'leaf', pane: 1 }, focused: 1 }], panes: { '1': { view: 'terminal', cwd: path } } })
+    const saved = { version: 2, activeWorktree: '/a', worktrees: [one('/a'), one('/b')] }
+    const pty = fakePty({ first: 100 })
+    const core = fakeSessions([live(1, '/a')])
+    const s = createStore(pty, { workspace: () => null, sessions: core.client })
+    await s.getState().restore(saved)
+    expect(core.attached).toEqual([1])
+    expect(pty.spawned).toEqual(['/b'])
+    expect(leaves(s.getState().worktreeTabs('/b')[0].root)).toEqual([100])
+  })
+
+  test('a listing that fails leaves every terminal to spawn as before', async () => {
+    const pty = fakePty({ first: 100 })
+    const core = fakeSessions([])
+    const s = createStore(pty, { workspace: () => null, sessions: core.client })
+    core.client.list = async () => {
+      throw new Error('no daemon')
+    }
+    await s.getState().restore(await savedPair())
+    expect(pty.spawned).toEqual(['/a', '/b'])
+  })
+
+  test('a view mounted again gets the restored screen again, until live output reaches one', async () => {
+    const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: 'screen' })
+    const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
+    await s.getState().restore(await savedPair())
+    const first: Uint8Array[] = []
+    const second: Uint8Array[] = []
+    const third: Uint8Array[] = []
+    s.getState().attachSink(1, (b) => first.push(b))
+    // StrictMode: mounted, unmounted, mounted again at once.
+    s.getState().attachSink(1, (b) => second.push(b))
+    expect(text(first)).toBe('screen')
+    expect(text(second)).toBe('screen')
+    core.outputs[1](new TextEncoder().encode('!'))
+    expect(text(second)).toBe('screen!')
+    s.getState().attachSink(1, (b) => third.push(b))
+    expect(third).toEqual([])
+  })
+
+  test('with no client given, the one the terminal view provides is used, through any wrapper of restore', async () => {
+    const core = fakeSessions([live(1, '/a'), live(2, '/b')])
+    provideSessions(core.client)
+    try {
+      const s = createStore(fakePty({ first: 100 }), { workspace: () => null })
+      // As the setup pane waits on it (`src/setup/launch.ts`): the saved layout, alone.
+      const restore = s.getState().restore
+      s.setState({ restore: async (saved) => restore(saved) })
+      const saved = await savedPair()
+      const ws = startWorkspace(s, { read: async () => saved, write: async () => {} }, 5)
+      await ws.ready
+      ws.stop()
+      expect(core.attached).toEqual([1, 2])
+    } finally {
+      provideSessions(null)
+    }
   })
 })
