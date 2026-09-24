@@ -1,7 +1,7 @@
 /** Voice dictation (issue #10). Voice has no pane view: it lives in `view.tsx` because
  *  App imports every `src/*\/view.tsx`, and that import is where it installs the ⌥Space
- *  chord, registers its palette actions and mounts the pill in its own root. */
-import { createRoot } from 'react-dom/client'
+ *  chord, registers `dictation.toggle` (Mod+E, bound by the keymap) and the language action,
+ *  and mounts Orca's indicator in the shell's overlay slot. */
 import { store } from '../layout/app-store'
 import { tauriPty } from '../pty/client'
 import { register, registerProvider } from '../actions/registry'
@@ -12,8 +12,8 @@ import { insert, resolveTarget, withSeparator } from './route'
 import { settingsStore } from '../settings/app-store'
 import { tauriMission } from '../mission/client'
 import { installChord } from './chord'
-import Pill from './Pill'
-import './voice.css'
+import { mountInSlot } from '../shell/slots'
+import { Indicator } from './Indicator'
 
 async function typeInMonaco(el: HTMLElement, text: string): Promise<boolean> {
   // Already loaded: a Monaco element exists only after the editor pane imported it.
@@ -68,8 +68,9 @@ async function setLanguage(l: Language) {
   }
 }
 
-const chord = detectPlatform() === 'mac' ? '⌥Space' : 'Alt+Space'
-register({ id: 'voice.dictate', title: 'Dictate (start / stop)', shortcut: chord, run: () => voice.toggle() })
+const mac = detectPlatform() === 'mac'
+const toggleKeys = mac ? ['⌘', 'E'] : ['Ctrl', 'E']
+register({ id: 'dictation.toggle', title: 'Dictate (start / stop)', shortcut: mac ? '⌘E' : 'Ctrl+E', run: () => voice.toggle() })
 registerProvider(() => [
   {
     id: 'voice.language',
@@ -84,15 +85,13 @@ registerProvider(() => [
 if (language !== 'auto') void setLanguage(language)
 const uninstallChord = installChord(voice)
 const unlistenProgress = tauriVoice.onProgress(voice.progress)
-const host = document.createElement('div')
-host.className = 'voice-host'
-document.body.appendChild(host)
-const root = createRoot(host)
-root.render(<Pill store={voice.store} />)
+function DictationIndicator() {
+  return <Indicator store={voice.store} shortcut={toggleKeys} onStop={() => void voice.end()} />
+}
+const unmount = mountInSlot('overlay', DictationIndicator)
 
 import.meta.hot?.dispose(() => {
   uninstallChord()
   void unlistenProgress.then((u) => u())
-  root.unmount()
-  host.remove()
+  unmount()
 })
