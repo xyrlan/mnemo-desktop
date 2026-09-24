@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import type { BrowserClient, DataStore } from './client'
 import { externalUrl, makeDataStore, openInChrome } from './open'
 import { BLANK, displayUrl, normalizeUrl } from './url'
@@ -47,6 +47,8 @@ export type AddressBarProps = {
   /** Navigates to what was typed; the pane owns the webview and its error line. */
   onSubmit: (e: FormEvent) => void
   onError: (err: unknown) => void
+  /** Pane tools drawn after the field (Design Mode's toggle). */
+  tools?: ReactNode
 }
 
 const stores = new WeakMap<object, () => Promise<DataStore>>()
@@ -58,7 +60,7 @@ function dataStoreOf(client: AddressBarProps['client']) {
 
 /** Back, forward, reload, the URL field and "Abrir no Chrome". A pane whose logins do not
  *  survive a restart (`MNEMO_BROWSER_EPHEMERAL`) says so next to the field. */
-export function AddressBar({ id, bar, dispatch, client, input, onSubmit, onError }: AddressBarProps) {
+export function AddressBar({ id, bar, dispatch, client, input, onSubmit, onError, tools }: AddressBarProps) {
   const [store, setStore] = useState<DataStore | null>(null)
   useEffect(() => {
     let alive = true
@@ -101,6 +103,7 @@ export function AddressBar({ id, bar, dispatch, client, input, onSubmit, onError
         onFocus={(e) => e.target.select()}
         onKeyDown={onKey}
       />
+      {tools}
       {store === 'ephemeral' && (
         <span className="browser-store" title="Logins in this pane are gone when the app closes (MNEMO_BROWSER_EPHEMERAL)">
           no saved login

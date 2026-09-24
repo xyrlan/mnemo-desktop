@@ -170,6 +170,7 @@ pub fn run() {
             browser::browser_pr_url,
             browser::browser_open_external,
             browser::browser_data_store,
+            browser::browser_save_shot,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
