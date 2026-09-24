@@ -239,3 +239,13 @@ Copied whole (tests left out) for wave C; paths under `src/renderer/src/` unless
 | Workspace cleanup | `components/workspace-cleanup/` | Finding stale worktrees (merged, idle, clean) and removing them in a batch, with its dialog |
 | Design Mode | `components/browser-pane/annotate/`; `src/main/browser/*grab*` | Grab mode in a browser page: hover overlay, click to pick an element, its HTML/CSS/screenshot as a payload for the agent |
 | AI commit and PR text | `components/right-sidebar/source-control/ai/`, `…/commit/`, `components/right-sidebar/create-pull-request-dialog-field-model.ts`; `src/main/ipc/filesystem/filesystem-git-{commit,pull-request}-generation-handlers.ts`, `src/main/git/source-control/staged-commit-context.ts` | Commit message composer with AI generation, prompts, the PR title/body generation, and the staged-diff context they send |
+
+## Wave D additions
+
+Paths under `src/renderer/src/components/right-sidebar/`.
+
+| Area | Where | What it carries |
+|---|---|---|
+| Explorer | `FileExplorer*.tsx`, `file-explorer-*.ts` | The worktree's file tree: virtual rows, expand/collapse, name filter, keyboard navigation, row context menu |
+| Search | `Search*.tsx`, `search*.ts` | Search across the worktree: query row with options, filters, results grouped by file with matched lines |
+| Source Control | `source-control/listing/`, `source-control/panel/` | Staged and unstaged changes by file, stage/unstage/discard, the panel frame the commit composer sits in |
