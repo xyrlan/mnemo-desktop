@@ -1,6 +1,6 @@
 [package]
 name = "mnemo-desktop"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.80"
 # Four binaries: the app, the desktop MCP server Claude Code starts (see src/mcp.rs), the hook
