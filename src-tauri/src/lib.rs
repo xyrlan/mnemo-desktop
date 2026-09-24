@@ -35,6 +35,9 @@ pub mod marketplace;
 // -- vault (src/vault.rs) --
 pub mod vault;
 
+// -- memory-feed (src/memory_feed.rs) --
+pub mod memory_feed;
+
 // -- cockpit: no Rust --
 
 // -- home (src/home.rs) --
@@ -187,6 +190,9 @@ pub fn run() {
             vault::vault_ego,
             vault::vault_health,
             vault::vault_doctor,
+
+            // -- memory-feed commands --
+            memory_feed::memory_feed,
 
             // -- vaultlevel commands --
             vault::vault_level,
