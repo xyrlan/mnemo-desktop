@@ -6,9 +6,14 @@
 //! `src/mcp.rs`). It links nothing of the app: a session starts it often, so it stays a
 //! small std + serde_json program, and it keeps working (with a clear error) while the
 //! app is closed.
+//!
+//! `mnemo-desktop-mcp call <tool> [<json-args>] [--out <file>]` makes one call without MCP,
+//! so a session can look at (and, against a debug build, drive) a `pnpm tauri dev` instance
+//! without registering it as a server: it prints the result as JSON and writes an image
+//! result to `--out`. See `usage()`.
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -35,8 +40,14 @@ fn socket_path_from(exported: Option<std::ffi::OsString>, home: Option<std::ffi:
 }
 
 fn tools() -> Value {
+    tools_for(cfg!(debug_assertions))
+}
+
+/// The tools this build offers: `desktop_app_drive` only in a debug build, the one kind of
+/// app that serves it (`mnemo_desktop_lib::mcp::DEV_TOOLS`).
+fn tools_for(debug: bool) -> Value {
     let pane = json!({ "type": "integer", "description": "Pane id from desktop_list_panes (browser and other non-terminal panes have negative ids)." });
-    json!([
+    let mut list = json!([
         {
             "name": "desktop_list_panes",
             "description": "List the panes open in the mnemo desktop app: id, view (terminal, browser, editor…), title, cwd, url for browser panes, which tab (1-based) and whether it is the focused pane of the active tab. Start here to find the pane id the other desktop tools take.",
@@ -68,8 +79,33 @@ fn tools() -> Value {
             "description": "Take a screenshot of a browser pane in the mnemo desktop app (browser panes only, including ones in a background tab). Use it when layout or visuals matter; desktop_browser_read is cheaper for text.",
             "inputSchema": { "type": "object", "properties": { "pane": pane }, "required": ["pane"], "additionalProperties": false },
             "annotations": { "readOnlyHint": true }
+        },
+        {
+            "name": "desktop_app_snapshot",
+            "description": "Take a screenshot of the mnemo desktop app's own window: its main webview, everything but the pages inside browser panes (desktop_pane_snapshot takes those). Use it to see a UI change in the running app. A terminal drawn with WebGL can come out blank; desktop_terminal_read has its text.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "annotations": { "readOnlyHint": true }
         }
-    ])
+    ]);
+    if debug {
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "desktop_app_drive",
+            "description": "Drive the mnemo desktop app's own window (debug builds only): click an element, type text into a field, press keys, or evaluate JavaScript in the app's page. Answers {ok, result?, error?}: result says what the action landed on, or the script's value. Events are synthetic: text lands in the focused field, but a Tab does not move focus and an Enter does not submit, so click the control. Follow with desktop_app_snapshot to see the effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["click", "type", "key", "eval"] },
+                    "selector": { "type": "string", "description": "CSS selector. click: what to click (required). type, key: what to focus first; without it, the focused element." },
+                    "text": { "type": "string", "description": "type: the text to insert at the caret." },
+                    "keys": { "type": "string", "description": "key: chords joined by + and pressed in turn when separated by spaces, e.g. \"Meta+k\", \"Mod+Shift+d\", \"ArrowDown ArrowDown Enter\". Mod is Cmd on macOS and Ctrl elsewhere; Space is the space bar." },
+                    "js": { "type": "string", "description": "eval: an expression or a function body (with return), awaited; its value comes back as JSON." }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }
+        }));
+    }
+    list
 }
 
 /// Asks the app one question. `Ok` carries MCP content; `Err` a message for the model.
@@ -113,14 +149,13 @@ fn handle(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>) -> O
             "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(LATEST_PROTOCOL),
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "mnemo-desktop", "version": env!("CARGO_PKG_VERSION") },
-            "instructions": "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot."
+            "instructions": "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window."
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-            let known = tools().as_array().is_some_and(|t| t.iter().any(|t| t["name"] == name));
-            if !known {
+            if !known(name) {
                 Err((-32602, format!("unknown tool {name:?}")))
             } else {
                 let args = params.get("arguments").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
@@ -139,7 +174,160 @@ fn handle(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>) -> O
     })
 }
 
+// ---------------------------------------------------------------------------------------
+// CLI: one call, no MCP.
+
+const BIN: &str = "mnemo-desktop-mcp";
+
+fn usage() -> String {
+    let names: Vec<String> = tools().as_array().into_iter().flatten().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect();
+    format!(
+        r#"usage: {BIN} call <tool> [<json-args>] [--out <file>]
+
+Makes one call to the running mnemo desktop app and prints the result as JSON: a text
+result as its JSON value (or as a string), an image as {{"mime", "data"}}, or, with --out,
+written to that file and printed as {{"mime", "out", "bytes"}}. Exits 1 when the call fails
+or its result says {{"ok": false}}, 2 on a usage error.
+
+The app is the one at ${SOCKET_ENV}, else this build's own ({socket}). A pane of the
+app exports its own socket, so from a pane of the installed app, reach a `pnpm tauri dev`
+instance with {SOCKET_ENV}=~/.mnemo-desktop-dev/mcp.sock.
+
+tools: {tools}
+
+examples:
+  {BIN} call desktop_app_snapshot --out /tmp/app.png
+  {BIN} call desktop_app_drive '{{"action":"key","keys":"Meta+k"}}'
+  {BIN} call desktop_app_drive '{{"action":"eval","js":"document.title"}}'
+"#,
+        socket = socket_path_from(None, std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })).display(),
+        tools = names.join(", "),
+    )
+}
+
+fn known(tool: &str) -> bool {
+    tools().as_array().is_some_and(|t| t.iter().any(|t| t["name"] == tool))
+}
+
+#[derive(Debug, PartialEq)]
+struct Call {
+    tool: String,
+    args: Value,
+    out: Option<PathBuf>,
+}
+
+/// `<tool> [<json-args>] [--out <file>]`, the words after `call`.
+fn parse_call(words: &[String]) -> Result<Call, String> {
+    let (mut rest, mut out) = (Vec::new(), None);
+    let mut it = words.iter();
+    while let Some(w) = it.next() {
+        if w == "--out" {
+            out = Some(PathBuf::from(it.next().ok_or("--out needs a file")?));
+        } else if let Some(file) = w.strip_prefix("--out=") {
+            out = Some(PathBuf::from(file));
+        } else {
+            rest.push(w.as_str());
+        }
+    }
+    let (tool, args) = match rest.as_slice() {
+        [] => return Err("which tool?".into()),
+        [tool] => (*tool, json!({})),
+        [tool, args] => (*tool, serde_json::from_str::<Value>(args).map_err(|e| format!("<json-args> is not JSON: {e}"))?),
+        [_, _, extra, ..] => return Err(format!("unexpected argument {extra:?}")),
+    };
+    if !args.is_object() {
+        return Err("<json-args> must be a JSON object".into());
+    }
+    if !known(tool) {
+        let hint = if tool == "desktop_app_drive" { " (only a debug build has it: use target/debug/mnemo-desktop-mcp)" } else { "" };
+        return Err(format!("unknown tool {tool:?}{hint}"));
+    }
+    Ok(Call { tool: tool.to_owned(), args, out })
+}
+
+type WriteFile<'a> = &'a mut dyn FnMut(&Path, &[u8]) -> Result<(), String>;
+
+/// MCP content as the CLI prints it: one item alone, several as a list; text as the JSON it
+/// holds when it holds some. With `out`, the first image goes to that file through `write`
+/// and is printed as where it went.
+fn render(content: &Value, out: Option<&Path>, write: WriteFile) -> Result<Value, String> {
+    use base64::Engine;
+    let items = content.as_array().cloned().unwrap_or_else(|| vec![content.clone()]);
+    let mut out = out;
+    let mut shown = Vec::with_capacity(items.len());
+    for item in &items {
+        shown.push(match item["type"].as_str() {
+            Some("text") => {
+                let text = item["text"].as_str().unwrap_or_default();
+                serde_json::from_str::<Value>(text).unwrap_or_else(|_| Value::String(text.to_owned()))
+            }
+            Some("image") => {
+                let (mime, data) = (item["mimeType"].as_str().unwrap_or_default(), item["data"].as_str().unwrap_or_default());
+                match out.take() {
+                    None => json!({ "mime": mime, "data": data }),
+                    Some(path) => {
+                        let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| format!("the image is not base64: {e}"))?;
+                        write(path, &bytes)?;
+                        json!({ "mime": mime, "out": path.display().to_string(), "bytes": bytes.len() })
+                    }
+                }
+            }
+            _ => item.clone(),
+        });
+    }
+    Ok(if shown.len() == 1 { shown.remove(0) } else { Value::Array(shown) })
+}
+
+/// Runs `call …` against `call` and returns the exit code.
+fn cli(words: &[String], call: &dyn Fn(&str, Value) -> Result<Value, String>, write: WriteFile, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let c = match parse_call(words) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = writeln!(stderr, "{BIN}: {e}\n\n{}", usage());
+            return 2;
+        }
+    };
+    let shown = call(&c.tool, c.args).and_then(|content| {
+        if c.out.is_some() && !content.as_array().is_some_and(|a| a.iter().any(|i| i["type"] == "image")) {
+            let _ = writeln!(stderr, "{BIN}: the result has no image; nothing written to {}", c.out.as_deref().unwrap_or(Path::new("")).display());
+        }
+        render(&content, c.out.as_deref(), write)
+    });
+    match shown {
+        Err(e) => {
+            let _ = writeln!(stderr, "{BIN}: {e}");
+            1
+        }
+        Ok(shown) => {
+            let _ = writeln!(stdout, "{}", serde_json::to_string_pretty(&shown).unwrap_or_default());
+            if shown.get("ok") == Some(&Value::Bool(false)) {
+                1
+            } else {
+                0
+            }
+        }
+    }
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        // No arguments: the MCP server Claude Code starts.
+        None => {}
+        Some("call") => {
+            let mut write = |path: &Path, bytes: &[u8]| std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()));
+            let code = cli(&args[1..], &call_app, &mut write, &mut std::io::stdout(), &mut std::io::stderr());
+            std::process::exit(code);
+        }
+        Some("-h" | "--help" | "help") => {
+            print!("{}", usage());
+            return;
+        }
+        Some(other) => {
+            eprintln!("{BIN}: unknown command {other:?}\n\n{}", usage());
+            std::process::exit(2);
+        }
+    }
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -189,10 +377,11 @@ mod tests {
     }
 
     #[test]
-    fn lists_the_four_tools_with_schemas() {
+    fn lists_the_tools_with_schemas() {
         let r = req(json!({ "id": 2, "method": "tools/list" }));
         let names: Vec<_> = r["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names, ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot"]);
+        // `cargo test` is a debug build, like `tauri dev`.
+        assert_eq!(names, ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]);
         for t in r["result"]["tools"].as_array().unwrap() {
             assert_eq!(t["inputSchema"]["type"], "object");
         }
@@ -211,6 +400,17 @@ mod tests {
 
         let r = req(json!({ "id": 5, "method": "tools/call", "params": { "name": "desktop_list_panes" } }));
         assert_eq!(r["result"]["content"][0]["text"], "desktop_list_panes {}");
+    }
+
+    #[test]
+    fn a_release_build_offers_no_drive() {
+        let names = |debug| tools_for(debug).as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert!(names(true).contains(&"desktop_app_drive".to_owned()));
+        assert!(!names(false).contains(&"desktop_app_drive".to_owned()));
+        assert!(names(false).contains(&"desktop_app_snapshot".to_owned()));
+        let drive = tools_for(true).as_array().unwrap().iter().find(|t| t["name"] == "desktop_app_drive").cloned().unwrap();
+        assert_eq!(drive["inputSchema"]["properties"]["action"]["enum"], json!(["click", "type", "key", "eval"]));
+        assert_eq!(drive["inputSchema"]["required"], json!(["action"]));
     }
 
     #[test]
@@ -240,5 +440,82 @@ mod tests {
         unsafe { std::env::set_var(SOCKET_ENV, &missing) };
         let e = call_app("desktop_list_panes", json!({})).unwrap_err();
         assert!(e.contains("not running"), "{e}");
+    }
+
+    fn words(w: &[&str]) -> Vec<String> {
+        w.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn call_reads_a_tool_its_args_and_an_out_file_anywhere() {
+        let c = parse_call(&words(&["desktop_app_snapshot", "--out", "/tmp/a.png"])).unwrap();
+        assert_eq!(c, Call { tool: "desktop_app_snapshot".into(), args: json!({}), out: Some("/tmp/a.png".into()) });
+        let c = parse_call(&words(&["--out=/x.png", "desktop_app_drive", r#"{"action":"eval","js":"1"}"#])).unwrap();
+        assert_eq!((c.args["js"].as_str(), c.out), (Some("1"), Some("/x.png".into())));
+
+        let err = |w: &[&str]| parse_call(&words(w)).unwrap_err();
+        assert_eq!(err(&[]), "which tool?");
+        assert_eq!(err(&["desktop_app_snapshot", "--out"]), "--out needs a file");
+        assert!(err(&["desktop_app_drive", "{nope"]).starts_with("<json-args> is not JSON"));
+        assert_eq!(err(&["desktop_app_drive", "[1]"]), "<json-args> must be a JSON object");
+        assert_eq!(err(&["desktop_list_panes", "{}", "more"]), r#"unexpected argument "more""#);
+        assert_eq!(err(&["rm"]), r#"unknown tool "rm""#);
+    }
+
+    fn no_write(_: &Path, _: &[u8]) -> Result<(), String> {
+        panic!("nothing should be written")
+    }
+
+    #[test]
+    fn results_print_as_the_json_they_carry() {
+        let r = render(&json!([{ "type": "text", "text": r#"{"ok":true,"result":3}"# }]), None, &mut no_write).unwrap();
+        assert_eq!(r, json!({ "ok": true, "result": 3 }));
+        let r = render(&json!([{ "type": "text", "text": "plain" }, { "type": "text", "text": "[1]" }]), None, &mut no_write).unwrap();
+        assert_eq!(r, json!(["plain", [1]]));
+        let r = render(&json!([{ "type": "image", "data": "iVBORw==", "mimeType": "image/png" }]), None, &mut no_write).unwrap();
+        assert_eq!(r, json!({ "mime": "image/png", "data": "iVBORw==" }));
+    }
+
+    #[test]
+    fn an_image_goes_to_the_out_file() {
+        let mut wrote = Vec::new();
+        let mut write = |p: &Path, b: &[u8]| {
+            wrote.push((p.to_owned(), b.to_vec()));
+            Ok(())
+        };
+        let content = json!([{ "type": "image", "data": "iVBORw==", "mimeType": "image/png" }, { "type": "image", "data": "AA==", "mimeType": "image/png" }]);
+        let r = render(&content, Some(Path::new("/tmp/shot.png")), &mut write).unwrap();
+        assert_eq!(r, json!([{ "mime": "image/png", "out": "/tmp/shot.png", "bytes": 4 }, { "mime": "image/png", "data": "AA==" }]));
+        assert_eq!(wrote, [(PathBuf::from("/tmp/shot.png"), b"\x89PNG".to_vec())]);
+
+        let bad = json!([{ "type": "image", "data": "@@", "mimeType": "image/png" }]);
+        assert!(render(&bad, Some(Path::new("/x")), &mut |_: &Path, _: &[u8]| Ok(())).unwrap_err().contains("not base64"));
+    }
+
+    fn run(w: &[&str], call: &dyn Fn(&str, Value) -> Result<Value, String>) -> (i32, String, String) {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = cli(&words(w), call, &mut |_: &Path, _: &[u8]| Ok(()), &mut out, &mut err);
+        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+    }
+
+    #[test]
+    fn the_exit_code_says_whether_it_worked() {
+        let answer = |text: &'static str| move |_: &str, _: Value| Ok(json!([{ "type": "text", "text": text }]));
+        let (code, out, _) = run(&["desktop_app_drive", r#"{"action":"eval","js":"1"}"#], &answer(r#"{"ok":true,"result":1}"#));
+        assert_eq!((code, serde_json::from_str::<Value>(&out).unwrap()), (0, json!({ "ok": true, "result": 1 })));
+        let (code, out, _) = run(&["desktop_app_drive", r#"{"action":"click"}"#], &answer(r#"{"ok":false,"error":"no"}"#));
+        assert_eq!((code, serde_json::from_str::<Value>(&out).unwrap()["error"].as_str()), (1, Some("no")));
+
+        let (code, out, err) = run(&["desktop_app_snapshot"], &|_: &str, _: Value| Err("the mnemo desktop app is not running".into()));
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert!(err.contains("not running"), "{err}");
+
+        let (code, _, err) = run(&["desktop_list_panes", "--out", "/tmp/x.png"], &answer("[]"));
+        assert_eq!(code, 0);
+        assert!(err.contains("no image"), "{err}");
+
+        let (code, out, err) = run(&["nope"], &answer("{}"));
+        assert_eq!((code, out.as_str()), (2, ""));
+        assert!(err.contains("usage: mnemo-desktop-mcp call") && err.contains("desktop_app_drive"), "{err}");
     }
 }

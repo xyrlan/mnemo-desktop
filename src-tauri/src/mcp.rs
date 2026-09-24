@@ -11,6 +11,11 @@
 //! relays a tool name and its arguments to the webview, which knows the panes, and hands
 //! back MCP `content`. The socket is bound when the webview first asks for its path, so
 //! nothing is served before something can answer.
+//!
+//! Eyes (spec 2026-09-24, *Eyes first*): `desktop_app_snapshot` is a picture of the app's own
+//! main webview, taken here rather than by the webview, so a page that hangs can still be
+//! seen. `desktop_app_drive` (click, type, keys, script) runs in the webview and is served by
+//! a debug build only: a release app is full of terminals no session should type into.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,7 +33,21 @@ pub const BIN_NAME: &str = "mnemo-desktop-mcp";
 /// The name sessions know the server by (`claude mcp add desktop …`).
 pub const SERVER_NAME: &str = "desktop";
 /// The tools the binary may relay; anything else is refused before it reaches the webview.
-pub const TOOLS: &[&str] = &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot"];
+pub const TOOLS: &[&str] = &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", APP_SNAPSHOT];
+/// Tools only a debug build serves (`pnpm tauri dev`), on top of `TOOLS`.
+pub const DEV_TOOLS: &[&str] = &[APP_DRIVE];
+/// A picture of the app's main webview, answered here without asking the webview.
+pub const APP_SNAPSHOT: &str = "desktop_app_snapshot";
+pub const APP_DRIVE: &str = "desktop_app_drive";
+
+/// Whether this build serves `method`.
+pub fn serves(method: &str) -> bool {
+    serves_in(method, cfg!(debug_assertions))
+}
+
+pub fn serves_in(method: &str, debug: bool) -> bool {
+    TOOLS.contains(&method) || (debug && DEV_TOOLS.contains(&method))
+}
 /// The socket the binary connects to; the app exports it into every pane (`pane_env`).
 pub const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
 
@@ -74,7 +93,7 @@ pub struct Request {
 pub fn answer_line(line: &str, ask: &dyn Fn(&str, Value) -> Result<Value, String>) -> String {
     let reply = match serde_json::from_str::<Request>(line) {
         Err(e) => json!({ "id": Value::Null, "error": format!("bad request: {e}") }),
-        Ok(req) if !TOOLS.contains(&req.method.as_str()) => {
+        Ok(req) if !serves(&req.method) => {
             json!({ "id": req.id, "error": format!("unknown tool {}", req.method) })
         }
         Ok(req) => {
@@ -179,7 +198,10 @@ pub fn mcp_socket_path<R: Runtime>(app: AppHandle<R>) -> String {
 fn start<R: Runtime>(app: AppHandle<R>, path: &Path) -> Result<(), String> {
     let listener = bind(path)?;
     let asker = app.clone();
-    let ask = std::sync::Arc::new(move |method: &str, params: Value| ask_webview(&asker, method, params));
+    let ask = std::sync::Arc::new(move |method: &str, params: Value| match method {
+        APP_SNAPSHOT => app_snapshot(&asker),
+        _ => ask_webview(&asker, method, params),
+    });
     std::thread::Builder::new().name("mcp-socket".into()).spawn(move || serve(listener, ask)).map_err(|e| e.to_string())?;
     if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_none() {
         std::thread::spawn(|| {
@@ -304,13 +326,32 @@ pub async fn mcp_browser_eval<R: Runtime>(app: AppHandle<R>, id: i64, script: St
 /// a model accepts as an image.
 pub const MAX_PNG: usize = 2_500_000;
 
+fn base64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
 /// What the pane's page shows, as `{ mime, data }` with base64 data.
 #[tauri::command]
 pub async fn mcp_browser_snapshot<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<Value, String> {
-    use base64::Engine;
     let webview = browser_webview(&app, id)?;
     let (mime, bytes) = snapshot(&webview).await?;
-    Ok(json!({ "mime": mime, "data": base64::engine::general_purpose::STANDARD.encode(bytes) }))
+    Ok(json!({ "mime": mime, "data": base64(&bytes) }))
+}
+
+/// `desktop_app_snapshot`: the app's main webview as MCP image content. Browser panes are
+/// webviews of their own laid over it, so they show as the space they leave
+/// (`desktop_pane_snapshot` takes those). A WebGL canvas without `preserveDrawingBuffer`
+/// (xterm's renderer) has nothing to paint by the time WebKit draws the snapshot, and comes
+/// out blank. Blocks: it runs on the socket's thread.
+fn app_snapshot<R: Runtime>(app: &AppHandle<R>) -> Answer {
+    let webview = app.get_webview(MAIN).ok_or("the app window is not open")?;
+    let (mime, bytes) = tauri::async_runtime::block_on(snapshot(&webview))?;
+    Ok(image_content(mime, &bytes))
+}
+
+pub fn image_content(mime: &str, bytes: &[u8]) -> Value {
+    json!([{ "type": "image", "data": base64(bytes), "mimeType": mime }])
 }
 
 #[cfg(target_os = "macos")]
@@ -449,6 +490,23 @@ mod tests {
         let r = parse(answer_line("not json", &echo));
         assert!(r["error"].as_str().unwrap().starts_with("bad request"));
         assert_eq!(r["id"], Value::Null);
+    }
+
+    #[test]
+    fn the_app_tools_are_served_and_driving_only_by_a_debug_build() {
+        assert!(serves_in(APP_SNAPSHOT, false) && serves_in(APP_SNAPSHOT, true));
+        assert!(serves_in(APP_DRIVE, true));
+        assert!(!serves_in(APP_DRIVE, false), "a release build must never be driven");
+        assert!(!serves_in("pty_write", true));
+        // `cargo test` is a debug build, like `tauri dev`.
+        let r = parse(answer_line(r#"{"id":1,"method":"desktop_app_drive","params":{"action":"eval","js":"1"}}"#, &echo));
+        assert_eq!(r["content"][0]["text"], r#"desktop_app_drive {"action":"eval","js":"1"}"#);
+    }
+
+    #[test]
+    fn a_snapshot_is_image_content() {
+        let c = image_content("image/png", b"\x89PNG");
+        assert_eq!(c, json!([{ "type": "image", "data": "iVBORw==", "mimeType": "image/png" }]));
     }
 
     #[test]

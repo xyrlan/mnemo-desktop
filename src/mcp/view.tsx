@@ -6,11 +6,19 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { store } from '../layout/app-store'
 import { readBuffer } from '../terminal/buffer'
+import { drive } from './drive'
 import { browserBridge, callTool, type Content, type ToolDeps } from './tools'
 
 type Ask = { ask: number; method: string; params?: Record<string, unknown> }
 
-const deps: ToolDeps = { state: () => store.getState(), readBuffer, browser: browserBridge }
+// Driving the app is for a session checking its own change in `pnpm tauri dev`; a release
+// build never types into its terminals on a session's say-so (the Rust side refuses it too).
+const deps: ToolDeps = {
+  state: () => store.getState(),
+  readBuffer,
+  browser: browserBridge,
+  ...(import.meta.env.DEV ? { drive: (params: Record<string, unknown>) => drive(params) } : {}),
+}
 
 const unlisten = listen<Ask>('mcp://ask', async ({ payload }) => {
   let content: Content[] | null = null

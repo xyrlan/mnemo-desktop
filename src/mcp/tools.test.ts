@@ -89,3 +89,16 @@ describe('browser tools', () => {
     await expect(callTool(deps(), 'desktop_rm_rf', {})).rejects.toThrow(/unknown tool/)
   })
 })
+
+describe('desktop_app_drive', () => {
+  it('answers the drive result as JSON text', async () => {
+    const drive = vi.fn(async () => ({ ok: false, error: 'no element matches "#x"' }))
+    const out = await callTool(deps({ drive }), 'desktop_app_drive', { action: 'click', selector: '#x' })
+    expect(drive).toHaveBeenCalledWith({ action: 'click', selector: '#x' })
+    expect(JSON.parse(textOf(out))).toEqual({ ok: false, error: 'no element matches "#x"' })
+  })
+
+  it('does not exist without a drive, as in a release build', async () => {
+    await expect(callTool(deps(), 'desktop_app_drive', { action: 'eval', js: '1' })).rejects.toThrow(/only exists in a debug build/)
+  })
+})

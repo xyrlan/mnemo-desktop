@@ -1,6 +1,7 @@
 import { leaves, type PaneId } from '../layout/tree'
 import type { State } from '../layout/store'
 import { tail } from '../terminal/buffer'
+import type { DriveResult } from './drive'
 
 /** MCP tool result content, passed through the socket and the stdio binary unchanged. */
 export type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
@@ -17,6 +18,8 @@ export type ToolDeps = {
   state: () => Pick<State, 'tabs' | 'activeTab' | 'panes'>
   readBuffer: (id: PaneId) => string[] | undefined
   browser: () => BrowserBridge | undefined
+  /** `desktop_app_drive`, given only in a debug build (see `drive.ts`). */
+  drive?: (params: Record<string, unknown>) => Promise<DriveResult>
 }
 
 export type PaneInfo = {
@@ -113,6 +116,11 @@ export async function callTool(deps: ToolDeps, method: string, params: Record<st
       paneOf(deps, id, 'browser', method)
       const shot = await bridgeOf(deps).snapshot(id)
       return [{ type: 'image', data: shot.data, mimeType: shot.mime }]
+    }
+
+    case 'desktop_app_drive': {
+      if (!deps.drive) throw new Error('desktop_app_drive only exists in a debug build of the app (pnpm tauri dev)')
+      return text(JSON.stringify(await deps.drive(params)))
     }
 
     default:
