@@ -12,11 +12,7 @@ export function openMissionPane(child: ChildSession) {
   const s = appStore.getState()
   const existing = Object.values(s.panes).find((p) => p.view === 'mission' && p.props?.id === child.id)
   if (existing) {
-    const tab = s.tabs.find((t) => t.root && JSON.stringify(t.root).includes(`"pane":${existing.id}`))
-    if (tab) {
-      appStore.setState({ activeTab: tab.id })
-      s.focusPane(existing.id)
-    }
+    s.goToPane(existing.id)
   } else {
     s.openView('mission', { id: child.id }, 'auto', child.name ?? child.id)
   }

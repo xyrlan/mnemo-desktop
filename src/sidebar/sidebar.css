@@ -1,0 +1,110 @@
+/* adapted from stablyai/orca src/renderer/src/assets/main.css (MIT, 122b8c25): 536-626
+   (worktree sidebar scrollbar), 1268-1349 (card hover and active, agent rows) and 1576-1704
+   (compact agent expansion, the working spinner). Scoped to the sidebar's root, so the class
+   names other wave-B screens adapt from the same file never meet these. */
+
+/* ── Scrollbar: no reserved gutter; the thumb fades in while the sidebar is hovered ── */
+
+[data-left-sidebar] .worktree-sidebar-scrollbar {
+  padding-right: 4px;
+  scrollbar-color: transparent transparent;
+}
+[data-left-sidebar] .worktree-sidebar-scrollbar::-webkit-scrollbar { width: 8px; }
+[data-left-sidebar] .worktree-sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  /* No right inset: it left a strip beside the resize seam that read as a gap in the handle. */
+  border-width: 3px 0 3px 0;
+}
+[data-left-sidebar].scrollbar-sleek-parent:hover .worktree-sidebar-scrollbar,
+[data-left-sidebar] .worktree-sidebar-scrollbar:hover {
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground, #737373) 48%, transparent) transparent;
+}
+[data-left-sidebar].scrollbar-sleek-parent:hover .worktree-sidebar-scrollbar::-webkit-scrollbar-thumb,
+[data-left-sidebar] .worktree-sidebar-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground, #737373) 28%, transparent);
+}
+[data-left-sidebar] .worktree-sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--muted-foreground, #737373) 48%, transparent);
+}
+
+/* ── Cards ── */
+
+[data-left-sidebar] .worktree-sidebar-card-hover:hover {
+  background: color-mix(in srgb, var(--sidebar-foreground) 4%, transparent);
+}
+.dark [data-left-sidebar] .worktree-sidebar-card-hover:hover {
+  background: color-mix(in srgb, var(--sidebar-accent) 40%, transparent);
+}
+
+/* The brighter border carries the selected state; a translucent wash keeps the text legible. */
+[data-left-sidebar] [data-worktree-card-surface][data-worktree-card-active='primary'] {
+  border-color: color-mix(in srgb, var(--worktree-sidebar-border) 40%, transparent);
+  background: color-mix(in srgb, var(--worktree-sidebar-foreground) 8%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--worktree-sidebar-foreground) 4%, transparent);
+}
+.dark [data-left-sidebar] [data-worktree-card-surface][data-worktree-card-active='primary'] {
+  border-color: color-mix(in srgb, var(--worktree-sidebar-foreground) 18%, var(--worktree-sidebar-border));
+  background: color-mix(in srgb, var(--worktree-sidebar-foreground) 10%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--worktree-sidebar-foreground) 3%, transparent);
+}
+
+/* ── Agent rows ── */
+
+[data-left-sidebar] .worktree-agent-row-hover:hover {
+  background: color-mix(in srgb, var(--sidebar-foreground) 1.25%, transparent);
+}
+[data-left-sidebar] .worktree-agent-row-hover[data-focused-agent-pane='true'] {
+  background: color-mix(in srgb, var(--sidebar-foreground) 12%, var(--sidebar-accent));
+}
+.dark [data-left-sidebar] .worktree-agent-row-hover:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.dark [data-left-sidebar] .worktree-agent-row-hover[data-focused-agent-pane='true'] {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* Compact agents hang half a step into the card's gutter. */
+[data-left-sidebar] [data-compact-agent-list='true'] {
+  margin-inline-start: -0.5rem;
+  width: calc(100% + 0.5rem);
+}
+
+/* Animate the grid track, not a height, so the reveal stays CSS-owned and interruptible. */
+[data-left-sidebar] .compact-agent-expansion-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-left-sidebar] .compact-agent-expansion-grid-expanded { grid-template-rows: 1fr; }
+
+@keyframes compact-agent-expansion-reveal {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+[data-left-sidebar] .compact-agent-expansion-grid-expanded .compact-agent-expansion-content {
+  animation: compact-agent-expansion-reveal 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+[data-left-sidebar] .compact-agent-summary-panel {
+  padding: 2px;
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: background 180ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── The working spinner: on the compositor; one day per iteration, still 12 steps a second ── */
+
+@keyframes agent-spinner-rotate {
+  to { transform: rotate(86400turn); }
+}
+[data-left-sidebar] .agent-working-spinner {
+  animation: agent-spinner-rotate 86400s steps(1036800, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-left-sidebar] .agent-working-spinner { animation: none; }
+  [data-left-sidebar] .compact-agent-expansion-grid { transition-duration: 0ms; }
+  [data-left-sidebar] .compact-agent-expansion-grid-expanded .compact-agent-expansion-content { animation-duration: 0ms; }
+  [data-left-sidebar] .compact-agent-summary-panel { transition-duration: 0ms; }
+}

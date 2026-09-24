@@ -10,6 +10,14 @@ export type ToolStatus = { name: ToolName; path: string | null; version: string 
 /** The order the setup screen lists them in. */
 export const TOOLS: ToolName[] = ['git', 'claude', 'mnemo', 'gh']
 
+/** What each one is for, as the setup screens say it. */
+export const WHAT: Record<ToolName, string> = {
+  git: 'worktrees, branches and diffs',
+  claude: 'Claude Code, which runs every session',
+  mnemo: 'rules, briefings and dispatch',
+  gh: 'issues and pull requests on GitHub',
+}
+
 /** Without these two the app does nothing useful: either missing opens setup at launch. */
 export const ESSENTIAL: ToolName[] = ['claude', 'mnemo']
 

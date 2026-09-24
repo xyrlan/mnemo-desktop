@@ -14,6 +14,7 @@ import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { missionStore } from '../mission/app-store'
 import { snapshot } from '../mission/fixtures'
 import { THRESHOLD } from './drag'
+import { fileDropStore } from '../terminal/drop'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -118,6 +119,64 @@ test('pressing the bar focuses its pane but does not steal keyboard focus from i
   await mouse('mouseup', pane(A).querySelector('.pane-bar')!, 0)
   expect(tab().focused).toBe(A)
   expect(document.activeElement).not.toBe(own)
+})
+
+test('a pane bar dragged over another pane marks it as a pane drop, not a file drop', async () => {
+  await render()
+  await mouse('mousedown', pane(A).querySelector('.pane-bar')!, 0)
+  await mouse('mousemove', pane(B).querySelector('.pane-content')!, THRESHOLD + 10)
+  expect(pane(B).classList.contains('pane-drop')).toBe(true)
+  expect(pane(C).classList.contains('pane-drop')).toBe(false)
+  await act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  expect(pane(B).classList.contains('pane-drop')).toBe(false)
+})
+
+test('a file dragged from Finder over a pane highlights it whole, as no pane drop', async () => {
+  await render()
+  await act(async () => fileDropStore.setState({ over: B }))
+  expect(pane(B).classList.contains('drop-target')).toBe(true)
+  expect(pane(B).classList.contains('pane-drop')).toBe(false)
+  await act(async () => fileDropStore.setState({ over: null }))
+})
+
+test('only a tab of several panes is a split, whose unfocused panes dim', async () => {
+  await render()
+  expect(host.querySelector('.split-root')!.classList.contains('is-split')).toBe(true)
+  await act(async () => root.render(<SplitView node={{ kind: 'leaf', pane: A }} />))
+  expect(host.querySelector('.split-root')!.classList.contains('is-split')).toBe(false)
+})
+
+describe('the resize handle', () => {
+  const pointer = (type: string, target: EventTarget, x: number, y = 0) =>
+    act(() => void target.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0 })))
+  const box = (w: number, h: number) =>
+    vi.spyOn(host.querySelector('.split-root')!, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: w, height: h }))
+
+  test('a line on a grab strip, oriented across its split', async () => {
+    await render()
+    const [row, col] = [host.querySelector('.divider.row')!, host.querySelector('.divider.col')!]
+    expect(row.classList.contains('is-vertical')).toBe(true)
+    expect(col.classList.contains('is-horizontal')).toBe(true)
+    expect(row.getAttribute('role')).toBe('separator')
+  })
+
+  test('dragging it resizes the split, held between 15% and 85%', async () => {
+    await render()
+    box(1000, 600)
+    const handle = host.querySelector('.divider.row')!
+    await pointer('pointerdown', handle, 500)
+    expect(handle.classList.contains('is-dragging')).toBe(true)
+    await pointer('pointermove', window, 300)
+    expect((tab().root as { ratio: number }).ratio).toBeCloseTo(0.3)
+    await pointer('pointermove', window, 20)
+    expect((tab().root as { ratio: number }).ratio).toBe(0.15)
+    await pointer('pointermove', window, 990)
+    expect((tab().root as { ratio: number }).ratio).toBe(0.85)
+    await pointer('pointerup', window, 990)
+    expect(handle.classList.contains('is-dragging')).toBe(false)
+    await pointer('pointermove', window, 500)
+    expect((tab().root as { ratio: number }).ratio).toBe(0.85)
+  })
 })
 
 test('the close button in the bar closes that pane', async () => {

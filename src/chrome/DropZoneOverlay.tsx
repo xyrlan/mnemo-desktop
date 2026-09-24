@@ -1,16 +1,16 @@
+// adapted from stablyai/orca src/renderer/src/components/tab-group/TabGroupDropOverlay.tsx
 import { useDrag, type Zone } from './drag'
 import type { PaneId } from '../layout/tree'
 
-/** `center` already gets a whole-pane highlight from `.pane.drop-target` (see theme.css); this
- *  only draws the extra strip an edge zone would graft into once round 15 wires it up. */
-function edgeOf(zone: Zone | null): Exclude<Zone, 'center'> | null {
-  return zone && zone !== 'center' ? zone : null
-}
-
-/** Drawn over the pane currently under a dragged bar, showing which edge (if any) the drop
- *  would land in. */
+/** Drawn over the pane a dragged bar is over, covering where the dragged pane would land: the
+ *  half on an edge's side (the target splits evenly to hold it), or the whole pane in the
+ *  centre, where the two swap. */
 export default function DropZoneOverlay({ pane }: { pane: PaneId }) {
-  const zone = useDrag((s) => (s.over === pane ? edgeOf(s.zone) : null))
+  const zone = useDrag((s): Zone | null => (s.from !== null && s.over === pane ? s.zone : null))
   if (!zone) return null
-  return <div className={`pane-drop-zone zone-${zone}`} aria-hidden />
+  return (
+    <div className={`pane-drop-zone zone-${zone}`} data-zone={zone} aria-hidden>
+      {zone === 'center' && <span className="pane-drop-zone-label">Swap</span>}
+    </div>
+  )
 }

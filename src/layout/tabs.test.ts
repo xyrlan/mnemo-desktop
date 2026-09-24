@@ -1,4 +1,4 @@
-import { dropOnGroup, groupLabel, paneAccent, paneClaude, paneLabel, tabLabel } from './tabs'
+import { dropOnGroup, groupLabel, paneAccent, paneClaude, paneForSession, paneLabel, tabLabel } from './tabs'
 import { accentHue, repoAccent } from '../home/repo-color'
 import { leaves, type Node, type PaneId, type Side } from './tree'
 import type { Pane, Tab } from './store'
@@ -105,4 +105,20 @@ test('a drop on a pane’s own line, or on one no tab holds, does nothing', () =
   dropOnGroup(s, 1, 99, 'left')
   expect(s.calls).toEqual([])
   expect(leaves(group.root)).toEqual([1, 2])
+})
+
+describe('paneForSession', () => {
+  const shown: Tab = { id: 'a', root: L(1), focused: 1 }
+  const hidden: Tab = { id: 'b', root: L(2), focused: 2 }
+  const panes = { 1: term(1, DESKTOP), 2: term(2, '/Users/me/github/mnemo', { sessionId: 's2' }) }
+
+  test('finds a session running in a worktree that is not on screen', () => {
+    const s = { tabs: [shown], panes, parked: { '/Users/me/github/mnemo': { tabs: [hidden] } } }
+    expect(paneForSession(s, { session_id: 's2', cwd: '' })).toBe(2)
+    expect(paneForSession(s, { session_id: null, cwd: '/Users/me/github/mnemo/' })).toBe(2)
+  })
+
+  test('a pane record no tab lays out is not a match', () => {
+    expect(paneForSession({ tabs: [shown], panes, parked: {} }, { session_id: 's2', cwd: '' })).toBeNull()
+  })
 })

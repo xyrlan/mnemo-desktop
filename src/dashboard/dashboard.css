@@ -1,0 +1,96 @@
+/* adapted from stablyai/orca src/renderer/src/assets/main.css (the kanban sheet and the agent
+   spinner) and components/dashboard-popout/agent-board-transitions.css (MIT, 122b8c25). */
+
+/* The drawer unrolls from the sidebar's edge instead of sliding in over it. Unlayered, so it
+   wins over the sheet's own slide classes. */
+.agent-dashboard-sheet[data-state='open'] {
+  animation-name: agent-dashboard-sheet-in;
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-dashboard-sheet[data-state='closed'] {
+  animation-name: agent-dashboard-sheet-out;
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.7, 0, 0.84, 0);
+}
+
+/* Attached to the sidebar, not floating above it: the sheet's generic elevation would cast a
+   haze over the sidebar while it stays open. */
+.agent-dashboard-sheet {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--worktree-sidebar-border) 80%, transparent);
+  backdrop-filter: none;
+}
+
+@keyframes agent-dashboard-sheet-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+@keyframes agent-dashboard-sheet-out {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(0 100% 0 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-dashboard-sheet[data-state='open'],
+  .agent-dashboard-sheet[data-state='closed'] {
+    animation: none;
+  }
+}
+
+/* The working spinner turns on the compositor; a day-long timeline of fine steps keeps every
+   spinner in phase (AgentStateDot sets their start time to 0). */
+@keyframes agent-dashboard-spinner-rotate {
+  to { transform: rotate(86400turn); }
+}
+
+.agent-dashboard-spinner {
+  animation: agent-dashboard-spinner-rotate 86400s steps(1036800, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-dashboard-spinner {
+    animation: none;
+  }
+}
+
+/* A card changing column. Every card has its own `view-transition-name`, so the browser morphs
+   it from its old place to its new one. These rules apply only while the board's own transition
+   runs (`useDashboardCards` puts the class on <html>), never to one anything else starts. */
+:root.agent-dashboard-moving::view-transition-group(*) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The columns do not move: no root cross-fade, which would double-image the lanes. */
+:root.agent-dashboard-moving::view-transition-old(root),
+:root.agent-dashboard-moving::view-transition-new(root) {
+  animation-duration: 0s;
+}
+
+/* A card that moves has an old and a new picture and just morphs (above). One that appears or
+   goes has only one (`:only-child`): it fades and scales. */
+@keyframes agent-dashboard-card-enter {
+  from { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes agent-dashboard-card-exit {
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+:root.agent-dashboard-moving::view-transition-new(*):only-child {
+  animation: 240ms cubic-bezier(0.2, 0, 0, 1) both agent-dashboard-card-enter;
+}
+
+:root.agent-dashboard-moving::view-transition-old(*):only-child {
+  animation: 180ms cubic-bezier(0.4, 0, 1, 1) both agent-dashboard-card-exit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root.agent-dashboard-moving::view-transition-group(*),
+  :root.agent-dashboard-moving::view-transition-old(*),
+  :root.agent-dashboard-moving::view-transition-new(*) {
+    animation: none !important;
+  }
+}

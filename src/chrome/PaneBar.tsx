@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { GitBranch, GripVertical, X } from 'lucide-react'
 import { store, useApp } from '../layout/app-store'
 import { useMission } from '../mission/app-store'
 import type { PaneId } from '../layout/tree'
@@ -62,9 +63,11 @@ function usePulseFlash(id: PaneId): { live: Pulse | undefined; count: number } {
   return { live, count }
 }
 
-/** The header of every pane: drag handle, repo · branch, Claude tokens, close. Pressing it
- *  focuses the pane without taking keyboard focus from a terminal that already has it. It also
- *  learns the Claude session a terminal runs (`useSessionLearn`). */
+/** The header of every pane, in Orca's pane-title look (chrome.css): drag handle, repo · branch,
+ *  Claude tokens, face toggle, close. Pressing it focuses the pane without taking keyboard focus
+ *  from a terminal that already has it. It also learns the Claude session a terminal runs
+ *  (`useSessionLearn`). `data-ui`: new chrome, so inside the current views' `.app` scope it gets
+ *  the new tokens and base styles back (theme.css). */
 export default function PaneBar({ id, client = tauriChrome, sessions = tauriSession }: { id: PaneId; client?: ChromeClient; sessions?: SessionClient }) {
   const ref = useRef<HTMLDivElement>(null)
   useSessionLearn(id, sessions)
@@ -109,12 +112,15 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
 
   return (
     <>
-      <div ref={ref} className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap, or onto its edge to move beside it'}>
-        <span className="pane-bar-grip" aria-hidden>
-          ⠿
-        </span>
+      <div ref={ref} data-ui className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap, or onto its edge to move beside it'}>
+        <GripVertical className="pane-bar-grip" aria-hidden />
         {info.place && <span className="pane-bar-repo">{info.place}</span>}
-        {info.branch && <span className="pane-bar-branch">{info.branch}</span>}
+        {info.branch && (
+          <span className="pane-bar-branch-row">
+            <GitBranch className="pane-bar-branch-icon" aria-hidden />
+            <span className="pane-bar-branch">{info.branch}</span>
+          </span>
+        )}
         <span className="pane-bar-title">{info.title}</span>
         {live && <span key={live.id} className="pane-bar-glow" aria-hidden />}
         {count > 0 && (
@@ -154,8 +160,9 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
             e.stopPropagation()
           }}
           onClick={close}
+          aria-label="Close pane"
         >
-          ×
+          <X aria-hidden />
         </button>
       </div>
       <Overlay pane={id} />
