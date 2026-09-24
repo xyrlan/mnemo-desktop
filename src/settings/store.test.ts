@@ -12,7 +12,7 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {} }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
 })
 
 test('a sidebarScope left in an old settings file is dropped, not written back', async () => {
@@ -21,7 +21,7 @@ test('a sidebarScope left in an old settings file is dropped, not written back',
   await s.getState().load()
   expect('sidebarScope' in s.getState()).toBe(false)
   await s.getState().set('outgoing', 'en')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {} }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
 })
 
 test('a failing read still marks loaded', async () => {
@@ -92,4 +92,42 @@ test('repoSetup keeps a command per repo and drops junk and blank ones', async (
   const junk = createSettingsStore({ read: async () => ({ repoSetup: ['pnpm i'] as unknown as Record<string, string> }), write: async () => {} })
   await junk.getState().load()
   expect(junk.getState().repoSetup).toEqual({})
+})
+
+test('projects round-trip, deduped, and junk is dropped', async () => {
+  let written: unknown = null
+  const s = createSettingsStore({ read: async () => ({ projects: ['/gh/a', '/gh/b', '/gh/a', ''] }), write: async (v) => { written = v } })
+  expect(s.getState().projects).toEqual([])
+  await s.getState().load()
+  expect(s.getState().projects).toEqual(['/gh/a', '/gh/b'])
+  await s.getState().set('projects', ['/gh/b'])
+  expect((written as { projects: string[] }).projects).toEqual(['/gh/b'])
+  const junk = createSettingsStore({ read: async () => ({ projects: ['/gh/a', 3] as unknown as string[] }), write: async () => {} })
+  await junk.getState().load()
+  expect(junk.getState().projects).toEqual([])
+})
+
+test('quickCommands keep each repo\'s valid commands in order and drop junk', async () => {
+  let written: unknown = null
+  const s = createSettingsStore({
+    read: async () => ({
+      quickCommands: {
+        '/gh/a': [{ label: 'test', command: 'pnpm test', extra: 1 }, { label: 'blank', command: '  ' }, { label: 2, command: 'x' }, { label: 'dev', command: 'pnpm dev' }],
+        '/gh/b': 'pnpm test',
+        '/gh/c': [null, { command: 'ls' }],
+      } as unknown as Record<string, Array<{ label: string; command: string }>>,
+    }),
+    write: async (v) => { written = v },
+  })
+  expect(s.getState().quickCommands).toEqual({})
+  await s.getState().load()
+  expect(s.getState().quickCommands).toEqual({ '/gh/a': [{ label: 'test', command: 'pnpm test' }, { label: 'dev', command: 'pnpm dev' }] })
+  await s.getState().set('quickCommands', { ...s.getState().quickCommands, '/gh/b': [{ label: 'up', command: 'make up' }] })
+  expect((written as { quickCommands: unknown }).quickCommands).toEqual({
+    '/gh/a': [{ label: 'test', command: 'pnpm test' }, { label: 'dev', command: 'pnpm dev' }],
+    '/gh/b': [{ label: 'up', command: 'make up' }],
+  })
+  const junk = createSettingsStore({ read: async () => ({ quickCommands: [] as unknown as Record<string, never> }), write: async () => {} })
+  await junk.getState().load()
+  expect(junk.getState().quickCommands).toEqual({})
 })
