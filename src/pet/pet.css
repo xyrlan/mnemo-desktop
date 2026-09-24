@@ -1,0 +1,17 @@
+/* The pet floats over everything but the menus; only its own box takes the pointer. */
+.pet {
+  position: fixed;
+  z-index: 40;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.35));
+  transition: transform 120ms ease-out;
+}
+.pet:hover { transform: translateY(-2px); }
+.pet.pet-dragging { cursor: grabbing; transform: scale(1.08); transition: none; }
+.pet[data-state='needs-you'] { animation: pet-bob 900ms ease-in-out infinite; }
+@keyframes pet-bob { 50% { translate: 0 -4px; } }
+@media (prefers-reduced-motion: reduce) {
+  .pet, .pet * { animation: none !important; transition: none !important; }
+}
