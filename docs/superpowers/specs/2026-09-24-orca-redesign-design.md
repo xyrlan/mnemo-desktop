@@ -135,8 +135,8 @@ orange for an agent asking something), sans UI, lucide icons, its radius,
 shadows and animations. mnemo's identity lives in three things: **one**
 accent colour of its own, JetBrains Mono in terminals and code, and the
 octopus. Dark first; the tokens make a light theme nearly free, but it is not
-polished now. The accent is picked by the maintainer from three candidates
-rendered side by side (**default**).
+polished now. The accent is today's blue, `#7aa2f7` in dark: the maintainer
+picked it on 2026-09-24 from three candidates rendered side by side.
 
 ### 6. Agent status: the app's own hooks
 

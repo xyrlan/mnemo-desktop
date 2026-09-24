@@ -1,6 +1,5 @@
-// A page for eyes, not the app: every primitive in `@/ui`, open where it can be, and the three
-// accent candidates side by side. Served by `pnpm dev` at /src/ui/gallery.html; `?dialog` opens
-// the dialog over it.
+// A page for eyes, not the app: every primitive in `@/ui`, open where it can be, and the accent.
+// Served by `pnpm dev` at /src/ui/gallery.html; `?dialog` opens the dialog over it.
 import { createRoot } from 'react-dom/client'
 import { Bell, GitBranch, Play, Settings } from 'lucide-react'
 import '../theme.css'
@@ -50,22 +49,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Accent({ id, name }: { id: 'a' | 'b' | 'c'; name: string }) {
+function Accent() {
   return (
-    <div data-ui className="dark flex flex-col gap-3 rounded-lg border border-border bg-card p-4" data-accent={id}>
-      <div className="text-sm font-medium">
-        {id} · {name}
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="size-6 rounded-md bg-brand" />
-        <Button size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
-          <Play /> New workspace
-        </Button>
-      </div>
-      <div className="flex items-center gap-2 text-sm">
-        <GitBranch className="size-4 text-brand" />
-        <span className="text-brand">feat/orca-redesign</span>
-      </div>
+    <div data-ui className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
+      <span className="size-6 rounded-md bg-brand" />
+      <Button size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+        <Play /> New workspace
+      </Button>
+      <span className="flex items-center gap-2 text-sm text-brand">
+        <GitBranch className="size-4" /> feat/orca-redesign
+      </span>
       <Switch defaultChecked />
     </div>
   )
@@ -78,15 +71,11 @@ function Gallery() {
       <main data-ui className="flex min-h-screen flex-col gap-8 bg-background p-8 font-sans text-foreground">
         <header className="flex flex-col gap-1">
           <h1 className="text-lg font-semibold">mnemo · ui primitives</h1>
-          <p className="text-sm text-muted-foreground">Adapted from Orca's shadcn set. Pick an accent.</p>
+          <p className="text-sm text-muted-foreground">Adapted from Orca's shadcn set.</p>
         </header>
 
-        <Section title="Accent candidates">
-          <div className="grid grid-cols-3 gap-4">
-            <Accent id="a" name="blue (today's)" />
-            <Accent id="b" name="violet" />
-            <Accent id="c" name="cyan" />
-          </div>
+        <Section title="Accent">
+          <Accent />
         </Section>
 
         <Section title="Buttons, badges, keys">

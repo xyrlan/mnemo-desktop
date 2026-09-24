@@ -7,7 +7,7 @@
 /* ======================================================================================
    The visual system (spec, *Visual system*): Orca's shadcn tokens, adapted from
    stablyai/orca src/renderer/src/assets/main.css — a neutral monochrome base, colour only
-   for state, and one accent of mnemo's own (`--brand`, three candidates on `data-accent`).
+   for state, and one accent of mnemo's own (`--brand`, today's blue).
    Dark first: index.html puts `class="dark"` on <html>; the light values exist so a light
    theme is nearly free, but they are not polished.
    ====================================================================================== */
@@ -200,19 +200,13 @@
   --status-warning: #eab308;
 }
 
-/* ── The accent: three candidates, picked by the maintainer from screenshots ──
-   `<html data-accent="a" | "b" | "c">`. None of them may read as a state: no yellow, orange,
-   green or red. `--brand-foreground` is text on a `bg-brand` surface. */
+/* ── The accent ─────────────────────────────────────────
+   mnemo's one colour of its own (spec, *Visual system*): today's blue, picked by the maintainer
+   on 2026-09-24 over a violet and a cyan. It never reads as a state. `--brand-foreground` is
+   text on a `bg-brand` surface. */
 
-:root, [data-accent='a'] { --brand: #2f5fd0; --brand-foreground: #fff; }
-[data-accent='b'] { --brand: #7c4ddb; --brand-foreground: #fff; }
-[data-accent='c'] { --brand: #0e8fa6; --brand-foreground: #fff; }
-/* a · tide — today's blue, carried over */
-.dark, .dark[data-accent='a'] { --brand: #7aa2f7; --brand-foreground: #0a0a0a; }
-/* b · ink — violet */
-.dark[data-accent='b'] { --brand: #b392f0; --brand-foreground: #0a0a0a; }
-/* c · reef — cyan */
-.dark[data-accent='c'] { --brand: #4fd1e8; --brand-foreground: #0a0a0a; }
+:root { --brand: #2f5fd0; --brand-foreground: #fff; }
+.dark { --brand: #7aa2f7; --brand-foreground: #0a0a0a; }
 
 /* ── The current views ─────────────────────────────────
    Every view on screen today lives inside `.app` (src/App.tsx), or in one of the three hosts

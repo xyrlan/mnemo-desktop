@@ -135,13 +135,10 @@ describe('tokens', () => {
     expect(css).toMatch(/:root, :host \{[^}]*--font-mono: 'JetBrains Mono'/)
   })
 
-  test('three accent candidates, each its own colour in dark', async () => {
+  test('one accent, today\'s blue in dark', async () => {
     const css = await build([])
-    const brand = (sel: string) => rule(css, sel).match(/--brand: ([^;]+);/)?.[1]
-    // Candidate a is also what <html> gets with no data-accent at all.
-    const picks = [`.dark, .dark[data-accent='a']`, `.dark[data-accent='b']`, `.dark[data-accent='c']`].map(brand)
-    expect(picks.every(Boolean)).toBe(true)
-    expect(new Set(picks).size).toBe(3)
+    expect(rule(css, '.dark')).toContain('--brand: #7aa2f7')
+    expect(css).not.toContain('data-accent')
   })
 })
 
