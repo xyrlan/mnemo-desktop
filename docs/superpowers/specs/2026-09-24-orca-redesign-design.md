@@ -100,7 +100,10 @@ main checkout is a worktree like any other. The sidebar moves to the **left**.
 
 Both appear as the same kind of worktree card with the same status. Agents
 launch with `--dangerously-skip-permissions` **by default**, both kinds — the
-maintainer's call, for the workflow — with a toggle in Settings.
+maintainer's call, for the workflow — with a toggle in Settings. That holds for
+a workspace made from an issue too, as in Orca: the issue's text, which anyone
+can write on a public repo, reaches an agent that asks nothing. The maintainer
+accepted that risk on 2026-09-24 over checking the author's access.
 
 **Worktree convention** (**default**): a new workspace is a sibling directory
 `<repo>-wt-<name>`, the convention `mnemo dispatch` already uses, so one place
@@ -220,8 +223,13 @@ allow.
   the Memory panel, new workspace / dispatch flows with the permissions
   toggle, notifications UI, the pet, dictation, onboarding, persistent
   terminals.
-- **Wave C**: diff comments and AI commit/PR text, Design Mode, floating
-  terminal, quick commands.
+- **Wave C** (`2026-09-24-orca-redesign-c.md`), after looking at the running
+  app: the bugs that showed (projects that do not persist, a clipped
+  dashboard, a stray line under the terminal), removing what waves A and B
+  retired, and the rest of the features — diff comments, AI commit/PR text,
+  Design Mode, floating terminal, quick commands, dictation on Mod+E, cleaning
+  up stale worktrees — plus shipping the helper binaries in the release
+  bundle.
 
 ### Rules carried over
 

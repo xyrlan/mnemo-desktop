@@ -225,3 +225,17 @@ mnemo's pet is the octopus (`src/avatar/`); Orca's sprites are not vendored.
 
 `assets/terminal.css` 219-243: `.tab-drop-overlay`, `.tab-drop-overlay__label`.
 `pet-bob` keyframes are injected by `pet/PetOverlay.tsx:312`.
+
+## Wave C additions
+
+Copied whole (tests left out) for wave C; paths under `src/renderer/src/` unless noted.
+
+| Area | Where | What it carries |
+|---|---|---|
+| Diff comments | `components/diff-comments/` | Per-line comment affordance on a diff, the comment card, and sending comments to the agent |
+| Floating terminal | `components/floating-terminal/` | A terminal floating over the app: toggle, drag, resize, the panel chrome |
+| Quick commands | `components/terminal-quick-commands/` | Saved commands per repo, the titlebar button and its menu, running one in the terminal |
+| Dictation | `components/dictation/` | The dictation indicator and states (listening, transcribing), Mod+E toggle |
+| Workspace cleanup | `components/workspace-cleanup/` | Finding stale worktrees (merged, idle, clean) and removing them in a batch, with its dialog |
+| Design Mode | `components/browser-pane/annotate/`; `src/main/browser/*grab*` | Grab mode in a browser page: hover overlay, click to pick an element, its HTML/CSS/screenshot as a payload for the agent |
+| AI commit and PR text | `components/right-sidebar/source-control/ai/`, `…/commit/`, `components/right-sidebar/create-pull-request-dialog-field-model.ts`; `src/main/ipc/filesystem/filesystem-git-{commit,pull-request}-generation-handlers.ts`, `src/main/git/source-control/staged-commit-context.ts` | Commit message composer with AI generation, prompts, the PR title/body generation, and the staged-diff context they send |
