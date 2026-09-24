@@ -13,9 +13,12 @@
 //! Nothing here reaches outside the repo's parent directory: a name is one plain path segment,
 //! and a path to remove must be a listed, non-main worktree under that parent.
 //!
-//! For cleaning up, `cleanup_facts` says of each tree but the main checkout whether its commits
-//! are all in the repo's default branch (`merged`): with no changes either, removing it loses
-//! nothing, since the branch is kept.
+//! For cleaning up, `cleanup_facts` says of each tree but the main checkout whether its work is
+//! already in the repo's default branch (`merged`): with no changes either, removing it loses
+//! nothing, since the branch is kept. A repo that squash- or rebase-merges never makes a branch
+//! an ancestor of the default branch, so `merged` also takes a branch whose changes are all
+//! there, and one whose pull request was merged or closed at the commit the tree is on. Only
+//! facts: nothing here removes anything.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -287,8 +290,9 @@ pub fn remove(path: &str, force: bool) -> Result<(), String> {
 pub struct CleanupTree {
     #[serde(flatten)]
     pub info: WorktreeInfo,
-    /// Its HEAD is in the default branch (local or the remote's), so none of its commits would
-    /// be lost; true too for a tree that never made one.
+    /// Its work is in the default branch (local or the remote's): its HEAD is there, or the
+    /// changes it makes are (a squash or rebase merge), or its branch's pull request was merged
+    /// or closed with the tree's HEAD in it. True too for a tree that never made a commit.
     pub merged: bool,
 }
 
@@ -312,17 +316,89 @@ fn bases(root: &Path, main_branch: Option<&str>) -> Vec<String> {
     remote.into_iter().chain(local).filter(|r| !r.starts_with('-') && resolves(r)).collect()
 }
 
+/// Whether the changes `head` makes since it left `base` are all in `base`, however they got
+/// there. Two ways to tell, as a squash-merge detector would: merging `head` into `base` changes
+/// nothing, or `head`'s changes squashed into one commit match one of `base`'s by patch id (`git
+/// cherry`), which still holds after `base` went on to change the same lines. Either writes a
+/// throwaway object into the repo and nothing else.
+fn changes_in(root: &Path, head: &str, base: &str) -> bool {
+    let Ok(fork) = git(&["merge-base", head, base], root) else { return false };
+    let fork = fork.trim();
+    // `--write-tree` is git 2.38; an older git refuses it and the patch-id test stands alone.
+    let merged_tree = git(&["merge-tree", "--write-tree", "--no-messages", base, head], root);
+    let base_tree = git(&["rev-parse", &format!("{base}^{{tree}}")], root);
+    if let (Ok(m), Ok(b)) = (&merged_tree, &base_tree) {
+        if m.lines().next().map(str::trim) == Some(b.trim()) {
+            return true;
+        }
+    }
+    let ident = ["-c", "user.name=mnemo", "-c", "user.email=mnemo@localhost", "-c", "commit.gpgsign=false"];
+    let tree = format!("{head}^{{tree}}");
+    let squash = git(&[&ident[..], &["commit-tree", &tree, "-p", fork, "-m", "squash"]].concat(), root);
+    let Ok(squash) = squash else { return false };
+    let Ok(cherry) = git(&["cherry", base, squash.trim()], root) else { return false };
+    let mut lines = cherry.lines().filter(|l| !l.trim().is_empty()).peekable();
+    lines.peek().is_some() && lines.all(|l| l.starts_with('-'))
+}
+
+/// One pull request of `gh pr list`, as far as cleaning up cares.
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Pr {
+    head_ref_name: String,
+    head_ref_oid: String,
+    state: String,
+}
+
+/// Runs `gh` in a directory: stdout, or why not.
+type GhRun<'a> = &'a dyn Fn(&[&str], &Path) -> Result<String, String>;
+
+fn run_gh(args: &[&str], cwd: &Path) -> Result<String, String> {
+    run("gh", args, Some(cwd))
+}
+
+/// Branch → the head commits of its pull requests that were merged or closed, for branches with
+/// no open one. Empty when `gh` is missing, signed out or the repo is not on GitHub: then only
+/// git's own signals count.
+fn ended_prs(root: &Path, gh: GhRun) -> HashMap<String, Vec<String>> {
+    let fields = "headRefName,headRefOid,state";
+    let text = gh(&["pr", "list", "--state", "all", "--limit", "1000", "--json", fields], root).unwrap_or_default();
+    let prs: Vec<Pr> = serde_json::from_str(&text).unwrap_or_default();
+    let open: std::collections::HashSet<&str> = prs.iter().filter(|p| p.state == "OPEN").map(|p| p.head_ref_name.as_str()).collect();
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for p in &prs {
+        if matches!(p.state.as_str(), "MERGED" | "CLOSED") && !open.contains(p.head_ref_name.as_str()) && !p.head_ref_oid.starts_with('-') {
+            out.entry(p.head_ref_name.clone()).or_default().push(p.head_ref_oid.clone());
+        }
+    }
+    out
+}
+
 /// What cleaning up needs to know of the repo `repo` is in; see the module doc.
 pub fn cleanup_facts(repo: &str) -> Result<CleanupFacts, String> {
+    cleanup_facts_with(repo, &run_gh)
+}
+
+fn cleanup_facts_with(repo: &str, gh: GhRun) -> Result<CleanupFacts, String> {
     let root = main_root(repo)?;
     let mut trees = list(repo)?;
     let main_branch = trees.first().filter(|w| w.is_main).and_then(|w| w.branch.clone());
     let bases = bases(&root, main_branch.as_deref());
     trees.retain(|w| !w.is_main);
-    let merged = |head: &str| !head.is_empty() && bases.iter().any(|b| git(&["merge-base", "--is-ancestor", head, b], &root).is_ok());
+    let prs = if bases.is_empty() || trees.is_empty() { HashMap::new() } else { ended_prs(&root, gh) };
+    let ancestor = |a: &str, b: &str| git(&["merge-base", "--is-ancestor", a, b], &root).is_ok();
+    let merged = |w: &WorktreeInfo| {
+        let head = w.head.as_str();
+        if head.is_empty() || head.starts_with('-') || bases.is_empty() {
+            return false;
+        }
+        // A pull request that ended with this very work in it; later commits are new work.
+        let pr_ended = || w.branch.as_ref().and_then(|b| prs.get(b)).is_some_and(|oids| oids.iter().any(|o| ancestor(head, o)));
+        bases.iter().any(|b| ancestor(head, b)) || pr_ended() || bases.iter().any(|b| changes_in(&root, head, b))
+    };
     Ok(CleanupFacts {
         base: bases.first().cloned(),
-        trees: trees.into_iter().map(|info| CleanupTree { merged: merged(&info.head), info }).collect(),
+        trees: trees.into_iter().map(|info| CleanupTree { merged: merged(&info), info }).collect(),
     })
 }
 
@@ -585,6 +661,14 @@ mod tests {
         sh_git(&["commit", "-q", "-m", file], dir);
     }
 
+    fn no_gh(_: &[&str], _: &Path) -> Result<String, String> {
+        Err("gh: not found".into())
+    }
+
+    fn head_of(dir: &Path) -> String {
+        git(&["rev-parse", "HEAD"], dir).unwrap().trim().to_string()
+    }
+
     fn merged_of(facts: &CleanupFacts) -> Vec<(String, bool, bool)> {
         facts.trees.iter().map(|t| (t.info.branch.clone().unwrap_or_default(), t.merged, t.info.dirty)).collect()
     }
@@ -601,7 +685,7 @@ mod tests {
         sh_git(&["merge", "-q", "--no-edit", "done"], &root);
         std::fs::write(Path::new(&fresh.path).join("scratch"), "x").unwrap();
 
-        let facts = cleanup_facts(&r).unwrap();
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
         // No remote: measured against the main checkout's own branch.
         assert_eq!(facts.base.as_deref(), Some("main"));
         // The main checkout is left out; the rest keep `list`'s order, which is git's (by path).
@@ -610,7 +694,7 @@ mod tests {
             [("done".into(), true, false), ("fresh".into(), true, true), ("open".into(), false, false)]
         );
         // Asked from inside a tree, the same answer.
-        assert_eq!(cleanup_facts(&open.path).unwrap(), facts);
+        assert_eq!(cleanup_facts_with(&open.path, &no_gh).unwrap(), facts);
     }
 
     #[test]
@@ -625,13 +709,127 @@ mod tests {
         sh_git(&["fetch", "-q", &tree.path, "shipped:shipped"], &origin);
         sh_git(&["merge", "-q", "--no-edit", "shipped"], &origin);
         sh_git(&["fetch", "-q"], &clone);
-        let facts = cleanup_facts(&c).unwrap();
+        let facts = cleanup_facts_with(&c, &no_gh).unwrap();
         assert_eq!(facts.base.as_deref(), Some("origin/main"));
         assert_eq!(merged_of(&facts), [("shipped".into(), true, false)]);
         // With no default branch to measure against, nothing counts as merged.
         sh_git(&["checkout", "-q", "--detach"], &clone);
         sh_git(&["remote", "remove", "origin"], &clone);
-        let none = cleanup_facts(&c).unwrap();
+        let none = cleanup_facts_with(&c, &no_gh).unwrap();
         assert_eq!((none.base, none.trees[0].merged), (None, false));
+    }
+
+    #[test]
+    fn a_squash_merged_branch_is_merged() {
+        let root = repo("wt-squash");
+        let r = s(&root);
+        let sq = create(&r, "sq", None, None, quiet()).unwrap();
+        commit(Path::new(&sq.path), "a.txt");
+        commit(Path::new(&sq.path), "b.txt");
+        let half = create(&r, "half", None, None, quiet()).unwrap();
+        commit(Path::new(&half.path), "c.txt");
+        commit(Path::new(&half.path), "d.txt");
+        // main moves on first, so neither branch is behind main's tip by accident.
+        commit(&root, "later.txt");
+        sh_git(&["merge", "-q", "--squash", "sq"], &root);
+        sh_git(&["commit", "-q", "-m", "sq (#1)"], &root);
+        // Only one of `half`'s two commits lands.
+        sh_git(&["cherry-pick", &format!("{}~1", head_of(Path::new(&half.path)))], &root);
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        assert_eq!(merged_of(&facts), [("half".into(), false, false), ("sq".into(), true, false)]);
+    }
+
+    #[test]
+    fn a_squash_merge_counts_after_the_default_branch_rewrites_the_same_lines() {
+        let root = repo("wt-squash-later");
+        let r = s(&root);
+        let sq = create(&r, "sq", None, None, quiet()).unwrap();
+        let t = Path::new(&sq.path);
+        std::fs::write(t.join("README"), "hi\nfrom sq\n").unwrap();
+        sh_git(&["commit", "-q", "-am", "one"], t);
+        std::fs::write(t.join("README"), "hi\nfrom sq, twice\n").unwrap();
+        sh_git(&["commit", "-q", "-am", "two"], t);
+        sh_git(&["merge", "-q", "--squash", "sq"], &root);
+        sh_git(&["commit", "-q", "-m", "sq (#1)"], &root);
+        // Merging `sq` again now conflicts; its squashed patch is still main's.
+        std::fs::write(root.join("README"), "hi\nrewritten\n").unwrap();
+        sh_git(&["commit", "-q", "-am", "rewrite"], &root);
+        let head = head_of(t);
+        assert!(!changes_in_merge_tree_only(&root, &head, "main"));
+        assert!(changes_in(&root, &head, "main"));
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        assert_eq!(merged_of(&facts), [("sq".into(), true, false)]);
+    }
+
+    /// The first of `changes_in`'s two tests alone.
+    fn changes_in_merge_tree_only(root: &Path, head: &str, base: &str) -> bool {
+        let m = git(&["merge-tree", "--write-tree", "--no-messages", base, head], root);
+        let b = git(&["rev-parse", &format!("{base}^{{tree}}")], root).unwrap();
+        m.is_ok_and(|m| m.lines().next().map(str::trim) == Some(b.trim()))
+    }
+
+    #[test]
+    fn a_rebase_merged_branch_is_merged() {
+        let root = repo("wt-rebase");
+        let r = s(&root);
+        let rb = create(&r, "rb", None, None, quiet()).unwrap();
+        commit(Path::new(&rb.path), "a.txt");
+        commit(Path::new(&rb.path), "b.txt");
+        commit(&root, "later.txt");
+        let tip = head_of(Path::new(&rb.path));
+        sh_git(&["cherry-pick", &format!("{tip}~1"), &tip], &root);
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        assert_eq!(merged_of(&facts), [("rb".into(), true, false)]);
+    }
+
+    #[test]
+    fn a_branch_whose_pull_request_ended_is_merged() {
+        let root = repo("wt-prs");
+        let r = s(&root);
+        let mut heads = HashMap::new();
+        for name in ["closed", "merged", "moved", "open", "reopened", "unknown"] {
+            let t = create(&r, name, None, None, quiet()).unwrap();
+            commit(Path::new(&t.path), &format!("{name}.txt"));
+            heads.insert(name, head_of(Path::new(&t.path)));
+        }
+        // `moved` got a commit after its PR was merged: new work.
+        let moved = Path::new(&list(&r).unwrap().iter().find(|w| w.branch.as_deref() == Some("moved")).unwrap().path).to_path_buf();
+        commit(&moved, "after.txt");
+        let pr = |b: &str, oid: &str, state: &str| format!(r#"{{"headRefName":"{b}","headRefOid":"{oid}","state":"{state}"}}"#);
+        let json = format!(
+            "[{}]",
+            [
+                pr("closed", &heads["closed"], "CLOSED"),
+                pr("merged", &heads["merged"], "MERGED"),
+                pr("moved", &heads["moved"], "MERGED"),
+                pr("open", &heads["open"], "OPEN"),
+                pr("reopened", &heads["reopened"], "MERGED"),
+                pr("reopened", &heads["reopened"], "OPEN"),
+            ]
+            .join(",")
+        );
+        let asked = Mutex::new(vec![]);
+        let gh = |args: &[&str], _: &Path| -> Result<String, String> {
+            asked.lock().unwrap().push(args.join(" "));
+            Ok(json.clone())
+        };
+        let facts = cleanup_facts_with(&r, &gh).unwrap();
+        assert_eq!(
+            merged_of(&facts),
+            [
+                ("closed".into(), true, false),
+                ("merged".into(), true, false),
+                ("moved".into(), false, false),
+                ("open".into(), false, false),
+                ("reopened".into(), false, false),
+                ("unknown".into(), false, false),
+            ]
+        );
+        // One `gh` call for the whole repo, every state.
+        assert_eq!(*asked.lock().unwrap(), ["pr list --state all --limit 1000 --json headRefName,headRefOid,state"]);
+        // `gh` failing or saying nonsense leaves git's signals alone.
+        for bad in [&no_gh as GhRun, &|_: &[&str], _: &Path| Ok("not json".to_string())] {
+            assert!(cleanup_facts_with(&r, bad).unwrap().trees.iter().all(|t| !t.merged));
+        }
     }
 }
