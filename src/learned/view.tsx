@@ -1,8 +1,9 @@
 /** "What mnemo learned" (#180, D1 of mnemo's install-review spec): the one screen where the user
  *  decides which pages mnemo recovered from their Claude Code history go live. It asks before
  *  anything reaches a model, shows the run as it goes (the run lives in the core, so leaving
- *  the screen does not stop it), then lists every page checked, grouped by type. Opens by itself
- *  once per project after setup; the vault's inbox opens it by hand. */
+ *  the screen does not stop it), then lists every page checked, grouped by type. Once per
+ *  project after setup it is offered by itself, as onboarding's second step
+ *  (`src/onboarding/`); ⌘K and the vault's inbox open this pane by hand. */
 import { useEffect } from 'react'
 import { store } from '../layout/app-store'
 import { homeStore } from '../home/app-store'
@@ -13,7 +14,8 @@ import { setup } from '../setup/app-store'
 import { afterRestore } from '../setup/launch'
 import { needsSetup } from '../setup/tools'
 import { learned, learnedClient, useLearned } from './app-store'
-import { showLearned, watchForReview } from './launch'
+import { onboarding } from '../onboarding/app-store'
+import { watchForReview } from './launch'
 import { reviewWhatWasLearned } from './open'
 import { settled, type Count, type Phase } from './store'
 import { day, groupPages, firstExpiry, type Group, type LearnedPage } from './types'
@@ -249,7 +251,8 @@ if (!hot?.learnedWatch) {
     show: (target, dry) => {
       if (!settled(learned.getState().phase)) return
       learned.getState().ask(target, dry)
-      showLearned(store)
+      // A dialog already open at setup reaches the consent on Continue.
+      onboarding.getState().offer('learned')
     },
   })
 }

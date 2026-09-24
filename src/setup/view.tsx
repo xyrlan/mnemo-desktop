@@ -1,7 +1,8 @@
 /** Setup (round 19): the four programs the app runs, found or missing, and a click that
  *  installs each missing one. mnemo installs inside the app; git, gh and Claude Code install
- *  in a terminal tab through this OS's own route. Opens by itself at launch when `claude` or
- *  `mnemo` is missing. */
+ *  in a terminal tab through this OS's own route. Since the Orca redesign it is onboarding's
+ *  first step (`src/onboarding/`), which opens by itself at launch when `claude` or `mnemo` is
+ *  missing; the pane stays for a workspace saved with it open. */
 import { useEffect } from 'react'
 import { store, useApp } from '../layout/app-store'
 import { leaves } from '../layout/tree'
@@ -9,17 +10,11 @@ import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { ghInstall, installGh } from '../github/actions'
 import { setup, useSetup } from './app-store'
-import { afterRestore, openIfMissing, showSetup } from './launch'
+import { onboarding } from '../onboarding/app-store'
+import { afterRestore, openIfMissing } from './launch'
 import type { Run } from './store'
-import { currentOs, installRoute, TOOLS, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
+import { currentOs, installRoute, TOOLS, WHAT, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
 import './setup.css'
-
-const WHAT: Record<ToolName, string> = {
-  git: 'worktrees, branches and diffs',
-  claude: 'Claude Code, which runs every session',
-  mnemo: 'rules, briefings and dispatch',
-  gh: 'issues and pull requests on GitHub',
-}
 
 const inTab = (command: string) => void store.getState().openCommandTab(undefined, command)
 
@@ -156,16 +151,16 @@ function SetupPane({ id }: PaneViewProps) {
 
 registerPaneView('setup', SetupPane)
 
-register({ id: 'setup.open', title: 'Setup: install git, claude, mnemo and gh', run: () => showSetup(store, 'auto') })
+register({ id: 'setup.open', title: 'Setup: install git, claude, mnemo and gh', run: () => onboarding.getState().show('setup') })
 
 // Once per app run, not once per hot reload: the first launch with `claude` or `mnemo` missing
-// lands on this pane instead of on a Home that cannot do anything.
+// opens onboarding at setup instead of leaving the user on a Home that cannot do anything.
 const hot = import.meta.hot?.data as { setupChecked?: boolean } | undefined
 if (!hot?.setupChecked) {
   if (hot) hot.setupChecked = true
   void openIfMissing({
     restored: afterRestore(store),
     check: () => setup.getState().check(),
-    open: () => showSetup(store, 'tab'),
+    open: () => onboarding.getState().show('setup'),
   })
 }
