@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Ban, Filter, ShieldCheck, SquarePen, Terminal } from 'lucide-react'
+import { Badge, Button } from '@/ui'
+import { cn } from '@/ui/cn'
 import { listKey } from '../actions/keys'
 import { useVault, vault } from './app-store'
 import { EgoView } from './EgoView'
+import { ERROR_TEXT, ErrorLine, MONO_TEXT } from './ErrorLine'
 import { PageView, openInEditor, short } from './PageView'
 import { applyChips, BADGE_LABEL, BADGES, BADGE_TITLE, confidenceTone, facets, reviewCount, scopeAgents, sinceText, withStale } from './rules'
 import { parseStale } from './stale'
 import { useArm } from './useArm'
-import type { RunResult, RuleRow } from './types'
+import { Dismiss, Dot, EMPTY, Loading, Refresh, ROW_ACTIONS, ROW_TOOLBAR, RowAction, SearchInput, SELECT, TH, Toggle, TR, TR_SELECTED } from './ui'
+import type { Badge as BadgeKind, RunResult, RuleRow, Tile } from './types'
 
 /** Closes the side panel. */
 const deselect = () => vault.getState().deselect()
@@ -20,15 +25,34 @@ function RawText({ title, result }: { title: string; result: RunResult }) {
   const out = [result.stdout.trimEnd(), result.stderr.trimEnd()].filter(Boolean).join('\n')
   const failed = result.code !== 0
   return (
-    <div className="vr-raw-block">
-      <div className="vr-raw-title">
+    <div className="vr-raw-block min-w-0 flex-1">
+      <div className="vr-raw-title pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
-        {failed && <span className="vh-fail"> {result.code === null ? 'not run' : `exit ${result.code}`}</span>}
+        {failed && <span className="vh-fail normal-case tracking-normal text-destructive"> {result.code === null ? 'not run' : `exit ${result.code}`}</span>}
       </div>
-      <pre className={failed ? 'vt-error' : undefined}>{out || '(no output)'}</pre>
+      <pre className={failed ? ERROR_TEXT : cn(MONO_TEXT, 'text-foreground')}>{out || '(no output)'}</pre>
     </div>
   )
 }
+
+/** A tone's dot on a tile: only a state that asks for something is coloured. */
+const TILE_TONE: Record<Tile['tone'] | 'warn', 'ok' | 'bad' | 'warn' | null> = { ok: 'ok', bad: 'bad', warn: 'warn', muted: null }
+
+/** One number of the strip: Orca's stat card, its label under it, a dot when it is a state. */
+function TileBody({ value, label, tone }: { value: ReactNode; label: string; tone: Tile['tone'] | 'warn' }) {
+  const dot = TILE_TONE[tone]
+  return (
+    <>
+      <div className="vh-tile-value truncate text-[16px] leading-tight font-semibold text-foreground tabular-nums">{value}</div>
+      <div className="vh-tile-label flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {dot && <Dot tone={dot} />}
+        {label}
+      </div>
+    </>
+  )
+}
+
+const TILE = 'vh-tile flex min-w-[104px] flex-col gap-0.5 rounded-lg border border-border bg-card px-3 py-2 text-left'
 
 /** `mnemo status` tiles, the review count (a click shows only problems), and the raw
  *  `status` / `doctor` text behind a button. */
@@ -41,68 +65,58 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
   const [dismissed, setDismissed] = useState<typeof health>(null)
   return (
     <>
-      <div className="vr-strip">
+      <div className="vr-strip flex flex-wrap items-stretch gap-2 px-3 pt-3 pb-2">
         {health?.tiles.map((t) => (
-          <div key={t.key} className={`vh-tile vh-${t.tone}`} title={t.detail}>
-            <div className="vh-tile-value">{t.value}</div>
-            <div className="vh-tile-label">{t.label}</div>
+          <div key={t.key} className={cn(TILE, `vh-${t.tone}`)} title={t.detail}>
+            <TileBody value={t.value} label={t.label} tone={t.tone} />
           </div>
         ))}
         {health && (
           <button
-            className={`vh-tile vr-review ${review ? 'vh-warn' : 'vh-ok'}`}
+            type="button"
+            className={cn(TILE, 'vr-review transition-colors hover:border-muted-foreground/35 hover:bg-accent/40', review ? 'vh-warn' : 'vh-ok')}
             title="Verified without evidence, dormant activations, and stale rules in this repo: click to show only problems"
             onClick={() => vault.getState().setChips({ problems: true })}
           >
-            <div className="vh-tile-value">{review}</div>
-            <div className="vh-tile-label">needs review</div>
+            <TileBody value={review} label="needs review" tone={review ? 'warn' : 'ok'} />
           </button>
         )}
         {health && (
           <button
-            className={`vh-tile ${health.inbox ? 'vh-warn' : 'vh-ok'}`}
+            type="button"
+            className={cn(TILE, 'transition-colors hover:border-muted-foreground/35 hover:bg-accent/40', health.inbox ? 'vh-warn' : 'vh-ok')}
             title="Pages staged in shared/_inbox/: click to read, promote or drop them"
             onClick={() => vault.getState().setMode('inbox')}
           >
-            <div className="vh-tile-value">{health.inbox}</div>
-            <div className="vh-tile-label">inbox</div>
+            <TileBody value={health.inbox} label="inbox" tone={health.inbox ? 'warn' : 'ok'} />
           </button>
         )}
         {/* No health is always a read in flight: the mount starts one before the first paint. */}
-        {!health && (
-          <div className="vt-empty vt-loading" role="status">
-            running mnemo status, stale…
-          </div>
-        )}
-        <div className="vr-strip-end">
-          {health?.root && <span className="vt-count" title={health.root}>{short(health.root)}</span>}
-          <button
+        {!health && <Loading>running mnemo status, stale…</Loading>}
+        <div className="vr-strip-end ml-auto flex items-center gap-1 self-start">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
             disabled={!health}
-            className={raw ? 'vt-mode-on' : ''}
+            className={cn('text-[11px] font-normal text-muted-foreground hover:text-foreground', raw && 'vt-mode-on bg-accent text-foreground')}
+            aria-pressed={raw}
             title="mnemo status and mnemo doctor, as printed"
             // `doctor` is the slow one, so it is read here rather than with the rest of the
             // health screen: opening this panel is the only thing that ever shows it.
             onClick={() => (setRaw(!raw), raw ? undefined : void vault.getState().loadDoctor())}
           >
+            <Terminal />
             status / doctor
-          </button>
-          <button title="Re-run status and stale" disabled={loading} onClick={() => void vault.getState().loadHealth(cwd ?? '')}>
-            {loading ? '…' : '↻'}
-          </button>
+          </Button>
+          <Refresh title="Re-run status and stale" busy={loading} onClick={() => void vault.getState().loadHealth(cwd ?? '')} />
         </div>
       </div>
-      {health?.error && dismissed !== health && (
-        <div className="vt-error-line">
-          <pre className="vt-error">{health.error}</pre>
-          <button className="vt-x" title="Dismiss" aria-label="Dismiss" onClick={() => setDismissed(health)}>
-            ×
-          </button>
-        </div>
-      )}
+      {health?.error && dismissed !== health && <ErrorLine text={health.error} onDismiss={() => setDismissed(health)} className="mx-3 mb-2" />}
       {raw && health && (
-        <div className="vr-raw">
+        <div className="vr-raw mx-3 mb-2 flex max-h-[40%] min-h-0 gap-4 overflow-auto rounded-lg border border-border bg-card px-3 py-2">
           <RawText title="mnemo status" result={health.status} />
-          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <div className="vt-empty vt-loading" role="status">running mnemo doctor…</div>}
+          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <Loading className="flex-1 py-0">running mnemo doctor…</Loading>}
         </div>
       )}
     </>
@@ -111,20 +125,36 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
 
 function Chip({ on, label, count, onClick }: { on: boolean; label: string; count?: number; onClick(): void }) {
   return (
-    <button className={`vr-chip${on ? ' vr-chip-on' : ''}`} onClick={onClick}>
+    <button
+      type="button"
+      aria-pressed={on}
+      className={cn(
+        'vr-chip inline-flex h-5 items-center gap-1 rounded-full border px-2 text-[11px] whitespace-nowrap transition-colors',
+        on ? 'vr-chip-on border-brand/50 bg-brand/15 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+      )}
+      onClick={onClick}
+    >
       {label}
-      {count !== undefined && <span className="vt-count"> {count}</span>}
+      {count !== undefined && <span className="vt-count text-muted-foreground/70 tabular-nums"> {count}</span>}
     </button>
   )
 }
 
-function Row({ row, selected, cwd, armed, onDisable }: { row: RuleRow; selected: boolean; cwd: string | undefined; armed: boolean; onDisable(): void }) {
+/** A badge's colour: `review` asks for you (Orca's orange), `stale` warns, `inbox` is mnemo's own. */
+const BADGE_TONE: Record<BadgeKind, string> = {
+  never: 'text-muted-foreground',
+  stale: 'border-status-warning-border text-status-warning',
+  review: 'border-agent-question/40 text-agent-question-text',
+  inbox: 'border-brand/40 text-brand',
+}
+
+function Row({ row, selected, narrow, cwd, armed, onDisable }: { row: RuleRow; selected: boolean; narrow: boolean; cwd: string | undefined; armed: boolean; onDisable(): void }) {
   const tone = confidenceTone(row.confidence)
   const select = () => void vault.getState().select(row.path)
   const lastFired = row.last_fired ? new Date(row.last_fired).toISOString().slice(0, 10) : 'never fired'
   return (
     <tr
-      className={`vr-row${selected ? ' vr-selected' : ''}`}
+      className={cn('vr-row group cursor-pointer outline-none focus-visible:bg-accent/40', TR, selected && cn('vr-selected', TR_SELECTED))}
       onClick={select}
       title={short(row.path)}
       // Reachable by Tab, and by Enter once there. The root's handler owns ↑↓, so a focused
@@ -135,44 +165,53 @@ function Row({ row, selected, cwd, armed, onDisable }: { row: RuleRow; selected:
         if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), select())
       }}
     >
-      <td className="vr-heat" title={`heat ${row.heat.toFixed(2)} · ${row.fires} fires in total`}>
-        <i style={{ width: `${Math.min(100, row.heat * 20)}%` }} />
-        <span>{row.heat >= 0.05 ? row.heat.toFixed(1) : '0'}</span>
-      </td>
-      <td className="vr-name">
-        <div className="vr-name-main">{row.name}</div>
-        {row.description && <div className="vr-desc">{row.description}</div>}
-      </td>
-      <td className="vr-type">
-        {row.type}
-        <div className="vr-agent">{row.agent}</div>
-      </td>
-      <td className="vr-conf-cell">
-        <span className={`vr-conf vr-tone-${tone}`}>
-          <i className={`vg-dot gr-${tone}`} />
-          {row.confidence ?? '—'}
+      <td className="vr-heat py-1.5 pr-2 pl-3 align-top" title={`heat ${row.heat.toFixed(2)} · ${row.fires} fires in total`}>
+        <span className="flex h-5 items-center gap-1.5">
+          <span className="w-6 text-right text-[11px] text-foreground/80 tabular-nums">{row.heat >= 0.05 ? row.heat.toFixed(1) : '0'}</span>
+          <span aria-hidden className="relative h-1 w-5 overflow-hidden rounded-full bg-muted">
+            <i className="absolute inset-y-0 left-0 rounded-full bg-brand/70" style={{ width: `${Math.min(100, row.heat * 20)}%` }} />
+          </span>
         </span>
       </td>
-      <td className="vr-last" title={lastFired}>
-        {sinceText(row.last_fired)}
+      <td className="vr-name min-w-0 px-2 py-1.5 align-top">
+        <div className="vr-name-main truncate text-[13px] leading-5 text-foreground">{row.name}</div>
+        {row.description && <div className="vr-desc truncate text-[11px] text-muted-foreground">{row.description}</div>}
       </td>
-      <td className="vr-badges">
-        {row.badges.map((b) => (
-          <span key={b} className={`vr-badge vr-badge-${b}`} title={b === 'review' || b === 'stale' ? row.reasons.join('\n') || BADGE_TITLE[b] : BADGE_TITLE[b]}>
-            {BADGE_LABEL[b]}
-          </span>
-        ))}
+      {!narrow && (
+        <td className="vr-type px-2 py-1.5 align-top text-[12px] whitespace-nowrap text-foreground">
+          {row.type}
+          <div className="vr-agent truncate text-[11px] text-muted-foreground">{row.agent}</div>
+        </td>
+      )}
+      <td className="vr-conf-cell px-2 py-1.5 align-top">
+        <span className={cn('vr-conf flex min-w-0 items-center gap-1.5 text-[12px] text-foreground', `vr-tone-${tone}`)} title={row.confidence ?? undefined}>
+          <Dot tone={tone} />
+          <span className="truncate">{row.confidence ?? '—'}</span>
+        </span>
       </td>
-      <td className="vr-acts" onClick={(e) => e.stopPropagation()}>
-        <button className={`vt-destructive${armed ? ' vt-armed' : ''}`} title={`mnemo disable-rule ${row.slug}`} onClick={onDisable}>
-          {armed ? 'really?' : 'Disable'}
-        </button>
-        <button title="mnemo reverify (dry run)" onClick={() => (select(), void vault.getState().run('reverify', cwd ?? ''))}>
-          Reverify
-        </button>
-        <button title={`Open ${short(row.path)} in the editor`} onClick={() => openInEditor(row.path)}>
-          Edit
-        </button>
+      {!narrow && (
+        <td className="vr-last px-2 py-1.5 align-top text-[12px] whitespace-nowrap text-muted-foreground tabular-nums" title={lastFired}>
+          {sinceText(row.last_fired)}
+        </td>
+      )}
+      <td className="vr-badges relative px-2 py-1.5 align-top">
+        <span className="flex flex-wrap gap-1">
+          {row.badges.map((b) => (
+            <Badge
+              key={b}
+              variant="outline"
+              className={cn('vr-badge h-4 rounded px-1.5 text-[10px] font-normal', `vr-badge-${b}`, BADGE_TONE[b])}
+              title={b === 'review' || b === 'stale' ? row.reasons.join('\n') || BADGE_TITLE[b] : BADGE_TITLE[b]}
+            >
+              {BADGE_LABEL[b]}
+            </Badge>
+          ))}
+        </span>
+        <span className={cn('vr-acts', ROW_TOOLBAR, !selected && !armed && ROW_ACTIONS)} onClick={(e) => e.stopPropagation()}>
+          <RowAction icon={<Ban />} label={armed ? 'really?' : 'Disable'} title={`mnemo disable-rule ${row.slug}`} armed={armed} destructive onClick={onDisable} />
+          <RowAction icon={<ShieldCheck />} label="Reverify" title="mnemo reverify (dry run)" onClick={() => (select(), void vault.getState().run('reverify', cwd ?? ''))} />
+          <RowAction icon={<SquarePen />} label="Edit" title={`Open ${short(row.path)} in the editor`} onClick={() => openInEditor(row.path)} />
+        </span>
       </td>
     </tr>
   )
@@ -191,26 +230,29 @@ function SidePanel({ cwd, selected }: { cwd: string | undefined; selected: strin
     ['neighbourhood', 'Neighbourhood'],
   ]
   return (
-    <aside className="vr-side" aria-label="Selected rule">
-      <div className="vr-side-bar">
-        <div className="vr-tabs" role="tablist">
+    <aside className="vr-side flex max-w-[560px] min-w-[300px] basis-[40%] flex-col border-l border-border" aria-label="Selected rule">
+      <div className="vr-side-bar flex h-8 shrink-0 items-stretch gap-1 border-b border-border pr-1 pl-2">
+        <div className="vr-tabs flex flex-1 items-stretch gap-1" role="tablist">
           {tabs.map(([key, label]) => (
             <button
               key={key}
+              type="button"
               role="tab"
               aria-selected={tab === key}
-              className={`vr-tab${tab === key ? ' vr-tab-on' : ''}`}
+              className={cn(
+                'vr-tab relative px-2 text-[12px] transition-colors',
+                'after:absolute after:inset-x-1 after:bottom-[-1px] after:h-0.5 after:rounded-full after:bg-foreground after:opacity-0 after:transition-opacity',
+                tab === key ? 'vr-tab-on text-foreground after:opacity-100' : 'text-muted-foreground hover:text-foreground',
+              )}
               onClick={() => setTab(key)}
             >
               {label}
             </button>
           ))}
         </div>
-        <button className="vt-x vr-side-close" title="Close (Esc)" aria-label="Close the side panel" onClick={deselect}>
-          ×
-        </button>
+        <Dismiss title="Close (Esc)" label="Close the side panel" onClick={deselect} className="vt-x vr-side-close self-center" />
       </div>
-      <div className="vr-side-body" role="tabpanel">
+      <div className="vr-side-body flex min-h-0 flex-1 flex-col" role="tabpanel">
         {tab === 'page' ? <PageView cwd={cwd} empty="Select a rule." /> : <EgoView path={selected} />}
       </div>
     </aside>
@@ -281,23 +323,22 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
     else if (k === 'down') move(1)
   }
 
+  const narrow = !!selected
   return (
-    <div className="vr" tabIndex={-1} onKeyDown={onKeyDown}>
+    <div className="vr flex min-h-0 flex-1 flex-col outline-none" tabIndex={-1} onKeyDown={onKeyDown}>
       <Strip cwd={cwd} review={reviewCount(health, staleRows)} />
-      <div className="vr-bar">
-        <input
+      <div className="vr-bar flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2">
+        <SearchInput
+          className="min-w-[180px] flex-1"
           value={filter}
           placeholder="Filter name, description, topics, body"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => vault.getState().setFilter(e.target.value)}
+          onChange={(v) => vault.getState().setFilter(v)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') vault.getState().setFilter('')
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') (e.preventDefault(), move(e.key === 'ArrowDown' ? 1 : -1))
           }}
         />
-        <select value={scope} title="Whose rules" onChange={(e) => void vault.getState().setScope(e.target.value)}>
+        <select className={SELECT} value={scope} title="Whose rules" onChange={(e) => void vault.getState().setScope(e.target.value)}>
           <option value="">every agent</option>
           {scopeAgents(agents, current).map((a) => (
             <option key={a} value={`agent:${a}`}>
@@ -305,56 +346,59 @@ export function HealthTable({ cwd, current }: { cwd: string | undefined; current
             </option>
           ))}
         </select>
-        <label className="vr-toggle" title={`Only rules with a badge: ${BADGES.map((b) => BADGE_LABEL[b]).join(', ')}`}>
-          <input type="checkbox" checked={chips.problems} onChange={(e) => vault.getState().setChips({ problems: e.target.checked })} />
+        <Toggle className="vr-toggle" title={`Only rules with a badge: ${BADGES.map((b) => BADGE_LABEL[b]).join(', ')}`} checked={chips.problems} onChange={(on) => vault.getState().setChips({ problems: on })}>
+          <Filter aria-hidden className="size-3" />
           only problems
-        </label>
-        <span className="vt-count">
+        </Toggle>
+        <span className="vt-count text-[11px] whitespace-nowrap text-muted-foreground tabular-nums">
           {loading && !loaded ? 'reading…' : shown.length === badged.length ? `${shown.length} rules` : `${shown.length} of ${badged.length} rules`}
         </span>
-        <button title="Re-read the rules" disabled={loading} onClick={() => void vault.getState().loadRules()}>
-          {loading ? '…' : '↻'}
-        </button>
+        <Refresh title="Re-read the rules" busy={loading} onClick={() => void vault.getState().loadRules()} />
       </div>
-      <div className="vr-chips">
-        {types.map((t) => (
-          <Chip key={`type:${t.name}`} on={chips.type === t.name} label={t.name} count={t.count} onClick={() => setChip('type', t.name)} />
-        ))}
-        <span className="vr-chips-sep" />
-        {chips.topic && !topics.some((t) => t.name === chips.topic) && <Chip on label={`#${chips.topic}`} onClick={() => setChip('topic', chips.topic!)} />}
-        {topics.map((t) => (
-          <Chip key={`topic:${t.name}`} on={chips.topic === t.name} label={`#${t.name}`} count={t.count} onClick={() => setChip('topic', t.name)} />
-        ))}
-      </div>
-      <div className={`vr-main${selected ? ' vr-with-side' : ''}`}>
-        <div className="vr-table">
+      {(types.length > 0 || topics.length > 0 || chips.topic) && (
+        <div className="vr-chips flex flex-wrap items-center gap-1 px-3 pb-2">
+          {types.map((t) => (
+            <Chip key={`type:${t.name}`} on={chips.type === t.name} label={t.name} count={t.count} onClick={() => setChip('type', t.name)} />
+          ))}
+          <span className="vr-chips-sep mx-1 h-3 w-px bg-border" />
+          {chips.topic && !topics.some((t) => t.name === chips.topic) && <Chip on label={`#${chips.topic}`} onClick={() => setChip('topic', chips.topic!)} />}
+          {topics.map((t) => (
+            <Chip key={`topic:${t.name}`} on={chips.topic === t.name} label={`#${t.name}`} count={t.count} onClick={() => setChip('topic', t.name)} />
+          ))}
+        </div>
+      )}
+      <div className={cn('vr-main flex min-h-0 flex-1 border-t border-border', selected && 'vr-with-side')}>
+        <div className="vr-table min-w-0 flex-1 overflow-auto">
           {loaded && shown.length === 0 && (
-            <div className="vt-empty">{rules.length === 0 && !filter && !scope ? 'No rules: `mnemo status` names no vault, or it holds no pages.' : 'No rule matches.'}</div>
+            <div className={cn('vt-empty', EMPTY, 'px-3')}>{rules.length === 0 && !filter && !scope ? 'No rules: `mnemo status` names no vault, or it holds no pages.' : 'No rule matches.'}</div>
           )}
           {shown.length > 0 && (
-            <table>
+            <table className="w-full table-fixed border-collapse">
+              {/* Fixed layout takes column widths from the header: the name column has none and
+                  takes whatever is left. With the side panel open, type and last-fired go. */}
               <thead>
                 <tr>
-                  <th title="Fires with a 30-day half-life">heat</th>
-                  <th>name</th>
-                  <th>type</th>
-                  <th>confidence</th>
-                  <th>last fired</th>
-                  <th />
-                  <th />
+                  <th className={cn(TH, 'w-[68px] pl-3')} title="Fires with a 30-day half-life">
+                    heat
+                  </th>
+                  <th className={TH}>name</th>
+                  {!narrow && <th className={cn(TH, 'w-[104px]')}>type</th>}
+                  <th className={cn(TH, narrow ? 'w-[108px]' : 'w-[124px]')}>confidence</th>
+                  {!narrow && <th className={cn(TH, 'w-[84px]')}>last fired</th>}
+                  <th className={cn(TH, 'w-[136px]')} />
                 </tr>
               </thead>
               <tbody>
                 {shown.slice(0, limit).map((r) => (
-                  <Row key={r.path} row={r} selected={r.path === selected} cwd={cwd} armed={armed === r.path} onDisable={() => disable(r)} />
+                  <Row key={r.path} row={r} selected={r.path === selected} narrow={narrow} cwd={cwd} armed={armed === r.path} onDisable={() => disable(r)} />
                 ))}
               </tbody>
             </table>
           )}
           {shown.length > limit && (
-            <button className="vr-more" onClick={() => setLimit(limit + PAGE_ROWS)}>
+            <Button type="button" variant="ghost" size="xs" className="vr-more mx-2 my-2 text-[11px] text-muted-foreground hover:text-foreground" onClick={() => setLimit(limit + PAGE_ROWS)}>
               show {Math.min(PAGE_ROWS, shown.length - limit)} more of {shown.length - limit}
-            </button>
+            </Button>
           )}
         </div>
         {/* The side panel only exists once a rule is selected: the table needs the width. */}

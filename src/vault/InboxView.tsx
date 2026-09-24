@@ -1,11 +1,23 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { Archive, ArrowUpFromLine, CircleCheck, Eye, LoaderCircle, Sparkles } from 'lucide-react'
+import { Button } from '@/ui'
+import { cn } from '@/ui/cn'
 import { store } from '../layout/app-store'
 import { reviewWhatWasLearned } from '../learned/open'
 import { useVault, vault } from './app-store'
-import { ErrorLine } from './ErrorLine'
+import { ERROR_TEXT, ErrorLine, MONO_TEXT } from './ErrorLine'
 import { splitFrontmatter, type InboxRow } from './inbox'
 import { Markdown } from './Markdown'
+import { Frontmatter } from './PageView'
 import { useArm } from './useArm'
+import { Dismiss, EMPTY, Loading, Refresh, ROW_ACTIONS, ROW_TOOLBAR, RowAction, TH, Toggle, TR, TR_SELECTED } from './ui'
+
+/** A destructive button's look while armed. */
+const ARMED = 'bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive'
+
+function Stat({ children }: { children: ReactNode }) {
+  return <span className="whitespace-nowrap">{children}</span>
+}
 
 function StatsLine({ cwd }: { cwd: string | undefined }) {
   const stats = useVault((s) => s.inboxStats)
@@ -16,18 +28,16 @@ function StatsLine({ cwd }: { cwd: string | undefined }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd])
 
-  if (!stats) return <div className="ib-stats vt-empty">{loading ? 'reading mnemo inbox --stats…' : ''}</div>
+  if (!stats) return loading ? <Loading className="ib-stats py-1.5">reading mnemo inbox --stats…</Loading> : <div className="ib-stats vt-empty" />
   return (
-    <div className="ib-stats">
-      <span>{stats.staged} staged, median {stats.medianAgeDays ?? '—'}d, oldest {stats.oldestAgeDays ?? '—'}d</span>
-      <span>
+    <div className="ib-stats flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground tabular-nums">
+      <Stat>{stats.staged} staged, median {stats.medianAgeDays ?? '—'}d, oldest {stats.oldestAgeDays ?? '—'}d</Stat>
+      <Stat>
         last {stats.windowDays}d: {stats.offered} offered, {stats.promoted} promoted, {stats.dropped} dropped
-      </span>
-      {stats.expired !== null && <span>{stats.expired} expired unreviewed, {stats.restored} restored</span>}
-      <span>{stats.medianDecisionDays === null ? 'no page both offered and decided yet' : `median offer → decision ${stats.medianDecisionDays}d`}</span>
-      <button title="Re-run mnemo inbox --stats" disabled={loading} onClick={() => void vault.getState().loadInboxStats(cwd ?? '')}>
-        {loading ? '…' : '↻'}
-      </button>
+      </Stat>
+      {stats.expired !== null && <Stat>{stats.expired} expired unreviewed, {stats.restored} restored</Stat>}
+      <Stat>{stats.medianDecisionDays === null ? 'no page both offered and decided yet' : `median offer → decision ${stats.medianDecisionDays}d`}</Stat>
+      <Refresh className="ml-auto size-5" title="Re-run mnemo inbox --stats" busy={loading} onClick={() => void vault.getState().loadInboxStats(cwd ?? '')} />
     </div>
   )
 }
@@ -36,45 +46,49 @@ function Notice({ cwd }: { cwd: string | undefined }) {
   const notice = useVault((s) => s.inboxNotice)
   if (!notice) return null
   return (
-    <div className={`vt-error-line ib-notice${notice.ok ? ' ib-notice-ok' : ''}`}>
-      <pre className={notice.ok ? undefined : 'vt-error'}>{notice.text}</pre>
-      {notice.canRestore && (
-        <button title={`Undo: mnemo inbox --restore ${notice.key}`} onClick={() => void vault.getState().restoreInbox(notice.key, cwd ?? '')}>
-          Undo
-        </button>
+    <div
+      className={cn(
+        'vt-error-line ib-notice mx-3 mt-2 flex items-start gap-2 rounded-md border px-2 py-1.5',
+        notice.ok ? 'ib-notice-ok border-status-success-border bg-status-success-background' : 'border-destructive/30 bg-destructive/10',
       )}
-      <button title="Dismiss" aria-label="Dismiss" onClick={() => vault.getState().dismissInboxNotice()}>
-        ×
-      </button>
+    >
+      {notice.ok && <CircleCheck aria-hidden className="mt-0.5 size-3.5 shrink-0 text-status-success" />}
+      <pre className={notice.ok ? cn(MONO_TEXT, 'text-status-success') : ERROR_TEXT}>{notice.text}</pre>
+      {notice.canRestore && (
+        <Button type="button" variant="outline" size="xs" className="-my-0.5 h-5 text-[11px]" title={`Undo: mnemo inbox --restore ${notice.key}`} onClick={() => void vault.getState().restoreInbox(notice.key, cwd ?? '')}>
+          Undo
+        </Button>
+      )}
+      <Dismiss onClick={() => vault.getState().dismissInboxNotice()} className="-my-1 size-5" />
     </div>
   )
 }
 
 function Row({ row, cwd, selected, busy, armed, onDrop }: { row: InboxRow; cwd: string | undefined; selected: boolean; busy: boolean; armed: boolean; onDrop(): void }) {
+  const show = () => void vault.getState().showInbox(row.key, cwd ?? '')
   return (
-    <tr className={`ib-row${selected ? ' vr-selected' : ''}`}>
-      <td className="ib-key" title={row.key} onClick={() => void vault.getState().showInbox(row.key, cwd ?? '')}>
+    <tr className={cn('ib-row group', TR, selected && cn('vr-selected', TR_SELECTED))}>
+      <td className="ib-key cursor-pointer truncate px-2 py-1.5 font-mono text-[11px] text-foreground hover:text-brand" title={row.key} onClick={show}>
         {row.key}
       </td>
-      <td className="ib-reason">{row.reason}</td>
-      <td className="ib-age">{row.ageDays}d</td>
-      <td className="ib-desc" title={row.description}>
+      <td className="ib-reason px-2 py-1.5 text-[11px] whitespace-nowrap text-muted-foreground">{row.reason}</td>
+      <td className="ib-age px-2 py-1.5 text-[11px] whitespace-nowrap text-muted-foreground tabular-nums">{row.ageDays}d</td>
+      <td className="ib-desc truncate px-2 py-1.5 text-[12px] text-foreground" title={row.description}>
         {row.description}
       </td>
-      <td className="ib-acts">
-        <button disabled={busy} onClick={() => void vault.getState().showInbox(row.key, cwd ?? '')}>
-          Show
-        </button>
-        <button disabled={busy} onClick={() => void vault.getState().promoteInbox(row.key, cwd ?? '')}>
-          {busy ? '…' : 'Promote'}
-        </button>
-        <button className={`vt-destructive${armed ? ' vt-armed' : ''}`} disabled={busy} onClick={onDrop}>
-          {armed ? 'really drop?' : 'Drop'}
-        </button>
+      {/* No width of its own: the toolbar floats back over the description's end. */}
+      <td className="ib-acts relative w-0 p-0">
+        <span className={cn(ROW_TOOLBAR, 'right-1', !selected && !armed && !busy && ROW_ACTIONS)}>
+          <RowAction icon={<Eye />} label="Show" title={`mnemo inbox --show ${row.key}`} disabled={busy} onClick={show} />
+          <RowAction icon={busy ? <LoaderCircle className="animate-spin" /> : <ArrowUpFromLine />} label={busy ? '…' : 'Promote'} title={`mnemo inbox --promote ${row.key}`} disabled={busy} onClick={() => void vault.getState().promoteInbox(row.key, cwd ?? '')} />
+          <RowAction icon={<Archive />} label={armed ? 'really drop?' : 'Drop'} title={`mnemo inbox --drop ${row.key}`} armed={armed} destructive disabled={busy} onClick={onDrop} />
+        </span>
       </td>
     </tr>
   )
 }
+
+const PAGE = 'vt-page flex min-h-0 min-w-0 flex-1 flex-col'
 
 function ShownPage({ cwd }: { cwd: string | undefined }) {
   const key = useVault((s) => s.inboxSelected)
@@ -84,42 +98,47 @@ function ShownPage({ cwd }: { cwd: string | undefined }) {
   const busy = useVault((s) => s.inboxBusy)
   const { armed, press } = useArm()
 
-  if (!key) return <div className="vt-page vt-empty">Select a staged page to read it.</div>
-  if (showing) return <div className="vt-page vt-empty">reading…</div>
+  if (!key) return <div className={cn(PAGE, EMPTY, 'vt-empty')}>Select a staged page to read it.</div>
+  if (showing) return <Loading className={PAGE}>reading…</Loading>
 
   const drop = () => {
     if (press(key)) void vault.getState().dropInbox(key, cwd ?? '')
   }
 
   return (
-    <div className="vt-page">
-      <header className="vt-page-head">
-        <div className="vt-title-row">
-          <span className="vt-title">{key}</span>
-          <button title="Close" aria-label="Close" onClick={() => vault.getState().closeInboxShown()}>
-            ×
-          </button>
+    <div className={PAGE}>
+      <header className="vt-page-head flex flex-col gap-1.5 border-b border-border px-3 pt-2.5 pb-2">
+        <div className="vt-title-row flex items-center gap-1">
+          <span className="vt-title min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-foreground">{key}</span>
+          <Dismiss title="Close" onClick={() => vault.getState().closeInboxShown()} />
         </div>
         {!error && (
-          <div className="vt-actions">
-            <button disabled={busy === key} onClick={() => void vault.getState().promoteInbox(key, cwd ?? '')}>
+          <div className="vt-actions flex flex-wrap items-center gap-1">
+            <Button type="button" variant="outline" size="xs" className="text-[11px]" disabled={busy === key} onClick={() => void vault.getState().promoteInbox(key, cwd ?? '')}>
               {busy === key ? 'Promote…' : 'Promote'}
-            </button>
-            <button className={`vt-destructive${armed === key ? ' vt-armed' : ''}`} disabled={busy === key} onClick={drop}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className={cn('vt-destructive text-[11px] text-destructive/90 hover:text-destructive', armed === key && cn('vt-armed border-destructive/60 dark:border-destructive/60', ARMED))}
+              disabled={busy === key}
+              onClick={drop}
+            >
               {armed === key ? 'really drop?' : 'Drop'}
-            </button>
+            </Button>
           </div>
         )}
       </header>
       {error ? (
-        <div className="vt-page-error">
+        <div className="vt-page-error p-3">
           <ErrorLine text={error} onDismiss={() => vault.getState().closeInboxShown()} />
         </div>
       ) : (
         (() => {
           const { frontmatter, body } = splitFrontmatter(shown ?? '')
           return (
-            <div className="vt-body">
+            <div className="vt-body min-h-0 flex-1 overflow-auto px-3 pt-1 pb-4">
               <Markdown
                 text={body}
                 onWiki={() => {}}
@@ -128,10 +147,9 @@ function ShownPage({ cwd }: { cwd: string | undefined }) {
                 }}
               />
               {frontmatter && (
-                <details className="vt-frontmatter">
-                  <summary>frontmatter</summary>
-                  <pre>{frontmatter}</pre>
-                </details>
+                <Frontmatter>
+                  <pre className="m-0 mt-1 font-mono text-[11px] whitespace-pre-wrap break-words text-foreground">{frontmatter}</pre>
+                </Frontmatter>
               )}
             </div>
           )
@@ -159,38 +177,38 @@ export function InboxView({ cwd }: { cwd: string | undefined }) {
   }, [cwd])
 
   return (
-    <div className="ib">
-      <div className="ib-bar">
-        <label className="vr-toggle" title="mnemo inbox --all">
-          <input type="checkbox" checked={all} onChange={(e) => void vault.getState().setInboxAll(e.target.checked, cwd ?? '')} />
+    <div className="ib flex min-h-0 flex-1 flex-col">
+      <div className="ib-bar flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-1.5">
+        <Toggle className="vr-toggle" title="mnemo inbox --all" checked={all} onChange={(on) => void vault.getState().setInboxAll(on, cwd ?? '')}>
           every project
-        </label>
-        {listing && <span className="vt-count">{listing.summary}</span>}
-        <button className="ib-bar-end" title="Review, once, the pages mnemo recovered from this repo's Claude Code history" onClick={() => reviewWhatWasLearned(cwd)}>
-          Review what mnemo learned
-        </button>
-        <button title="Re-read mnemo inbox" disabled={loading} onClick={() => void vault.getState().loadInbox(cwd ?? '')}>
-          {loading ? '…' : '↻'}
-        </button>
+        </Toggle>
+        {listing && <span className="vt-count min-w-0 truncate text-[11px] text-muted-foreground" title={listing.summary}>{listing.summary}</span>}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <Button type="button" variant="outline" size="xs" className="ib-bar-end text-[11px]" title="Review, once, the pages mnemo recovered from this repo's Claude Code history" onClick={() => reviewWhatWasLearned(cwd)}>
+            <Sparkles />
+            Review what mnemo learned
+          </Button>
+          <Refresh title="Re-read mnemo inbox" busy={loading} onClick={() => void vault.getState().loadInbox(cwd ?? '')} />
+        </div>
       </div>
       <StatsLine cwd={cwd} />
       <Notice cwd={cwd} />
-      {error && <ErrorLine text={error} />}
-      <div className="vr-main">
-        <div className="ib-table">
-          {listing && listing.rows.length === 0 && !error && <div className="vt-empty">{listing.summary || 'Nothing staged in shared/_inbox/.'}</div>}
+      {error && <ErrorLine text={error} className="mx-3 mt-2" />}
+      <div className="vr-main flex min-h-0 flex-1">
+        <div className="ib-table min-w-0 flex-1 overflow-auto">
+          {listing && listing.rows.length === 0 && !error && <div className={cn('vt-empty', EMPTY, 'px-3')}>{listing.summary || 'Nothing staged in shared/_inbox/.'}</div>}
           {listing && listing.rows.length > 0 && (
-            <table>
+            <table className="w-full table-fixed border-collapse">
               <thead>
                 <tr>
-                  <th>key</th>
-                  <th>reason</th>
-                  <th>age</th>
-                  <th>description</th>
-                  <th />
-                </tr>
+                  <th className={cn(TH, 'w-[32%] pl-3')}>key</th>
+                  <th className={cn(TH, 'w-[88px]')}>reason</th>
+                  <th className={cn(TH, 'w-[48px]')}>age</th>
+                  <th className={TH}>description</th>
+                  <th className={cn(TH, 'w-0 p-0')} />
+                                  </tr>
               </thead>
-              <tbody>
+              <tbody className="[&_td:first-child]:pl-3">
                 {listing.rows.map((r) => (
                   <Row
                     key={r.key}
@@ -206,13 +224,15 @@ export function InboxView({ cwd }: { cwd: string | undefined }) {
             </table>
           )}
           {listing && listing.other > 0 && !all && (
-            <div className="vt-empty">
-              {listing.other} more staged for other projects —{' '}
-              <button onClick={() => void vault.getState().setInboxAll(true, cwd ?? '')}>show all</button>
+            <div className={cn('vt-empty flex items-center gap-1', EMPTY, 'px-3')}>
+              {listing.other} more staged for other projects —
+              <Button type="button" variant="link" size="xs" className="h-auto px-0 text-[12px] text-brand" onClick={() => void vault.getState().setInboxAll(true, cwd ?? '')}>
+                show all
+              </Button>
             </div>
           )}
         </div>
-        <aside className="vr-side" aria-label="Staged page">
+        <aside className="vr-side flex max-w-[560px] min-w-[300px] basis-[36%] flex-col border-l border-border" aria-label="Staged page">
           <ShownPage cwd={cwd} />
         </aside>
       </div>

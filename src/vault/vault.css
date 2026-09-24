@@ -1,219 +1,42 @@
-.vault { display: flex; flex-direction: column; font-size: 12px; min-height: 0; }
-.vault button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.vault button:hover:not(:disabled) { border-color: var(--accent); }
-.vault button:disabled { opacity: .5; cursor: default; }
-.vt-main { flex: 1; min-height: 0; display: flex; gap: 8px; }
-.vt-side { flex: 0 0 34%; min-width: 200px; max-width: 420px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); padding-right: 6px; }
-.vt-bar { display: flex; gap: 4px; padding-bottom: 6px; }
-.vt-bar input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; color: var(--fg); font: inherit; outline: none; }
-.vt-bar input:focus { border-color: var(--accent); }
-.vt-bar input::placeholder { color: var(--fg-muted); }
-.vt-tree { flex: 1; min-height: 0; overflow: auto; }
-.vt-empty { color: var(--fg-muted); padding: 12px 2px; }
-.vt-error { color: var(--ansi-red); white-space: pre-wrap; word-break: break-word; font: inherit; margin: 4px 0; }
+/* The vault draws with Tailwind (wave E, vault-restyle); what is left here cannot be a utility.
+   `.vt-md` is a rendered page body, also used by the conversation's cards
+   (src/conversation/cards/index.tsx imports this file): its rules are spelled out whole so they
+   read the same under Tailwind's preflight (the vault, `data-ui`) and under the old views'
+   `revert-layer` scope (the conversation). Tokens only from :root, which both scopes see. */
 
-.vault .vt-agent-head { display: flex; align-items: baseline; gap: 6px; width: 100%; border: 0; background: transparent; padding: 4px 2px; text-align: left; }
-.vt-caret { color: var(--fg-muted); width: 10px; }
-.vt-agent-name { font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.vt-count { color: var(--fg-muted); font-weight: 400; }
-.vt-other { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 2px; }
-.vt-other .vt-agent { padding-left: 10px; }
-.vt-group { padding: 0 0 4px 16px; }
-.vt-group-type { color: var(--ansi-magenta); padding: 4px 0 2px; }
-.vault .vt-row { display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: 100%; text-align: left; border: 0; border-left: 2px solid transparent; border-radius: 0; background: transparent; padding: 3px 6px; white-space: normal; }
-.vault .vt-row:hover { background: var(--bg-elev); }
-.vault .vt-row.vt-selected { background: var(--bg-elev); border-left-color: var(--accent); }
-.vt-row-name { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vt-row-desc { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.vt-page { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-.vt-page-head { border-bottom: 1px solid var(--border); padding-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
-.vt-title-row { display: flex; align-items: baseline; gap: 6px; }
-.vt-title { flex: 1; font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vt-desc { line-height: 1.45; }
-.vt-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.vt-meta-key { color: var(--fg-muted); }
-.vt-topic { font-size: 11px; padding: 0 6px; border-radius: 3px; background: var(--bg-elev); color: var(--ansi-cyan); }
-.vt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 4px; }
-.vault .vt-destructive { color: var(--ansi-yellow); }
-.vault .vt-armed { border-color: var(--ansi-red); color: var(--ansi-red); }
-.vt-cwd { color: var(--fg-muted); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vt-page-error { padding: 8px 0; }
-.vt-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 8px 12px 2px; }
-
-.vt-md { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.55; max-width: 80ch; }
-.vt-md h2, .vt-md h3, .vt-md h4, .vt-md h5, .vt-md h6 { margin: 14px 0 6px; font-size: 14px; }
+.vt-md { font-family: var(--font-sans); font-size: 13px; line-height: 1.6; color: var(--foreground); max-width: 80ch; overflow-wrap: anywhere; }
+.vt-md > :first-child { margin-top: 0; }
+.vt-md h2, .vt-md h3, .vt-md h4, .vt-md h5, .vt-md h6 { margin: 16px 0 6px; font-size: 14px; font-weight: 600; line-height: 1.35; }
 .vt-md h2 { font-size: 16px; }
 .vt-md p { margin: 6px 0; }
+.vt-md strong { font-weight: 600; }
+.vt-md em { font-style: italic; }
 .vt-md ul, .vt-md ol { margin: 6px 0; padding-left: 20px; }
-.vt-md code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-elev); padding: 0 4px; border-radius: 3px; }
-.vt-md pre { background: var(--bg-elev); padding: 8px 10px; border-radius: 4px; overflow: auto; }
-.vt-md pre code { background: transparent; padding: 0; }
-.vt-md blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--fg-muted); }
-.vt-md hr { border: 0; border-top: 1px solid var(--border); }
-.vt-md a { color: var(--accent); text-decoration: none; }
-.vt-md a:hover { text-decoration: underline; }
-.vt-md a.vt-wiki { color: var(--ansi-cyan); }
-.vt-frontmatter { margin-top: 12px; color: var(--fg-muted); }
-.vt-frontmatter summary { cursor: pointer; }
-.vt-frontmatter table { border-collapse: collapse; margin-top: 4px; }
-.vt-frontmatter td { padding: 1px 12px 1px 0; vertical-align: top; word-break: break-word; }
-.vt-frontmatter td:first-child { white-space: nowrap; }
-.vt-frontmatter td:last-child { color: var(--fg); }
+.vt-md ul { list-style: disc; }
+.vt-md ol { list-style: decimal; }
+.vt-md li { margin: 2px 0; }
+.vt-md li::marker { color: var(--muted-foreground); }
+.vt-md code { font-family: var(--font-mono); font-size: 12px; background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+.vt-md pre { margin: 8px 0; background: var(--muted); padding: 8px 10px; border-radius: 6px; overflow: auto; }
+.vt-md pre code { background: transparent; padding: 0; font-size: 11px; line-height: 1.55; }
+.vt-md blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid var(--muted-foreground); color: var(--muted-foreground); }
+.vt-md hr { margin: 12px 0; border: 0; border-top: 1px solid var(--input); }
+.vt-md a { color: var(--brand); text-decoration: none; cursor: pointer; }
+.vt-md a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* A [[wikilink]] is a page of the vault: dotted, so it reads apart from a web link. */
+.vt-md a.vt-wiki { text-decoration: underline dotted; text-underline-offset: 3px; }
 
-.vt-log { flex: 0 0 auto; max-height: 35%; overflow: auto; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
-.vt-log-entry { background: var(--bg-elev); border-left: 2px solid var(--border); border-radius: 3px; padding: 3px 8px 5px; margin-bottom: 4px; }
-.vt-log-entry.vt-ok { border-left-color: var(--ansi-green); }
-.vt-log-entry.vt-fail { border-left-color: var(--ansi-red); }
-.vt-log-head { display: flex; align-items: baseline; gap: 10px; color: var(--fg-muted); }
-.vt-log-line { color: var(--fg); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vt-ok .vt-log-status { color: var(--ansi-green); }
-.vt-fail .vt-log-status { color: var(--ansi-red); }
-.vault .vt-log-head button { border: 0; background: transparent; padding: 0 4px; color: var(--fg-muted); }
-.vt-log-entry pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font: inherit; color: var(--fg); max-height: 220px; overflow: auto; }
-.vt-log-entry pre.vt-error { color: var(--ansi-red); }
-.vt-why { margin-top: 4px; }
-.vt-why-note { color: var(--fg-muted); padding-bottom: 2px; }
-.vt-why-row { display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 1px 0; }
-.vt-why-ts { color: var(--fg-muted); }
-.vt-why-fired { color: var(--ansi-green); }
-.vt-why-silent { color: var(--ansi-yellow); }
-.vt-why-cands { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; }
-
-.vt-modes { display: flex; gap: 4px; padding-bottom: 6px; }
-.vault button.vt-mode-on { border-color: var(--accent); color: var(--accent); }
-
-/* Legend dots: the tone classes in graph.css only set border-color and lose to the shorthand; restate them. */
-.vg-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-left: auto; color: var(--fg-muted); font-size: 11px; }
-.vg-legend > span { display: inline-flex; align-items: center; gap: 4px; }
-.vg-dot { display: inline-block; width: 0; height: 0; border: 4px solid var(--border); border-radius: 50%; }
-.vault .vg-dot.gr-ok { border-color: var(--ansi-green); }
-.vault .vg-dot.gr-accent { border-color: var(--accent); }
-.vault .vg-dot.gr-warn { border-color: var(--ansi-yellow); }
-.vault .vg-dot.gr-bad { border-color: var(--ansi-red); }
-.vault .vg-dot.gr-muted { border-color: var(--fg-muted); }
-
-/* Health: status strip, filter bar, chips, the rules table and the selected rule beside it. */
-.vr { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.vr-strip { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; padding-bottom: 6px; }
-.vr-strip .vh-tile { min-width: 96px; }
-.vault button.vh-tile { text-align: left; white-space: normal; padding: 4px 8px; border-left-width: 3px; }
-.vr-strip-end { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.vh-tile { background: var(--bg-elev); border: 1px solid var(--border); border-left-width: 3px; border-radius: 4px; padding: 4px 8px; }
-.vault .vh-tile.vh-ok { border-left-color: var(--ansi-green); }
-.vault .vh-tile.vh-bad { border-left-color: var(--ansi-red); }
-.vault .vh-tile.vh-warn { border-left-color: var(--ansi-yellow); }
-.vh-tile-value { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vh-tile-label { color: var(--fg-muted); font-size: 11px; }
-.vh-fail { color: var(--ansi-red); }
-.vr-raw { display: flex; gap: 8px; max-height: 40%; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; margin-bottom: 6px; }
-.vr-raw-block { flex: 1; min-width: 0; }
-.vr-raw-title { color: var(--fg-muted); padding: 2px 0; }
-.vr-raw pre { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 0; }
-
-.vr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-bottom: 6px; }
-.vr-bar input:not([type]) { flex: 1; min-width: 180px; height: 26px; padding: 0 8px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; color: var(--fg); font: inherit; outline: none; }
-.vr-bar input:not([type]):focus { border-color: var(--accent); }
-.vr-bar input::placeholder { color: var(--fg-muted); }
-.vr-bar select { height: 26px; max-width: 220px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
-.vr-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
-.vr-chips { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 6px; }
-.vault .vr-chip { border-radius: 10px; padding: 0 8px; font-size: 11px; }
-.vault .vr-chip.vr-chip-on { border-color: var(--accent); color: var(--accent); }
-.vr-chips-sep { width: 8px; }
-
-.vr-main { flex: 1; min-height: 0; display: flex; gap: 8px; }
-.vr-table { flex: 1; min-width: 0; overflow: auto; }
-.vr-table table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-/* Fixed layout takes column widths from the first row, i.e. the header: size the <th>s;
-   the name column (2nd) has no width and takes whatever is left. */
-.vr-table th:nth-child(1) { width: 44px; }
-.vr-table th:nth-child(3) { width: 84px; }
-.vr-table th:nth-child(4) { width: 104px; }
-.vr-table th:nth-child(5) { width: 80px; }
-.vr-table th:nth-child(6) { width: 92px; }
-.vr-table th:nth-child(7) { width: 84px; }
-/* With the rule panel open the table is narrow: type and last-fired go, the name stays readable. */
-.vr-with-side .vr-type, .vr-with-side .vr-last, .vr-with-side th:nth-child(3), .vr-with-side th:nth-child(5) { display: none; }
-.vr-table th { position: sticky; top: 0; z-index: 1; background: var(--bg); color: var(--fg-muted); font-weight: 400; text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.vr-table td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); vertical-align: top; }
-.vr-row { cursor: pointer; }
-.vr-row:hover { background: var(--bg-elev); }
-.vr-row.vr-selected { background: var(--bg-elev); box-shadow: inset 2px 0 0 var(--accent); }
-.vr-heat { width: 48px; position: relative; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
-.vr-heat i { position: absolute; left: 0; top: 3px; bottom: 3px; background: color-mix(in srgb, var(--ansi-yellow) 25%, transparent); border-radius: 2px; }
-.vr-heat span { position: relative; }
-.vr-name { min-width: 0; }
-.vr-name-main, .vr-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vr-desc, .vr-agent { color: var(--fg-muted); font-size: 11px; }
-.vr-type, .vr-last { white-space: nowrap; }
-.vr-last { color: var(--fg-muted); }
-.vr-conf { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.vr-badges { white-space: nowrap; }
-.vr-badge { display: inline-block; font-size: 10px; padding: 0 5px; margin-right: 3px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); }
-.vr-badge-never { color: var(--fg-muted); }
-.vr-badge-stale { color: var(--ansi-magenta); border-color: var(--ansi-magenta); }
-.vr-badge-review { color: var(--ansi-yellow); border-color: var(--ansi-yellow); }
-.vr-badge-inbox { color: var(--ansi-cyan); border-color: var(--ansi-cyan); }
-.vr-acts { white-space: nowrap; opacity: 0; }
-.vr-row:hover .vr-acts, .vr-row.vr-selected .vr-acts, .vr-acts:focus-within { opacity: 1; }
-.vault .vr-acts button { padding: 0 6px; font-size: 11px; margin-left: 2px; }
-.vault .vr-more { margin: 6px 0; }
-
-.vr-side { flex: 0 0 38%; min-width: 300px; max-width: 560px; display: flex; flex-direction: column; gap: 6px; min-height: 0; border-left: 1px solid var(--border); padding-left: 8px; }
-.vr-side-bar { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
-.vr-tabs { flex: 1; display: flex; gap: 2px; }
-.vault .vr-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-muted); padding: 4px 8px; margin-bottom: -1px; }
-.vault .vr-tab:hover:not(:disabled) { color: var(--fg); }
-.vault .vr-tab.vr-tab-on { color: var(--fg); border-bottom-color: var(--accent); }
-.vr-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.vr-side-body > .vt-page, .vr-side-body > .ve { flex: 1; }
-.vr:focus { outline: none; }
-.vault .vt-x { border: 0; background: transparent; color: var(--fg-muted); font-size: 14px; line-height: 1; padding: 0 4px; }
-.vault .vt-x:hover:not(:disabled) { color: var(--fg); }
-.vt-error-line { display: flex; align-items: flex-start; gap: 4px; }
-.vt-error-line .vt-error { flex: 1; min-width: 0; }
-.vt-loading::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--fg-muted); animation: vt-loading 1s ease-in-out infinite; }
-@keyframes vt-loading { 50% { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) { .vt-loading::before { animation: none; } }
-.ve { flex: 1 1 50%; min-height: 200px; display: flex; flex-direction: column; }
-.ve-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 0; }
-.ve-canvas { position: relative; flex: 1; min-height: 320px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-.ve-msg { position: absolute; inset: 0 auto auto 0; z-index: 5; padding: 8px 10px; margin: 0; }
+/* The neighbourhood graph: React Flow draws its own nodes and edges, reached only by class. */
 .ve-canvas .gr-card { min-width: 0; max-width: 170px; padding: 4px 8px; }
-.ve-canvas .react-flow__node.ve-centre .gr-card { border-width: 2px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.ve-canvas .react-flow__node.ve-centre .gr-card { border-width: 2px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent); }
 .ve-canvas .react-flow__edge.ve-edge-topic .react-flow__edge-path { stroke-dasharray: 3 4; opacity: .6; }
-.ve-canvas .react-flow__edge.ve-edge-link .react-flow__edge-path { stroke: var(--ansi-cyan); }
+.ve-canvas .react-flow__edge.ve-edge-link .react-flow__edge-path { stroke: var(--muted-foreground); }
 /* pulse (#44): a rule mnemo just used glows, its edges run toward it */
-@keyframes ve-glow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); } 35% { box-shadow: 0 0 14px 6px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes ve-glow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 80%, transparent); } 35% { box-shadow: 0 0 14px 6px color-mix(in srgb, var(--brand) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .ve-canvas .react-flow__node.ve-glow { z-index: 10 !important; }
-.ve-canvas .react-flow__node.ve-glow .gr-card { border-color: var(--accent); animation: ve-glow 2s ease-out; }
-.ve-canvas .react-flow__edge.ve-edge-glow .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; opacity: 1; }
+.ve-canvas .react-flow__node.ve-glow .gr-card { border-color: var(--brand); animation: ve-glow 2s ease-out; }
+.ve-canvas .react-flow__edge.ve-edge-glow .react-flow__edge-path { stroke: var(--brand); stroke-width: 2; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ve-canvas .react-flow__node.ve-glow .gr-card { animation: none; } }
 /* React Flow sets an inline `visibility` on each node once measured: hide the card inside instead */
 .ve-canvas .react-flow__node.ve-ghost { pointer-events: none !important; }
 .ve-canvas .react-flow__node.ve-ghost > * { visibility: hidden; }
-
-/* Inbox: `mnemo inbox`'s listing as a table, a staged page beside it, promote/drop/restore. */
-.ib { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.ib-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-bottom: 6px; }
-.ib-bar .ib-bar-end { margin-left: auto; }
-.ib-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--fg-muted); padding-bottom: 6px; }
-.ib-stats button { margin-left: auto; }
-.ib-notice { padding-bottom: 6px; }
-.ib-notice-ok pre { color: var(--ansi-green); }
-.ib-table { flex: 1; min-width: 0; overflow: auto; }
-.ib-table table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.ib-table th:nth-child(1) { width: 30%; }
-.ib-table th:nth-child(2) { width: 88px; }
-.ib-table th:nth-child(3) { width: 44px; }
-.ib-table th { position: sticky; top: 0; z-index: 1; background: var(--bg); color: var(--fg-muted); font-weight: 400; text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.ib-table td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); vertical-align: top; }
-.ib-row:hover { background: var(--bg-elev); }
-.ib-row.vr-selected { background: var(--bg-elev); box-shadow: inset 2px 0 0 var(--accent); }
-.ib-key { cursor: pointer; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-key:hover { color: var(--accent); }
-.ib-reason { color: var(--fg-muted); white-space: nowrap; }
-.ib-age { color: var(--fg-muted); white-space: nowrap; }
-.ib-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-acts { white-space: nowrap; }
-.vault .ib-acts button { padding: 0 6px; font-size: 11px; margin-left: 2px; }

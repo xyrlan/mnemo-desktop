@@ -135,3 +135,20 @@ test('Escape still closes the side panel, and the arrows do not fight the filter
   expect(selectedName(host)).toBe('First rule')
   await act(async () => root.unmount())
 })
+
+test('a row’s Edit opens the page in the editor without selecting the row', async () => {
+  const { host, root } = await mount()
+  const { store } = await import('../layout/app-store')
+  const openView = vi.spyOn(store.getState(), 'openView').mockImplementation(() => {})
+  try {
+    await act(async () => (rowFor(host, 'Second rule').querySelector('.vr-acts button[aria-label="Edit"]') as HTMLElement).click())
+    await flush()
+    expect(openView).toHaveBeenCalledWith('editor', { path: `${dir}/second.md` }, 'auto', 'second.md')
+    // The toolbar floats inside the row: its clicks must not reach the row's own.
+    expect(selectedName(host)).toBeNull()
+    expect(host.querySelector('.vr-side')).toBeNull()
+  } finally {
+    openView.mockRestore()
+    await act(async () => root.unmount())
+  }
+})
