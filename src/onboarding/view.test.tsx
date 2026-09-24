@@ -51,7 +51,14 @@ const noPages = JSON.stringify({ project: 'clubinho', origin: 'backfill', pages:
 // The first import pulls in the app's stores and the UI kit: slow on a cold cache.
 beforeAll(async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  await act(async () => void (await import('./view')))
+  // The dialog mounts itself in the shell's overlay slot; the shell is not rendered here, so
+  // draw that slot on its own.
+  await act(async () => {
+    await import('./view')
+    const { SlotOutlet } = await import('../shell/Slot')
+    const { createRoot } = await import('react-dom/client')
+    createRoot(document.body.appendChild(document.createElement('div'))).render(<SlotOutlet slot="overlay" />)
+  })
 }, 120_000)
 
 beforeEach(async () => {
