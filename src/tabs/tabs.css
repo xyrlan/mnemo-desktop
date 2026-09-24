@@ -1,0 +1,38 @@
+/* adapted from stablyai/orca src/renderer/src/assets/main.css (tab strip, agent spinner) */
+
+/* The strip scrolls with the chevrons, the wheel and the trackpad; a native scrollbar thumb
+   would sit over the tab labels. */
+.workbench-tab-strip {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.workbench-tab-strip::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Fades at an edge that hides tabs, as masks: an overlay in the card colour would not match the
+   active tab's lifted background. */
+.workbench-tab-strip--fade-start.workbench-tab-strip--fade-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+}
+.workbench-tab-strip--fade-start:not(.workbench-tab-strip--fade-end) {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 100%);
+  mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 100%);
+}
+.workbench-tab-strip--fade-end:not(.workbench-tab-strip--fade-start) {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.5rem), transparent);
+}
+
+/* One turn a second, stepped so every spinner on screen shares a phase. */
+@keyframes tab-agent-spinner-rotate {
+  to { transform: rotate(86400turn); }
+}
+.tab-agent-spinner {
+  animation: tab-agent-spinner-rotate 86400s steps(1036800, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-agent-spinner { animation: none; }
+}
