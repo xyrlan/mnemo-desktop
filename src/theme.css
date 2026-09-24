@@ -1,14 +1,256 @@
+@import 'tailwindcss' source('.');
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
 @import '@fontsource/jetbrains-mono/400.css';
 @import '@fontsource/jetbrains-mono/700.css';
+
+/* ======================================================================================
+   The visual system (spec, *Visual system*): Orca's shadcn tokens, adapted from
+   stablyai/orca src/renderer/src/assets/main.css — a neutral monochrome base, colour only
+   for state, and one accent of mnemo's own (`--brand`, three candidates on `data-accent`).
+   Dark first: index.html puts `class="dark"` on <html>; the light values exist so a light
+   theme is nearly free, but they are not polished.
+   ====================================================================================== */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-editor-surface: var(--editor-surface);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-worktree-sidebar: var(--worktree-sidebar);
+  --color-worktree-sidebar-foreground: var(--worktree-sidebar-foreground);
+  --color-worktree-sidebar-accent: var(--worktree-sidebar-accent);
+  --color-worktree-sidebar-accent-foreground: var(--worktree-sidebar-accent-foreground);
+  --color-worktree-sidebar-border: var(--worktree-sidebar-border);
+  --color-worktree-sidebar-ring: var(--worktree-sidebar-ring);
+  --color-agent-question: var(--agent-question);
+  --color-agent-question-text: var(--agent-question-text);
+  --color-status-success: var(--status-success);
+  --color-status-success-background: var(--status-success-background);
+  --color-status-success-border: var(--status-success-border);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-background: var(--status-warning-background);
+  --color-status-warning-border: var(--status-warning-border);
+  --color-tab-group-split-divider: var(--tab-group-split-divider);
+  --color-tab-group-split-divider-strong: var(--tab-group-split-divider-strong);
+
+  /* The four agent states, one hue each (Orca's AgentStateDot): the only colour in the UI
+     besides `--brand` and destructive red. */
+  --color-state-working: var(--state-working);
+  --color-state-needs-you: var(--state-needs-you);
+  --color-state-done: var(--state-done);
+  --color-state-idle: var(--state-idle);
+
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --shadow-floating: 0 10px 24px rgb(0 0 0 / 0.18);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* `static`: emitted on :root whether or not a utility uses them, because the terminal and the
+   editor read `--font-mono` from <html> (src/theme.ts `cssVar`), and every current view's CSS
+   says `var(--font-mono)`. JetBrains Mono stays the terminal and code font. */
+@theme static {
+  --font-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+  /* Stacking, lowest first. Popovers sit above drawers and dialogs (a select inside a sheet
+     must open over it); tooltips above everything. The current views stay below all of it:
+     their highest is the palette overlay at 10. Use as `z-drawer`, `z-popover`, … */
+  --z-index-drawer: 40;
+  --z-index-toast: 45;
+  --z-index-modal: 50;
+  --z-index-popover: 60;
+  --z-index-menu: 70;
+  --z-index-tooltip: 90;
+}
+
+/* ── Light ─────────────────────────────────────────────── */
+
+:root {
+  --radius: 0.625rem;
+  --background: #fff;
+  --editor-surface: #fff;
+  --foreground: #0a0a0a;
+  --card: #fff;
+  --card-foreground: #0a0a0a;
+  --popover: #fff;
+  --popover-foreground: #0a0a0a;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  /* --accent and --border: see *The current views* below. */
+  --accent-foreground: #171717;
+  --destructive: #e40014;
+  --destructive-foreground: #fcf3f3;
+  --input: #e5e5e5;
+  --ring: #a1a1a1;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #171717;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #f5f5f5;
+  --sidebar-accent-foreground: #171717;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #a1a1a1;
+  --worktree-sidebar: #f5f5f5;
+  --worktree-sidebar-foreground: #0a0a0a;
+  --worktree-sidebar-accent: #eaeaea;
+  --worktree-sidebar-accent-foreground: #171717;
+  --worktree-sidebar-border: #e5e5e5;
+  --worktree-sidebar-ring: #a1a1a1;
+  --tab-group-split-divider: #868690;
+  --tab-group-split-divider-strong: #71717a;
+
+  --state-working: #ca8a04;
+  --state-needs-you: #ea580c;
+  --state-done: #059669;
+  --state-idle: #a3a3a3;
+  /* Orca's names for the same things, so ported components read them unchanged. */
+  --agent-question: var(--state-needs-you);
+  --agent-question-text: #c2410c;
+  --status-success: #15803d;
+  --status-success-background: color-mix(in srgb, var(--status-success) 10%, transparent);
+  --status-success-border: color-mix(in srgb, var(--status-success) 25%, transparent);
+  --status-warning: #ca8a04;
+  --status-warning-background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+  --status-warning-border: color-mix(in srgb, var(--status-warning) 25%, transparent);
+}
+
+/* ── Dark ──────────────────────────────────────────────── */
+
+.dark {
+  --background: #0a0a0a;
+  --editor-surface: #1e1e1e;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent-foreground: #fafafa;
+  --destructive: #ff6568;
+  --destructive-foreground: #df2225;
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #737373;
+  --sidebar: #171717;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #1447e6;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-ring: #525252;
+  --worktree-sidebar: #2a2a2a;
+  --worktree-sidebar-foreground: #fafafa;
+  --worktree-sidebar-accent: #353535;
+  --worktree-sidebar-accent-foreground: #fafafa;
+  --worktree-sidebar-border: rgb(255 255 255 / 0.07);
+  --worktree-sidebar-ring: #737373;
+  --tab-group-split-divider: #71717a;
+  --tab-group-split-divider-strong: #a1a1aa;
+
+  --state-working: #eab308;
+  --state-needs-you: #f97316;
+  --state-done: #10b981;
+  --state-idle: #737373;
+  --agent-question-text: #fdba74;
+  --status-success: #86efac;
+  --status-warning: #eab308;
+}
+
+/* ── The accent: three candidates, picked by the maintainer from screenshots ──
+   `<html data-accent="a" | "b" | "c">`. None of them may read as a state: no yellow, orange,
+   green or red. `--brand-foreground` is text on a `bg-brand` surface. */
+
+:root, [data-accent='a'] { --brand: #2f5fd0; --brand-foreground: #fff; }
+[data-accent='b'] { --brand: #7c4ddb; --brand-foreground: #fff; }
+[data-accent='c'] { --brand: #0e8fa6; --brand-foreground: #fff; }
+/* a · tide — today's blue, carried over */
+.dark, .dark[data-accent='a'] { --brand: #7aa2f7; --brand-foreground: #0a0a0a; }
+/* b · ink — violet */
+.dark[data-accent='b'] { --brand: #b392f0; --brand-foreground: #0a0a0a; }
+/* c · reef — cyan */
+.dark[data-accent='c'] { --brand: #4fd1e8; --brand-foreground: #0a0a0a; }
+
+/* ── The current views ─────────────────────────────────
+   Every view on screen today lives inside `.app` (src/App.tsx), or in one of the three hosts
+   mounted straight on <body>: `.palette-overlay` (the editor and marketplace prompts),
+   `.pulse-host`, `.voice-host`. They are written against the tokens below; wave B replaces
+   them one at a time. Two names collide with Orca's, and Orca's
+   win: `--accent` is shadcn's hover surface, `--border` its hairline. Ours moved to
+   `--legacy-accent` / `--legacy-border`, and inside those roots the old names are bound back
+   to them, so a current view resolves `var(--accent)` to the blue it was drawn with (and a repo
+   colour, `oklch(from var(--accent) …)` in src/home/repo-color.ts, keeps its chroma).
+
+   New UI inside one of them opts out: every ported primitive carries `data-slot`, and a new view
+   mounted in an old pane marks its root `data-ui`. Both get Orca's values and Orca's base
+   styles back. The new shell must not reuse any of those four classes. Delete this section, and the
+   `:root` block under it, when the last current view is gone. */
+
+:root, :is(.app, .palette-overlay, .pulse-host, .voice-host) :where([data-slot], [data-ui]) { --accent: #f5f5f5; --border: #e5e5e5; }
+.dark, .dark :is(.app, .palette-overlay, .pulse-host, .voice-host) :where([data-slot], [data-ui]) { --accent: #404040; --border: rgb(255 255 255 / 0.07); }
+:is(.app, .palette-overlay, .pulse-host, .voice-host) {
+  --accent: var(--legacy-accent);
+  --border: var(--legacy-border);
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  font-variant-ligatures: none;
+  line-height: normal;
+  letter-spacing: normal;
+  -webkit-font-smoothing: auto;
+  tab-size: 8;
+}
 
 :root {
   --bg: #0f1116;
   --bg-elev: #161923;
   --fg: #d6dae3;
   --fg-muted: #7c8394;
-  --accent: #7aa2f7;
-  --border: #262a36;
-  --border-focus: var(--accent);
+  --legacy-accent: #7aa2f7;
+  --legacy-border: #262a36;
+  --border-focus: var(--legacy-accent);
 
   --ansi-black: #1a1d27;
   --ansi-red: #f7768e;
@@ -27,12 +269,64 @@
   --ansi-bright-cyan: #a6e3ff;
   --ansi-bright-white: #c0caf5;
 
-  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
   --font-size: 13px;
 }
 
+/* ── Base ──────────────────────────────────────────────── */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    letter-spacing: 0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ul {
+    list-style: none;
+  }
+
+  :where(button:not(:disabled)) {
+    cursor: pointer;
+  }
+
+  :where(button:disabled) {
+    cursor: default;
+  }
+
+  /* The current views were drawn over the browser's own element styles, not Tailwind's
+     preflight: inside their roots those come back, except under new UI (see above).
+     `revert-layer` rolls these elements back past every Tailwind layer, and each view's own
+     (unlayered) CSS wins over layers anyway. Not `revert`: that also drops presentation attributes such as an
+     SVG's `width="16"` or `fill`, which `revert-layer` leaves standing. */
+  :is(.app, .palette-overlay, .pulse-host, .voice-host) :where(*:not([data-slot], [data-slot] *, [data-ui], [data-ui] *)) {
+    all: revert-layer;
+  }
+
+  /* The outermost new element only, so a nested primitive still inherits its parent's size. */
+  :is(.app, .palette-overlay, .pulse-host, .voice-host) :where([data-ui], [data-slot]:not([data-ui] *, [data-slot] *)) {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    font-variant-ligatures: normal;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+[data-sonner-toaster] {
+  font-family: var(--font-sans);
+  z-index: var(--z-index-toast) !important;
+}
+
 html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
-body { font-family: var(--font-mono); font-size: var(--font-size); font-variant-ligatures: none; overflow: hidden; }
+body { overflow: hidden; }
 * { box-sizing: border-box; }
 
 .app { display: flex; flex-direction: row; height: 100%; }
