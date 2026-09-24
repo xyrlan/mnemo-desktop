@@ -6,7 +6,7 @@ function PathPrompt({ initial, hint, done }: { initial: string; hint: string; do
   const [value, setValue] = useState(initial)
   return (
     <div className="palette-overlay" onMouseDown={() => done(null)}>
-      <div className="palette editor-prompt" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="palette editor-prompt" data-ui onMouseDown={(e) => e.stopPropagation()}>
         <input
           autoFocus
           aria-label="File path"
