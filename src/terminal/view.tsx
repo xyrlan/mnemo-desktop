@@ -11,6 +11,9 @@ import { parseOsc7 } from './osc7'
 import { macChord, pasteBytes } from './keymap'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
+import { resizeRequest } from './reattach'
+import { provideSessions } from './sessions'
+import { tauriSessions } from './tauri-sessions'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { openUrl } from '../github/actions'
 import { openTerminalLink } from './links'
@@ -44,7 +47,8 @@ export default function TerminalPane({ id }: PaneViewProps) {
     term.loadAddon(new WebLinksAddon(openLink))
     term.open(el)
     try {
-      const webgl = new WebglAddon()
+      // A dev build keeps the drawing buffer, so the eyes' WebKit snapshot sees terminal text.
+      const webgl = new WebglAddon(import.meta.env.DEV)
       webgl.onContextLoss(() => webgl.dispose())
       term.loadAddon(webgl)
     } catch (e) {
@@ -52,7 +56,32 @@ export default function TerminalPane({ id }: PaneViewProps) {
     }
     fit.fit()
 
-    store.getState().attachSink(id, (b) => term.write(b))
+    /** Fits the terminal to its box and tells the shell; not while the box has no size (a hidden
+     *  tab), so a shell that kept running is never squeezed to xterm's 80×24 meanwhile. */
+    const refit = () => {
+      const d = fit.proposeDimensions()
+      if (!d || !(d.cols > 0 && d.rows > 0)) return
+      fit.fit()
+      void tauriPty.resize(id, term.cols, term.rows)
+    }
+    // A shell attached again (a reload, a relaunch) comes back drawn at the size it had:
+    // `CSI 8 ; rows ; cols t`, then its scrollback and screen. The terminal takes that size to draw
+    // them, and fits its box again as soon as that write is parsed, before any output after it:
+    // the shell prints that for the fitted size.
+    let refitAfterWrite = false
+    const resized = term.parser.registerCsiHandler({ final: 't' }, (params) => {
+      const size = resizeRequest(params)
+      if (!size) return false
+      term.resize(size.cols, size.rows)
+      refitAfterWrite = true
+      return true
+    })
+    const settle = () => {
+      if (!refitAfterWrite) return
+      refitAfterWrite = false
+      refit()
+    }
+    store.getState().attachSink(id, (b) => term.write(b, settle))
     // The desktop MCP reads what this pane shows (`desktop_terminal_read`).
     const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
@@ -87,12 +116,9 @@ export default function TerminalPane({ id }: PaneViewProps) {
       return true
     })
 
-    const ro = new ResizeObserver(() => {
-      fit.fit()
-      void tauriPty.resize(id, term.cols, term.rows)
-    })
+    const ro = new ResizeObserver(refit)
     ro.observe(el)
-    void tauriPty.resize(id, term.cols, term.rows)
+    refit()
     const releaseDrop = holdFileDrop()
 
     return () => {
@@ -102,6 +128,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
       data.dispose()
       title.dispose()
       osc7.dispose()
+      resized.dispose()
       term.dispose()
       termRef.current = null
     }
@@ -135,3 +162,5 @@ export default function TerminalPane({ id }: PaneViewProps) {
 }
 
 registerPaneView('terminal', TerminalPane)
+// The workspace restore attaches each saved terminal to its shell when the shell kept running.
+provideSessions(tauriSessions)

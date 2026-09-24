@@ -5,6 +5,7 @@ import { layoutRects, workspaceRect } from './rects'
 import { reuseHandler } from './reuse'
 import { mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved, type SavedLayout, type SavedWorktree } from './saved'
 import type { PtyClient } from '../pty/client'
+import { providedSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
 
 /** `name`: what the user renamed the tab to; it wins over the name its focused pane gives it. */
 export type Tab = { id: string; root: Node; focused: PaneId; name?: string }
@@ -40,6 +41,9 @@ export type StoreOptions = {
   /** Which of the saved sessions a running `claude` already holds (another app instance may run
    *  them); rejects when that cannot be told. None given: every saved session is resumed. */
   liveSessions?: (ids: string[]) => Promise<string[]>
+  /** The terminals that outlived the page, for `restore` to attach its panes to. None given: the
+   *  client the terminal view provides (`provideSessions`), else every terminal spawns anew. */
+  sessions?: SessionClient
 }
 
 /** A worktree's workbench: its tabs and the one it shows (`''`: none, Home shows). */
@@ -130,13 +134,20 @@ export type Actions = {
    *  is shown. Transient views are left out. */
   snapshotForSave(): Saved
   /** Recreate the worktrees of a saved workspace (what `workspace_read` returned), each one's tabs
-   *  after the ones it already has, and show the worktree that was shown, which comes back first:
-   *  a terminal spawns a shell in its saved cwd (else its worktree; the core falls back to home when
-   *  it is gone) and,
-   *  when it ran a Claude session, types `claude --resume <id>` after the prompt unless that session
-   *  is live elsewhere (or liveness cannot be told), keeping the id on the pane either way; other views
-   *  reopen with their props. Resolves once every pane exists; rejects when the file holds tabs
-   *  but none could be read. A missing or empty workspace restores nothing. */
+   *  after the ones it already has, and show the worktree that was shown, which comes back first.
+   *
+   *  A terminal whose shell kept running (`StoreOptions.sessions`: the core's terminals outlive the
+   *  page and the app) attaches to it again under its saved id, its screen and scrollback first,
+   *  and nothing is typed into it. Otherwise it spawns a shell in its saved cwd (else its worktree; the core falls
+   *  back to home when it is gone) and, when it ran a Claude session, types `claude --resume <id>`
+   *  after the prompt unless that session is live elsewhere (or liveness cannot be told), keeping the
+   *  id on the pane either way. Other views reopen with their props.
+   *
+   *  Then, whatever the file held (or failed to), a shell no saved pane claims — opened too late to
+   *  be saved, or the file lost — comes back as a tab of its own, in the open worktree holding its
+   *  folder (else the one shown), without changing what is shown; a terminal whose program ended is
+   *  forgotten. Resolves once every pane exists; rejects when the file holds tabs but none could be
+   *  read. A missing or empty workspace restores nothing of its own. */
   restore(saved: unknown): Promise<void>
 }
 
@@ -203,6 +214,19 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
     /** Output that arrived before a TerminalPane attached its sink (the shell prompt
      *  usually lands before `pty.spawn` even resolves). Flushed by attachSink. */
     const pending = new Map<PaneId, Uint8Array[]>()
+    /** What attachSink flushed, handed again to the next sink until live output reaches one: a view
+     *  mounted twice in a row (StrictMode) would otherwise draw a restored screen into the first,
+     *  discarded terminal and leave the second blank. */
+    const replay = new Map<PaneId, Uint8Array[]>()
+
+    /** Output of terminal `id`: to its view, else kept for when it mounts. */
+    function route(id: PaneId, b: Uint8Array) {
+      const sink = get().sinks[id]
+      if (sink) {
+        replay.delete(id)
+        sink(b)
+      } else pending.get(id)?.push(b) ?? pending.set(id, [b])
+    }
 
     /** Hands new props to an open pane: its view's handler decides, else they replace the old ones. */
     function reuse(id: PaneId, view: string, props: Record<string, unknown>, title?: string): boolean {
@@ -221,13 +245,8 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           cols: DEFAULT_COLS,
           rows: DEFAULT_ROWS,
           onOutput: (b) => {
-            if (assigned === null) {
-              early.push(b)
-              return
-            }
-            const sink = get().sinks[assigned]
-            if (sink) sink(b)
-            else pending.get(assigned)?.push(b) ?? pending.set(assigned, [b])
+            if (assigned === null) early.push(b)
+            else route(assigned, b)
           },
         })
         assigned = id
@@ -239,6 +258,109 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const id = synthetic--
         set((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal', error: String(e) } } }))
         return id
+      }
+    }
+
+    /** Pane `id` on terminal `id`, whose program kept running: what it shows now goes to the view
+     *  first, then what it prints. False, and no pane, when it cannot be attached. */
+    async function attachPane(sessions: SessionClient, id: PaneId, cwd: string | undefined): Promise<boolean> {
+      set((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal', ...(cwd ? { cwd } : {}) } } }))
+      // Listening before attaching: an exit right after is not missed.
+      const unlisten = await pty.onExit(id, (code) => get().paneExited(id, code))
+      let attached = false
+      const early: Uint8Array[] = []
+      try {
+        const screen = await sessions.attach(id, (b) => (attached ? route(id, b) : early.push(b)))
+        pending.set(id, [...(screen.length ? [screen] : []), ...early])
+        attached = true
+        return true
+      } catch {
+        unlisten()
+        set((s) => {
+          const panes = { ...s.panes }
+          delete panes[id]
+          return { panes }
+        })
+        return false
+      }
+    }
+
+    /** The open worktree holding `folder` (the deepest), else the one shown. */
+    function worktreeOf(folder: string): string | null {
+      const holds = (w: string) => folder === w || folder.startsWith(w.endsWith('/') ? w : `${w}/`)
+      const s = get()
+      return s.worktrees.filter(holds).sort((a, b) => b.length - a.length)[0] ?? s.activeWorktree
+    }
+
+    /** Shells that kept running with no saved pane to claim them come back as tabs; the ended are
+     *  forgotten. What is shown stays shown. */
+    async function adopt(sessions: SessionClient, orphans: PtyInfo[]) {
+      for (const info of orphans) {
+        if (!info.alive) {
+          void pty.kill(info.id)
+          continue
+        }
+        if (!(await attachPane(sessions, info.id, info.cwd || undefined))) continue
+        const tab: Tab = { id: `tab-${info.id}`, root: leaf(info.id), focused: info.id }
+        const where = worktreeOf(info.cwd)
+        set((s) => {
+          if (where === null || where === s.activeWorktree) return { tabs: [...s.tabs, tab] }
+          const l = s.parked[where] ?? { tabs: [], activeTab: '' }
+          return { parked: { ...s.parked, [where]: { ...l, tabs: [...l.tabs, tab] } } }
+        })
+      }
+    }
+
+    /** The saved layout, `reattach` putting each terminal pane back on its shell when it can. */
+    async function restoreSaved(saved: unknown, reattach: (old: PaneId, cwd: string | undefined) => Promise<boolean>) {
+      const parsed = parseSaved(saved)
+      if (!parsed) return
+      // A session still running (another instance of the app has it) would get a second copy,
+      // with its hooks and MCP servers, from `claude --resume` (#168). Unknown counts as running.
+      const sessions = parsed.worktrees.flatMap((w) => Object.values(w.panes).flatMap((p) => (p.view === 'terminal' && p.sessionId ? [p.sessionId] : [])))
+      const running: Set<string> | 'unknown' =
+        sessions.length === 0 ? new Set() : await liveSessions(sessions).then((ids) => new Set(ids), () => 'unknown' as const)
+      // Open in the saved order, the shown one shown, before any shell spawns.
+      set((s) => {
+        const fresh = parsed.worktrees.flatMap((w) => (w.path !== null && w.path !== s.activeWorktree && !s.worktrees.includes(w.path) ? [w.path] : []))
+        const parked = { ...s.parked }
+        for (const w of fresh) parked[w] = { tabs: [], activeTab: '' }
+        return { worktrees: [...s.worktrees, ...fresh], parked }
+      })
+      if (parsed.activeWorktree !== null) swap(parsed.activeWorktree)
+      const first = parsed.worktrees.filter((w) => w.path === parsed.activeWorktree)
+      for (const w of [...first, ...parsed.worktrees.filter((w) => w.path !== parsed.activeWorktree)]) {
+        const made: Tab[] = []
+        let shown: string | undefined
+        for (const t of w.tabs) {
+          const ids = new Map<PaneId, PaneId>()
+          for (const old of leaves(t.root)) {
+            const p = w.panes[String(old)]
+            if (p.view === 'terminal') {
+              const cwd = p.cwd ?? w.path ?? undefined
+              // Its shell kept running: the pane keeps its id, and the Claude in it runs on.
+              const back = await reattach(old, cwd)
+              const id = back ? old : await spawnPane(cwd)
+              ids.set(old, id)
+              if (p.face) get().setFace(id, p.face)
+              if (p.sessionId) {
+                // Kept on the pane even when not resumed, so the saved layout keeps it too.
+                get().setSessionId(id, p.sessionId)
+                const resumable = !back && running !== 'unknown' && !running.has(p.sessionId)
+                if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+              }
+            } else {
+              const id = synthetic--
+              ids.set(old, id)
+              set((s) => ({ panes: { ...s.panes, [id]: { id, view: p.view, props: p.props ?? {}, title: p.title } } }))
+            }
+          }
+          const root = mapLeaves(t.root, ids)
+          const tab: Tab = { id: `tab-${leaves(root)[0]}`, root, focused: ids.get(t.focused) ?? leaves(root)[0], ...(t.name ? { name: t.name } : {}) }
+          made.push(tab)
+          if (t.id === w.activeTab) shown = tab.id
+        }
+        addTabs(w.path, made, shown)
       }
     }
 
@@ -270,6 +392,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             delete panes[p]
             delete sinks[p]
             pending.delete(p)
+            replay.delete(p)
           }
           const parked = { ...s.parked }
           delete parked[path]
@@ -507,8 +630,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
       attachSink(id, sink) {
         set((s) => ({ sinks: { ...s.sinks, [id]: sink } }))
-        for (const b of pending.get(id) ?? []) sink(b)
+        const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
         pending.delete(id)
+        if (chunks.length) replay.set(id, chunks)
+        for (const b of chunks) sink(b)
       },
       setPalette(open) {
         set({ paletteOpen: open })
@@ -523,51 +648,21 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       async restore(saved) {
-        const parsed = parseSaved(saved)
-        if (!parsed) return
-        // A session still running (another instance of the app has it) would get a second copy,
-        // with its hooks and MCP servers, from `claude --resume` (#168). Unknown counts as running.
-        const sessions = parsed.worktrees.flatMap((w) => Object.values(w.panes).flatMap((p) => (p.view === 'terminal' && p.sessionId ? [p.sessionId] : [])))
-        const running: Set<string> | 'unknown' =
-          sessions.length === 0 ? new Set() : await liveSessions(sessions).then((ids) => new Set(ids), () => 'unknown' as const)
-        // Open in the saved order, the shown one shown, before any shell spawns.
-        set((s) => {
-          const fresh = parsed.worktrees.flatMap((w) => (w.path !== null && w.path !== s.activeWorktree && !s.worktrees.includes(w.path) ? [w.path] : []))
-          const parked = { ...s.parked }
-          for (const w of fresh) parked[w] = { tabs: [], activeTab: '' }
-          return { worktrees: [...s.worktrees, ...fresh], parked }
-        })
-        if (parsed.activeWorktree !== null) swap(parsed.activeWorktree)
-        const first = parsed.worktrees.filter((w) => w.path === parsed.activeWorktree)
-        for (const w of [...first, ...parsed.worktrees.filter((w) => w.path !== parsed.activeWorktree)]) {
-          const made: Tab[] = []
-          let shown: string | undefined
-          for (const t of w.tabs) {
-            const ids = new Map<PaneId, PaneId>()
-            for (const old of leaves(t.root)) {
-              const p = w.panes[String(old)]
-              if (p.view === 'terminal') {
-                const id = await spawnPane(p.cwd ?? w.path ?? undefined)
-                ids.set(old, id)
-                if (p.face) get().setFace(id, p.face)
-                if (p.sessionId) {
-                  // Kept on the pane even when not resumed, so the saved layout keeps it too.
-                  get().setSessionId(id, p.sessionId)
-                  const resumable = running !== 'unknown' && !running.has(p.sessionId)
-                  if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
-                }
-              } else {
-                const id = synthetic--
-                ids.set(old, id)
-                set((s) => ({ panes: { ...s.panes, [id]: { id, view: p.view, props: p.props ?? {}, title: p.title } } }))
-              }
-            }
-            const root = mapLeaves(t.root, ids)
-            const tab: Tab = { id: `tab-${leaves(root)[0]}`, root, focused: ids.get(t.focused) ?? leaves(root)[0], ...(t.name ? { name: t.name } : {}) }
-            made.push(tab)
-            if (t.id === w.activeTab) shown = tab.id
-          }
-          addTabs(w.path, made, shown)
+        const sessions = opts.sessions ?? providedSessions()
+        // The terminals that outlived the last page, each claimed at most once by a saved pane.
+        const held = sessions ? await sessions.list().catch((): PtyInfo[] => []) : []
+        const claimed = new Set<PaneId>()
+        /** Saved pane `old` on its own shell again, when that shell still runs. */
+        const reattach = async (old: PaneId, cwd: string | undefined) => {
+          const info = held.find((i) => i.id === old)
+          if (!sessions || !info?.alive || claimed.has(old)) return false
+          claimed.add(old)
+          return attachPane(sessions, old, info.cwd || cwd)
+        }
+        try {
+          await restoreSaved(saved, reattach)
+        } finally {
+          if (sessions) await adopt(sessions, held.filter((i) => !claimed.has(i.id)))
         }
       },
     }
