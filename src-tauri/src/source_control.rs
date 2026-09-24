@@ -448,6 +448,9 @@ mod tests {
         let root = temp_dir(tag).join("repo");
         std::fs::create_dir_all(&root).unwrap();
         sh_git(&["init", "-q", "-b", "main"], &root);
+        // Windows runners check files out with CRLF (`core.autocrlf=true`), which a restored
+        // file would then read back as `…\r\n`.
+        sh_git(&["config", "core.autocrlf", "false"], &root);
         for (f, body) in [("keep.txt", "same\n"), ("edit.txt", "one\ntwo\n"), ("gone.txt", "bye\n"), ("old.txt", "moved\nalong\n")] {
             std::fs::write(root.join(f), body).unwrap();
         }
@@ -534,14 +537,15 @@ mod tests {
         let root = repo("scm-stage");
         std::fs::write(root.join("edit.txt"), "changed\n").unwrap();
         std::fs::remove_file(root.join("gone.txt")).unwrap();
-        std::fs::write(root.join("*.txt"), "a star\n").unwrap();
-        stage(&s(&root), &v(&["edit.txt", "gone.txt", "*.txt"])).unwrap();
+        std::fs::write(root.join("[eg]dit.txt"), "a glob\n").unwrap();
+        stage(&s(&root), &v(&["edit.txt", "gone.txt", "[eg]dit.txt"])).unwrap();
         let st = status(&s(&root)).unwrap();
-        assert_eq!(rows(&st), vec![row("staged", "added", "*.txt"), row("staged", "deleted", "gone.txt"), row("staged", "modified", "edit.txt")]);
-        // `*.txt` is a file here, not a glob: unstaging it leaves the others staged.
-        unstage(&s(&root), &v(&["*.txt"])).unwrap();
+        assert_eq!(rows(&st), vec![row("staged", "added", "[eg]dit.txt"), row("staged", "deleted", "gone.txt"), row("staged", "modified", "edit.txt")]);
+        // `[eg]dit.txt` is a file here, not a glob (Windows allows no `*` in a name): unstaging it
+        // leaves `edit.txt`, which the glob would match, staged.
+        unstage(&s(&root), &v(&["[eg]dit.txt"])).unwrap();
         let st = status(&s(&root)).unwrap();
-        assert_eq!(rows(&st), vec![row("staged", "deleted", "gone.txt"), row("staged", "modified", "edit.txt"), row("untracked", "untracked", "*.txt")]);
+        assert_eq!(rows(&st), vec![row("staged", "deleted", "gone.txt"), row("staged", "modified", "edit.txt"), row("untracked", "untracked", "[eg]dit.txt")]);
         assert_eq!(std::fs::read_to_string(root.join("edit.txt")).unwrap(), "changed\n");
     }
 
