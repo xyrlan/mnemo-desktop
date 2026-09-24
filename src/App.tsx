@@ -6,7 +6,7 @@ import { registerBuiltins } from './actions/registry'
 import { startWorkspace, type Workspace } from './layout/persist'
 import Shell from './shell/Shell'
 import { registerShellActions } from './shell/actions'
-import { pollMission, reloadUnknownTitles, showFirstWorktree } from './shell/live'
+import { pollMission, refreshGithubEvery, reloadUnknownTitles, showFirstWorktree } from './shell/live'
 
 // Every `src/<view>/view.tsx` registers its pane view, or mounts its screen in a shell slot
 // (`mountInSlot`, src/shell/slots.ts), on import. A new one therefore needs no edit here.
@@ -28,6 +28,7 @@ export default function App() {
   // What the mission sidebar ran while it was mounted: the snapshot poll, and Home's titles.
   useEffect(() => pollMission(), [])
   useEffect(() => reloadUnknownTitles(), [])
+  useEffect(() => refreshGithubEvery(), [])
   useEffect(() => {
     workspace ??= startWorkspace(store)
     let live = true

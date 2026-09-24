@@ -6,9 +6,9 @@
  *   pnpm run install-app:check      print a reminder when the installed bundle is behind main
  *
  * The swap runs from a detached /bin/sh, not from here, because the terminal you typed this in
- * is very often a pane of the app we are about to quit: quitting kills that pane's PTY and
- * every process under it, and a script killed between the delete and the copy leaves no app at
- * all. The new bundle is staged beside the old one first, so the only thing that happens while
+ * is very often a pane of the app we are about to quit. Since the terminal daemon (#209) a
+ * pane's shell outlives the app on macOS and Linux, but the running app may predate it, and a
+ * script killed between the delete and the copy leaves no app at all. The new bundle is staged beside the old one first, so the only thing that happens while
  * the app is down is two renames.
  */
 import { execFileSync, spawn } from 'node:child_process'
@@ -101,7 +101,7 @@ function install({ launch }) {
 
   console.log(version || `built ${sha}`)
   if (process.env.TERM_PROGRAM === 'mnemo') {
-    console.log('quitting mnemo and swapping the bundle in: this pane goes with it, the app comes back')
+    console.log('quitting mnemo and swapping the bundle in: the app comes back')
     spawn('/bin/sh', [swap], { detached: true, stdio: 'ignore' }).unref()
   } else {
     loud('/bin/sh', [swap])

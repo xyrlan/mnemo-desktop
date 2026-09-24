@@ -50,3 +50,15 @@ export const reloadUnknownTitles = () =>
       return () => offs.forEach((off) => off())
     },
   })
+
+/** Home fetched GitHub's issues and PRs when it showed. With Home gone, the fleet's PR badges
+ *  and Tasks read them from here: once at launch, then every five minutes. */
+export function refreshGithubEvery(ms = 5 * 60_000): () => void {
+  const refresh = () => void homeStore.getState().refreshGithub()
+  void homeStore
+    .getState()
+    .load()
+    .then(refresh)
+  const timer = setInterval(refresh, ms)
+  return () => clearInterval(timer)
+}
