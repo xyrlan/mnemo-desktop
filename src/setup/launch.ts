@@ -20,10 +20,11 @@ export function afterRestore(store: Store, waitMs = RESTORE_WAIT_MS): Promise<vo
       resolve()
     }
     // Once the restore has started it may take as long as its terminals take to spawn.
-    const wrapped: typeof restore = async (saved) => {
+    // Every argument goes through: the store's `restore` may take more than the saved layout.
+    const wrapped: typeof restore = async (...args: Parameters<typeof restore>) => {
       clearTimeout(timer)
       try {
-        await restore(saved)
+        await restore(...args)
       } finally {
         done()
       }
