@@ -1,26 +1,170 @@
-/* The edge strip a dragged pane bar would graft into. `.pane.drop-target` (theme.css)
- * already covers the center-zone (swap) case with a whole-pane highlight. */
+/* The pane frame: adapted from stablyai/orca src/renderer/src/assets/main.css
+   (`.tab-group-split-resize-handle`) and terminal.css (`.tab-drop-overlay`, the pane title bar,
+   the drag source), and TabGroupPanel's focus dimming.
+
+   theme.css still carries the frame the current views were drawn with (`.pane`, `.pane-bar`,
+   `.divider`, all unlayered and global); every rule here is written to outrank it, so which of
+   the two stylesheets loads first does not matter. Colour is state or `--brand` only. */
+
+/* ── Panes ──────────────────────────────────────────── */
+
+/* No box around each pane: the seams between them are the resize handles' lines. */
+.split-root > .pane,
+.split-root > .pane.focused,
+.split-root > .pane.drop-target { border: 0; }
+
+/* With more than one pane, the ones without focus dim a little, so the focused one reads as
+   selected; a lone pane has nothing to contrast with. */
+.split-root.is-split > .pane { transition: opacity 150ms ease; }
+.split-root.is-split > .pane:not(.focused) { opacity: 0.95; }
+.split-root > .pane.drag-source,
+.split-root.is-split > .pane.drag-source { opacity: 0.4; }
+
+/* ── Resize handle ──────────────────────────────────── */
+
+/* A 6px transparent grab strip (geometry.ts GAP) drawing a 3px line in its middle. The line is
+   the ::after, so a background on the strip never hides it. */
+.split-root > .divider,
+.split-root > .divider:hover,
+.split-root > .divider.dragging { background: transparent; z-index: 3; }
+.split-root > .divider::after {
+  content: '';
+  position: absolute;
+  border-radius: 1px;
+  background: var(--tab-group-split-divider);
+  transition: background 100ms ease;
+}
+.split-root > .divider.is-vertical::after { top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); }
+.split-root > .divider.is-horizontal::after { left: 0; right: 0; top: 50%; height: 3px; transform: translateY(-50%); }
+.split-root > .divider:hover::after,
+.split-root > .divider.is-dragging::after { background: var(--tab-group-split-divider-strong); }
+
+/* ── Pane title bar ─────────────────────────────────── */
+
+.pane > .pane-bar[data-ui] {
+  --pane-bar-h: 24px;
+  flex: 0 0 var(--pane-bar-h);
+  height: var(--pane-bar-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 6px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+  cursor: grab;
+}
+.pane.focused > .pane-bar[data-ui] { color: var(--foreground); }
+
+.pane-bar[data-ui] .pane-bar-grip {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+}
+.pane-bar[data-ui]:hover .pane-bar-grip { opacity: 1; }
+.pane.focused > .pane-bar[data-ui] .pane-bar-grip { color: var(--brand); opacity: 1; }
+
+.pane-bar[data-ui] .pane-bar-repo { flex: 0 1 auto; font-weight: 600; color: inherit; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar[data-ui] .pane-bar-branch-row { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 3px; color: var(--muted-foreground); }
+.pane-bar[data-ui] .pane-bar-branch-icon { flex: 0 0 auto; width: 11px; height: 11px; }
+.pane-bar[data-ui] .pane-bar-branch { min-width: 0; color: inherit; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar[data-ui] .pane-bar-branch::before { content: none; }
+.pane-bar[data-ui] .pane-bar-title { flex: 1 1 0; min-width: 0; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; }
+.pane-bar[data-ui] .pane-bar-tokens { flex: 0 0 auto; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* The pulse glow and badge keep their tones (theme.css); only the fallback, which was the old
+   accent, becomes the brand. */
+.pane-bar[data-ui] .pane-bar-glow { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pulse-tone, var(--brand)) 28%, transparent), transparent); }
+.pane-bar[data-ui] .pane-bar-pulse { font: inherit; font-size: 11px; color: var(--muted-foreground); }
+.pane-bar[data-ui] .pane-bar-pulse:hover { color: var(--foreground); border-color: var(--border); }
+.pane-bar[data-ui] .pane-bar-pulse.live { color: var(--pulse-tone, var(--brand)); border-color: color-mix(in srgb, var(--pulse-tone, var(--brand)) 55%, transparent); }
+
+/* The close X: a 16px square like a tab's, visible on the focused pane's bar and on hover. */
+.pane-bar[data-ui] .pane-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.6);
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+.pane-bar[data-ui] .pane-close svg { width: 12px; height: 12px; }
+.pane-bar[data-ui]:hover .pane-close,
+.pane.focused > .pane-bar[data-ui] .pane-close { color: var(--muted-foreground); }
+.pane-bar[data-ui] .pane-close:hover,
+.pane-bar[data-ui] .pane-close:focus-visible { color: var(--foreground); background: var(--muted); }
+
+/* The face toggle of a terminal pane (round 20): which face it shows, and a click flips it. */
+.pane-bar[data-ui] .pane-bar-face { flex: 0 0 auto; cursor: pointer; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: 9999px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 11px; line-height: 16px; }
+.pane-bar[data-ui] .pane-bar-face:hover { color: var(--foreground); background: var(--muted); }
+.pane-bar[data-ui] .pane-bar-face.on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 50%, transparent); }
+
+/* ── Drop overlay ───────────────────────────────────── */
+
+/* A dragged pane bar (or a file from Finder) over a pane: the old frame turned the whole bar
+   blue; the new one leaves the bar as it is and lays a translucent brand overlay where the drop
+   lands. A file covers the whole pane (`::after`); a pane bar gets DropZoneOverlay instead. */
+.split-root > .pane.drop-target > .pane-bar[data-ui] { background: var(--card); color: var(--foreground); }
+.split-root > .pane.drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--brand) 20%, transparent);
+  border: 2px solid color-mix(in srgb, var(--brand) 50%, transparent);
+  border-radius: 4px;
+}
+.split-root > .pane.drop-target.pane-drop::after { content: none; }
+
 .pane-drop-zone {
   position: absolute;
   z-index: 6;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--brand) 20%, transparent);
+  border: 2px solid color-mix(in srgb, var(--brand) 50%, transparent);
+  border-radius: 4px;
+  transition: inset 120ms cubic-bezier(0.16, 1, 0.3, 1);
   animation: pane-drop-zone-in 120ms ease-out;
 }
-.pane-drop-zone.zone-left { inset: 0 75% 0 0; border-width: 0 2px 0 0; }
-.pane-drop-zone.zone-right { inset: 0 0 0 75%; border-width: 0 0 0 2px; }
-.pane-drop-zone.zone-up { inset: 0 0 75% 0; border-width: 0 0 2px 0; }
-.pane-drop-zone.zone-down { inset: 75% 0 0 0; border-width: 2px 0 0 0; }
+/* The half the dragged pane would take: the target splits evenly to hold it. */
+.pane-drop-zone.zone-center { inset: 0; }
+.pane-drop-zone.zone-left { inset: 0 50% 0 0; }
+.pane-drop-zone.zone-right { inset: 0 0 0 50%; }
+.pane-drop-zone.zone-up { inset: 0 0 50% 0; }
+.pane-drop-zone.zone-down { inset: 50% 0 0 0; }
+.pane-drop-zone-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: calc(var(--radius) * 0.6);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--brand-foreground);
+  background: color-mix(in srgb, var(--brand) 85%, transparent);
+}
 
 @keyframes pane-drop-zone-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .pane-drop-zone { animation: none; }
+  .pane-drop-zone { animation: none; transition: none; }
+  .split-root.is-split > .pane { transition: none; }
 }
-
-/* The face toggle of a terminal pane (round 20): which face it shows, and a click flips it. */
-.pane-bar-face { flex: 0 0 auto; height: 18px; padding: 0 6px; background: transparent; border: 1px solid var(--border); border-radius: 9px; color: var(--fg-muted); font: inherit; font-size: 11px; cursor: pointer; }
-.pane-bar-face:hover { color: var(--fg); background: var(--bg); }
-.pane-bar-face.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-.pane.drop-target .pane-bar .pane-bar-face { border-color: currentColor; }

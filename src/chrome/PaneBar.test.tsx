@@ -45,7 +45,7 @@ test('no drop-zone overlay while nothing is being dragged over this pane', () =>
   expect(host.querySelector('.pane-drop-zone')).toBeNull()
 })
 
-test('an edge zone over this pane draws the matching strip', async () => {
+test('an edge zone over this pane draws the matching half', async () => {
   await act(async () => dragStore.setState({ from: other, over: id, zone: 'left' }))
   expect(host.querySelector('.pane-drop-zone.zone-left')).not.toBeNull()
 
@@ -54,9 +54,23 @@ test('an edge zone over this pane draws the matching strip', async () => {
   expect(host.querySelector('.pane-drop-zone.zone-down')).not.toBeNull()
 })
 
-test('the center zone draws no strip (the whole-pane highlight covers it)', async () => {
+test('the center zone covers the whole pane and says the two swap', async () => {
   await act(async () => dragStore.setState({ from: other, over: id, zone: 'center' }))
+  const zone = host.querySelector('.pane-drop-zone.zone-center')
+  expect(zone).not.toBeNull()
+  expect(zone?.textContent).toBe('Swap')
+})
+
+test('no overlay without a drag, even with a stale target', async () => {
+  await act(async () => dragStore.setState({ from: null, over: id, zone: 'left' }))
   expect(host.querySelector('.pane-drop-zone')).toBeNull()
+})
+
+test('the bar is new chrome: marked for the new tokens, closed by an X with a name', () => {
+  const bar = host.querySelector('.pane-bar')!
+  expect(bar.hasAttribute('data-ui')).toBe(true)
+  expect(bar.querySelector('.pane-close')?.getAttribute('aria-label')).toBe('Close pane')
+  expect(bar.querySelector('.pane-close svg')).not.toBeNull()
 })
 
 test('a zone over a different pane draws nothing here', async () => {
