@@ -323,9 +323,24 @@ mod tests {
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     }
 
+    /// `p` with symlinks resolved (macOS's `/var` is `/private/var`), minus the `\\?\` prefix
+    /// Windows puts on a canonical path: git cannot create a tree under one.
+    fn real(p: &Path) -> PathBuf {
+        let canon = p.canonicalize().unwrap();
+        match canon.to_string_lossy().strip_prefix(r"\\?\") {
+            Some(rest) => PathBuf::from(rest),
+            None => canon,
+        }
+    }
+
+    /// A path spelled the way `list` reports it: git's own spelling, `C:/…` on Windows.
+    fn git_form(p: &Path) -> String {
+        s(p).replace('\\', "/")
+    }
+
     /// `<tmp>/<tag>/repo` with one commit on `main`, symlinks resolved.
     fn repo(tag: &str) -> PathBuf {
-        let root = temp_dir(tag).canonicalize().unwrap().join("repo");
+        let root = real(&temp_dir(tag)).join("repo");
         std::fs::create_dir_all(&root).unwrap();
         sh_git(&["init", "-q", "-b", "main"], &root);
         std::fs::write(root.join("README"), "hi\n").unwrap();
@@ -373,7 +388,7 @@ mod tests {
     fn create_list_and_remove_a_sibling_tree() {
         let root = repo("wt-cycle");
         let made = create(&s(&root), "task", None, None, quiet()).unwrap();
-        let want = s(&root.parent().unwrap().join("repo-wt-task"));
+        let want = git_form(&root.parent().unwrap().join("repo-wt-task"));
         assert_eq!(made.path, want);
         assert_eq!(made.branch.as_deref(), Some("task"));
         assert!(!made.is_main && !made.dispatched && !made.dirty);
@@ -383,7 +398,7 @@ mod tests {
         // From any tree, the same list, main first.
         let from_tree = list(&made.path).unwrap();
         assert_eq!(from_tree, list(&s(&root)).unwrap());
-        assert_eq!(from_tree.iter().map(|w| (w.path.as_str(), w.is_main)).collect::<Vec<_>>(), [(s(&root).as_str(), true), (want.as_str(), false)]);
+        assert_eq!(from_tree.iter().map(|w| (w.path.as_str(), w.is_main)).collect::<Vec<_>>(), [(git_form(&root).as_str(), true), (want.as_str(), false)]);
 
         // Dirty: an untracked file counts, and git keeps it without force.
         std::fs::write(Path::new(&want).join("scratch"), "x").unwrap();
@@ -431,7 +446,7 @@ mod tests {
         std::fs::create_dir(root.join("sub")).unwrap();
         assert!(remove(&s(&root.join("sub")), true).unwrap_err().contains("not a worktree"));
         // A tree git knows, put outside the repo's parent folder.
-        let far = temp_dir("wt-far").canonicalize().unwrap().join("far");
+        let far = real(&temp_dir("wt-far")).join("far");
         sh_git(&["worktree", "add", "-q", "-b", "far", &s(&far)], &root);
         assert!(remove(&s(&far), true).unwrap_err().contains("outside"));
         assert!(far.exists());
