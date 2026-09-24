@@ -127,4 +127,10 @@ describe('AddressBar', () => {
     await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     expect(dispatch).toHaveBeenCalledWith({ type: 'cancel' })
   })
+
+  test("the pane's tools sit after the field, before Chrome", async () => {
+    await render({ client: fakeClient(), tools: createElement('button', { className: 'tool' }, 'T') })
+    const order = [...host.querySelectorAll('input, button')].map((e) => e.className || e.tagName.toLowerCase())
+    expect(order.slice(3)).toEqual(['input', 'tool', 'browser-external'])
+  })
 })

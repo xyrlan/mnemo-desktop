@@ -344,6 +344,60 @@ fn run_launches(launches: &[Launch]) -> Result<(), String> {
     Err(format!("could not open a browser: {}", failures.join("; ")))
 }
 
+/// Design Mode's screenshots of picked elements, kept where the agent they are sent to can
+/// read them. Only the newest `SHOTS_KEPT` stay.
+pub fn shot_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("mnemo-desktop-design")
+}
+
+pub const SHOTS_KEPT: usize = 30;
+/// A crop of one element, never a whole retina page: anything bigger is refused.
+pub const SHOT_MAX_BYTES: usize = 20 * 1024 * 1024;
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// Writes `png` to `dir` as `<pane label>-<millis>.png` and drops the oldest shots past
+/// `SHOTS_KEPT`. Refuses anything that is not a PNG.
+pub fn save_shot(dir: &std::path::Path, id: BrowserId, png: &[u8], millis: u128) -> Result<std::path::PathBuf, String> {
+    if !png.starts_with(PNG_MAGIC) {
+        return Err("the screenshot is not a PNG".into());
+    }
+    if png.len() > SHOT_MAX_BYTES {
+        return Err(format!("the screenshot is {} bytes, over the {SHOT_MAX_BYTES} kept", png.len()));
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(format!("{}-{millis}.png", label_for(id)));
+    std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+    prune_shots(dir, SHOTS_KEPT);
+    Ok(path)
+}
+
+/// Keeps the `keep` newest `.png` files in `dir`, by modification time.
+pub fn prune_shots(dir: &std::path::Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut shots: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "png"))
+        .filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p)))
+        .collect();
+    shots.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    for (_, old) in shots.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+/// Saves a Design Mode screenshot (base64 PNG) and answers its path.
+#[tauri::command]
+pub async fn browser_save_shot(id: BrowserId, data: String) -> Result<String, String> {
+    use base64::Engine;
+    let png = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("the screenshot is not base64: {e}"))?;
+    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    tauri::async_runtime::spawn_blocking(move || save_shot(&shot_dir(), id, &png, millis))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 /// The open PR for the branch checked out in `cwd`, via `gh pr view`. `None` when `gh` is
 /// missing, unauthenticated, or the branch has no PR: the palette action skips silently.
 /// Runs through a login shell because apps launched from Finder/Dock get a bare PATH.
@@ -479,6 +533,39 @@ mod tests {
             let exits = |p| Launch { program: p, args: vec![], wait: true };
             assert!(run_launches(&[exits("/usr/bin/false"), exits("/usr/bin/true")]).is_ok());
         }
+    }
+
+    #[test]
+    fn a_shot_is_saved_as_a_png_under_the_pane_label() {
+        let dir = std::env::temp_dir().join(format!("mnemo-shot-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let png = [PNG_MAGIC, b"rest"].concat();
+        let path = save_shot(&dir, -3, &png, 1234).unwrap();
+        assert_eq!(path, dir.join("browser-n3-1234.png"));
+        assert_eq!(std::fs::read(&path).unwrap(), png);
+        assert!(save_shot(&dir, -3, b"GIF89a", 1).unwrap_err().contains("not a PNG"));
+        assert!(save_shot(&dir, -3, &[PNG_MAGIC, &vec![0u8; SHOT_MAX_BYTES]].concat(), 2).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_the_newest_shots_are_kept() {
+        let dir = std::env::temp_dir().join(format!("mnemo-prune-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        for i in 0..4 {
+            let p = dir.join(format!("s{i}.png"));
+            std::fs::write(&p, b"x").unwrap();
+            let when = old + std::time::Duration::from_secs(i * 60);
+            std::fs::File::options().write(true).open(&p).unwrap().set_modified(when).unwrap();
+        }
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+        prune_shots(&dir, 2);
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["notes.txt", "s2.png", "s3.png"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

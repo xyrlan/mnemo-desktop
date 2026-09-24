@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useReducer, useRef, useState, type FormEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { cursorPosition, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
@@ -6,12 +6,14 @@ import { store, useApp } from '../layout/app-store'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { makeBrowserClient, pageBounds, sameBounds, type Bounds } from './client'
-import { barReducer, initialBar } from './address'
+import { AddressBar, barReducer, initialBar } from './address'
 import { makeWebviews } from './lifecycle'
 import { BLANK, normalizeUrl } from './url'
 import { terminalCwd } from './pr'
 import { focusedEvent, toViewport, watchPageFocus, type FocusHost } from './focus'
 import { registerReuse } from '../layout/reuse'
+import { DesignStrip, DesignToggle, designPane } from './design-view'
+import { design } from './design-live'
 import './browser.css'
 
 export const browser = makeBrowserClient(invoke, <T,>(event: string, cb: (payload: T) => void) =>
@@ -110,6 +112,7 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
       untrack()
       for (const u of unlisten) void u.then((off) => off())
       webviews.release(id)
+      design.stop(id)
     }
   }, [id, start])
 
@@ -128,38 +131,21 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
     browser.navigate(id, next.url).catch((err) => setError(String(err)))
     input.current?.blur()
   }
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return
-    dispatch({ type: 'cancel' })
-    input.current?.blur()
-  }
   const fail = (err: unknown) => setError(String(err))
 
   return (
     <div className={`pane-body browser${bar.loading ? ' loading' : ''}`}>
-      <form className="browser-bar" onSubmit={submit}>
-        <button type="button" title="Back" onClick={() => browser.back(id).catch(fail)}>
-          ←
-        </button>
-        <button type="button" title="Forward" onClick={() => browser.forward(id).catch(fail)}>
-          →
-        </button>
-        <button type="button" title="Reload" onClick={() => browser.reload(id).catch(fail)}>
-          ↻
-        </button>
-        <input
-          ref={input}
-          value={bar.input}
-          placeholder="Enter a URL or search"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => dispatch({ type: 'edit', input: e.target.value })}
-          onBlur={() => dispatch({ type: 'blur' })}
-          onFocus={(e) => e.target.select()}
-          onKeyDown={onKey}
-        />
-      </form>
+      <AddressBar
+        id={id}
+        bar={bar}
+        dispatch={dispatch}
+        client={browser}
+        input={input}
+        onSubmit={submit}
+        onError={fail}
+        tools={<DesignToggle id={id} />}
+      />
+      <DesignStrip id={id} />
       <div ref={page} className="browser-page">
         {error && <div className="pane-message">{error}</div>}
       </div>
@@ -184,6 +170,15 @@ register({
   id: 'browser.open',
   title: 'Open URL…',
   run: () => store.getState().openView('browser', { url: '' }, 'auto', 'browser'),
+})
+
+register({
+  id: 'browser.design-mode',
+  title: 'Design Mode: pick an element in the browser for the agent',
+  run: () => {
+    const id = designPane(store.getState())
+    if (id !== null) design.toggle(id)
+  },
 })
 
 register({
