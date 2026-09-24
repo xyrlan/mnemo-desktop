@@ -147,8 +147,9 @@ module (a static registry); `lib.rs` is not touched.
 - **Shrink or replace:** when the length drops below the offset, or the file is a different
   file, send `Reset`, then lines from 0.
 - **Stopping:** `conversation_unfollow(id)` stops the follow's thread and watch. So does a
-  Channel send failing (the webview is gone). No thread outlives its follow; there is a test for
-  that.
+  Channel send failing (the webview is gone), and so does the webview that started the follow
+  loading a page (a reload): a send into the reloaded page still succeeds, so nothing else would.
+  No thread outlives its follow; there is a test for that.
 - **`conversation_earlier`:** the `count` complete lines ending right before byte `before`.
   `start == 0` means the top of the file.
 - **Tests:** temp files for every case above: tail N of M, a partial then a completed line,

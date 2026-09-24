@@ -122,6 +122,13 @@ pub fn run() {
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
+        // A webview loading a page (a reload) leaves its transcript follows with nobody to
+        // unfollow them; end them here.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                conversation::page_loading(webview.label());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
             commands::pty_write,

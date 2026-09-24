@@ -5,8 +5,9 @@
 //!
 //! Each follow is one thread, kept in a static registry here (no `.manage`): it sends the tail, then
 //! wakes on a `notify` watch of the transcript's directory or a 1 s fallback poll and sends the
-//! complete lines past its offset. It ends on `conversation_unfollow` or when a send fails, and its
-//! watch goes with it. Contract: docs/contracts/round20.md.
+//! complete lines past its offset. It ends on `conversation_unfollow`, when the webview that started
+//! it loads a page (`page_loading`: a reload leaves nobody to unfollow, and a send to the dead page
+//! still succeeds), or when a send fails; its watch goes with it. Contract: docs/contracts/round20.md.
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -59,10 +60,20 @@ const HEAD: u64 = 4 << 10;
 /// The first `Lines` holds at most ~4 MB, so it can hold fewer than `tail` lines (inline images);
 /// its `start` says where `conversation_earlier` picks up. After a `Reset` lines restart at 0. A
 /// transcript that goes away sends `Reset` then `Missing`, and the follow looks for it again.
-#[tauri::command(async)]
-pub fn conversation_follow(session_id: String, cwd: String, tail: usize, on_event: Channel<FollowEvent>) -> Result<u32, String> {
+///
+/// The follow belongs to the calling webview and ends when it loads a page. Not `async`: a sync
+/// command runs on the main thread, as the page-load hook does, so a follow the old page asked for
+/// is registered before that hook clears it, never after.
+#[tauri::command]
+pub fn conversation_follow(
+    webview: tauri::Webview,
+    session_id: String,
+    cwd: String,
+    tail: usize,
+    on_event: Channel<FollowEvent>,
+) -> Result<u32, String> {
     check_session_id(&session_id)?;
-    start(move || crate::mission::transcript_path(&cwd, &session_id), tail, move |e| on_event.send(e).is_ok())
+    start(webview.label(), move || crate::mission::transcript_path(&cwd, &session_id), tail, move |e| on_event.send(e).is_ok())
 }
 
 /// Stops a follow; an unknown id is ignored.
@@ -106,6 +117,8 @@ fn earlier(path: &Path, before: u64, count: usize) -> io::Result<Chunk> {
 
 /// A running follow: its thread ends once `stop` is set and `wake` reaches it.
 struct Follow {
+    /// The label of the webview that asked for it.
+    owner: String,
     stop: Arc<AtomicBool>,
     wake: Sender<()>,
     thread: Option<JoinHandle<()>>,
@@ -116,9 +129,9 @@ fn follows() -> MutexGuard<'static, HashMap<u32, Follow>> {
     FOLLOWS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Spawns a follow of the file `find` returns (it is asked again while there is none), sending
-/// each event to `sink`; a `false` from `sink` (the webview is gone) ends the follow.
-fn start<F, S>(find: F, tail: usize, sink: S) -> Result<u32, String>
+/// Spawns a follow for webview `owner` of the file `find` returns (it is asked again while there
+/// is none), sending each event to `sink`; a `false` from `sink` (the webview is gone) ends it.
+fn start<F, S>(owner: &str, find: F, tail: usize, sink: S) -> Result<u32, String>
 where
     F: FnMut() -> Option<PathBuf> + Send + 'static,
     S: FnMut(FollowEvent) -> bool + Send + 'static,
@@ -137,13 +150,34 @@ where
             follows().remove(&id);
         })
         .map_err(|e| format!("conversation: cannot start a follow: {e}"))?;
-    all.insert(id, Follow { stop, wake, thread: Some(thread) });
+    all.insert(id, Follow { owner: owner.to_owned(), stop, wake, thread: Some(thread) });
     Ok(id)
 }
 
 /// Ends follow `id`, returning its thread (already ending) for a caller that wants to wait.
 fn stop(id: u32) -> Option<JoinHandle<()>> {
-    let mut f = follows().remove(&id)?;
+    follows().remove(&id).and_then(end)
+}
+
+/// Ends every follow of webview `owner`, which is loading a page: the page that asked for them is
+/// gone, and a Channel send into it still succeeds (Tauri evals a callback the new page lacks, or
+/// queues a payload over 8 KB for a fetch that never comes). Called on `PageLoadEvent::Started`.
+/// Returns how many it ended.
+pub fn page_loading(owner: &str) -> usize {
+    let gone: Vec<Follow> = {
+        let mut all = follows();
+        let ids: Vec<u32> = all.iter().filter(|(_, f)| f.owner == owner).map(|(id, _)| *id).collect();
+        ids.iter().filter_map(|id| all.remove(id)).collect()
+    };
+    let n = gone.len();
+    gone.into_iter().for_each(|f| drop(end(f)));
+    if n > 0 {
+        log::debug!("conversation: {owner} loaded a page; ended {n} follows");
+    }
+    n
+}
+
+fn end(mut f: Follow) -> Option<JoinHandle<()>> {
     f.stop.store(true, Ordering::SeqCst);
     let _ = f.wake.send(());
     f.thread.take()
@@ -477,7 +511,7 @@ mod tests {
     fn follow(path: &Path, tail: usize) -> (u32, Receiver<FollowEvent>) {
         let (tx, rx) = mpsc::channel();
         let p = path.to_path_buf();
-        let id = start(move || p.is_file().then(|| p.clone()), tail, move |e| tx.send(e).is_ok()).unwrap();
+        let id = start("test", move || p.is_file().then(|| p.clone()), tail, move |e| tx.send(e).is_ok()).unwrap();
         (id, rx)
     }
 
@@ -493,7 +527,7 @@ mod tests {
     }
 
     /// True once the follow's thread has let go of its sink, whatever it sent before.
-    fn ended(rx: &Receiver<FollowEvent>) -> bool {
+    fn ended<T>(rx: &Receiver<T>) -> bool {
         let until = Instant::now() + WAIT;
         while Instant::now() < until {
             if let Err(mpsc::RecvTimeoutError::Disconnected) = rx.recv_timeout(Duration::from_millis(100)) {
@@ -858,6 +892,7 @@ mod tests {
         let p = path.clone();
         let mut sent = 0;
         let id = start(
+            "test",
             move || p.is_file().then(|| p.clone()),
             10,
             move |e| {
@@ -887,13 +922,67 @@ mod tests {
             Err(tauri::Error::WebviewNotFound)
         });
         let p = path.clone();
-        let id = start(move || p.is_file().then(|| p.clone()), 10, move |e| channel.send(e).is_ok()).unwrap();
+        let id = start("test", move || p.is_file().then(|| p.clone()), 10, move |e| channel.send(e).is_ok()).unwrap();
         let until = Instant::now() + WAIT;
         while follows().contains_key(&id) {
             assert!(Instant::now() < until, "a failing Channel did not end the follow");
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Follows `path` for webview `owner` through a Tauri Channel that takes every send, as one
+    /// into a page that has since reloaded does. What reaches the "page" comes out on the
+    /// receiver as JSON, which closes when the follow's thread is gone.
+    fn follow_into_a_reloaded_page(owner: &str, path: &Path) -> (u32, Receiver<serde_json::Value>) {
+        let (tx, rx) = mpsc::channel();
+        let channel: Channel<FollowEvent> = Channel::new(move |body| {
+            let tauri::ipc::InvokeResponseBody::Json(json) = body else { panic!("a follow event is JSON") };
+            let _ = tx.send(serde_json::from_str(&json).unwrap());
+            Ok(())
+        });
+        let p = path.to_path_buf();
+        let id = start(owner, move || p.is_file().then(|| p.clone()), 10, move |e| channel.send(e).is_ok()).unwrap();
+        (id, rx)
+    }
+
+    fn kind_of(rx: &Receiver<serde_json::Value>) -> String {
+        rx.recv_timeout(WAIT).expect("an event")["kind"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn a_page_load_ends_its_webviews_follows_and_no_others() {
+        let dir = temp_dir("conv-reload");
+        let (a, b, missing) = (dir.join("a.jsonl"), dir.join("b.jsonl"), dir.join("none.jsonl"));
+        std::fs::write(&a, "a\n").unwrap();
+        std::fs::write(&b, "b\n").unwrap();
+        let (main, other) = ("conv-reload-main", "conv-reload-other");
+        let (a_id, a_rx) = follow_into_a_reloaded_page(main, &a);
+        let (m_id, m_rx) = follow_into_a_reloaded_page(main, &missing);
+        let (b_id, b_rx) = follow_into_a_reloaded_page(other, &b);
+        assert_eq!(kind_of(&a_rx), "lines");
+        assert_eq!(kind_of(&m_rx), "missing");
+        assert_eq!(kind_of(&b_rx), "lines");
+
+        // Nothing unfollows and every send succeeds, so only the page load can end these.
+        append(&a, b"more\n");
+        assert_eq!(kind_of(&a_rx), "lines");
+        assert!(follows().contains_key(&a_id));
+
+        assert_eq!(page_loading(main), 2);
+        assert!(ended(&a_rx) && ended(&m_rx), "a follow outlived the page that asked for it");
+        {
+            let all = follows();
+            assert!(!all.contains_key(&a_id) && !all.contains_key(&m_id));
+            assert!(all.contains_key(&b_id), "another webview's follow ended");
+        }
+        assert_eq!(page_loading(main), 0);
+
+        // The other webview's follow runs on, until its own page loads.
+        append(&b, b"more\n");
+        assert_eq!(kind_of(&b_rx), "lines");
+        assert_eq!(page_loading(other), 1);
+        assert!(ended(&b_rx));
     }
 
     #[test]
