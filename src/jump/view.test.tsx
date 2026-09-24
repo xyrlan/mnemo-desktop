@@ -31,9 +31,14 @@ import { all, run } from '../actions/registry'
 import { jumpStore } from './store'
 
 // Cold, the import transforms Radix and cmdk: slower than the default hook timeout on CI.
+// The palette mounts itself in the shell's overlay slot; the shell is not rendered here, so draw
+// that slot on its own.
 beforeAll(async () => {
   await act(async () => {
     await import('./view')
+    const { SlotOutlet } = await import('../shell/Slot')
+    const { createRoot } = await import('react-dom/client')
+    createRoot(document.body.appendChild(document.createElement('div'))).render(<SlotOutlet slot="overlay" />)
   })
 }, 60_000)
 
