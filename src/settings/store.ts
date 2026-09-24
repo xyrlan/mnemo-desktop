@@ -12,9 +12,23 @@ export type Settings = {
   cloneBase: string | null
   /** Cockpit and board: the labels the recent-issues filter keeps, per repo root. */
   issueLabels: Record<string, string[]>
+  /** A new workspace's `claude` runs with `--dangerously-skip-permissions` (spec, *How a parallel
+   *  agent is born*: on by default, the maintainer's call). */
+  skipPermissions: boolean
+  /** The command a new worktree runs once it exists (`pnpm install`, say), per repo root. */
+  repoSetup: Record<string, string>
 }
 
-export const DEFAULTS: Settings = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {} }
+export const DEFAULTS: Settings = {
+  outgoing: 'en',
+  replyLanguage: 'unchanged',
+  homePinned: [],
+  homeHidden: [],
+  cloneBase: null,
+  issueLabels: {},
+  skipPermissions: true,
+  repoSetup: {},
+}
 
 export interface SettingsClient {
   read(): Promise<Partial<Settings>>
@@ -64,6 +78,10 @@ function pick(v: Partial<Settings>): Partial<Settings> {
   if (typeof v.cloneBase === 'string' && v.cloneBase) out.cloneBase = v.cloneBase
   if (v.issueLabels && typeof v.issueLabels === 'object' && !Array.isArray(v.issueLabels)) {
     out.issueLabels = Object.fromEntries(Object.entries(v.issueLabels).flatMap(([root, ls]) => (strs(ls) ? [[root, strs(ls)!]] : [])))
+  }
+  if (typeof v.skipPermissions === 'boolean') out.skipPermissions = v.skipPermissions
+  if (v.repoSetup && typeof v.repoSetup === 'object' && !Array.isArray(v.repoSetup)) {
+    out.repoSetup = Object.fromEntries(Object.entries(v.repoSetup).filter(([, cmd]) => typeof cmd === 'string' && cmd.trim() !== ''))
   }
   return out
 }
