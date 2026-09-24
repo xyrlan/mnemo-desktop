@@ -1,4 +1,4 @@
-import { createMissionStore, foldsOpen } from './store'
+import { createMissionStore } from './store'
 import type { MissionClient } from './client'
 import type { Snapshot } from './types'
 
@@ -63,14 +63,6 @@ test('sendReply sends the trimmed draft and clears it; failure keeps the draft',
   expect(await s.getState().sendReply('x')).toBe(false)
   expect(s.getState().drafts.x).toBe('again')
   expect(s.getState().replyErrors.x).toContain('no socket')
-})
-
-test('sidebar width clamps', () => {
-  const s = createMissionStore(fake())
-  s.getState().setSidebarWidth(10)
-  expect(s.getState().sidebarWidth).toBe(240)
-  s.getState().setSidebarWidth(9999)
-  expect(s.getState().sidebarWidth).toBe(720)
 })
 
 test('sendReply records what was sent so the UI can show it immediately', async () => {
@@ -145,22 +137,4 @@ test('replyAsMe failure keeps the draft and shows why, without the Error prefix'
   expect(s.getState().replyErrors.x).toBe('x\'s input already holds "hm"')
   expect(s.getState().sent.x).toBeUndefined()
   expect(await s.getState().replyAsMe('empty')).toBe(false)
-})
-
-test('folds: working opens by itself only when nothing needs you, done starts collapsed', () => {
-  expect(foldsOpen({}, 0)).toEqual({ working: true, done: false })
-  expect(foldsOpen({}, 2)).toEqual({ working: false, done: false })
-  // A click wins over the default, either way.
-  expect(foldsOpen({ working: false }, 0)).toEqual({ working: false, done: false })
-  expect(foldsOpen({ working: true, done: true }, 2)).toEqual({ working: true, done: true })
-})
-
-test('setFold keeps one fold state for every surface, and leaves the other fold alone', () => {
-  const s = createMissionStore(fake())
-  expect(s.getState().folds).toEqual({})
-  s.getState().setFold('done', true)
-  s.getState().setFold('working', false)
-  expect(s.getState().folds).toEqual({ done: true, working: false })
-  s.getState().setFold('done', false)
-  expect(s.getState().folds).toEqual({ done: false, working: false })
 })

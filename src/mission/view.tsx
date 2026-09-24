@@ -131,7 +131,6 @@ registerProvider(() => {
     },
   ]
 })
-register({ id: 'mission.toggle-sidebar', title: 'Toggle mission sidebar', shortcut: '⌘B', run: () => missionStore.getState().toggleSidebar() })
 register({
   id: 'mission.reply-blocked',
   title: 'Reply to the first blocked child',

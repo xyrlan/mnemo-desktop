@@ -1,12 +1,11 @@
 import { useEffect } from 'react'
 import { missionStore, useMission } from './app-store'
 import { store as appStore } from '../layout/app-store'
-import { childWord, needKind, permissionAsk, type ChildSession, type Mission, type Pr } from './types'
+import { childWord, needKind, permissionAsk, type ChildSession } from './types'
 import { answerPrompt, useAnswer, type Choice } from '../cockpit/approve'
 import './mission.css'
 
-/** What the sidebar's needs-you list, the cockpit canvas and the mission pane do with a
- *  child, a PR or a contract, and the reply box they share. */
+/** What the mission pane does with a child, and the reply box under its conversation. */
 
 export function openMissionPane(child: ChildSession) {
   const s = appStore.getState()
@@ -21,14 +20,6 @@ export function openMissionPane(child: ChildSession) {
 
 export function attachChild(id: string, place: 'tab' | 'split-col' = 'tab') {
   appStore.getState().openView('terminal-cmd', { cmd: `claude attach ${id}` }, place, `attach ${id}`)
-}
-
-export function openPr(pr: Pr) {
-  appStore.getState().openView('browser', { url: pr.url }, 'auto', `PR #${pr.number}`)
-}
-
-export function openContract(m: Mission) {
-  appStore.getState().openView('editor', { path: m.contract_path }, 'auto', m.contract_path.split('/').pop())
 }
 
 /** `Bash: cd … && …` as the tool and what it runs; a bare ask is all command. */
@@ -85,15 +76,15 @@ export function PermissionBox({ c, className = '' }: { c: ChildSession; classNam
 
 /** The blocked child's question, a reply field prefilled with its suggested reply, and what
  *  was last sent; a permission prompt gets `PermissionBox` instead. Renders nothing unless the
- *  child is BLOCKED. `attach` adds a link to the child's session, for surfaces that have none. */
-export function ReplyBox({ c, rows = 2, className = '', attach = false }: { c: ChildSession; rows?: number; className?: string; attach?: boolean }) {
+ *  child is BLOCKED. */
+export function ReplyBox({ c, rows = 2, className = '' }: { c: ChildSession; rows?: number; className?: string }) {
   const blocked = childWord(c) === 'BLOCKED'
   if (!blocked) return null
   if (needKind(c) === 'permission') return <PermissionBox c={c} className={className} />
-  return <QuestionBox c={c} rows={rows} className={className} attach={attach} />
+  return <QuestionBox c={c} rows={rows} className={className} />
 }
 
-function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: number; className: string; attach: boolean }) {
+function QuestionBox({ c, rows, className }: { c: ChildSession; rows: number; className: string }) {
   const draft = useMission((s) => s.drafts[c.id] ?? '')
   const lastSent = useMission((s) => s.sent[c.id]?.at(-1))
   useEffect(() => {
@@ -102,7 +93,7 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
   return (
     <div className={`m-reply${className ? ` ${className}` : ''}`}>
       <div className="m-needs">{c.needs}</div>
-      <ReplyField c={c} rows={rows} attach={attach} />
+      <ReplyField c={c} rows={rows} />
       {lastSent && (
         <div className="m-sent">
           {lastSent.asMe ? 'typed as you' : 'sent'} ✓ {sentAt(lastSent.at)} · {lastSent.asMe ? 'in its terminal' : 'waiting for the child to pick it up…'} <span className="m-sent-text" title={lastSent.original !== lastSent.text ? `typed: ${lastSent.original}` : undefined}>{lastSent.text}</span>
@@ -115,10 +106,9 @@ function QuestionBox({ c, rows, className, attach }: { c: ChildSession; rows: nu
 export const sentAt = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 /** The draft field, send / reply as me, and what each of them is: what the blocked child's
- *  question box and the cockpit's chat drawer both type into. One draft per child, so the two
- *  show the same text. It never prefills: a suggested reply is the question box's, for a child
- *  that asked. */
-export function ReplyField({ c, rows, attach = false }: { c: ChildSession; rows: number; attach?: boolean }) {
+ *  question box types into. One draft per child. It never prefills: a suggested reply is the
+ *  question box's, for a child that asked. */
+function ReplyField({ c, rows }: { c: ChildSession; rows: number }) {
   const draft = useMission((s) => s.drafts[c.id] ?? '')
   const err = useMission((s) => s.replyErrors[c.id])
   const sending = useMission((s) => s.sending[c.id])
@@ -146,11 +136,6 @@ export function ReplyField({ c, rows, attach = false }: { c: ChildSession; rows:
         >
           {typing ? 'typing…' : 'reply as me'}
         </button>
-        {attach && (
-          <button className="m-attach-link" title={`claude attach ${c.id}`} onClick={() => attachChild(c.id)}>
-            take over
-          </button>
-        )}
         {err && <span className="m-error">{err}</span>}
       </div>
       {/* Claude Code delivers socket writes as another session's message, which it tells

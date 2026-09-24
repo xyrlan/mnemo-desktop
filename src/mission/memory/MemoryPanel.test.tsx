@@ -73,7 +73,7 @@ test('a fresh child with rows nowhere reads as empty everywhere, never an error'
 })
 
 // Every pane's stylesheet is loaded at once (App imports every view), so a class another view
-// styles lands here too. The panel once used `.mm`, the cockpit mission map's root, and took its
+// styles lands here too. The panel once used `.mm`, the (since retired) cockpit mission map's root, and took its
 // `height: 100%`: the mission pane's conversation below it got 0 px (round 20). Read from disk:
 // vitest hands a `?raw` stylesheet over as an empty string. The app has no Node types, so the
 // two fs calls are typed here.
@@ -95,7 +95,8 @@ test('no stylesheet outside the mission pane styles a class the panel renders', 
   const classes = new Set([...host.querySelectorAll('[class]')].flatMap((e) => [...e.classList]))
   expect(classes.size).toBeGreaterThan(5)
   const sheets = sheetsOutsideMission()
-  expect(sheets.some(([p, css]) => p.endsWith('cockpit.css') && css.length > 1000)).toBe(true)
+  // The walk found the sheets: theme.css is the largest of them.
+  expect(sheets.some(([p, css]) => p.endsWith('/theme.css') && css.length > 1000)).toBe(true)
   for (const [path, css] of sheets) {
     for (const c of classes) expect(new RegExp(`\\.${c}(?![\\w-])`).test(css), `${path} styles .${c}`).toBe(false)
   }

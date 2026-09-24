@@ -1,60 +1,18 @@
-.hm { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
-.hm-head { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
-.hm-title { font-weight: 700; color: var(--accent); letter-spacing: .04em; }
-.hm-entry { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.hm-clone { display: flex; gap: 6px; }
-.hm-clone input, .hm-filter { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); padding: 5px 8px; font: inherit; border-radius: 4px; min-width: 240px; }
-.hm-clone input:focus, .hm-filter:focus { outline: none; border-color: var(--accent); }
+/* The PR view (pr-pane.tsx, review/) and the diff look the conversation's cards share. */
 .hm-btn, .hm-link { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); padding: 5px 10px; font: inherit; border-radius: 4px; cursor: pointer; }
 .hm-btn:hover { border-color: var(--accent); }
 .hm-btn:disabled { opacity: .4; cursor: default; }
 .hm-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
 .hm-link { border: 0; background: transparent; color: var(--fg-muted); text-align: left; }
-.hm-repo-name { font-weight: 700; }
-.hm-repo-path { color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hm-repo-when { color: var(--fg-muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
-.hm-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ansi-green); }
-.hm-actions { margin-left: auto; display: flex; gap: 6px; }
 .hm-session-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hm-session-meta { color: var(--fg-muted); font-size: 11px; display: flex; gap: 10px; white-space: nowrap; }
 .hm-live { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
-.hm-live-here { color: var(--ansi-green); border-color: var(--ansi-green); }
-.hm-live-bg { color: var(--ansi-cyan); border-color: var(--ansi-cyan); }
 .hm-muted { color: var(--fg-muted); }
-.hm-empty { align-items: center; justify-content: center; gap: 16px; color: var(--fg-muted); }
-.hm-empty .hm-entry { margin: 0; }
-.hm-errors { padding: 6px 20px; color: var(--fg-muted); font-size: 11px; border-top: 1px solid var(--border); }
-.hm-notice { position: absolute; z-index: 3; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-elev); border: 1px solid var(--ansi-yellow); color: var(--fg); padding: 8px 14px; border-radius: 4px; cursor: pointer; }
 .hm-agent { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
-.hm-filter { min-width: 180px; }
-.hm-stream { flex: 1; min-height: 0; overflow: auto; padding: 12px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
-/* A group and every row in it carry the repo's accent (`--repo`, from repoAccent). */
-.hm-group { --repo: var(--accent); display: flex; flex-direction: column; gap: 2px; border-left: 3px solid var(--repo); padding-left: 10px; }
-.hm-group.hm-hidden { opacity: .5; }
-.hm-group-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 4px 0 6px; position: sticky; top: -12px; background: var(--bg); z-index: 1; }
-.hm-group-head .hm-repo-name { color: var(--repo); font-size: 14px; }
-.hm-group.hm-unresolved .hm-repo-name { color: var(--fg-muted); font-weight: 400; }
-.hm-group.hm-selected .hm-group-head .hm-repo-name { text-decoration: underline; text-decoration-color: var(--repo); text-underline-offset: 3px; }
-.hm-section { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+/* The PR view carries its repo's accent (`--repo`, from repoAccent). */
 .hm-section-label { color: var(--fg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 4px 0 2px 10px; }
-.hm-count { color: var(--repo); }
-.hm-row { display: flex; align-items: center; gap: 10px; text-align: left; background: transparent; border: 1px solid transparent; border-left: 2px solid color-mix(in srgb, var(--repo) 55%, transparent); color: var(--fg); padding: 5px 10px; border-radius: 0 4px 4px 0; font: inherit; cursor: pointer; min-width: 0; }
-button.hm-row:hover:not(:disabled), .hm-pr:hover { background: var(--bg-elev); border-color: var(--border); border-left-color: var(--repo); }
-.hm-row:disabled { opacity: .45; cursor: default; }
-.hm-pr { cursor: default; padding: 0 10px 0 0; }
-.hm-pr-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; padding: 5px 0 5px 10px; cursor: pointer; }
 .hm-num { color: var(--repo); font-size: 12px; white-space: nowrap; }
 .hm-checks { font-size: 11px; width: 10px; text-align: center; }
-.hm-checks-pass { color: var(--ansi-green); }
-.hm-checks-fail { color: var(--ansi-red); }
-.hm-checks-pending { color: var(--ansi-yellow); }
-.hm-child { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--repo); color: var(--repo); background: transparent; white-space: nowrap; }
-button.hm-child { cursor: pointer; }
-button.hm-child:hover { background: color-mix(in srgb, var(--repo) 18%, transparent); }
-.hm-gh-error { cursor: default; color: var(--fg-muted); font-size: 11px; }
-.hm-more { font-size: 11px; padding: 3px 12px; }
-.hm-more:hover { color: var(--fg); }
-.hm-folds { display: flex; gap: 12px; }
 .hm-armed { border-color: var(--ansi-red); color: var(--ansi-red); }
 /* The PR view sits over the stream, which stays mounted (and scrolled) underneath. */
 .hm-pr-view { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--bg); }

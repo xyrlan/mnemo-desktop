@@ -1,34 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { store as appStore } from '../layout/app-store'
-import type { Mission, Pr } from '../mission/types'
-import { runJob } from './job'
+import type { Pr } from '../mission/types'
 import { mergeChecked } from './merge'
 
-export { mergeArgv, mergeKey, mergePlan } from './merge'
+export { mergeKey } from './merge'
 
-/** What the inbox rows and the mission map run. Pages open in a browser pane. `merge` and
- *  `land` run headless: the user already confirmed them twice (`useArm`), so they do not move
- *  anyone to a terminal to watch — the row says how it went, and the log is in its drawer.
- *  A merge is gated on the PR's checks at the moment it runs (`merge.ts`). */
-
-/** The PR's checks page: GitHub lists the failing job first there. */
-export function openJob(pr: Pr) {
-  appStore.getState().openView('browser', { url: `${pr.url.replace(/\/+$/, '')}/checks` }, 'auto', `PR #${pr.number} checks`)
-}
-
-export const landArgv = (m: Mission) => ['mnemo', 'land', m.contract_path, '--merge']
-
-/** A land's job key is its row's key (`needs.ts`), as a merge's is (`mergeKey`). */
-export const landKey = (m: Mission) => `land:${m.contract_path}`
+/** What the PR view's merge runs (`src/home/review/Merge.tsx`). A merge runs headless: the user
+ *  already confirmed it twice (`useArm`), so nobody is moved to a terminal to watch — the view
+ *  says how it went, and the log opens in a pane. It is gated on the PR's checks at the moment it
+ *  runs (`merge.ts`). */
 
 /** Merges `pr` only if every one of its checks passed when the merge runs, marking a draft
- *  ready first; the row keyed `mergeKey(root, pr)` says how it went. The PR view calls it too. */
+ *  ready first; the job keyed `mergeKey(root, pr)` says how it went. */
 export function mergePr(root: string, pr: Pr) {
   void mergeChecked(root, pr)
-}
-
-export function landMission(root: string, m: Mission) {
-  void runJob(landKey(m), `land · ${m.feature}`, root, landArgv(m))
 }
 
 /** Hands a job's log to a pane of its own, for whoever wants the full screen. It shows the same
@@ -37,11 +22,7 @@ export function openJobLog(key: string, title: string) {
   appStore.getState().openView('job-log', { job: key }, 'auto', title)
 }
 
-export function stopChild(id: string) {
-  appStore.getState().openView('terminal-cmd', { cmd: `claude stop ${id}` }, 'split-col', `stop ${id}`)
-}
-
-/** Two-step confirmation for what cannot be undone (merge, land, stop): the first `fire(key)`
+/** Two-step confirmation for what cannot be undone (a merge): the first `fire(key)`
  *  arms `key` and returns false, a second one within `ms` returns true. `armed` names what
  *  is waiting for the second press, so the button can say so. */
 export function useArm(ms = 4000): { armed: string | null; fire: (key: string) => boolean } {
