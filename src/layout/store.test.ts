@@ -531,8 +531,8 @@ test('a conversation face survives save and restore; the terminal face is the de
   s.getState().setFace(1, 'conversation')
   s.getState().setFace(2, 'terminal')
   const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave()))
-  expect(saved.panes['1'].face).toBe('conversation')
-  expect(saved.panes['2'].face).toBeUndefined()
+  expect(saved.worktrees[0].panes['1'].face).toBe('conversation')
+  expect(saved.worktrees[0].panes['2'].face).toBeUndefined()
   const again = createStore(fakePty())
   await again.getState().restore(saved)
   const faces = Object.values(again.getState().panes).map((p) => [p.cwd, p.face])
@@ -560,4 +560,173 @@ test('goToPane shows the tab holding a pane with it focused; renameTab sets and 
   s.getState().renameTab('tab-3', 'x')
   s.getState().renameTab('tab-3', undefined)
   expect(s.getState().tabs[1]).not.toHaveProperty('name')
+})
+
+describe('worktrees', () => {
+  test('a switch parks the shown workbench with its panes running and brings it back as it was', async () => {
+    const pty = fakePty()
+    const s = createStore(pty)
+    await s.getState().switchWorktree('/repo')
+    await s.getState().newTab()
+    await s.getState().split('row')
+    s.getState().setRatio([], 0.3)
+    const there = s.getState().tabs
+
+    await s.getState().switchWorktree('/repo-wt-a')
+    expect(s.getState().activeWorktree).toBe('/repo-wt-a')
+    expect(s.getState().tabs).toEqual([])
+    expect(s.getState().activeTab).toBe('')
+    await s.getState().newTab()
+    // A new terminal opens in the worktree shown.
+    expect(s.getState().panes[3].cwd).toBe('/repo-wt-a')
+    // The parked worktree's panes keep running: none killed, all still panes of the store.
+    expect(pty.killed).toEqual([])
+    expect(Object.keys(s.getState().panes)).toEqual(['1', '2', '3'])
+
+    await s.getState().switchWorktree('/repo')
+    expect(s.getState().tabs).toBe(there)
+    expect(s.getState().activeTab).toBe('tab-1')
+    expect(s.getState().tabs[0].root).toMatchObject({ kind: 'split', ratio: 0.3 })
+    expect(s.getState().openWorktrees()).toEqual(['/repo', '/repo-wt-a'])
+  })
+
+  test('worktreeTabs reads any open worktree, and both reads keep their array until it changes', async () => {
+    const s = createStore(fakePty())
+    await s.getState().switchWorktree('/a')
+    await s.getState().newTab()
+    await s.getState().switchWorktree('/b')
+    const open = s.getState().openWorktrees()
+    const a = s.getState().worktreeTabs('/a')
+    expect(a.map((t) => t.id)).toEqual(['tab-1'])
+    expect(s.getState().worktreeTabs('/b')).toBe(s.getState().tabs)
+    expect(s.getState().worktreeTabs('/nowhere')).toEqual([])
+    expect(s.getState().worktreeTabs('/nowhere')).toBe(s.getState().worktreeTabs('/elsewhere'))
+
+    await s.getState().newTab()
+    expect(s.getState().worktreeTabs('/a')).toBe(a)
+    expect(s.getState().openWorktrees()).toBe(open)
+    await s.getState().switchWorktree('/b')
+    expect(s.getState().openWorktrees()).toBe(open)
+  })
+
+  test('tabs opened before any worktree join the first one switched to, after its own', async () => {
+    const s = createStore(fakePty())
+    await s.getState().newTab('/home')
+    expect(s.getState().activeWorktree).toBeNull()
+    expect(s.getState().openWorktrees()).toEqual([])
+    await s.getState().switchWorktree('/a')
+    await s.getState().newTab()
+    await s.getState().switchWorktree('/b')
+    await s.getState().newTab('/home')
+    await s.getState().switchWorktree('/a')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1', 'tab-2'])
+    expect(s.getState().worktreeTabs('/b').map((t) => t.id)).toEqual(['tab-3'])
+  })
+
+  test('closeWorktree kills its panes alone and shows the worktree opened before it', async () => {
+    const pty = fakePty()
+    const s = createStore(pty)
+    for (const w of ['/a', '/b', '/c']) {
+      await s.getState().switchWorktree(w)
+      await s.getState().newTab()
+    }
+    s.getState().openView('vault', {}, 'tab')
+    await s.getState().switchWorktree('/b')
+    await s.getState().split('col')
+    const sink = vi.fn()
+    s.getState().attachSink(4, sink)
+
+    await s.getState().closeWorktree('/b')
+    expect(pty.killed).toEqual([2, 4])
+    expect(s.getState().activeWorktree).toBe('/a')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1'])
+    expect(s.getState().openWorktrees()).toEqual(['/a', '/c'])
+    expect(s.getState().panes[2]).toBeUndefined()
+    expect(s.getState().sinks[4]).toBeUndefined()
+    // A killed shell still reports its exit: the pane stays gone.
+    s.getState().paneExited(2, 0)
+    s.getState().setTitle(4, 'zsh')
+    expect(Object.keys(s.getState().panes).map(Number).sort()).toEqual([-1, 1, 3])
+
+    // A parked worktree closes without touching the one shown; synthetic panes are not killed.
+    await s.getState().closeWorktree('/c')
+    expect(pty.killed).toEqual([2, 4, 3])
+    expect(s.getState().activeWorktree).toBe('/a')
+    expect(s.getState().panes[-1]).toBeUndefined()
+
+    await s.getState().closeWorktree('/nowhere')
+    await s.getState().closeWorktree('/a')
+    expect(s.getState().activeWorktree).toBeNull()
+    expect(s.getState().tabs).toEqual([])
+    expect(s.getState().activeTab).toBe('')
+    expect(s.getState().openWorktrees()).toEqual([])
+    expect(s.getState().panes).toEqual({})
+  })
+
+  test('closing the first worktree while shown shows the one after it', async () => {
+    const s = createStore(fakePty())
+    await s.getState().switchWorktree('/a')
+    await s.getState().switchWorktree('/b')
+    await s.getState().switchWorktree('/a')
+    await s.getState().closeWorktree('/a')
+    expect(s.getState().activeWorktree).toBe('/b')
+  })
+
+  test('goToPane switches to the worktree holding the pane; closeTab closes a tab of a parked one', async () => {
+    const pty = fakePty()
+    const s = createStore(pty)
+    await s.getState().switchWorktree('/a')
+    await s.getState().newTab()
+    await s.getState().split('row')
+    await s.getState().newTab()
+    await s.getState().switchWorktree('/b')
+    s.getState().goToPane(1)
+    expect(s.getState().activeWorktree).toBe('/a')
+    expect(s.getState().activeTab).toBe('tab-1')
+    expect(s.getState().tabs[0].focused).toBe(1)
+
+    await s.getState().switchWorktree('/b')
+    await s.getState().closeTab('tab-3')
+    expect(pty.killed).toEqual([3])
+    expect(s.getState().worktreeTabs('/a').map((t) => t.id)).toEqual(['tab-1'])
+    expect(s.getState().activeWorktree).toBe('/b')
+    s.getState().goToPane(99)
+    expect(s.getState().activeWorktree).toBe('/b')
+  })
+
+  test('a tab whose shell was spawning during a switch lands in the worktree it was opened in', async () => {
+    let release: () => void = () => {}
+    const base = fakePty()
+    const pty: PtyClient = {
+      ...base,
+      spawn: (o) => new Promise((ok) => (release = () => ok(base.spawn(o)))),
+    }
+    const s = createStore(pty)
+    await s.getState().switchWorktree('/a')
+    const opening = s.getState().newTab()
+    await s.getState().switchWorktree('/b')
+    release()
+    await opening
+    expect(s.getState().tabs).toEqual([])
+    expect(s.getState().worktreeTabs('/a').map((t) => t.id)).toEqual(['tab-1'])
+
+    // A split finishing after a switch splits its own tab, parked or not.
+    await s.getState().switchWorktree('/a')
+    const splitting = s.getState().split('row')
+    await s.getState().switchWorktree('/b')
+    release()
+    await splitting
+    expect(leaves(s.getState().worktreeTabs('/a')[0].root)).toEqual([1, 2])
+    expect(s.getState().tabs).toEqual([])
+  })
+
+  test('a split in a pane without a cwd starts in the shown worktree', async () => {
+    const s = createStore(fakePty(), { workspace: () => null })
+    await s.getState().switchWorktree('/a')
+    s.getState().openView('vault', {}, 'tab')
+    await s.getState().split('row')
+    expect(s.getState().panes[1].cwd).toBe('/a')
+    await s.getState().openCommandTab(undefined, 'claude')
+    expect(s.getState().panes[2].cwd).toBe('/a')
+  })
 })
