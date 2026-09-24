@@ -26,6 +26,10 @@ pub struct ParentSession {
     /// Sum of `tokens` over the children whose `parent_session` is this session.
     #[serde(default)]
     pub children_tokens: u64,
+    /// What the session is parked on while `status` is `waiting`, as `claude agents` says it
+    /// (`permission prompt`, `input needed`, `dialog open`); None otherwise.
+    #[serde(default)]
+    pub waiting_for: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -153,6 +157,7 @@ pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
                 tokens: 0,
                 cache_read: 0,
                 children_tokens: 0,
+                waiting_for: r.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()).map(str::to_string),
             })
         })
         .collect())
@@ -1075,6 +1080,9 @@ mod tests {
     const CONTRACT: &str = include_str!("../fixtures/contract.md");
     const TIMELINE: &str = include_str!("../fixtures/timeline.jsonl");
     const TRANSCRIPT: &str = include_str!("../fixtures/transcript.jsonl");
+    /// Rows of `claude agents --json --all` (Claude Code 2.1.281) while an interactive session sat
+    /// on an AskUserQuestion, a plan approval, a Bash permission and `/config`, in that order.
+    const AGENTS_WAITING: &str = include_str!("../fixtures/agents-waiting.json");
 
     #[test]
     fn agents_keeps_interactive_rows_with_pid_and_status() {
@@ -1108,6 +1116,19 @@ mod tests {
         let json = serde_json::to_value(by("04082ea7")).unwrap();
         assert_eq!(json["model"], "claude-fable-5-1[1m]");
         assert!(json["effort"].is_null());
+    }
+
+    #[test]
+    fn a_parent_carries_what_it_waits_for() {
+        let p = parse_agents(AGENTS_WAITING).unwrap();
+        let w: Vec<_> = p.iter().map(|x| (x.status.as_str(), x.waiting_for.as_deref())).collect();
+        assert_eq!(
+            w,
+            [("waiting", Some("input needed")), ("waiting", Some("permission prompt")), ("waiting", Some("permission prompt")), ("waiting", Some("dialog open"))]
+        );
+        let busy = parse_agents(AGENTS).unwrap();
+        assert!(busy.iter().filter(|x| x.status != "waiting").all(|x| x.waiting_for.is_none()));
+        assert_eq!(serde_json::to_value(&p[0]).unwrap()["waiting_for"], "input needed");
     }
 
     #[test]
@@ -1368,7 +1389,7 @@ mod tests {
     #[test]
     fn a_declared_parent_wins_over_the_heuristic() {
         let parent = |sid: &str, cwd: &str| ParentSession {
-            session_id: sid.into(), pid: None, name: None, status: "idle".into(), cwd: cwd.into(), tokens: 0, cache_read: 0, children_tokens: 0,
+            session_id: sid.into(), pid: None, name: None, status: "idle".into(), cwd: cwd.into(), tokens: 0, cache_read: 0, children_tokens: 0, waiting_for: None,
         };
         let mut parents = vec![parent("old", "/r"), parent("young", "/r")];
         let mut children = parse_sessions(SESSIONS).unwrap().into_iter().take(2).collect::<Vec<_>>();
