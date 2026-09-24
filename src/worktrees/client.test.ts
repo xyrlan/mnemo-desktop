@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const invoke = vi.fn()
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: unknown[]) => invoke(...a) }))
 
-import { createWorktree, listWorktrees, removeWorktree, type WorktreeInfo } from './client'
+import { cleanupFacts, createWorktree, listWorktrees, removeWorktree, type WorktreeInfo } from './client'
 
 const tree: WorktreeInfo = {
   path: '/x/repo-wt-a',
@@ -45,5 +45,12 @@ describe('worktrees client', () => {
   it("passes the backend's refusal through", async () => {
     invoke.mockImplementation(() => Promise.reject(new Error('the main checkout is not removed')))
     await expect(removeWorktree('/x/repo')).rejects.toThrow('the main checkout is not removed')
+  })
+
+  it('reads cleanup facts through worktree_cleanup_facts', async () => {
+    const facts = { base: 'origin/main', trees: [{ ...tree, merged: true }] }
+    invoke.mockResolvedValue(facts)
+    expect(await cleanupFacts('/x/repo')).toEqual(facts)
+    expect(invoke).toHaveBeenLastCalledWith('worktree_cleanup_facts', { repo: '/x/repo' })
   })
 })

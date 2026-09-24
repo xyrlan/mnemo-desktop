@@ -29,3 +29,21 @@ export const createWorktree = (repo: string, name: string, opts: { base?: string
 /** Removes a worktree, keeping its branch. Rejects for the main checkout, while setup runs, and
  *  (without `force`) for a dirty tree. */
 export const removeWorktree = (path: string, force = false): Promise<void> => invoke<void>('worktree_remove', { path, force })
+
+/** A tree other than the main checkout, as cleaning up sees it. */
+export type CleanupTree = WorktreeInfo & {
+  /** Its HEAD is in the default branch (local or the remote's): none of its commits would be
+   *  lost. True too for a tree that never made one. */
+  merged: boolean
+}
+
+export type CleanupFacts = {
+  /** What `merged` is measured against (`origin/main`); null when there is nothing to measure
+   *  against, and then nothing is `merged`. */
+  base: string | null
+  /** Every tree of the repo but the main checkout. */
+  trees: CleanupTree[]
+}
+
+/** What cleaning up stale worktrees needs to know of the repo `repo` is in. */
+export const cleanupFacts = (repo: string): Promise<CleanupFacts> => invoke<CleanupFacts>('worktree_cleanup_facts', { repo })
