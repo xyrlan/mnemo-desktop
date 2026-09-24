@@ -147,12 +147,12 @@ const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('
 test('a PR with no child still opens: number, title, checks and draft, and no child section', async () => {
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr({ checks: 'fail', state: 'draft' })] })]) })
   await render({ repo: '/gh/a', pr: pr() })
-  expect(text('.hm-pr-head .hm-num')).toBe('#372')
-  expect(text('.hm-pr-title')).toBe('the PR view')
+  expect(text('.hm-pr-title .hm-num')).toBe('#372')
+  expect(text('.hm-pr-title')).toBe('the PR view#372')
   // The fresh snapshot wins over the row that was clicked: checks move while the view is open.
-  expect(text('.hm-checks')).toBe('✗')
-  expect(text('.hm-pr-head .hm-agent')).toBe('draft')
-  expect(text('.hm-pr-checks')).toBe('checks fail')
+  expect(host.querySelector('.hm-checks')?.getAttribute('data-checks')).toBe('fail')
+  expect(text('.hm-pr-head .hm-pr-state')).toBe('Draft')
+  expect(text('.hm-pr-checks')).toBe('Checkschecks fail')
   // No child section at all, and never an empty slot where the actions were.
   expect(host.querySelector('.hm-pr-child')).toBeNull()
   expect(host.querySelector('.hm-pr-acts')).toBeNull()
@@ -191,13 +191,16 @@ test('a finished child can be resumed but not stopped; one this snapshot lost is
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr({ child: 'gone2222' })] })]) })
   await act(async () => root.render(<PrPane opened={{ repo: '/gh/a', pr: pr({ child: 'gone2222' }) }} />))
   expect(text('.hm-pr-kid')).toBe('child gone2222, not in this snapshot')
+  expect(text('.hm-pr-child')).toBe('Opened bychild gone2222, not in this snapshot')
   expect(host.querySelector('.hm-pr-acts')).toBeNull()
 })
 
 test('the breadcrumb and ⌘← pop back to the stream', async () => {
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]), openedPr: { repo: '/gh/a', pr: pr() } })
   await render({ repo: '/gh/a', pr: pr() })
-  expect(text('.hm-pr-crumbs')).toBe('‹ a/PR #372')
+  expect(text('.hm-pr-crumbs')).toBe('a·PR #372')
+  // New UI inside the old views' root opts out of their element styles.
+  expect(host.querySelector('.hm-pr-view')!.hasAttribute('data-ui')).toBe(true)
   act(() => host.querySelector<HTMLButtonElement>('.hm-pr-back')!.click())
   expect(homeStore.getState().openedPr).toBeNull()
 
@@ -236,17 +239,21 @@ test('a different PR opened inside the grace period is navigated to, not left on
   ])
 })
 
-const tab = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[role=tab]')].find((b) => b.textContent === label)!
+const tab = (mode: 'diff' | 'github') => host.querySelector<HTMLButtonElement>(`[role=tab][data-mode=${mode}]`)!
+/** Radix tabs switch on mousedown, not click. */
+const pickTab = (mode: 'diff' | 'github') => act(() => void tab(mode).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })))
 const lines = () => host.querySelectorAll('.rv-line').length
 
 test('the change is read natively by default, from the repo root, beside the lens', async () => {
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
   await render({ repo: '/gh/a', pr: pr() })
   expect(reads).toEqual(['/gh/a#372'])
-  expect(tab('Diff').getAttribute('aria-selected')).toBe('true')
+  expect(tab('diff').getAttribute('aria-selected')).toBe('true')
+  expect(text('[data-mode=diff]')).toBe('Files changed2')
   // The webview loads behind the diff at zero size; the diff is what is on screen.
   expect(host.querySelector<HTMLElement>('.hm-pr-page')!.hidden).toBe(true)
-  expect(text('.rv-bar')).toBe('2 files+3 −1main ← feat/pr-view')
+  expect(text('.rv-bar')).toBe('2 files+3 −1')
+  expect(text('.hm-pr-refs')).toBe('mainfeat/pr-view')
   const heads = [...host.querySelectorAll('.rv-file-head .rv-path')].map((e) => e.textContent)
   expect(heads).toEqual(['src/a.rs', 'docs/new.md'])
   expect(text('.rv-hunk')).toBe('@@ -10,2 +10,2 @@ fn run()')
@@ -264,12 +271,12 @@ test('GitHub is one tab away, on the webview that was loading behind the diff', 
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
   await render({ repo: '/gh/a', pr: pr() })
   expect(sent).toEqual([`browser_create ${PR_WEBVIEW} https://github.com/o/a/pull/372`])
-  act(() => tab('GitHub').click())
+  pickTab('github')
   expect(host.querySelector<HTMLElement>('.hm-pr-page')!.hidden).toBe(false)
   expect(host.querySelector('.rv')).toBeNull()
   // Switching never makes a second webview.
   expect(sent.filter((c) => c.startsWith('browser_create'))).toHaveLength(1)
-  act(() => tab('Diff').click())
+  pickTab('diff')
   expect(host.querySelector('.rv')).toBeTruthy()
 })
 
@@ -283,7 +290,7 @@ test('a diff of thousands draws a bounded page, and the rest is a click away', a
   const open = [...host.querySelectorAll('.rv-file-head')].map((h) => h.getAttribute('aria-expanded'))
   expect(open).toEqual(['true', 'false', 'true', 'false'])
   expect(lines()).toBe(70)
-  expect(text('.rv-file:nth-child(4) .hm-agent')).toBe('generated')
+  expect(text('.rv-file:nth-child(4) .rv-generated')).toBe('generated')
 
   // Opened by hand, it draws one page, then one more per click.
   act(() => host.querySelectorAll<HTMLButtonElement>('.rv-file-head')[1].click())
@@ -298,10 +305,10 @@ test('picking a file in the side column opens it in the diff', async () => {
   answer = async () => review({ files: [file('a.ts', 10), file('huge.ts', 3000)] })
   homeStore.setState({ snapshot: snapOf([repo({ prs: [pr()] })]) })
   await render({ repo: '/gh/a', pr: pr() })
-  act(() => tab('GitHub').click())
+  pickTab('github')
   act(() => host.querySelectorAll<HTMLButtonElement>('.rv-list-row')[1].click())
   // Back on the diff, with that file open.
-  expect(tab('Diff').getAttribute('aria-selected')).toBe('true')
+  expect(tab('diff').getAttribute('aria-selected')).toBe('true')
   expect(host.querySelectorAll('.rv-file-head')[1].getAttribute('aria-expanded')).toBe('true')
 })
 
@@ -322,11 +329,12 @@ test('a read gh refused says why, and offers another try or GitHub', async () =>
   answer = async () => review({ files: [file('big.lock', 0, { additions: 30000 })], diff_error: 'diff exceeded the maximum number of lines (20000)' })
   await act(async () => host.querySelector<HTMLButtonElement>('.hm-pr-reload')!.click())
   expect(text('.rv-warn span')).toBe('gh gave no diff: diff exceeded the maximum number of lines (20000)')
+  expect(button('Merge')!.disabled).toBe(false)
   // The file list came from `gh pr view`: opening a file never claims it did not change.
   act(() => host.querySelector<HTMLButtonElement>('.rv-file-head')!.click())
   expect(text('.rv-msg')).toBe('gh gave no diff to show; it is on GitHub')
   act(() => button('Read it on GitHub')!.click())
-  expect(tab('GitHub').getAttribute('aria-selected')).toBe('true')
+  expect(tab('github').getAttribute('aria-selected')).toBe('true')
 })
 
 test('merge goes through mergePr, only on the second click, and says what its job said', async () => {
@@ -349,6 +357,7 @@ test('merge goes through mergePr, only on the second click, and says what its jo
   })
   // Refused is refused, in gh's words, and the button is back.
   expect(text('.hm-pr-merge-state')).toBe('merge failed ✗')
+  expect(button('log')).toBeTruthy()
   expect(text('.hm-pr-merge-why')).toBe('X Pull request o/a#372 is not mergeable: the base branch policy prohibits the merge.')
   expect(button('Merge')!.disabled).toBe(false)
 })
