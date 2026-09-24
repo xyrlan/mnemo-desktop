@@ -76,6 +76,9 @@ pub mod conversation;
 // -- github (src/github.rs) --
 pub mod github;
 
+// -- ai-commit-pr (src/commit.rs) --
+pub mod commit;
+
 // -- job (src/job.rs) --
 pub mod job;
 pub mod tools_install;
@@ -258,6 +261,15 @@ pub fn run() {
             github::gh_auth,
             github::gh_issues,
             github::gh_project,
+
+            // -- ai-commit-pr commands --
+            commit::commit_status,
+            commit::commit_message,
+            commit::commit_create,
+            commit::commit_push,
+            commit::commit_pr_find,
+            commit::commit_pr_draft,
+            commit::commit_pr_create,
 
             // -- job commands --
             job::job_run,
