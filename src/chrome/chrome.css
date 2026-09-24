@@ -176,3 +176,11 @@
    short white thumb) draws along the bottom. The grid is fitted to the width, so nothing is
    meant to scroll sideways; the vertical scrollbar stays. */
 .pane .xterm .xterm-viewport { overflow-x: hidden; }
+
+/* Seen in the real app after that: the band stayed. It is the viewport itself. xterm paints it
+   black (`rgb(0,0,0)`, inline), and the fitted rows stop ~13px short of its bottom, so that strip
+   showed black under the last row; and its native scrollbar (`overflow-y: scroll`, 17px) drew a
+   white thumb in the corner, although xterm 6 draws its own (`.xterm-scrollable-element`). The
+   viewport takes the terminal's background and hides the native bar. */
+.pane .xterm .xterm-viewport { background-color: var(--bg) !important; scrollbar-width: none; }
+.pane .xterm .xterm-viewport::-webkit-scrollbar { display: none; }

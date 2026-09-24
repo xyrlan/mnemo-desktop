@@ -7,7 +7,8 @@ import { getMemoryFeed } from '../memory/client'
 import { mountInSlot } from '../shell/slots'
 import { learnedClient } from '../learned/app-store'
 import { MemoryPanel } from './MemoryPanel'
-import { RightSidebar, type ActivityItem } from './RightSidebar'
+import { RightSidebar } from './RightSidebar'
+import { registerRightbarPanel, useRightbarPanels } from './panels'
 import { createMemoryStore, targetOf, type LayoutView } from './memory'
 
 /** The single live panel store: what it read survives the sidebar closing and opening. */
@@ -31,12 +32,15 @@ function LiveMemoryPanel(): React.JSX.Element {
   return <MemoryPanel store={memory} target={target} stamp={stamp} />
 }
 
-/** The right sidebar's tabs; Explorer, Source control and Checks join in a later wave. */
-export const ITEMS: ActivityItem[] = [{ id: 'memory', icon: Brain, title: 'Memory', panel: LiveMemoryPanel }]
+/** Explorer, Search and Source control register themselves the same way. */
+const unregisterMemory = registerRightbarPanel({ id: 'memory', icon: Brain, title: 'Memory', order: 100, panel: LiveMemoryPanel })
 
 function LiveRightSidebar(): React.JSX.Element | null {
-  return <RightSidebar items={ITEMS} />
+  return <RightSidebar items={useRightbarPanels()} />
 }
 
 const unmount = mountInSlot('right-sidebar', LiveRightSidebar)
-import.meta.hot?.dispose(unmount)
+import.meta.hot?.dispose(() => {
+  unmount()
+  unregisterMemory()
+})

@@ -65,13 +65,14 @@ test('a paste cannot end itself early or press keys', () => {
   expect(pasteOf('a\r\nb\x1b[201~\x03c\td')).toBe('\x1b[200~a\nb[201~c\td\x1b[201~')
 })
 
-function sinks() {
+function sinks(alive = true) {
   const log: string[] = []
   return {
     log,
     s: {
       writePty: async (pane: number, data: string) => void log.push(`write ${pane} ${JSON.stringify(data)}`),
       reply: async (id: string, text: string) => void log.push(`reply ${id} ${text}`),
+      paneRunsClaude: async (pane: number) => (log.push(`check ${pane}`), alive),
       goToPane: (pane: number) => void log.push(`go ${pane}`),
       sleep: async (ms: number) => void log.push(`sleep ${ms}`),
     },
@@ -82,6 +83,7 @@ test('in a pane: the screenshot as a dropped file, then the text as one paste, t
   const { log, s } = sinks()
   await deliver({ kind: 'pane', pane: 3, title: 't' }, 'hi\nthere', '/tmp/my shot.png', s)
   expect(log).toEqual([
+    'check 3',
     `write 3 ${JSON.stringify('/tmp/my\\ shot.png ')}`,
     `sleep ${KEY_GAP_MS}`,
     `write 3 ${JSON.stringify('\x1b[200~hi\nthere\x1b[201~')}`,
@@ -94,9 +96,15 @@ test('in a pane: the screenshot as a dropped file, then the text as one paste, t
 test('without a screenshot only the text goes; a child gets a reply; nobody is an error', async () => {
   const { log, s } = sinks()
   await deliver({ kind: 'pane', pane: 3, title: 't' }, 'hi', null, s)
-  expect(log[0]).toBe(`write 3 ${JSON.stringify('\x1b[200~hi\x1b[201~')}`)
+  expect(log[1]).toBe(`write 3 ${JSON.stringify('\x1b[200~hi\x1b[201~')}`)
   log.length = 0
   await deliver({ kind: 'mission', id: 'c1', title: 't' }, 'hi', '/tmp/x.png', s)
   expect(log).toEqual(['reply c1 hi'])
   await expect(deliver({ kind: 'none', reason: 'no agent' }, 'hi', null, s)).rejects.toThrow('no agent')
+})
+
+test('a pane whose Claude has exited gets nothing: no drop, no paste, no Enter', async () => {
+  const { log, s } = sinks(false)
+  await expect(deliver({ kind: 'pane', pane: 3, title: 'fix-bug' }, 'hi', '/tmp/x.png', s)).rejects.toThrow('fix-bug is no longer running')
+  expect(log).toEqual(['check 3'])
 })

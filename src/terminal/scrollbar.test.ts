@@ -9,3 +9,12 @@ test('the terminal viewport never scrolls sideways, only vertically', async () =
   expect(css).toMatch(/\.xterm-viewport\s*\{[^}]*overflow-x:\s*hidden/)
   expect(css).not.toMatch(/\.xterm-viewport\s*\{[^}]*overflow-y:\s*hidden/)
 })
+
+test('the viewport shows the terminal background and no native scrollbar of its own', async () => {
+  const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
+  const css = fs.readFileSync(chromeCss, 'utf8')
+  // xterm paints the viewport black inline; only an !important rule wins over that.
+  expect(css).toMatch(/\.xterm-viewport\s*\{[^}]*background-color:\s*var\(--bg\)\s*!important/)
+  expect(css).toMatch(/\.xterm-viewport\s*\{[^}]*scrollbar-width:\s*none/)
+  expect(css).toMatch(/\.xterm-viewport::-webkit-scrollbar\s*\{\s*display:\s*none/)
+})
