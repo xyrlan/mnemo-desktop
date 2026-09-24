@@ -30,9 +30,18 @@ const full: ChildMemory = {
   mcp_reads: ['stream-state-persist-with-overlay-not-swap'],
 }
 
+// The panel is new UI inside the old pane scope: without `data-ui` its button draws as a white
+// browser box (theme.css reverts everything else under `.app`).
+test('the panel opts out of the old scope, empty or not', () => {
+  act(() => root.render(<MemoryPanel memory={null} hasSession={false} />))
+  expect(host.querySelector('.cmem')?.hasAttribute('data-ui')).toBe(true)
+  act(() => root.render(<MemoryPanel memory={full} hasSession={true} />))
+  expect(host.querySelector('.cmem')?.hasAttribute('data-ui')).toBe(true)
+})
+
 test('a child with no session yet says so and shows nothing else', () => {
   act(() => root.render(<MemoryPanel memory={null} hasSession={false} />))
-  expect(host.textContent).toBe('memory: no session yet')
+  expect(host.textContent).toBe('Memory: no session yet')
 })
 
 test('memory still loading renders nothing rather than a false empty state', () => {
@@ -63,7 +72,7 @@ test('collapsing the panel hides the body but keeps the badge', () => {
 test('mcp reads say "not recorded" when the log carries no session id, not an empty list', () => {
   act(() => root.render(<MemoryPanel memory={{ briefing: null, injected: [], friction: [], mcp_reads: null }} hasSession={true} />))
   expect(host.textContent).toContain('not recorded')
-  expect(host.textContent).toContain('briefing')
+  expect(host.textContent).toContain('Briefing')
 })
 
 test('a fresh child with rows nowhere reads as empty everywhere, never an error', () => {
@@ -90,9 +99,10 @@ function sheetsOutsideMission(dir = `${cwd}/src`): [string, string][] {
     return e.name.endsWith('.css') ? [[p, fs.readFileSync(p, 'utf8')]] : []
   })
 }
-test('no stylesheet outside the mission pane styles a class the panel renders', () => {
+// Tailwind's utilities are shared by design; the panel's own names are what must not collide.
+test('no stylesheet outside the mission pane styles a class the panel names', () => {
   act(() => root.render(<MemoryPanel memory={full} hasSession={true} />))
-  const classes = new Set([...host.querySelectorAll('[class]')].flatMap((e) => [...e.classList]))
+  const classes = new Set([...host.querySelectorAll('[class]')].flatMap((e) => [...e.classList]).filter((c) => c.startsWith('cmem')))
   expect(classes.size).toBeGreaterThan(5)
   const sheets = sheetsOutsideMission()
   // The walk found the sheets: theme.css is the largest of them.
