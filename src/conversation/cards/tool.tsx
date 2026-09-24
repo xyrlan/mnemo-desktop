@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Card, ToolOutcome } from '../types'
 import type { Pending } from '../stream'
 import { useCards } from './context'
@@ -24,6 +25,13 @@ function mark(o: ToolOutcome | null): [string, string] {
   if (o.kind === 'bash' && o.interrupted) return ['⏹', 'interrupted']
   return ['✓', 'done']
 }
+
+/** Lines of a Bash command shown before it folds. A heredoc (`git commit -m "$(cat <<'EOF'`,
+ *  `cat > f <<'EOF'`) opens with the command itself, then its body: four lines keep the command
+ *  and the start of the body (a commit's subject and first line) readable, and hold the card
+ *  to about the height of the output toggle under it. A command folds only when at least two
+ *  lines would hide: hiding one behind a one-line control saves nothing. */
+export const CMD_FOLD = 4
 
 const cap = (s: string) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}\n… ${s.length - OUTPUT_CAP} more characters not shown` : s)
 const lineCount = (s: string) => (s ? s.replace(/\n$/, '').split('\n').length : 0)
@@ -113,7 +121,22 @@ function DiffTool({ card, o, k }: { card: ToolCardT; o: Extract<ToolOutcome, { k
   )
 }
 
-/** Bash: the command on the card, its output folded under it. */
+/** Copies `text` whole, whatever the card shows of it. */
+function CopyButton({ text }: { text: string }) {
+  const [said, setSaid] = useState<'copy' | 'copied' | 'copy failed'>('copy')
+  const copy = () =>
+    navigator.clipboard.writeText(text).then(
+      () => setSaid('copied'),
+      () => setSaid('copy failed'),
+    )
+  return (
+    <button className="cv-link cv-copy" title="copy the whole command" onClick={() => void copy()} onBlur={() => setSaid('copy')}>
+      {said}
+    </button>
+  )
+}
+
+/** Bash: the command on the card, folded past `CMD_FOLD` lines, its output folded under it. */
 function BashTool({ card, k }: { card: ToolCardT; k: string }) {
   const { isOpen, toggle } = useCards()
   const o = card.outcome
@@ -121,14 +144,23 @@ function BashTool({ card, k }: { card: ToolCardT; k: string }) {
   const open = isOpen(k)
   const [m, what] = mark(o)
   const lines = o?.kind === 'bash' ? lineCount(o.stdout) + lineCount(o.stderr) : 0
+  const cmdLines = command.split('\n')
+  const hidden = cmdLines.length > CMD_FOLD + 1 ? cmdLines.length - CMD_FOLD : 0
+  const cmdOpen = isOpen(`${k}:cmd`)
   return (
     <>
       <div className="cv-tool-head">
         <span className="cv-tool-mark" title={what}>
           {m}
         </span>
-        <code className="cv-bash-cmd">$ {command}</code>
+        <code className="cv-bash-cmd">$ {hidden && !cmdOpen ? cmdLines.slice(0, CMD_FOLD).join('\n') : command}</code>
+        <CopyButton text={command} />
       </div>
+      {hidden > 0 && (
+        <button className="cv-more cv-cmd-more" aria-expanded={cmdOpen} onClick={() => toggle(`${k}:cmd`)}>
+          {cmdOpen ? '▾ fold command' : `▸ ${hidden} more lines of command`}
+        </button>
+      )}
       {o?.kind === 'bash' ? (
         <>
           {o.interrupted && <span className="cv-badge">interrupted</span>}

@@ -1,6 +1,6 @@
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
@@ -45,6 +45,7 @@ import { ConversationView } from './ConversationView'
 import ConversationFace, { paneStatus } from './Face'
 import { RuleActionsContext, type RuleActions } from './cards/context'
 import { DIFF_FOLD, diffRows } from './cards/diff'
+import { CMD_FOLD } from './cards/tool'
 import { tauriConversation, type ConversationClient } from './client'
 import { applyEarlier, applyEvent, clockText, firstIndex, newSegment, pendingCard, streamItems, TAIL, workingSince, STATUS_LAG_MS, type Item } from './stream'
 import { startUsage, BEAT_MS, type UsageDeps } from './usage'
@@ -466,6 +467,73 @@ test('a Bash card shows its command with the output folded under it', async () =
   await click(button(/output · 3 lines/))
   expect(qa('.cv-out').map((e) => e.textContent)).toEqual(['a\nb\n', 'warn'])
   expect(q('.cv-out.cv-err')?.textContent).toBe('warn')
+})
+
+/** A commit made through a heredoc, as Claude Code writes one. Written for this test, not
+ *  taken from a transcript, so there is nothing to scrub. */
+const HEREDOC = [
+  `git commit -m "$(cat <<'EOF'`,
+  'fix(parser): a quoted path keeps its spaces',
+  '',
+  'The tokenizer split on every space, so `cd "My Drive"` moved to "My.',
+  'Quotes now group a token; an unclosed quote runs to the end of the line.',
+  '',
+  'Co-Authored-By: A. Contributor <contributor@example.invalid>',
+  'EOF',
+  ')"',
+].join('\n')
+
+/** jsdom has no `navigator.clipboard`. */
+function stubClipboard(writeText: (t: string) => Promise<void>) {
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  onTestFinished(() => void delete (navigator as { clipboard?: unknown }).clipboard)
+}
+
+test('a heredoc command folds to its first lines, opens in place, folds again, and copies whole', async () => {
+  const written: string[] = []
+  stubClipboard(async (t) => void written.push(t))
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(lines(0, [tool('h1', 0, 'Bash', { kind: 'bash', stdout: '[main 1a2b3c4] fix\n', stderr: '', interrupted: false }, { input: { command: HEREDOC } })]))
+  const all = HEREDOC.split('\n')
+  expect(CMD_FOLD).toBe(4)
+  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${all.slice(0, CMD_FOLD).join('\n')}`)
+  expect(q('.cv-bash-cmd')?.textContent?.split('\n')[0]).toBe(`$ ${all[0]}`)
+  const more = button(`▸ ${all.length - CMD_FOLD} more lines of command`)
+  expect(more?.getAttribute('aria-expanded')).toBe('false')
+
+  await click(more)
+  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${HEREDOC}`)
+  expect(button('▾ fold command')?.getAttribute('aria-expanded')).toBe('true')
+  expect(q('.cv-out')).toBeNull() // the output stays folded on its own
+
+  await click(button('▾ fold command'))
+  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${all.slice(0, CMD_FOLD).join('\n')}`)
+
+  await click(button('copy'))
+  expect(written).toEqual([HEREDOC])
+  expect(button('copied')).not.toBeNull()
+})
+
+test('a command folds only when it would hide two lines or more', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  const five = ['a', 'b', 'c', 'd', 'e'].join('\n')
+  const six = ['a', 'b', 'c', 'd', 'e', 'f'].join('\n')
+  await follows[0].emit(lines(0, [tool('c5', 0, 'Bash', null, { input: { command: five } }), tool('c6', 1, 'Bash', null, { input: { command: six } })]))
+  const [c5, c6] = qa('.cv-bash-cmd')
+  expect(c5.textContent).toBe(`$ ${five}`)
+  expect(c6.textContent).toBe('$ a\nb\nc\nd')
+  expect(qa('.cv-cmd-more').map((b) => b.textContent)).toEqual(['▸ 2 more lines of command'])
+})
+
+test('a failed copy says so', async () => {
+  stubClipboard(async () => Promise.reject(new Error('denied')))
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(lines(0, [tool('b1', 0, 'Bash', null, { input: { command: 'ls' } })]))
+  await click(button('copy'))
+  expect(button('copy failed')).not.toBeNull()
 })
 
 test('other tools are one line that opens to their input and result; a denial shows folded', async () => {
