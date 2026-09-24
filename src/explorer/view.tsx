@@ -3,6 +3,7 @@ import { Files } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { store as layout, useApp } from '../layout/app-store'
 import { useFleet } from '../fleet/store'
+import { registerRightbarPanel } from '../rightbar/panels'
 import { toast } from '@/ui'
 import { tauriExplorer } from './client'
 import { FileExplorer } from './FileExplorer'
@@ -49,20 +50,8 @@ function LiveExplorer(): React.JSX.Element {
   )
 }
 
-type RegisterRightbarPanel = (item: {
-  id: string
-  title: string
-  icon: React.ComponentType<{ className?: string }>
-  order: number
-  panel: React.ComponentType
-}) => () => void
+/** After Memory (100), in Orca's order: Explorer, then Search and Source Control. */
+export const EXPLORER_ORDER = 200
 
-// The right sidebar's panel registry lands beside this piece (wave D, `rightbar-panels`): until it
-// is on this branch the glob finds nothing and the tab waits; after the merge it wires itself.
-const panels = Object.values(import.meta.glob<{ registerRightbarPanel?: RegisterRightbarPanel }>('../rightbar/panels.ts', { eager: true }))[0]
-
-/** After Memory (Orca's order: Explorer, then Search and Source Control). */
-export const EXPLORER_ORDER = 10
-
-const unregister = panels?.registerRightbarPanel?.({ id: 'explorer', title: 'Explorer', icon: Files, order: EXPLORER_ORDER, panel: LiveExplorer })
-import.meta.hot?.dispose(() => unregister?.())
+const unregister = registerRightbarPanel({ id: 'explorer', title: 'Explorer', icon: Files, order: EXPLORER_ORDER, panel: LiveExplorer })
+import.meta.hot?.dispose(unregister)
