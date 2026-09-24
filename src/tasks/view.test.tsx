@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: async () => null }))
 const composer = vi.hoisted(() => ({ calls: [] as unknown[] }))
-vi.mock('./upstream', () => ({ openNewWorkspace: (opts?: unknown) => void composer.calls.push(opts) }))
+vi.mock('../new-workspace/open', () => ({ openNewWorkspace: (opts?: unknown) => void composer.calls.push(opts) }))
 
 import { paneView } from '../panes/registry'
 import { all } from '../actions/registry'

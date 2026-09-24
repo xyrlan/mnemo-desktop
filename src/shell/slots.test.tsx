@@ -106,3 +106,37 @@ test('an overlay that throws says so in a corner, not over the whole window', ()
   expect(alert.className).not.toContain('inset-0')
   error.mockRestore()
 })
+
+// What a hot reload does to a `view.tsx`: runs it again, which makes the same-named component anew.
+const reloaded = (name: string, text: string) => {
+  const c = () => <span>{text}</span>
+  Object.defineProperty(c, 'name', { value: name })
+  return c
+}
+
+test('a hot-reloaded mount replaces its earlier one, in its place, instead of drawing a second copy', () => {
+  const firstOff = mountInSlot('status-bar', reloaded('StatusBar', 'old'))
+  mountInSlot('status-bar', C)
+  const again = reloaded('StatusBar', 'new')
+  mountInSlot('status-bar', again)
+  mountInSlot('status-bar', reloaded('StatusBar', 'newer'))
+  expect(drawn('status-bar')).toBe('newerc')
+  // The earlier run's undo no longer names anything drawn.
+  act(() => firstOff())
+  expect(host.textContent).toBe('newerc')
+  expect(slotEntries('status-bar')).toHaveLength(2)
+})
+
+test('the undo of the mount that replaced it still takes it out', () => {
+  mountInSlot('overlay', reloaded('Pet', 'old'))
+  const off = mountInSlot('overlay', reloaded('Pet', 'new'))
+  act(() => off())
+  expect(slotEntries('overlay')).toEqual([])
+})
+
+test('components without a name, or named differently, are never taken for a reload', () => {
+  mountInSlot('overlay', reloaded('', 'x'))
+  mountInSlot('overlay', reloaded('', 'y'))
+  mountInSlot('overlay', reloaded('Other', 'z'))
+  expect(drawn('overlay')).toBe('xyz')
+})
