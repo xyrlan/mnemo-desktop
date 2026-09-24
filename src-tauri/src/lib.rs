@@ -363,6 +363,9 @@ pub fn run() {
                     ("sidebar.toggle-left", "Toggle Left Sidebar", "CmdOrCtrl+B"),
                     ("sidebar.toggle-right", "Toggle Right Sidebar", "CmdOrCtrl+L"),
                     ("pane.toggle-face", "Toggle Conversation", "CmdOrCtrl+Shift+C"),
+                    ("dictation.toggle", "Toggle Dictation", "CmdOrCtrl+E"),
+                    ("floating-terminal.toggle", "Toggle Floating Terminal", "CmdOrCtrl+Alt+A"),
+                    ("diff.open", "Open Diff", "CmdOrCtrl+Shift+G"),
                 ];
                 const PREFIX: &str = "action:";
 
