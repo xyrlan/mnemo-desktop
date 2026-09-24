@@ -1,0 +1,12 @@
+{
+  "name": "mnemo-desktop-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shot": "node shot.mjs",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
