@@ -4,9 +4,14 @@ import { run } from './registry'
 export type Platform = 'mac' | 'other'
 
 export function actionForKey(e: KeyboardEvent, platform: Platform): string | null {
+  const k = e.key.toLowerCase()
+  // Tabs sit on Ctrl+1…9 where ⌘ is free for worktrees (mac); elsewhere Ctrl is the modifier, so tabs take Alt.
+  if (/^[1-9]$/.test(k) && !e.shiftKey) {
+    if (platform === 'mac' && e.ctrlKey && !e.metaKey && !e.altKey) return `tab.go.${k}`
+    if (platform === 'other' && e.altKey && !e.ctrlKey && !e.metaKey) return `tab.go.${k}`
+  }
   const mod = platform === 'mac' ? e.metaKey : e.ctrlKey
   if (!mod) return null
-  const k = e.key.toLowerCase()
   if (e.altKey && !e.shiftKey) {
     const m: Record<string, string> = {
       arrowleft: 'focus.left',
@@ -18,11 +23,11 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
   }
   if (e.altKey) return null
   if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', h: 'home.show', b: 'cockpit.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
+    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', b: 'cockpit.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
     return m[k] ?? null
   }
-  if (/^[1-9]$/.test(k)) return `tab.go.${k}`
-  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open', b: 'mission.toggle-sidebar' }
+  if (/^[1-9]$/.test(k)) return `worktree.go.${k}`
+  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open', j: 'worktree.jump', n: 'workspace.new', b: 'sidebar.toggle-left', l: 'sidebar.toggle-right' }
   return m[k] ?? null
 }
 

@@ -11,11 +11,15 @@ test('mac bindings', () => {
   expect(actionForKey(ev('W', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.close')
   expect(actionForKey(ev('w', { metaKey: true }), 'mac')).toBe('pane.close')
   expect(actionForKey(ev('ArrowLeft', { metaKey: true, altKey: true }), 'mac')).toBe('focus.left')
-  expect(actionForKey(ev('3', { metaKey: true }), 'mac')).toBe('tab.go.3')
+  expect(actionForKey(ev('3', { metaKey: true }), 'mac')).toBe('worktree.go.3')
+  expect(actionForKey(ev('3', { ctrlKey: true }), 'mac')).toBe('tab.go.3')
+  expect(actionForKey(ev('j', { metaKey: true }), 'mac')).toBe('worktree.jump')
+  expect(actionForKey(ev('n', { metaKey: true }), 'mac')).toBe('workspace.new')
+  expect(actionForKey(ev('l', { metaKey: true }), 'mac')).toBe('sidebar.toggle-right')
   expect(actionForKey(ev('{', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.prev')
   expect(actionForKey(ev('k', { metaKey: true }), 'mac')).toBe('palette.open')
-  expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('mission.toggle-sidebar')
-  expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBe('home.show')
+  expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('sidebar.toggle-left')
+  expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBeNull()
   expect(actionForKey(ev('B', { metaKey: true, shiftKey: true }), 'mac')).toBe('cockpit.open')
   expect(actionForKey(ev('C', { metaKey: true, shiftKey: true }), 'mac')).toBe('pane.toggle-face')
   expect(actionForKey(ev('t', { ctrlKey: true }), 'mac')).toBeNull()
@@ -25,6 +29,8 @@ test('mac bindings', () => {
 test('other platforms use ctrl', () => {
   expect(actionForKey(ev('t', { ctrlKey: true }), 'other')).toBe('tab.new')
   expect(actionForKey(ev('t', { metaKey: true }), 'other')).toBeNull()
+  expect(actionForKey(ev('2', { ctrlKey: true }), 'other')).toBe('worktree.go.2')
+  expect(actionForKey(ev('2', { altKey: true }), 'other')).toBe('tab.go.2')
 })
 
 test('list keys: plain arrows, Enter, r, a and Esc; nothing with a modifier or while typing', () => {
@@ -154,13 +160,14 @@ describe('installKeys', () => {
 test('every native menu accelerator in lib.rs maps to the same action as its keydown', () => {
   const block = libRs.slice(libRs.indexOf('// -- menu --'), libRs.indexOf('app.set_menu('))
   expect(block.length).toBeGreaterThan(0)
-  const items = [...block.matchAll(/\("([\w.-]+)",\s*"[^"]*",\s*"(CmdOrCtrl[^"]*)"\)/g)].map((m) => [m[1], m[2]] as const)
+  const items = [...block.matchAll(/\("([\w.-]+)",\s*"[^"]*",\s*"((?:CmdOrCtrl|Ctrl)[^"]*)"\)/g)].map((m) => [m[1], m[2]] as const)
   const shifted: Record<string, string> = { '[': '{', ']': '}' }
   const named: Record<string, string> = { Left: 'ArrowLeft', Right: 'ArrowRight', Up: 'ArrowUp', Down: 'ArrowDown' }
   const toEvent = (accel: string) => {
     const parts = accel.split('+')
     const key = parts.pop()!
     const shiftKey = parts.includes('Shift')
+    if (parts[0] === 'Ctrl') return ev(key, { ctrlKey: true })
     return ev(named[key] ?? (shiftKey ? (shifted[key] ?? key.toUpperCase()) : key.toLowerCase()), {
       metaKey: true,
       shiftKey,
@@ -172,8 +179,8 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(ids.sort()).toEqual(
     [
       'tab.new', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
-      'mission.toggle-sidebar', 'home.show', 'pane.toggle-face', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
-      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `tab.go.${n}`),
+      'sidebar.toggle-left', 'sidebar.toggle-right', 'worktree.jump', 'workspace.new', 'pane.toggle-face', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((n) => [`tab.go.${n}`, `worktree.go.${n}`]),
     ].sort(),
   )
   for (const [id, accel] of items) expect([accel, actionForKey(toEvent(accel), 'mac')]).toEqual([accel, id])
