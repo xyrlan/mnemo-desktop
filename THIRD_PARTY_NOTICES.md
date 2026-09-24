@@ -14,11 +14,12 @@ Used for:
   `src/renderer/src/assets/main.css`);
 - the UI primitives in `src/ui/` other than `kbd.tsx` and `cn.ts` (from
   `src/renderer/src/components/ui/`);
-- the screens of the redesign's wave B — `src/shell/`, `src/sidebar/`, `src/tabs/`,
-  `src/layout/SplitView.tsx`, `src/chrome/`, `src/statusbar/`, `src/rightbar/`, `src/dashboard/`,
-  `src/jump/`, `src/new-workspace/`, `src/notify/`, `src/pet/`, `src/onboarding/` — where a file
-  opens with `// adapted from stablyai/orca <path>`;
-- the reference copies in `vendor/orca/`, verbatim, with Orca's `LICENSE` beside them.
+- the screens of the redesign's waves B, C and D — among them `src/shell/`, `src/sidebar/`,
+  `src/tabs/`, `src/layout/SplitView.tsx`, `src/chrome/`, `src/statusbar/`, `src/rightbar/`,
+  `src/dashboard/`, `src/jump/`, `src/new-workspace/`, `src/notify/`, `src/pet/`,
+  `src/onboarding/`, `src/diff/`, `src/commit/`, `src/floating/`, `src/quick-commands/`,
+  `src/voice/`, `src/browser/`, `src/explorer/`, `src/search/`, `src/source-control/` — where
+  a file opens with `// adapted from stablyai/orca <path>`.
 
 ```
 MIT License
