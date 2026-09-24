@@ -168,3 +168,11 @@
   .pane-drop-zone { animation: none; transition: none; }
   .split-root.is-split > .pane { transition: none; }
 }
+
+/* ── Terminal ───────────────────────────────────────── */
+
+/* xterm.css gives the viewport `overflow-y: scroll`, which computes `overflow-x` to `auto`; when
+   the fitted grid is a sliver wider than the box, a horizontal scrollbar (a black track with a
+   short white thumb) draws along the bottom. The grid is fitted to the width, so nothing is
+   meant to scroll sideways; the vertical scrollbar stays. */
+.pane .xterm .xterm-viewport { overflow-x: hidden; }
