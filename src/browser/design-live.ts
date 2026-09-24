@@ -5,7 +5,7 @@ import { fleetStore, useFleet } from '../fleet/store'
 import { missionStore, useMission } from '../mission/app-store'
 import { tauriMission } from '../mission/client'
 import { allChildren } from '../mission/types'
-import { tauriPty } from '../pty/client'
+import { ptyPid, tauriPty } from '../pty/client'
 import { makeDesignMode } from './design'
 import { deliver, resolveAgent, type AgentTarget } from './grab-agent'
 import { cropShot, type Snapshot } from './grab-shot'
@@ -29,6 +29,10 @@ export const design = makeDesignMode({
     deliver(target, text, shot, {
       writePty: (pane, data) => tauriPty.write(pane, data),
       reply: (id, t) => tauriMission.reply(id, t),
+      paneRunsClaude: async (pane) => {
+        const pid = await ptyPid(pane).catch(() => null)
+        return pid !== null && (await invoke<boolean>('chrome_claude_running', { panePid: pid }).catch(() => false))
+      },
       goToPane: (pane) => layout.getState().goToPane(pane),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     }),

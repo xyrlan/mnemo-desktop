@@ -10,6 +10,9 @@ pub mod proc;
 // -- editor (src/fs.rs) --
 pub mod fs;
 
+// -- search (src/search.rs) --
+pub mod search;
+
 // -- tool-path (src/tools.rs) --
 pub mod tools;
 
@@ -165,6 +168,9 @@ pub fn run() {
             fs::fs_write,
             fs::fs_list,
 
+            // -- search commands --
+            search::search_worktree,
+
             // -- tool-path commands --
             tools::tools_status,
 
@@ -231,6 +237,7 @@ pub fn run() {
 
             // -- chrome commands --
             chrome::chrome_session,
+            chrome::chrome_claude_running,
             commands::pty_pid,
 
             // -- workspace commands --
