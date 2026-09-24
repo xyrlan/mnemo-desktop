@@ -67,8 +67,8 @@ export function AgentKanbanBoard({ cards, onReveal, onClose, className }: Props)
           ) : null}
         </div>
         <div className="scrollbar-sleek flex min-h-0 flex-1 overflow-x-auto p-3">
-          {/* Auto margins centre the capped board and give way when it overflows. */}
-          <div className="mx-auto flex w-full max-w-[1280px] gap-3">
+          {/* Auto margins centre the capped board; min-w-max keeps every column its full width, so a narrow drawer scrolls (padding included) instead of clipping the last column. */}
+          <div className="mx-auto flex w-full min-w-max max-w-[1280px] gap-3">
             {BUCKETS.map((bucket) => (
               <KanbanColumn key={bucket} bucket={bucket} cards={grouped[bucket]} now={now} onReveal={onReveal} />
             ))}
