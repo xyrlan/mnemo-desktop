@@ -3,7 +3,8 @@ name = "mnemo-desktop"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
-# Two binaries: the app, and the desktop MCP server Claude Code starts (src/bin/, see src/mcp.rs).
+# Three binaries: the app, the desktop MCP server Claude Code starts (see src/mcp.rs), and the
+# hook command Claude Code runs on agent events (see src/agent_hooks.rs); the last two live in src/bin/.
 default-run = "mnemo-desktop"
 
 [lib]
@@ -17,7 +18,9 @@ tauri-build = { version = "2", features = [] }
 # `unstable` unlocks `Window::add_child`, which browser panes use for child webviews.
 tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `raw_value`: the app edits `~/.claude/settings.json` (agent_hooks.rs) and writes back every
+# part it did not change as the text it read.
+serde_json = { version = "1", features = ["raw_value"] }
 portable-pty = "0.9"
 log = "0.4"
 env_logger = "0.11"
@@ -36,6 +39,8 @@ base64 = "0.22"
 tar = "0.4"
 flate2 = "1"
 sha2 = "0.10"
+# Native OS notifications for agents (agent_hooks.rs), sent from Rust: the front calls a command.
+tauri-plugin-notification = "2"
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -61,6 +61,9 @@ pub mod tools_path;
 // -- pulse (src/pulse.rs) --
 pub mod pulse;
 
+// -- agent hooks (src/agent_hooks.rs) --
+pub mod agent_hooks;
+
 // -- conversation (src/conversation.rs) --
 pub mod conversation;
 
@@ -225,6 +228,11 @@ pub fn run() {
             // -- pulse commands --
             pulse::pulse_start,
 
+            // -- agent hooks commands --
+            agent_hooks::agent_hooks_install,
+            agent_hooks::agent_hooks_uninstall,
+            agent_hooks::agent_notify,
+
             // -- conversation commands --
             conversation::conversation_follow,
             conversation::conversation_unfollow,
@@ -267,6 +275,10 @@ pub fn run() {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
                 run_smoke(app)?;
             }
+
+            // -- agent hooks --
+            // Claude Code's hooks tell the app where each session is (src/agent_hooks.rs).
+            agent_hooks::start(app.handle())?;
 
             // -- menu --
             // App chords as native menu accelerators, so they reach the app while a browser
