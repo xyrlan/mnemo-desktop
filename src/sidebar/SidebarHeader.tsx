@@ -1,9 +1,10 @@
 // adapted from stablyai/orca components/sidebar/SidebarHeader.tsx [48-94, 124-134] and
 // components/sidebar/sidebar-header-actions.tsx (MIT, 122b8c25)
 import React, { useState } from 'react'
-import { FolderPlus, Loader2, Plus, X } from 'lucide-react'
+import { BrushCleaning, FolderPlus, Loader2, Plus, X } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
 import { addProject } from './actions'
+import { openCleanup } from './archive'
 import { run } from './upstream'
 
 function HeaderAction({ label, shortcut, children, ...props }: React.ComponentProps<typeof Button> & { label: string; shortcut?: string }) {
@@ -22,8 +23,9 @@ function HeaderAction({ label, shortcut, children, ...props }: React.ComponentPr
   )
 }
 
-/** "Projects", with Add project (Home's folder picker) and New workspace (`workspace.new`). A
- *  folder that could not be added says why under the row, until dismissed. */
+/** "Projects", with Clean up workspaces (`worktree.cleanup`), Add project (Home's folder picker)
+ *  and New workspace (`workspace.new`). A folder that could not be added says why under the row,
+ *  until dismissed. */
 export const SidebarHeader = React.memo(function SidebarHeader() {
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +49,9 @@ export const SidebarHeader = React.memo(function SidebarHeader() {
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1" data-sidebar-header-actions="">
+          <HeaderAction label="Clean up workspaces" onClick={openCleanup}>
+            <BrushCleaning className="size-3.5" strokeWidth={2.25} />
+          </HeaderAction>
           <HeaderAction label="Add project" onClick={() => void add()} disabled={adding}>
             {adding ? <Loader2 className="size-3.5 animate-spin" /> : <FolderPlus className="size-3.5" strokeWidth={2.25} />}
           </HeaderAction>

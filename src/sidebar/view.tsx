@@ -1,9 +1,15 @@
 // The left sidebar mounts itself (App.tsx imports every `src/*/view.tsx`): into the shell's
-// `left-sidebar` slot, with `worktree.go.1` … `worktree.go.9` registered for the keymap.
+// `left-sidebar` slot, its dialogs into the `overlay`, with `worktree.go.1` … `worktree.go.9` and
+// `worktree.cleanup` registered for the keymap.
 import LeftSidebar from './Sidebar'
+import ArchiveOverlay from './ArchiveOverlay'
 import { registerSidebarActions } from './actions'
 import { mountInSlot } from './upstream'
 
 registerSidebarActions()
-const unmount = mountInSlot('left-sidebar', LeftSidebar)
-import.meta.hot?.dispose(unmount)
+const unmountSidebar = mountInSlot('left-sidebar', LeftSidebar)
+const unmountOverlay = mountInSlot('overlay', ArchiveOverlay)
+import.meta.hot?.dispose(() => {
+  unmountSidebar()
+  unmountOverlay()
+})

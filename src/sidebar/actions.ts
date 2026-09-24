@@ -1,6 +1,7 @@
 import { fleetStore, homeStore, layoutStore, register } from './upstream'
 import { sidebarStore } from './store'
 import { sidebarOrder } from './model'
+import { openCleanup } from './archive'
 
 /** Show worktree `path` and mark it read: what a card click does. */
 export function activateWorktree(path: string) {
@@ -27,8 +28,10 @@ export async function addProject(): Promise<string | null> {
   return after
 }
 
-/** `worktree.go.1` … `worktree.go.9`: the Nth card in sidebar order, folded repos left out. */
+/** `worktree.go.1` … `worktree.go.9`: the Nth card in sidebar order, folded repos left out.
+ *  `worktree.cleanup`: the view that removes stale worktrees in one go. */
 export function registerSidebarActions() {
+  register({ id: 'worktree.cleanup', title: 'Clean up workspaces…', run: openCleanup })
   for (let n = 1; n <= 9; n++) {
     register({
       id: `worktree.go.${n}`,

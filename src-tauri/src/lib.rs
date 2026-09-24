@@ -228,6 +228,7 @@ pub fn run() {
             worktree::worktree_list,
             worktree::worktree_create,
             worktree::worktree_remove,
+            worktree::worktree_cleanup_facts,
 
             // -- mcp commands --
             mcp::mcp_socket_path,
