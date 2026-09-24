@@ -255,7 +255,7 @@ export default function ProjectCombobox({
           sideOffset={4}
           // Opaque and unfaded: this lands on the composer dialog, and a translucent fade shows
           // the Name field through the list mid-animation.
-          className={cn('flex w-[var(--radix-popover-trigger-width)] min-w-[17rem] flex-col p-0', COMBOBOX_POPOVER_SURFACE)}
+          className={cn('flex w-(--radix-popover-trigger-width) min-w-[17rem] flex-col p-0', COMBOBOX_POPOVER_SURFACE)}
           // Focus stays in the field — it's the search box.
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
