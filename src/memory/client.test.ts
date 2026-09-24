@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getMemoryFeed } from './client'
 import type { MemoryFeed } from './types'
 
-// A plain stand-in, not a spy: the core's refusal is a bare string, and a spy that rejects
-// with one fails the test on its own under vitest 5.
+// A plain stand-in, not a spy: the core's refusal is a bare string, and a `vi.fn()` reset in
+// `beforeEach` that then rejected with one failed the test as "Unknown Error" under vitest 5,
+// though the client caught it.
 const core = vi.hoisted(() => ({ calls: [] as Array<[string, unknown]>, answer: (): Promise<unknown> => Promise.resolve(null) }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (cmd: string, args: unknown) => {
