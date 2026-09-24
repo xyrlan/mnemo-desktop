@@ -86,6 +86,9 @@ pub mod commit;
 pub mod job;
 pub mod tools_install;
 
+// -- source-control (src/source_control.rs) --
+pub mod source_control;
+
 // -- build info (src/build_info.rs) --
 pub mod build_info;
 
@@ -283,6 +286,13 @@ pub fn run() {
             // -- job commands --
             job::job_run,
             tools_install::tools_install_mnemo,
+
+            // -- source-control commands --
+            source_control::source_control_status,
+            source_control::source_control_stage,
+            source_control::source_control_unstage,
+            source_control::source_control_discard,
+            source_control::source_control_watch,
 
             // -- build info commands --
             build_info::app_build_info,
