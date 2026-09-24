@@ -39,8 +39,10 @@ export function clampPosition(p: Point, view: { width: number; height: number },
   return { x: cap(p.x, view.width), y: cap(p.y, view.height) }
 }
 
-export const defaultPosition = (view: { width: number; height: number }): Point =>
-  clampPosition({ x: view.width, y: view.height }, view)
+/** The bottom-right corner of the workbench: `rightInset` is the right sidebar's width while it
+ *  is open, so the pet does not sit on its panels (Source Control's Commit button is down there). */
+export const defaultPosition = (view: { width: number; height: number }, rightInset = 0): Point =>
+  clampPosition({ x: view.width - rightInset - PET_SIZE - MARGIN, y: view.height }, view)
 
 export function loadPosition(storage: Pick<Storage, 'getItem'>): Point | null {
   try {

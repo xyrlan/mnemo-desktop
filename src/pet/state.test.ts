@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentNode, AgentState } from '../fleet/types'
 import { POSES, STATE_SCENES } from '../avatar/scenes'
-import { clampPosition, loadPosition, petScene, petStateOf, savePosition, STORAGE_KEY } from './state'
+import { clampPosition, defaultPosition, loadPosition, PET_SIZE, petScene, petStateOf, savePosition, STORAGE_KEY } from './state'
 
 const fleet = (...states: AgentState[]) => ({
   repos: [
@@ -60,4 +60,13 @@ describe('position', () => {
     m.set(STORAGE_KEY, '{oops')
     expect(loadPosition(s)).toBeNull()
   })
+})
+
+test('by default the pet sits at the workbench corner, clear of an open right sidebar', () => {
+  const view = { width: 1280, height: 768 }
+  const alone = defaultPosition(view)
+  const beside = defaultPosition(view, 320)
+  expect(beside.x).toBe(alone.x - 320)
+  expect(beside.y).toBe(alone.y)
+  expect(beside.x + PET_SIZE).toBeLessThanOrEqual(view.width - 320)
 })

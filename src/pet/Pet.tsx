@@ -3,6 +3,7 @@
 import { useEffect, useState, type PointerEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useFleet } from '../fleet/store'
+import { shellStore } from '../shell/store'
 import { withPartIndex } from '../avatar/scenes'
 import { makeLevelClient } from '../vaultlevel/client'
 import type { VaultLevel } from '../vaultlevel/types'
@@ -14,11 +15,15 @@ const client = makeLevelClient(invoke)
 const POLL_MS = 30_000
 const CAPTION = { working: 'working', 'needs-you': 'needs you', done: 'done', idle: 'idle' } as const
 const view = () => ({ width: window.innerWidth, height: window.innerHeight })
+const rightInset = () => {
+  const s = shellStore.getState()
+  return s.rightOpen ? s.rightWidth : 0
+}
 
 export default function Pet() {
   const state = useFleet(petStateOf)
   const [vault, setVault] = useState<VaultLevel>()
-  const [pos, setPos] = useState<Point>(() => clampPosition(loadPosition(localStorage) ?? defaultPosition(view()), view()))
+  const [pos, setPos] = useState<Point>(() => clampPosition(loadPosition(localStorage) ?? defaultPosition(view(), rightInset()), view()))
   const [grab, setGrab] = useState<Point | null>(null)
 
   useEffect(() => {

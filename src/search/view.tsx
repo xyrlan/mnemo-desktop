@@ -18,5 +18,5 @@ function LiveSearchPanel(): React.JSX.Element {
   return <SearchPanel store={search} root={root} onOpenMatch={(file, match) => root && void openMatch(app, root, file, match)} />
 }
 
-const unregister = registerPanel({ id: 'search', title: 'Search', icon: Search, order: 20, panel: LiveSearchPanel })
+const unregister = registerPanel({ id: 'search', title: 'Search', icon: Search, order: 300, panel: LiveSearchPanel })
 import.meta.hot?.dispose(unregister)
