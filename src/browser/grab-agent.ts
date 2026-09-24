@@ -65,6 +65,8 @@ export function pasteOf(text: string): string {
 export type Sinks = {
   writePty(pane: number, data: string): Promise<void>
   reply(id: string, text: string): Promise<void>
+  /** Whether the pane's shell still has Claude Code under it, asked now. */
+  paneRunsClaude(pane: number): Promise<boolean>
   goToPane(pane: number): void
   sleep(ms: number): Promise<void>
 }
@@ -82,6 +84,9 @@ export async function deliver(target: AgentTarget, text: string, shot: string | 
     case 'mission':
       return s.reply(target.id, text)
     case 'pane': {
+      // The fleet's last look may be seconds old: if Claude has exited, Enter would run the
+      // pasted page in a shell.
+      if (!(await s.paneRunsClaude(target.pane))) throw new Error(`${target.title} is no longer running in that terminal: nothing was sent`)
       if (shot) {
         await s.writePty(target.pane, dropText([shot]))
         await s.sleep(KEY_GAP_MS)

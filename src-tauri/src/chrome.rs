@@ -127,6 +127,16 @@ pub fn session_of(pane_pid: u32) -> Option<String> {
     session_below(pane_pid, &agents, children_of)
 }
 
+/// Like `session_of`, but asks `claude agents` now instead of reusing the last few seconds'
+/// answer: for a check that gates keystrokes into the pane.
+pub fn session_of_fresh(pane_pid: u32) -> Option<String> {
+    let agents = run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j))?;
+    if agents.is_empty() {
+        return None;
+    }
+    session_below(pane_pid, &agents, children_of)
+}
+
 /// Every pane asks on its own poll; one `claude agents` answers them all.
 fn agents() -> &'static Cache<Option<HashMap<u32, (String, u64)>>> {
     static C: std::sync::OnceLock<Cache<Option<HashMap<u32, (String, u64)>>>> = std::sync::OnceLock::new();
@@ -157,6 +167,12 @@ pub async fn chrome_repo(cwd: String) -> Option<String> {
 #[tauri::command]
 pub async fn chrome_session(pane_pid: u32) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || session_of(pane_pid)).await.ok().flatten()
+}
+
+/// Whether a terminal pane runs Claude Code this moment (never cached).
+#[tauri::command]
+pub async fn chrome_claude_running(pane_pid: u32) -> bool {
+    tauri::async_runtime::spawn_blocking(move || session_of_fresh(pane_pid).is_some()).await.unwrap_or(false)
 }
 
 #[cfg(test)]
