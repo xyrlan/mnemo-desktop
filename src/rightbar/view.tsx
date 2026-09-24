@@ -4,11 +4,11 @@ import { useShallow } from 'zustand/react/shallow'
 import { useApp } from '../layout/app-store'
 import { useFleet } from '../fleet/store'
 import { getMemoryFeed } from '../memory/client'
+import { mountInSlot } from '../shell/slots'
 import { learnedClient } from '../learned/app-store'
 import { MemoryPanel } from './MemoryPanel'
 import { RightSidebar, type ActivityItem } from './RightSidebar'
 import { createMemoryStore, targetOf, type LayoutView } from './memory'
-import { mountInSlot } from './shell'
 
 /** The single live panel store: what it read survives the sidebar closing and opening. */
 const memory = createMemoryStore({

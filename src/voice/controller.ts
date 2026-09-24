@@ -2,9 +2,11 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { Language, Progress, VoiceClient } from './client'
 import type { Target } from './route'
 
-/** What the pill shows. `idle` hides it. */
+/** What the indicator shows. `idle` hides it. */
 export type Phase =
   | { kind: 'idle' }
+  /** The microphone is opening. */
+  | { kind: 'starting' }
   | { kind: 'listening' }
   | { kind: 'transcribing' }
   | { kind: 'done'; text: string; landed: boolean }
@@ -19,11 +21,11 @@ export type VoiceState = {
 
 export type Voice = {
   store: StoreApi<VoiceState>
-  /** Opens a take (the chord's press). No-op while one is open. */
+  /** Opens a take (⌥Space's press). No-op while one is open. */
   begin(): void
-  /** Closes the take, transcribes and inserts (the chord's release). */
+  /** Closes the take, transcribes and inserts (⌥Space's release, the indicator's Stop). */
   end(): Promise<void>
-  /** `voice.dictate` from the palette: begin, or end the open take. */
+  /** `dictation.toggle` (Mod+E, the palette): begin, or end the open take. */
   toggle(): Promise<void>
   note(text: string): void
   progress(p: Progress): void
@@ -33,7 +35,7 @@ export type VoiceDeps = {
   client: VoiceClient
   target(): Target
   insert(target: Target, text: string): Promise<boolean>
-  /** How long a result stays on the pill, in ms. */
+  /** How long a result stays on the indicator, in ms. */
   linger?: number
 }
 
@@ -68,14 +70,20 @@ export function createVoice(deps: VoiceDeps): Voice {
   function begin() {
     if (take) return
     const target = deps.target()
-    show({ kind: 'listening' })
+    show({ kind: 'starting' })
     const t = { target, opened: Promise.resolve(false), ending: false }
-    t.opened = open().catch((e) => {
-      show({ kind: 'error', message: message(e) }, true)
-      // Nothing to close: the next press or toggle starts fresh.
-      if (take === t) take = null
-      return false
-    })
+    t.opened = open().then(
+      () => {
+        if (take === t && !t.ending) show({ kind: 'listening' })
+        return true
+      },
+      (e) => {
+        show({ kind: 'error', message: message(e) }, true)
+        // Nothing to close: the next press or toggle starts fresh.
+        if (take === t) take = null
+        return false
+      },
+    )
     take = t
   }
 

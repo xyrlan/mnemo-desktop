@@ -17,6 +17,11 @@ export type Settings = {
   skipPermissions: boolean
   /** The command a new worktree runs once it exists (`pnpm install`, say), per repo root. */
   repoSetup: Record<string, string>
+  /** Repo roots the user added ("Add project", "Open a folder", a clone). Home lists each
+   *  whether or not Claude has run there; `forgetProject` takes one out. */
+  projects: string[]
+  /** The titlebar's saved commands, per repo root, in the order the user keeps them. */
+  quickCommands: Record<string, Array<{ label: string; command: string }>>
 }
 
 export const DEFAULTS: Settings = {
@@ -28,6 +33,8 @@ export const DEFAULTS: Settings = {
   issueLabels: {},
   skipPermissions: true,
   repoSetup: {},
+  projects: [],
+  quickCommands: {},
 }
 
 export interface SettingsClient {
@@ -82,6 +89,18 @@ function pick(v: Partial<Settings>): Partial<Settings> {
   if (typeof v.skipPermissions === 'boolean') out.skipPermissions = v.skipPermissions
   if (v.repoSetup && typeof v.repoSetup === 'object' && !Array.isArray(v.repoSetup)) {
     out.repoSetup = Object.fromEntries(Object.entries(v.repoSetup).filter(([, cmd]) => typeof cmd === 'string' && cmd.trim() !== ''))
+  }
+  const projects = strs(v.projects)
+  if (projects) out.projects = [...new Set(projects.filter((p) => p !== ''))]
+  if (v.quickCommands && typeof v.quickCommands === 'object' && !Array.isArray(v.quickCommands)) {
+    const ok = (c: unknown): c is { label: string; command: string } =>
+      !!c && typeof c === 'object' && typeof (c as { label: unknown }).label === 'string' && typeof (c as { command: unknown }).command === 'string' && (c as { command: string }).command.trim() !== ''
+    out.quickCommands = Object.fromEntries(
+      Object.entries(v.quickCommands).flatMap(([root, cs]) => {
+        const kept = Array.isArray(cs) ? cs.filter(ok).map((c) => ({ label: c.label, command: c.command })) : []
+        return kept.length ? [[root, kept]] : []
+      }),
+    )
   }
   return out
 }

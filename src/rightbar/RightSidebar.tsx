@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { PanelRight } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
-import { useShell } from './shell'
+import { useShell } from '../shell/store'
 import { RIGHT_SIDEBAR_MIN_WIDTH, clampRightSidebarPanelWidth } from './width'
 
 /** One tab of the activity bar and the panel it shows. */

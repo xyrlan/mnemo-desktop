@@ -8,7 +8,7 @@ export const homeStore = createHomeStore(
   { ...tauriHome, refreshGithub },
   () => {
     const s = settingsStore.getState()
-    return { homePinned: s.homePinned, homeHidden: s.homeHidden, cloneBase: s.cloneBase }
+    return { homePinned: s.homePinned, homeHidden: s.homeHidden, cloneBase: s.cloneBase, projects: s.projects }
   },
   (k, v) => settingsStore.getState().set(k, v),
   {

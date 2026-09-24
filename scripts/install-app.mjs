@@ -16,6 +16,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { BIN_DIR, listBundle, missingHelpers } from './bundle-helpers.mjs'
 import { shaOfVersionLine, staleReminder } from './stale.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -82,6 +83,10 @@ function install({ launch }) {
   const meta = JSON.parse(out('cargo', ['metadata', '--no-deps', '--format-version', '1', '--manifest-path', 'src-tauri/Cargo.toml']))
   const built = join(meta.target_directory, 'release/bundle/macos/mnemo.app')
   if (!existsSync(built)) die(`tauri build left no bundle at ${built}`)
+  // The MCP bridge, the terminal daemon and the agent-status hook are looked for beside the app's
+  // executable: a bundle without them installs an app with those quietly off.
+  const missing = missingHelpers('app', listBundle(built))
+  if (missing.length) die(`the bundle has no ${missing.join(', ')} in ${BIN_DIR.app}: refusing to install it (see src-tauri/Cargo.toml's [[bin]])`)
 
   // Ask the binary itself, which is the only answer that proves the stamp survived the build.
   const version = ask(join(built, EXE), ['--version'], { timeout: 20_000 })

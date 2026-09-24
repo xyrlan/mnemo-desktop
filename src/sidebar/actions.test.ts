@@ -1,4 +1,5 @@
 import { activateAgent, addProject, registerSidebarActions } from './actions'
+import { archiveStore } from './archive'
 import { sidebarStore } from './store'
 import { actions, fleetStore, homeStore, layoutStore, repo, resetFakes, tree } from './testing'
 
@@ -17,6 +18,12 @@ test('worktree.go.1 … worktree.go.9 are registered, with the keymap’s chords
   expect(ids).toEqual(Array.from({ length: 9 }, (_, i) => `worktree.go.${i + 1}`))
   expect(actions.get('worktree.go.1')).toMatchObject({ title: 'Go to workspace 1', shortcut: '⌘1' })
   expect(actions.get('worktree.go.9')?.shortcut).toBe('⌘9')
+})
+
+test('worktree.cleanup opens the cleanup view', async () => {
+  expect(actions.get('worktree.cleanup')).toMatchObject({ title: 'Clean up workspaces…' })
+  await actions.get('worktree.cleanup')!.run()
+  expect(archiveStore.getState().cleanup.open).toBe(true)
 })
 
 test('worktree.go.N shows the Nth card in sidebar order and marks it read', async () => {

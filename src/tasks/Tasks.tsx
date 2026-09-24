@@ -15,7 +15,7 @@ import { selectionStore, useSelection } from '../github/app-store'
 import { dispatchIssue, dispatchIssues, openIssue, openUrl } from '../github/actions'
 import { linkIssues, linkWord, type Issue, type IssueLink } from '../github/types'
 import { checksOf, dispatchable, EFFORTS, MAY, MODELS, taskRepos, totals, type TaskRepo } from './model'
-import { openNewWorkspace } from './upstream'
+import { openNewWorkspace } from '../new-workspace/open'
 import '../home/home.css'
 
 const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~')

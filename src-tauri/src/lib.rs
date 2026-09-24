@@ -47,6 +47,9 @@ pub mod home_commands;
 // -- pr-review (src/review.rs) --
 pub mod review;
 
+// -- diff-comments (src/worktree_diff.rs) --
+pub mod worktree_diff;
+
 // -- chrome (src/chrome.rs) --
 pub mod chrome;
 
@@ -75,6 +78,9 @@ pub mod conversation;
 
 // -- github (src/github.rs) --
 pub mod github;
+
+// -- ai-commit-pr (src/commit.rs) --
+pub mod commit;
 
 // -- job (src/job.rs) --
 pub mod job;
@@ -170,6 +176,7 @@ pub fn run() {
             browser::browser_pr_url,
             browser::browser_open_external,
             browser::browser_data_store,
+            browser::browser_save_shot,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
@@ -215,6 +222,10 @@ pub fn run() {
             // -- pr-review commands --
             review::review_pr,
 
+            // -- diff-comments commands --
+            worktree_diff::worktree_diff_files,
+            worktree_diff::worktree_diff_file,
+
             // -- chrome commands --
             chrome::chrome_session,
             commands::pty_pid,
@@ -228,6 +239,7 @@ pub fn run() {
             worktree::worktree_list,
             worktree::worktree_create,
             worktree::worktree_remove,
+            worktree::worktree_cleanup_facts,
 
             // -- mcp commands --
             mcp::mcp_socket_path,
@@ -258,6 +270,15 @@ pub fn run() {
             github::gh_auth,
             github::gh_issues,
             github::gh_project,
+
+            // -- ai-commit-pr commands --
+            commit::commit_status,
+            commit::commit_message,
+            commit::commit_create,
+            commit::commit_push,
+            commit::commit_pr_find,
+            commit::commit_pr_draft,
+            commit::commit_pr_create,
 
             // -- job commands --
             job::job_run,
@@ -349,6 +370,9 @@ pub fn run() {
                     ("sidebar.toggle-left", "Toggle Left Sidebar", "CmdOrCtrl+B"),
                     ("sidebar.toggle-right", "Toggle Right Sidebar", "CmdOrCtrl+L"),
                     ("pane.toggle-face", "Toggle Conversation", "CmdOrCtrl+Shift+C"),
+                    ("dictation.toggle", "Toggle Dictation", "CmdOrCtrl+E"),
+                    ("floating-terminal.toggle", "Toggle Floating Terminal", "CmdOrCtrl+Alt+A"),
+                    ("diff.open", "Open Diff", "CmdOrCtrl+Shift+G"),
                 ];
                 const PREFIX: &str = "action:";
 

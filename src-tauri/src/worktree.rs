@@ -12,6 +12,10 @@
 //!
 //! Nothing here reaches outside the repo's parent directory: a name is one plain path segment,
 //! and a path to remove must be a listed, non-main worktree under that parent.
+//!
+//! For cleaning up, `cleanup_facts` says of each tree but the main checkout whether its commits
+//! are all in the repo's default branch (`merged`): with no changes either, removing it loses
+//! nothing, since the branch is kept.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -277,6 +281,51 @@ pub fn remove(path: &str, force: bool) -> Result<(), String> {
     git(&args, &root).map(|_| ())
 }
 
+/// One tree as `cleanup_facts` reports it: `CleanupTree` in `src/worktrees/client.ts`.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupTree {
+    #[serde(flatten)]
+    pub info: WorktreeInfo,
+    /// Its HEAD is in the default branch (local or the remote's), so none of its commits would
+    /// be lost; true too for a tree that never made one.
+    pub merged: bool,
+}
+
+/// `CleanupFacts` in `src/worktrees/client.ts`.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupFacts {
+    /// The branch `merged` is measured against, as git spells it (`origin/main`); `None` when
+    /// there is none to measure against, and then nothing is `merged`.
+    pub base: Option<String>,
+    /// Every tree but the main checkout, in `list`'s order.
+    pub trees: Vec<CleanupTree>,
+}
+
+/// The refs a tree's HEAD is looked for in: the remote's default branch (`origin/HEAD`) and the
+/// local branch of the same name, else the main checkout's branch; only those that resolve.
+fn bases(root: &Path, main_branch: Option<&str>) -> Vec<String> {
+    let remote = git(&["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let local = remote.as_deref().and_then(|r| r.split_once('/')).map(|(_, b)| b.to_string()).or(main_branch.map(String::from));
+    let resolves = |r: &str| git(&["rev-parse", "--verify", "--quiet", &format!("{r}^{{commit}}")], root).is_ok();
+    remote.into_iter().chain(local).filter(|r| !r.starts_with('-') && resolves(r)).collect()
+}
+
+/// What cleaning up needs to know of the repo `repo` is in; see the module doc.
+pub fn cleanup_facts(repo: &str) -> Result<CleanupFacts, String> {
+    let root = main_root(repo)?;
+    let mut trees = list(repo)?;
+    let main_branch = trees.first().filter(|w| w.is_main).and_then(|w| w.branch.clone());
+    let bases = bases(&root, main_branch.as_deref());
+    trees.retain(|w| !w.is_main);
+    let merged = |head: &str| !head.is_empty() && bases.iter().any(|b| git(&["merge-base", "--is-ancestor", head, b], &root).is_ok());
+    Ok(CleanupFacts {
+        base: bases.first().cloned(),
+        trees: trees.into_iter().map(|info| CleanupTree { merged: merged(&info.head), info }).collect(),
+    })
+}
+
 fn emitter(app: AppHandle) -> Arc<dyn Fn(JobEvent) + Send + Sync> {
     Arc::new(move |e| {
         let _ = match e {
@@ -304,6 +353,12 @@ pub async fn worktree_create(app: AppHandle, repo: String, name: String, base: O
 #[tauri::command]
 pub async fn worktree_remove(path: String, force: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || remove(&path, force)).await.map_err(|e| e.to_string())?
+}
+
+/// `cleanupFacts` in `src/worktrees/client.ts`.
+#[tauri::command]
+pub async fn worktree_cleanup_facts(repo: String) -> Result<CleanupFacts, String> {
+    tauri::async_runtime::spawn_blocking(move || cleanup_facts(&repo)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -522,5 +577,61 @@ mod tests {
         assert_eq!(lines, [made.path.clone()]);
         assert_eq!(list(&s(&root)).unwrap()[1].setup_job, None);
         remove(&made.path, false).unwrap();
+    }
+
+    fn commit(dir: &Path, file: &str) {
+        std::fs::write(dir.join(file), file).unwrap();
+        sh_git(&["add", "-A"], dir);
+        sh_git(&["commit", "-q", "-m", file], dir);
+    }
+
+    fn merged_of(facts: &CleanupFacts) -> Vec<(String, bool, bool)> {
+        facts.trees.iter().map(|t| (t.info.branch.clone().unwrap_or_default(), t.merged, t.info.dirty)).collect()
+    }
+
+    #[test]
+    fn cleanup_facts_say_which_trees_are_in_the_default_branch() {
+        let root = repo("wt-facts");
+        let r = s(&root);
+        let done = create(&r, "done", None, None, quiet()).unwrap();
+        commit(Path::new(&done.path), "done.txt");
+        let open = create(&r, "open", None, None, quiet()).unwrap();
+        commit(Path::new(&open.path), "open.txt");
+        let fresh = create(&r, "fresh", None, None, quiet()).unwrap();
+        sh_git(&["merge", "-q", "--no-edit", "done"], &root);
+        std::fs::write(Path::new(&fresh.path).join("scratch"), "x").unwrap();
+
+        let facts = cleanup_facts(&r).unwrap();
+        // No remote: measured against the main checkout's own branch.
+        assert_eq!(facts.base.as_deref(), Some("main"));
+        // The main checkout is left out; the rest keep `list`'s order, which is git's (by path).
+        assert_eq!(
+            merged_of(&facts),
+            [("done".into(), true, false), ("fresh".into(), true, true), ("open".into(), false, false)]
+        );
+        // Asked from inside a tree, the same answer.
+        assert_eq!(cleanup_facts(&open.path).unwrap(), facts);
+    }
+
+    #[test]
+    fn cleanup_facts_measure_against_the_remotes_default_branch() {
+        let origin = repo("wt-facts-remote");
+        let clone = origin.parent().unwrap().join("clone");
+        sh_git(&["clone", "-q", &s(&origin), &s(&clone)], origin.parent().unwrap());
+        let c = s(&clone);
+        let tree = create(&c, "shipped", None, None, quiet()).unwrap();
+        commit(Path::new(&tree.path), "shipped.txt");
+        // Merged upstream and fetched, while the local main stays behind.
+        sh_git(&["fetch", "-q", &tree.path, "shipped:shipped"], &origin);
+        sh_git(&["merge", "-q", "--no-edit", "shipped"], &origin);
+        sh_git(&["fetch", "-q"], &clone);
+        let facts = cleanup_facts(&c).unwrap();
+        assert_eq!(facts.base.as_deref(), Some("origin/main"));
+        assert_eq!(merged_of(&facts), [("shipped".into(), true, false)]);
+        // With no default branch to measure against, nothing counts as merged.
+        sh_git(&["checkout", "-q", "--detach"], &clone);
+        sh_git(&["remote", "remove", "origin"], &clone);
+        let none = cleanup_facts(&c).unwrap();
+        assert_eq!((none.base, none.trees[0].merged), (None, false));
     }
 }

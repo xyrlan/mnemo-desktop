@@ -2,8 +2,8 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { HomeClient } from './client'
 import { cloneDest, EMPTY, stopCmd, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type OpenedPr, type Pr } from './types'
 
-export type HomeSettings = { homePinned: string[]; homeHidden: string[]; cloneBase: string | null }
-export type SetSetting = (key: 'homePinned' | 'homeHidden', value: string[]) => Promise<void>
+export type HomeSettings = { homePinned: string[]; homeHidden: string[]; cloneBase: string | null; projects: string[] }
+export type SetSetting = (key: 'homePinned' | 'homeHidden' | 'projects', value: string[]) => Promise<void>
 /** The slice of the layout store Home drives. Injected so tests never touch Tauri. */
 export type LayoutLike = {
   readonly panes: Record<number, { id: number; sessionId?: string }>
@@ -27,8 +27,6 @@ export type HomeState = {
   /** Unresolved protected folders listed without a filter. */
   showProtected: boolean
   cloneSpec: string
-  /** Roots opened or cloned this run that history does not know yet. */
-  extraRoots: string[]
   notice: string | null
   github: GithubRead
   /** When the last GitHub read finished; null before one did. */
@@ -63,8 +61,12 @@ export type HomeActions = {
   stopChild(repo: HomeRepo, s: HomeSession): void
   newSession(root: string): void
   shell(root: string): void
+  /** Pick a folder and add its repo to the saved projects (showing it again if hidden). */
   openFolder(): Promise<void>
   clone(): Promise<void>
+  /** Take `root` out of the saved projects and the pinned ones, and hide it, so a repo Claude's
+   *  history still knows leaves the list too. Adding it again brings it back. */
+  forgetProject(root: string): Promise<void>
   dismiss(): void
 }
 export type HomeStore = StoreApi<HomeState & HomeActions>
@@ -84,7 +86,19 @@ function withFlag(snapshot: HomeSnapshot, root: string, flag: 'pinned' | 'hidden
   return { ...snapshot, repos }
 }
 
+const without = (list: string[], v: string) => list.filter((x) => x !== v)
+
+/** Roots Home lists even with no history: the saved projects, and the pinned and hidden ones so
+ *  a pin shows and a hide sticks (the fleet leaves out a repo Home lists as hidden). */
+const listedRoots = (s: HomeSettings) => [...new Set([...s.projects, ...s.homePinned, ...s.homeHidden])]
+
 export function createHomeStore(client: LensClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike): HomeStore {
+  /** Save `root` as a project; one the user hid (or forgot) shows again. */
+  async function addProject(root: string) {
+    const s = settings()
+    if (!s.projects.includes(root)) await setSetting('projects', [...s.projects, root])
+    if (s.homeHidden.includes(root)) await setSetting('homeHidden', without(s.homeHidden, root))
+  }
   return createZustand<HomeState & HomeActions>((set, get) => ({
     snapshot: EMPTY,
     loading: false,
@@ -93,7 +107,6 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
     showHidden: false,
     showProtected: false,
     cloneSpec: '',
-    extraRoots: [],
     notice: null,
     github: 'idle',
     githubAt: null,
@@ -104,7 +117,7 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
       const s = settings()
       const here = Object.values(layout.panes).map((p) => p.sessionId).filter((x): x is string => !!x)
       try {
-        const snapshot = await client.snapshot({ here, pinned: s.homePinned, hidden: s.homeHidden, extraRoots: get().extraRoots })
+        const snapshot = await client.snapshot({ here, pinned: s.homePinned, hidden: s.homeHidden, extraRoots: listedRoots(s) })
         const selected = get().selected
         const keep = selected !== null && snapshot.repos.some((r) => r.root === selected)
         // Never an unresolved repo: it may be folded out of the list, and selecting one is a
@@ -168,7 +181,8 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
       if (!picked) return
       try {
         const root = await client.registerRepo(picked)
-        set((st) => ({ extraRoots: st.extraRoots.includes(root) ? st.extraRoots : [...st.extraRoots, root], selected: root }))
+        await addProject(root)
+        set({ selected: root })
         await get().load()
       } catch (e) {
         set({ notice: String(e) })
@@ -180,7 +194,20 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
       const dest = cloneDest(base, spec)
       if (!dest) return
       await layout.openCommandTab(base, `gh repo clone ${spec} ${dest}`)
-      set((st) => ({ extraRoots: [...st.extraRoots, dest], cloneSpec: '' }))
+      set({ cloneSpec: '' })
+      await addProject(dest)
+    },
+    async forgetProject(root) {
+      const s = settings()
+      set((st) => ({
+        snapshot: withFlag(withFlag(st.snapshot, root, 'pinned', false), root, 'hidden', true),
+        selected: st.selected === root ? null : st.selected,
+        openedPr: st.openedPr?.repo === root ? null : st.openedPr,
+      }))
+      if (s.projects.includes(root)) await setSetting('projects', without(s.projects, root))
+      if (s.homePinned.includes(root)) await setSetting('homePinned', without(s.homePinned, root))
+      if (!s.homeHidden.includes(root)) await setSetting('homeHidden', [...s.homeHidden, root])
+      await get().load()
     },
     dismiss: () => set({ notice: null }),
   }))

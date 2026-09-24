@@ -24,6 +24,11 @@ import { useStore } from 'zustand'
  * A slot draws its components in the order they were mounted, each inside its own error
  * boundary. Mounting the same component in the same slot twice draws it once, until both
  * mounts are undone.
+ *
+ * In dev, a hot reload runs a `view.tsx` again, and its second `mountInSlot` brings a new
+ * function of the same name. That mount takes the earlier one's place (and its position) instead
+ * of drawing a second copy; the earlier mount's undo then does nothing. So in dev two different
+ * components in one slot need different names; a component with no name is never replaced.
  */
 export type ShellSlot = 'left-sidebar' | 'right-sidebar' | 'status-bar' | 'titlebar-tabs' | 'titlebar-right' | 'overlay'
 
@@ -40,14 +45,20 @@ const empty = () => Object.fromEntries(SLOTS.map((s) => [s, []])) as unknown as 
 const slots = createZustand<Slots>(empty)
 let nextKey = 1
 
+const nameOf = (c: ComponentType) => c.displayName || c.name
+/** The same view's component, run again by a hot reload. */
+const sameName = (a: ComponentType, b: ComponentType) => nameOf(a) !== '' && nameOf(a) === nameOf(b)
+
 /** Draw `component` in `slot`. Returns the way to take it out again; calling that more than
  *  once takes it out once. */
 export function mountInSlot(slot: ShellSlot, component: ComponentType): () => void {
   if (!SLOTS.includes(slot)) throw new Error(`mountInSlot: no slot named ${JSON.stringify(slot)}`)
   slots.setState((s) => {
     const had = s[slot].find((e) => e.component === component)
-    const next = had ? s[slot].map((e) => (e === had ? { ...e, count: e.count + 1 } : e)) : [...s[slot], { key: nextKey++, component, count: 1 }]
-    return { [slot]: next }
+    if (had) return { [slot]: s[slot].map((e) => (e === had ? { ...e, count: e.count + 1 } : e)) }
+    const reloaded = import.meta.env.DEV ? s[slot].find((e) => sameName(e.component, component)) : undefined
+    if (reloaded) return { [slot]: s[slot].map((e) => (e === reloaded ? { key: e.key, component, count: 1 } : e)) }
+    return { [slot]: [...s[slot], { key: nextKey++, component, count: 1 }] }
   })
   let mounted = true
   return () => {

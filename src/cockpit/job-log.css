@@ -1,0 +1,13 @@
+/* A job's log pane: what `merge` or `land` printed, line by line, and how it ended. */
+.job-log { display: flex; flex-direction: column; font-size: 12px; line-height: 1.5; }
+.ck-empty { color: var(--fg-muted); padding: 12px 4px; }
+.ck-log { font-size: 11px; line-height: 1.45; }
+.ck-log-line { display: flex; gap: 6px; }
+.ck-log-stream { flex: 0 0 auto; width: 2.2em; color: var(--fg-muted); user-select: none; }
+.ck-log-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.ck-log-err .ck-log-text { color: var(--ansi-red); }
+/* The app's own lines between a job's steps (what the merge gate read): not a process's output. */
+.ck-log-app .ck-log-text { color: var(--fg-muted); font-style: italic; }
+.ck-log-end { margin-top: 6px; color: var(--fg-muted); }
+.ck-log-failed { color: var(--ansi-red); }
+.ck-log-ok { color: var(--ansi-green); }

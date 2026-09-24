@@ -1,40 +1,8 @@
-/* The vault square. Every colour is a theme token; the slot around it belongs to the sidebar. */
-/* Fills the slot's width; the height is fixed. Four bands top to bottom — stage 113, caption 26,
-   texture 15, HUD 22 — adding up to `SQUARE` (176) in Square.tsx. */
-.vl-square { position: relative; width: 100%; height: 176px; flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; --vl-tone: var(--accent); }
-/* Five health tones down one ramp, for the HUD bar and the octopus at rest. The ansi tokens
-   alone do not make a ramp — this theme's `--ansi-red` is a pink (#f7768e) that reads as
-   decorative next to the green, so the two ends are deepened and the middles mixed, keeping the
-   theme's hues but widening the distance the eye has to travel between bands. */
-.vl-green { --vl-tone: var(--ansi-green); }
-.vl-lime { --vl-tone: color-mix(in oklab, var(--ansi-green) 40%, var(--ansi-yellow)); }
-.vl-yellow { --vl-tone: var(--ansi-yellow); }
-.vl-orange { --vl-tone: color-mix(in oklab, var(--ansi-yellow) 30%, #e05a3a); }
-.vl-red { --vl-tone: color-mix(in oklab, var(--ansi-red) 62%, #7d1d2e); }
-.vl-muted { --vl-tone: var(--fg-muted); }
+/* The octopus's resting poses, from the vault square that wore them (retired, orca-redesign-c).
+   Their scenes are in `src/avatar/scenes.ts` (IDLE, POSES); `src/avatar/gallery.html` imports
+   this file to draw them. The app itself does not load it. */
 
-/* The scene's own tone, the same four `avatar.css` paints the octopus with, for the things around
-   him that follow the action rather than the vault: his glow and the texture's bars. */
-.vl-kind-accent { --vl-kind: var(--accent); }
-.vl-kind-green { --vl-kind: var(--ansi-green); }
-.vl-kind-yellow { --vl-kind: var(--ansi-yellow); }
-.vl-kind-red { --vl-kind: var(--ansi-red); }
-.vl-kind-muted { --vl-kind: var(--fg-muted); }
-
-/* Band 1 — the stage. The octopus is a fixed 104px, centred, whatever the sidebar's width. */
-.vl-stage { flex: 0 0 113px; display: flex; justify-content: center; align-items: flex-end; }
-.vl-octo { width: 104px; height: 104px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--vl-kind) 40%, transparent)); }
-.vl-octo.vl-at-rest { --vl-kind: var(--vl-tone); }
-
-/* At rest, before the first pulse, the body takes the vault's own tone, so all five bands colour
-   it, not just the four `avatar.css` happens to define. Only here: once a scene is worn, its
-   tone is the scene's. */
-.vl-body .av-head, .vl-body .av-node { fill: var(--vl-tone); }
-.vl-body .av-arm { fill: color-mix(in srgb, var(--vl-tone) 60%, var(--bg)); }
-.vl-body .av-eye { fill: var(--bg); }
-
-/* idle — the octopus at rest, breathing. Its scene is in `src/avatar/scenes.ts` (IDLE);
-   the keyframes are here because `avatar.css` is read-only for this feature. */
+/* idle — the octopus at rest, breathing. */
 @keyframes av-idle-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
 @keyframes av-idle-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
 .av-idle { transform-origin: 50% 40%; animation: av-idle-breathe 4.2s ease-in-out infinite; }
@@ -51,49 +19,3 @@
 .av-poor .av-eye { opacity: .55; }
 /* Slower and shallower: a vault in trouble does not bustle. */
 .av-poor, .av-poor .av-arm { animation-duration: 6.5s; }
-
-/* Band 2 — the caption: what he did, then where and how long ago. A long target is cut here,
-   not in JavaScript: the width belongs to the layout. */
-.vl-caption { flex: 0 0 26px; padding: 0 10px; text-align: center; font-size: 11px; line-height: 13px; min-width: 0; }
-.vl-what, .vl-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vl-what { color: var(--fg-muted); }
-/* The target is what the eye is after — `git push --force`, not `blocked`. */
-.vl-target { color: var(--fg); }
-.vl-where { color: var(--fg-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-
-/* Band 3 — the activity texture: one thin bar per bucket of the last hour, oldest at the left,
-   as tall as that bucket's share of the busiest one and coloured by what mostly happened in it.
-   The heights come in as inline px from `TICK` in Square.tsx, so this band only has to place
-   them. Texture, not data: nothing here is a number, a legend or a hover target. */
-.vl-texture { flex: 0 0 15px; display: flex; justify-content: center; align-items: flex-end; gap: 1px; padding-bottom: 3px; }
-.vl-tick { width: 2px; min-height: 1px; border-radius: 1px; background: var(--vl-kind); opacity: .85; transition: height .3s ease-out; }
-/* An empty bucket keeps its place as a rest mark. Without it a quiet hour is two bars adrift in
-   a void, and the row stops reading as a stretch of time. */
-.vl-tick.vl-quiet { background: var(--fg-muted); opacity: .25; }
-
-/* The discreet way into the vault: only on hover, and never over the octopus. */
-.vl-open { position: absolute; right: 4px; top: 4px; z-index: 2; opacity: 0; transition: opacity .12s; background: none; border: 0; color: var(--fg-muted); font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
-.vl-square:hover .vl-open { opacity: .7; }
-.vl-open:hover { opacity: 1; color: var(--fg); background: var(--bg); }
-.vl-open:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
-
-/* Band 4 — the HUD: the vault's level, and its health on the bar. */
-.vl-hud { flex: 0 0 22px; margin: 0 8px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fg-muted); }
-.vl-level { color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vl-bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.vl-fill { display: block; height: 100%; background: var(--vl-tone); transition: width .4s ease-out; }
-
-/* The fire at the end of the bar: sustained good health. */
-.vl-fire { flex: 0 0 auto; }
-@keyframes vl-flicker { 0%, 100% { transform: scaleY(1); opacity: .9; } 50% { transform: scaleY(.7); opacity: .6; } }
-/* Hot at the base, pale at the tip. The base rect keeps the theme's red only as a tint: on its
-   own that token is a pink and reads as confetti under a green octopus. */
-.vl-flame { transform-box: fill-box; transform-origin: 50% 100%; animation: vl-flicker .5s ease-in-out infinite; }
-.vl-flame rect:nth-child(1) { fill: color-mix(in oklab, var(--ansi-red) 50%, #c2410c); }
-.vl-flame rect:nth-child(2) { fill: color-mix(in oklab, var(--ansi-yellow) 70%, #fff); }
-.vl-flame-1 { animation-delay: .17s; }
-.vl-flame-2 { animation-delay: .34s; }
-
-@media (prefers-reduced-motion: reduce) {
-  .vl-square * { animation: none !important; transition: none !important; }
-}

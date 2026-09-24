@@ -16,12 +16,12 @@ const snap: HomeSnapshot = {
 function mk(over: Partial<LensClient> = {}) {
   const calls: string[] = []
   const client: LensClient = {
-    // Like the Rust side: roots opened this run come back as (empty) repos.
+    // Like the Rust side: listed roots history does not know come back as (empty) repos.
     // Like the Rust side: the flags come back applied from the arguments, and repos are
     // sorted pinned first, then by last activity, then by name (`sort_repos` in home.rs).
     snapshot: async (a) => ({
       ...snap,
-      repos: [...snap.repos, ...a.extraRoots.map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }))]
+      repos: [...snap.repos, ...a.extraRoots.filter((root) => !snap.repos.some((r) => r.root === root)).map((root) => ({ root, name: root.split('/').pop()!, last_at: 0, pinned: false, hidden: false, unresolved: false, sessions: [], children: [] }))]
         .map((r) => ({ ...r, pinned: a.pinned.includes(r.root), hidden: a.hidden.includes(r.root) }))
         .sort((x, y) => Number(y.pinned) - Number(x.pinned) || y.last_at - x.last_at || x.name.localeCompare(y.name)),
     }),
@@ -31,8 +31,8 @@ function mk(over: Partial<LensClient> = {}) {
     refreshGithub: async () => {},
     ...over,
   }
-  const settings = { homePinned: [] as string[], homeHidden: [] as string[], cloneBase: null as string | null }
-  const setSetting = async (k: 'homePinned' | 'homeHidden', v: string[]) => { settings[k] = v; calls.push(`${k}=${v.join(',')}`) }
+  const settings = { homePinned: [] as string[], homeHidden: [] as string[], cloneBase: null as string | null, projects: [] as string[] }
+  const setSetting = async (k: 'homePinned' | 'homeHidden' | 'projects', v: string[]) => { settings[k] = v; calls.push(`${k}=${v.join(',')}`) }
   const layout = {
     panes: {} as Record<number, { id: number; sessionId?: string }>,
     commands: [] as string[],
@@ -42,7 +42,7 @@ function mk(over: Partial<LensClient> = {}) {
     focusPane: (id: number) => { layout.focused.push(id) },
   }
   const store = createHomeStore(client, () => settings, setSetting, layout)
-  return { store, calls, layout }
+  return { store, calls, layout, settings }
 }
 
 test('load selects the first repo and keeps selection across reloads', async () => {
@@ -93,13 +93,13 @@ test('openSession with a live-here session focuses its pane; elsewhere only noti
   expect(store.getState().notice).toBe('open in another terminal')
 })
 
-test('clone types gh into a tab under clone_base and remembers the dest as an extra root', async () => {
-  const { store, layout } = mk()
+test('clone types gh into a tab under clone_base and saves the dest as a project', async () => {
+  const { store, layout, settings } = mk()
   await store.getState().load()
   store.getState().setCloneSpec('xyrlan/mnemo')
   await store.getState().clone()
   expect(layout.commands).toEqual(['/gh:gh repo clone xyrlan/mnemo /gh/mnemo'])
-  expect(store.getState().extraRoots).toEqual(['/gh/mnemo'])
+  expect(settings.projects).toEqual(['/gh/mnemo'])
   expect(store.getState().cloneSpec).toBe('')
 })
 
@@ -108,11 +108,75 @@ test('openFolder registers the picked dir and refreshes; non-git surfaces the er
   await bad.store.getState().load()
   await bad.store.getState().openFolder()
   expect(bad.store.getState().notice).toBe('not a git repository')
+  expect(bad.settings.projects).toEqual([])
   const ok = mk()
   await ok.store.getState().load()
   await ok.store.getState().openFolder()
-  expect(ok.store.getState().extraRoots).toEqual(['/gh/picked'])
+  expect(ok.settings.projects).toEqual(['/gh/picked'])
   expect(ok.store.getState().selected).toBe('/gh/picked')
+  expect(ok.store.getState().snapshot.repos.some((r) => r.root === '/gh/picked')).toBe(true)
+})
+
+test('a saved project is listed on a fresh start, with no history and nothing opened this run', async () => {
+  // The bug: a project added lived only in memory, so a repo with no sessions was gone on restart.
+  let seen: string[] = []
+  const first = mk()
+  await first.store.getState().openFolder()
+  const restarted = mk({ snapshot: async (a) => { seen = a.extraRoots; return snap } })
+  restarted.settings.projects = [...first.settings.projects]
+  await restarted.store.getState().load()
+  expect(seen).toEqual(['/gh/picked'])
+})
+
+test('a pinned repo with no history is listed, and pinned', async () => {
+  const { store, settings } = mk()
+  settings.homePinned = ['/gh/quiet']
+  await store.getState().load()
+  expect(store.getState().snapshot.repos[0]).toMatchObject({ root: '/gh/quiet', pinned: true })
+})
+
+test('opening a folder twice saves it once', async () => {
+  const { store, settings, calls } = mk()
+  await store.getState().openFolder()
+  await store.getState().openFolder()
+  expect(settings.projects).toEqual(['/gh/picked'])
+  expect(calls).toEqual(['projects=/gh/picked'])
+})
+
+test('forgetProject unsaves, unpins and hides the repo, and moves the selection off it', async () => {
+  const { store, settings, calls } = mk()
+  await store.getState().openFolder()
+  await store.getState().togglePin('/gh/picked')
+  expect(store.getState().selected).toBe('/gh/picked')
+  calls.length = 0
+  await store.getState().forgetProject('/gh/picked')
+  expect(settings).toMatchObject({ projects: [], homePinned: [], homeHidden: ['/gh/picked'] })
+  expect(calls).toEqual(['projects=', 'homePinned=', 'homeHidden=/gh/picked'])
+  expect(store.getState().snapshot.repos.find((r) => r.root === '/gh/picked')).toMatchObject({ pinned: false, hidden: true })
+  expect(store.getState().selected).toBe('/gh/a')
+})
+
+test('forgetProject hides a repo history still knows, so it leaves the list too', async () => {
+  const { store, settings } = mk()
+  await store.getState().load()
+  store.getState().openPr('/gh/a', aPr)
+  const pending = store.getState().forgetProject('/gh/a')
+  // At once, without waiting for the reload.
+  expect(store.getState().snapshot.repos.find((r) => r.root === '/gh/a')!.hidden).toBe(true)
+  expect(store.getState().openedPr).toBeNull()
+  await pending
+  expect(settings.homeHidden).toEqual(['/gh/a'])
+  expect(store.getState().snapshot.repos.filter((r) => !r.hidden).map((r) => r.root)).toEqual(['/gh/b'])
+  expect(store.getState().selected).toBe('/gh/b')
+})
+
+test('adding a forgotten project again shows it again', async () => {
+  const { store, settings } = mk()
+  await store.getState().openFolder()
+  await store.getState().forgetProject('/gh/picked')
+  await store.getState().openFolder()
+  expect(settings).toMatchObject({ projects: ['/gh/picked'], homeHidden: [] })
+  expect(store.getState().snapshot.repos.find((r) => r.root === '/gh/picked')!.hidden).toBe(false)
 })
 
 /** `/dl/x-sub` sits in a protected folder: listed by its history path until selected. */

@@ -32,8 +32,9 @@ describe('voice controller', () => {
   it('press listens, release transcribes into the target resolved at press, then fades', async () => {
     const { voice, client, deps, phase } = setup()
     voice.begin()
-    expect(phase()).toEqual({ kind: 'listening' })
+    expect(phase()).toEqual({ kind: 'starting' })
     expect(deps.target).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening' }))
     await voice.end()
     expect(client.stop).toHaveBeenCalledOnce()
     expect(deps.insert).toHaveBeenCalledWith(PTY, 'hello world')
@@ -48,10 +49,15 @@ describe('voice controller', () => {
     voice.begin()
     const ending = voice.end()
     expect(client.stop).not.toHaveBeenCalled()
+    const seen: string[] = []
+    const unsub = voice.store.subscribe((s) => seen.push(s.phase.kind))
     opening.resolve()
     await ending
+    unsub()
     expect(client.stop).toHaveBeenCalledOnce()
     expect(phase().kind).toBe('done')
+    // Stopped while opening: never claims to be listening.
+    expect(seen).not.toContain('listening')
   })
 
   it('ignores a second press while a take is open or transcribing', async () => {
@@ -87,7 +93,7 @@ describe('voice controller', () => {
     voice.begin()
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(2))
     expect(client.stop).toHaveBeenCalledOnce()
-    expect(phase()).toEqual({ kind: 'listening' })
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening' }))
   })
 
   it('reports silence and failures without inserting', async () => {
@@ -110,10 +116,10 @@ describe('voice controller', () => {
     expect(phase()).toEqual({ kind: 'done', text: 'hello world', landed: false })
   })
 
-  it('toggle starts, then stops (the palette action)', async () => {
+  it('toggle starts, then stops (Mod+E)', async () => {
     const { voice, client, phase } = setup()
     await voice.toggle()
-    expect(phase().kind).toBe('listening')
+    await vi.waitFor(() => expect(phase().kind).toBe('listening'))
     await voice.toggle()
     expect(client.stop).toHaveBeenCalledOnce()
     expect(phase().kind).toBe('done')

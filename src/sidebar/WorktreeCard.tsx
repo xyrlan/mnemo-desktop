@@ -5,11 +5,13 @@
 // components/sidebar/WorktreeCardStatusSlot.tsx and
 // components/sidebar/WorktreeTitleInlineRename.tsx [336-385] (MIT, 122b8c25)
 import React from 'react'
+import { LoaderCircle } from 'lucide-react'
 import { Badge, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
 import type { PrNode, WorktreeNode } from '../fleet/types'
 import { StatusIndicator } from './agent-glyphs'
 import { activateWorktree } from './actions'
+import { useArchive } from './archive'
 import { prLabel, STATUS_LABEL, worktreeStatus, type WorktreeStatus } from './model'
 import { ReviewIcon } from './review-icon'
 import { TruncatedSidebarLabel } from './truncated-label'
@@ -82,7 +84,8 @@ function PrBadge({ pr }: { pr: PrNode }): React.JSX.Element {
   )
 }
 
-/** One worktree: status lane, name, branch, PR and its agents. A click shows it and marks it read. */
+/** One worktree: status lane, name, branch, PR and its agents. A click shows it and marks it read.
+ *  While it is being removed it is greyed out under "Removing…" and takes no clicks. */
 export const WorktreeCard = React.memo(function WorktreeCard({
   worktree,
   active,
@@ -94,6 +97,7 @@ export const WorktreeCard = React.memo(function WorktreeCard({
   const hasMetaRow = worktree.branch !== null || worktree.pr !== null
   const showAgents = worktree.agents.length > 0
   const titleOnlyCard = !hasMetaRow && !showAgents
+  const removing = useArchive((s) => s.removing.has(worktree.path))
   return (
     <div
       className={cn(
@@ -102,12 +106,22 @@ export const WorktreeCard = React.memo(function WorktreeCard({
         'ml-1 w-[calc(100%-0.25rem)] rounded-lg',
         'group-focus-visible/row:ring-1 group-focus-visible/row:ring-worktree-sidebar-ring',
         active ? 'border border-transparent' : 'border border-transparent worktree-sidebar-card-hover',
+        removing && 'cursor-not-allowed opacity-50 grayscale',
       )}
       style={{ paddingLeft: CARD_PADDING_LEFT }}
       data-worktree-card-surface="true"
       data-worktree-card-active={active ? 'primary' : undefined}
-      onClick={() => activateWorktree(worktree.path)}
+      aria-busy={removing}
+      onClick={() => !removing && activateWorktree(worktree.path)}
     >
+      {removing && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/50 backdrop-blur-[1px]">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background px-3 py-1 text-[11px] font-medium text-foreground shadow-sm">
+            <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
+            Removing…
+          </div>
+        </div>
+      )}
       <div
         className={cn('flex w-full min-w-0 gap-0.5 pl-0', titleOnlyCard ? 'items-center' : 'items-start')}
         data-worktree-card-parent-content=""

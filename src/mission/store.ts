@@ -7,8 +7,6 @@ import { replyLanguageFooter } from '../settings/store'
 export type MissionState = {
   snapshot: Snapshot
   looked: Record<string, number>
-  sidebarOpen: boolean
-  sidebarWidth: number
   polling: boolean
   lastError: string | null
   /** Per-child reply drafts and send errors. */
@@ -21,18 +19,6 @@ export type MissionState = {
    *  `asMe` when it was typed into the child's terminal instead of posted to its inbox. */
   sent: Record<string, Sent[]>
   translating: Record<string, boolean>
-  /** The cockpit body's folds, shared by the sidebar and the pane. Unset follows `foldsOpen`'s
-   *  defaults; set, it is what the user last clicked. */
-  folds: Folds
-}
-
-export type Fold = 'working' | 'done'
-export type Folds = Partial<Record<Fold, boolean>>
-
-/** Which cockpit sections are open: `needs` always is; `andando` opens by itself when nothing
- *  needs you (who is working is then the whole story); `feito` starts collapsed. */
-export function foldsOpen(folds: Folds, needs: number): Record<Fold, boolean> {
-  return { working: folds.working ?? needs === 0, done: folds.done ?? false }
 }
 
 export type Sent = { at: number; text: string; original: string; asMe?: boolean }
@@ -41,8 +27,6 @@ export type MissionActions = {
   refresh(focusedCwd: string | undefined, withPrs: boolean): Promise<void>
   loadLooked(): Promise<void>
   markLooked(id: string, timelineLen: number): Promise<void>
-  toggleSidebar(): void
-  setSidebarWidth(w: number): void
   setDraft(id: string, text: string): void
   sendReply(id: string): Promise<boolean>
   /** Types the draft, exactly as written, into the child's terminal through `claude attach`, so
@@ -51,7 +35,6 @@ export type MissionActions = {
   replyAsMe(id: string, suggested?: string | null): Promise<boolean>
   /** Replace the draft with its English translation (via `claude -p`). */
   translateDraft(id: string): Promise<boolean>
-  setFold(fold: Fold, open: boolean): void
 }
 
 export type MissionStore = StoreApi<MissionState & MissionActions>
@@ -64,8 +47,6 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
   return createZustand<MissionState & MissionActions>((set, get) => ({
     snapshot: EMPTY,
     looked: {},
-    sidebarOpen: true,
-    sidebarWidth: 360,
     polling: false,
     lastError: null,
     drafts: {},
@@ -74,7 +55,6 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
     typing: {},
     sent: {},
     translating: {},
-    folds: {},
 
     async refresh(focusedCwd, withPrs) {
       if (get().polling) return
@@ -106,15 +86,6 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
       }
     },
 
-    toggleSidebar() {
-      set((s) => ({ sidebarOpen: !s.sidebarOpen }))
-    },
-    setSidebarWidth(w) {
-      set({ sidebarWidth: Math.min(720, Math.max(240, w)) })
-    },
-    setFold(fold, open) {
-      set((s) => ({ folds: { ...s.folds, [fold]: open } }))
-    },
     setDraft(id, text) {
       set((s) => ({ drafts: { ...s.drafts, [id]: text } }))
     },
