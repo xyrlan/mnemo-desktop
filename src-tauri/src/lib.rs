@@ -52,6 +52,9 @@ pub mod chrome;
 // -- workspace (src/workspace.rs) --
 pub mod workspace;
 
+// -- worktrees (src/worktree.rs) --
+pub mod worktree;
+
 // -- mcp (src/mcp.rs) --
 pub mod mcp;
 
@@ -209,6 +212,11 @@ pub fn run() {
             workspace::workspace_read,
             workspace::workspace_write,
             workspace::workspace_live_sessions,
+
+            // -- worktrees commands --
+            worktree::worktree_list,
+            worktree::worktree_create,
+            worktree::worktree_remove,
 
             // -- mcp commands --
             mcp::mcp_socket_path,
