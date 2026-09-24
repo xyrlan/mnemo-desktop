@@ -47,6 +47,9 @@ pub mod home_commands;
 // -- pr-review (src/review.rs) --
 pub mod review;
 
+// -- diff-comments (src/worktree_diff.rs) --
+pub mod worktree_diff;
+
 // -- chrome (src/chrome.rs) --
 pub mod chrome;
 
@@ -214,6 +217,10 @@ pub fn run() {
 
             // -- pr-review commands --
             review::review_pr,
+
+            // -- diff-comments commands --
+            worktree_diff::worktree_diff_files,
+            worktree_diff::worktree_diff_file,
 
             // -- chrome commands --
             chrome::chrome_session,
