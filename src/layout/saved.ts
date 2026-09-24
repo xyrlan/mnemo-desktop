@@ -1,14 +1,17 @@
 import type { Node, PaneId } from './tree'
 import { closeLeaf, leaves } from './tree'
 
-/** What `~/.mnemo-desktop/workspace.json` holds: the tabs with their split trees and ratios,
- *  and what each pane was (never its PTY, its scrollback or its exit code). Pane ids are the
- *  ids of the run that saved it; `restore` issues new ones. */
+/** What `~/.mnemo-desktop/workspace.json` holds: for each open worktree, its tabs with their split
+ *  trees and ratios, and what each pane was (never its PTY, its scrollback or its exit code). Pane
+ *  ids are the ids of the run that saved it; `restore` issues new ones. */
 export type SavedPane = { view: string; props?: Record<string, unknown>; cwd?: string; title?: string; sessionId?: string; face?: 'conversation' }
 export type SavedTab = { id: string; root: Node; focused: PaneId; name?: string }
-export type Saved = { version: 1; tabs: SavedTab[]; panes: Record<string, SavedPane>; activeTab: string }
+export type SavedLayout = { tabs: SavedTab[]; panes: Record<string, SavedPane>; activeTab: string }
+/** `path: null` is the layout of no worktree: the tabs opened before one was chosen. */
+export type SavedWorktree = SavedLayout & { path: string | null }
+export type Saved = { version: 2; activeWorktree: string | null; worktrees: SavedWorktree[] }
 
-export const SAVED_VERSION = 1
+export const SAVED_VERSION = 2
 
 /** Views that only exist for a moment (a placeholder that opens a real terminal and closes). */
 export const TRANSIENT_VIEWS = new Set(['terminal-cmd'])
@@ -44,19 +47,14 @@ function parsePane(x: unknown): SavedPane | null {
   return p
 }
 
-/** The workspace to restore from what `workspace_read` returned. `null` when there is nothing to
- *  restore (no file, no tabs). A tab that cannot be read is dropped and a pane that cannot be read
- *  leaves its tab; throws only when tabs were saved and none of them survived, or the shape is
- *  not a workspace at all. */
-export function parseSaved(v: unknown): Saved | null {
-  if (!isObj(v)) throw new Error('workspace.json is not an object')
-  if (v.tabs === undefined) return null
-  if (!Array.isArray(v.tabs)) throw new Error('workspace.json: tabs is not a list')
-  if (v.tabs.length === 0) return null
+/** One layout as saved; `read` is false when it held tabs and none of them could be read. */
+function parseLayout(v: Record<string, unknown>): { layout: SavedLayout; read: boolean } {
+  if (v.tabs !== undefined && !Array.isArray(v.tabs)) throw new Error('workspace.json: tabs is not a list')
+  const raw = (v.tabs ?? []) as unknown[]
   const rawPanes = isObj(v.panes) ? v.panes : {}
   const panes: Record<string, SavedPane> = {}
   const tabs: SavedTab[] = []
-  for (const t of v.tabs) {
+  for (const t of raw) {
     if (!isObj(t)) continue
     let root = parseNode(t.root, new Set())
     if (!root) continue
@@ -73,9 +71,47 @@ export function parseSaved(v: unknown): Saved | null {
     if (str(t.name)) tab.name = t.name as string
     tabs.push(tab)
   }
-  if (tabs.length === 0) throw new Error('workspace.json: no tab could be read')
   const activeTab = typeof v.activeTab === 'string' ? v.activeTab : ''
-  return { version: SAVED_VERSION, tabs, panes, activeTab }
+  return { layout: { tabs, panes, activeTab }, read: raw.length === 0 || tabs.length > 0 }
+}
+
+/** The workspace to restore from what `workspace_read` returned. `null` when there is nothing to
+ *  restore (no file, no worktree, no tab). A tab that cannot be read is dropped and a pane that
+ *  cannot be read leaves its tab; a worktree whose tabs all fail stays open with none. Throws only
+ *  when tabs were saved and none of them survived, or the shape is not a workspace at all.
+ *
+ *  A file from before worktrees (`version: 1`, its tabs at the top) reads as the one layout of no
+ *  worktree. */
+export function parseSaved(v: unknown): Saved | null {
+  if (!isObj(v)) throw new Error('workspace.json is not an object')
+  if (v.worktrees === undefined) {
+    if (v.tabs === undefined) return null
+    const { layout, read } = parseLayout(v)
+    if (!read) throw new Error('workspace.json: no tab could be read')
+    return layout.tabs.length ? { version: SAVED_VERSION, activeWorktree: null, worktrees: [{ path: null, ...layout }] } : null
+  }
+  if (!Array.isArray(v.worktrees)) throw new Error('workspace.json: worktrees is not a list')
+  const worktrees: SavedWorktree[] = []
+  const seen = new Set<string | null>()
+  let saved = false
+  let survived = false
+  for (const w of v.worktrees) {
+    if (!isObj(w)) continue
+    const path = w.path === null ? null : str(w.path)
+    if (path === undefined || seen.has(path)) continue
+    const { layout, read } = parseLayout(w)
+    saved ||= layout.tabs.length > 0 || !read
+    survived ||= layout.tabs.length > 0
+    // No worktree and no tab: nothing to keep open.
+    if (path === null && layout.tabs.length === 0) continue
+    seen.add(path)
+    worktrees.push({ path, ...layout })
+  }
+  if (saved && !survived) throw new Error('workspace.json: no tab could be read')
+  if (worktrees.length === 0) return null
+  const named = typeof v.activeWorktree === 'string' || v.activeWorktree === null ? (v.activeWorktree as string | null) : undefined
+  const activeWorktree = named !== undefined && seen.has(named) ? named : worktrees[0].path
+  return { version: SAVED_VERSION, activeWorktree, worktrees }
 }
 
 /** The same tree with every leaf renamed through `map` (leaves missing from it stay). */

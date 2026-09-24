@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { createStore, PROMPT_DELAY_MS, type Store } from './store'
-import { parseSaved, type Saved } from './saved'
+import { parseSaved, type Saved, type SavedWorktree } from './saved'
 import { startWorkspace, type WorkspaceClient } from './persist'
 import type { PtyClient } from '../pty/client'
 import type { Node } from './tree'
@@ -20,6 +20,12 @@ function fakePty(first = 1) {
     onExit: async () => () => {},
   }
   return { pty, spawned, writes }
+}
+
+/** The one layout of a workspace that never chose a worktree. */
+const loose = (saved: Saved): SavedWorktree => {
+  expect(saved.worktrees.map((w) => w.path)).toEqual([null])
+  return saved.worktrees[0]
 }
 
 const leaf = (pane: number): Node => ({ kind: 'leaf', pane })
@@ -45,17 +51,23 @@ test('snapshotForSave keeps trees, ratios, focus, names and what each pane is, n
   s.getState().paneExited(1, 0)
   const saved = s.getState().snapshotForSave()
   expect(saved).toEqual({
-    version: 1,
-    activeTab: 'tab-1',
-    tabs: [
-      { id: 'tab-1', root: split('row', 0.3, leaf(1), leaf(2)), focused: 1 },
-      { id: 'tab--1', root: leaf(-1), focused: -1, name: 'triage' },
+    version: 2,
+    activeWorktree: null,
+    worktrees: [
+      {
+        path: null,
+        activeTab: 'tab-1',
+        tabs: [
+          { id: 'tab-1', root: split('row', 0.3, leaf(1), leaf(2)), focused: 1 },
+          { id: 'tab--1', root: leaf(-1), focused: -1, name: 'triage' },
+        ],
+        panes: {
+          '1': { view: 'terminal', cwd: '/repo', title: 'zsh' },
+          '2': { view: 'terminal', cwd: '/repo/wt', sessionId: 'sess-1' },
+          '-1': { view: 'cockpit', props: { x: 1 }, title: 'cockpit' },
+        },
+      },
     ],
-    panes: {
-      '1': { view: 'terminal', cwd: '/repo', title: 'zsh' },
-      '2': { view: 'terminal', cwd: '/repo/wt', sessionId: 'sess-1' },
-      '-1': { view: 'cockpit', props: { x: 1 }, title: 'cockpit' },
-    },
   })
   // Plain JSON: what goes to the file is what comes back.
   expect(JSON.parse(JSON.stringify(saved))).toEqual(saved)
@@ -66,7 +78,7 @@ test('snapshotForSave leaves transient views out of their tab', async () => {
   await s.getState().newTab('/a')
   s.getState().openView('terminal-cmd', { cmd: 'claude attach x' }, 'split-row')
   s.getState().openView('terminal-cmd', { cmd: 'claude attach y' }, 'tab')
-  const saved = s.getState().snapshotForSave()
+  const saved = loose(s.getState().snapshotForSave())
   expect(saved.tabs).toEqual([{ id: 'tab-1', root: leaf(1), focused: 1 }])
   expect(Object.keys(saved.panes)).toEqual(['1'])
 })
@@ -96,9 +108,9 @@ test('restore recreates the tabs with new ids, spawns shells in their cwd and re
 
     // Saving the restored layout gives the same shape back, less a shell's stale title (the
     // new shell sets its own).
-    const again = s.getState().snapshotForSave()
+    const again = loose(s.getState().snapshotForSave())
     expect(again.tabs.map((t) => t.root.kind)).toEqual(['split', 'leaf'])
-    expect(Object.values(again.panes)).toEqual([{ view: 'terminal', cwd: '/repo' }, ...Object.values(saved.panes).slice(1)])
+    expect(Object.values(again.panes)).toEqual([{ view: 'terminal', cwd: '/repo' }, ...Object.values(loose(saved).panes).slice(1)])
   } finally {
     vi.useRealTimers()
   }
@@ -120,7 +132,7 @@ test('restore leaves a session another instance runs alone, and resumes nothing 
     expect(one.writes).toEqual([[10, 'claude --resume sess-0\n']])
     // The live one stays on its pane, so the layout saves it and a later restore can resume it.
     expect(s.getState().panes[11].sessionId).toBe('sess-1')
-    expect(s.getState().snapshotForSave().panes['11']).toMatchObject({ sessionId: 'sess-1' })
+    expect(loose(s.getState().snapshotForSave()).panes['11']).toMatchObject({ sessionId: 'sess-1' })
 
     const two = fakePty(10)
     const blind = createStore(two.pty, { workspace: () => null, liveSessions: () => Promise.reject(new Error('claude: not found')) })
@@ -153,7 +165,7 @@ test('a moved layout saves and restores with the same panes in the same places',
   const moved = split('col', 0.5, leaf(2), split('col', 0.5, leaf(3), leaf(1)))
   expect(s.getState().tabs[0].root).toEqual(moved)
   const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave())) as Saved
-  expect(saved.tabs[0]).toEqual({ id: 'tab-1', root: moved, focused: 1 })
+  expect(loose(saved).tabs[0]).toEqual({ id: 'tab-1', root: moved, focused: 1 })
 
   const r = createStore(fakePty(10).pty, { workspace: () => null })
   await r.getState().restore(saved)
@@ -161,7 +173,7 @@ test('a moved layout saves and restores with the same panes in the same places',
   // Spawned in tree order: 2 → 10, 3 → 11, 1 → 12.
   expect(t).toEqual({ id: 'tab-10', root: split('col', 0.5, leaf(10), split('col', 0.5, leaf(11), leaf(12))), focused: 12 })
   expect([10, 11, 12].map((id) => r.getState().panes[id].cwd)).toEqual(['/repo/wt', '/repo/low', '/repo'])
-  expect(r.getState().snapshotForSave().tabs[0]).toEqual({ id: 'tab-10', root: split('col', 0.5, leaf(10), split('col', 0.5, leaf(11), leaf(12))), focused: 12 })
+  expect(loose(r.getState().snapshotForSave()).tabs[0]).toEqual({ id: 'tab-10', root: split('col', 0.5, leaf(10), split('col', 0.5, leaf(11), leaf(12))), focused: 12 })
 })
 
 test('restore of nothing restores nothing; of junk tabs rejects; restored tabs go after the open ones', async () => {
@@ -195,17 +207,139 @@ test('parseSaved drops unreadable panes and tabs, clamps ratios, and never lets 
       '4': { view: 'browser', props: { url: 'https://x' }, cwd: 7 },
     },
   }
-  const saved = parseSaved(v) as Saved
+  // A file from before worktrees: its tabs are the layout of no worktree.
+  const saved = loose(parseSaved(v) as Saved)
   expect(saved.tabs).toEqual([
     { id: 'a', root: leaf(1), focused: 1 },
     { id: 'c', root: leaf(4), focused: 4, name: 'kept' },
   ])
   expect(saved.panes).toEqual({ '1': { view: 'terminal', cwd: '/a' }, '4': { view: 'browser', props: { url: 'https://x' } } })
   expect(saved.activeTab).toBe('b')
-  expect((parseSaved({ tabs: [{ root: split('row', 7, leaf(1), leaf(2)) }], panes: { '1': { view: 'a' }, '2': { view: 'b' } } }) as Saved).tabs[0].root).toEqual(split('row', 0.9, leaf(1), leaf(2)))
+  expect(loose(parseSaved({ tabs: [{ root: split('row', 7, leaf(1), leaf(2)) }], panes: { '1': { view: 'a' }, '2': { view: 'b' } } }) as Saved).tabs[0].root).toEqual(split('row', 0.9, leaf(1), leaf(2)))
   expect(parseSaved({})).toBeNull()
   expect(() => parseSaved(null)).toThrow()
   expect(() => parseSaved({ tabs: 'x' })).toThrow()
+})
+
+describe('per worktree', () => {
+  /** `/repo` with a shell beside a Claude session, `/repo-wt-a` with a vault tab; `/repo-wt-a` shown. */
+  async function two(): Promise<Store> {
+    const s = createStore(fakePty().pty, { workspace: () => null })
+    await s.getState().switchWorktree('/repo')
+    await s.getState().newTab()
+    await s.getState().split('row', '/repo/src')
+    s.getState().setSessionId(2, 'sess-2')
+    await s.getState().switchWorktree('/repo-wt-a')
+    s.getState().openView('vault', {}, 'tab', 'vault')
+    await s.getState().switchWorktree('/empty')
+    await s.getState().switchWorktree('/repo-wt-a')
+    return s
+  }
+
+  test('each open worktree saves its own layout, and the file says which is shown', async () => {
+    const saved = (await two()).getState().snapshotForSave()
+    expect(saved).toEqual({
+      version: 2,
+      activeWorktree: '/repo-wt-a',
+      worktrees: [
+        {
+          path: '/repo',
+          activeTab: 'tab-1',
+          tabs: [{ id: 'tab-1', root: split('row', 0.5, leaf(1), leaf(2)), focused: 2 }],
+          panes: { '1': { view: 'terminal', cwd: '/repo' }, '2': { view: 'terminal', cwd: '/repo/src', sessionId: 'sess-2' } },
+        },
+        { path: '/repo-wt-a', activeTab: 'tab--1', tabs: [{ id: 'tab--1', root: leaf(-1), focused: -1 }], panes: { '-1': { view: 'vault', props: {}, title: 'vault' } } },
+        // Open with no tab: it stays open.
+        { path: '/empty', activeTab: '', tabs: [], panes: {} },
+      ],
+    })
+  })
+
+  test('restore reopens every worktree in its order, the shown one first and shown', async () => {
+    vi.useFakeTimers()
+    try {
+      const saved = JSON.parse(JSON.stringify((await two()).getState().snapshotForSave()))
+      // A shell the saved file does not place gets its worktree's path.
+      delete saved.worktrees[0].panes['1'].cwd
+      // The shown one holds a shell too, beside its vault tab.
+      saved.worktrees[1].tabs.push({ id: 'tab-9', root: leaf(9), focused: 9 })
+      saved.worktrees[1].panes['9'] = { view: 'terminal', cwd: '/repo-wt-a' }
+      const { pty, spawned, writes } = fakePty(10)
+      const s = createStore(pty, { workspace: () => null })
+      await s.getState().restore(saved)
+      const st = s.getState()
+      expect(st.openWorktrees()).toEqual(['/repo', '/repo-wt-a', '/empty'])
+      expect(st.activeWorktree).toBe('/repo-wt-a')
+      expect(st.tabs.map((t) => st.panes[t.focused].view)).toEqual(['vault', 'terminal'])
+      expect(st.activeTab).toBe(st.tabs[0].id)
+      // The shown worktree's shells come back before the parked ones'.
+      expect(spawned).toEqual(['/repo-wt-a', '/repo', '/repo/src'])
+      expect(st.worktreeTabs('/repo')).toEqual([{ id: 'tab-11', root: split('row', 0.5, leaf(11), leaf(12)), focused: 12 }])
+      expect(st.parked['/repo'].activeTab).toBe('tab-11')
+      expect(st.worktreeTabs('/empty')).toEqual([])
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(writes).toEqual([[12, 'claude --resume sess-2\n']])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('restore puts tabs opened before it after each worktree\'s own, and tabs of no worktree into the one shown', async () => {
+    const s = createStore(fakePty(10).pty, { workspace: () => null })
+    await s.getState().newTab('/home')
+    await s.getState().restore({
+      version: 2,
+      activeWorktree: '/a',
+      worktrees: [{ path: '/a', tabs: [{ id: 'x', root: leaf(-4), focused: -4 }], panes: { '-4': { view: 'vault' } }, activeTab: 'x' }],
+    })
+    expect(s.getState().activeWorktree).toBe('/a')
+    expect(s.getState().tabs.map((t) => s.getState().panes[t.focused].view)).toEqual(['terminal', 'vault'])
+    expect(s.getState().activeTab).toBe(s.getState().tabs[1].id)
+  })
+
+  test('parseSaved keeps each worktree once, drops what is not one, and falls back to the first as shown', () => {
+    const tab = { id: 't', root: leaf(1), focused: 1 }
+    const panes = { '1': { view: 'terminal' } }
+    const saved = parseSaved({
+      activeWorktree: '/gone',
+      worktrees: [
+        { path: '/a', tabs: [tab], panes },
+        { path: '/a', tabs: [tab], panes },
+        { path: 7, tabs: [tab], panes },
+        { path: '', tabs: [tab], panes },
+        'junk',
+        { path: '/b', tabs: [{ root: 'nope' }] },
+        { path: null, tabs: [] },
+      ],
+    }) as Saved
+    expect(saved.worktrees.map((w) => [w.path, w.tabs.length])).toEqual([
+      ['/a', 1],
+      ['/b', 0],
+    ])
+    expect(saved.activeWorktree).toBe('/a')
+    expect(parseSaved({ activeWorktree: null, worktrees: [{ path: '/a' }, { path: null, tabs: [tab], panes }] })?.activeWorktree).toBeNull()
+    expect(parseSaved({ worktrees: [] })).toBeNull()
+    expect(parseSaved({ worktrees: [{ path: null, tabs: [] }] })).toBeNull()
+    expect(() => parseSaved({ worktrees: {} })).toThrow('worktrees is not a list')
+    expect(() => parseSaved({ worktrees: [{ path: '/a', tabs: [{ root: 1 }] }] })).toThrow('no tab could be read')
+    expect(() => parseSaved({ worktrees: [{ path: '/a', tabs: 'x' }] })).toThrow('tabs is not a list')
+  })
+
+  test('a switch of worktree is a change worth saving', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = createStore(fakePty().pty, { workspace: () => null })
+      const written: unknown[] = []
+      const ws = startWorkspace(s, { read: async () => ({}), write: async (v) => void written.push(v) }, 500)
+      await ws.ready
+      await s.getState().switchWorktree('/a')
+      vi.advanceTimersByTime(500)
+      expect(written).toEqual([{ version: 2, activeWorktree: '/a', worktrees: [{ path: '/a', tabs: [], panes: {}, activeTab: '' }] }])
+      ws.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('startWorkspace', () => {
@@ -238,7 +372,7 @@ describe('startWorkspace', () => {
       expect(written).toEqual([])
       vi.advanceTimersByTime(1)
       expect(written).toHaveLength(1)
-      expect((written[0] as Saved).tabs[0].root).toMatchObject({ ratio: 0.7 })
+      expect(loose(written[0] as Saved).tabs[0].root).toMatchObject({ ratio: 0.7 })
 
       // Same layout, nothing written; the palette is not layout.
       s.getState().setPalette(true)
@@ -264,7 +398,7 @@ describe('startWorkspace', () => {
       expect((await ws.ready).notice).toBe('could not restore the last workspace: workspace.json: no tab could be read')
       await s.getState().newTab('/b')
       vi.advanceTimersByTime(500)
-      expect((written[0] as Saved).panes).toEqual({ '1': { view: 'terminal', cwd: '/b' } })
+      expect(loose(written[0] as Saved).panes).toEqual({ '1': { view: 'terminal', cwd: '/b' } })
       ws.stop()
 
       const failing = startWorkspace(createStore(fakePty().pty), { read: async () => Promise.reject(new Error('io')), write: async () => {} })

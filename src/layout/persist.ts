@@ -23,7 +23,7 @@ export type Workspace = {
 }
 
 /** Restores `~/.mnemo-desktop/workspace.json` into the store, then writes it back on every layout
- *  change, debounced. Writes only when what would be saved differs from the last write. */
+ *  change (a switch of worktree included), debounced. Writes only when what would be saved differs from the last write. */
 export function startWorkspace(store: Store, client: WorkspaceClient = tauriWorkspace, debounceMs = SAVE_DEBOUNCE_MS): Workspace {
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -53,7 +53,8 @@ export function startWorkspace(store: Store, client: WorkspaceClient = tauriWork
     // What is on screen now is what the file says (or should say): no write until it changes.
     last = JSON.stringify(store.getState().snapshotForSave())
     unsubscribe = store.subscribe((s, prev) => {
-      if (s.tabs === prev.tabs && s.panes === prev.panes && s.activeTab === prev.activeTab) return
+      const same = s.tabs === prev.tabs && s.panes === prev.panes && s.activeTab === prev.activeTab
+      if (same && s.activeWorktree === prev.activeWorktree && s.worktrees === prev.worktrees && s.parked === prev.parked) return
       if (timer !== undefined) clearTimeout(timer)
       timer = setTimeout(save, debounceMs)
     })

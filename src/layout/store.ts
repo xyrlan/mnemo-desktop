@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { closeLeaf, extract, graft, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect, type Side } from './tree'
 import { layoutRects, workspaceRect } from './rects'
 import { reuseHandler } from './reuse'
-import { mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved } from './saved'
+import { mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved, type SavedLayout, type SavedWorktree } from './saved'
 import type { PtyClient } from '../pty/client'
 
 /** `name`: what the user renamed the tab to; it wins over the name its focused pane gives it. */
@@ -42,16 +42,41 @@ export type StoreOptions = {
   liveSessions?: (ids: string[]) => Promise<string[]>
 }
 
+/** A worktree's workbench: its tabs and the one it shows (`''`: none, Home shows). */
+export type WorktreeLayout = { tabs: Tab[]; activeTab: string }
+
 export type State = {
+  /** The shown worktree's tabs and the tab it shows: what is on screen now. */
   tabs: Tab[]
   activeTab: string
+  /** Every open pane, of every open worktree: a worktree that is not shown keeps its panes running,
+   *  and pane ids are unique across worktrees. Which of them are on screen is what `tabs` holds. */
   panes: Record<PaneId, Pane>
+  /** The worktree shown now; `tabs` and `activeTab` are its layout. `null` until one is chosen:
+   *  the tabs opened before then belong to no worktree, and join the first one switched to. */
+  activeWorktree: string | null
+  /** The open worktrees, in the order they were opened; the shown one is among them. */
+  worktrees: string[]
+  /** The layouts of the open worktrees not shown now, by path. */
+  parked: Record<string, WorktreeLayout>
   paletteOpen: boolean
   /** Output subscribers keyed by pane; set by TerminalPane on mount. */
   sinks: Record<PaneId, (b: Uint8Array) => void>
 }
 
 export type Actions = {
+  /** Show worktree `path`'s workbench: the one shown is parked with its panes running, and `path`
+   *  comes back as it was left, or opens with no tab. Tabs of no worktree join it. */
+  switchWorktree(path: string): Promise<void>
+  /** Kill every pane of worktree `path` and forget its layout. When it was shown, the worktree
+   *  opened before it shows instead (else the one after, else none). */
+  closeWorktree(path: string): Promise<void>
+  /** The open worktrees, in the order they were opened. The same array until one opens or closes. */
+  openWorktrees(): string[]
+  /** An open worktree's tabs, shown or not; none for a worktree that is not open. The same array
+   *  until its tabs change, so it can be selected from the store. */
+  worktreeTabs(path: string): Tab[]
+  /** A terminal tab in `cwd`, else in the shown worktree, else in the core's default (home). */
   newTab(cwd?: string): Promise<void>
   /** Show Home without closing anything: clears `activeTab`; any tab click restores. */
   showHome(): void
@@ -66,11 +91,12 @@ export type Actions = {
   closePane(): Promise<void>
   /** Close every pane of the active tab except the focused one. */
   closeOthers(): Promise<void>
-  /** Close every pane of a tab (kills their PTYs) and the tab itself. */
+  /** Close every pane of a tab (kills their PTYs) and the tab itself, in whichever worktree holds it. */
   closeTab(id: string): Promise<void>
   focusPane(id: PaneId): void
   goToTab(index: number): void
-  /** Show the tab holding `id` with that pane focused; nothing when no tab holds it. */
+  /** Show the tab holding `id` with that pane focused, switching to its worktree when it is not
+   *  the one shown; nothing when no tab holds it. */
   goToPane(id: PaneId): void
   /** Set (or, with an empty or missing name, clear) a tab's own name. */
   renameTab(id: string, name: string | undefined): void
@@ -99,11 +125,14 @@ export type Actions = {
   paneExited(id: PaneId, code: number | null): void
   attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
   setPalette(open: boolean): void
-  /** The layout as `~/.mnemo-desktop/workspace.json` keeps it: tabs, trees with ratios, focus,
-   *  and each pane's view, props, cwd, title and session. Transient views are left out. */
+  /** The layout as `~/.mnemo-desktop/workspace.json` keeps it, per open worktree: tabs, trees
+   *  with ratios, focus, and each pane's view, props, cwd, title and session; and which worktree
+   *  is shown. Transient views are left out. */
   snapshotForSave(): Saved
-  /** Recreate the tabs of a saved workspace (what `workspace_read` returned) after the open ones:
-   *  a terminal spawns a shell in its saved cwd (the core falls back to home when it is gone) and,
+  /** Recreate the worktrees of a saved workspace (what `workspace_read` returned), each one's tabs
+   *  after the ones it already has, and show the worktree that was shown, which comes back first:
+   *  a terminal spawns a shell in its saved cwd (else its worktree; the core falls back to home when
+   *  it is gone) and,
    *  when it ran a Claude session, types `claude --resume <id>` after the prompt unless that session
    *  is live elsewhere (or liveness cannot be told), keeping the id on the pane either way; other views
    *  reopen with their props. Resolves once every pane exists; rejects when the file holds tabs
@@ -124,6 +153,52 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
   return createZustand<State & Actions>((set, get) => {
     const active = () => get().tabs.find((t) => t.id === get().activeTab)
     let synthetic = -1
+
+    /** The change that applies `fn` to the layout holding tab `id`, shown or parked (a tab may
+     *  change worktree under an await: a switch parks it); `{}` when none holds it. */
+    function inLayoutOf(s: State, id: string, fn: (l: WorktreeLayout) => WorktreeLayout): Partial<State> {
+      if (s.tabs.some((t) => t.id === id)) return fn({ tabs: s.tabs, activeTab: s.activeTab })
+      for (const [path, l] of Object.entries(s.parked)) if (l.tabs.some((t) => t.id === id)) return { parked: { ...s.parked, [path]: fn(l) } }
+      return {}
+    }
+
+    /** `l` without tab `id`; when it was the one shown, its left neighbour shows instead. */
+    function dropTab(l: WorktreeLayout, id: string): WorktreeLayout {
+      const idx = l.tabs.findIndex((t) => t.id === id)
+      const tabs = l.tabs.filter((t) => t.id !== id)
+      return { tabs, activeTab: l.activeTab === id ? tabs[Math.max(0, idx - 1)]?.id ?? '' : l.activeTab }
+    }
+
+    /** Puts `tabs` after worktree `where`'s own, showing `show` (else the first of them). The worktree
+     *  is the one it was when the tabs were asked for: a switch while their shells spawned leaves
+     *  them in it, a tab of no worktree joins the one shown, and a worktree closed meanwhile opens
+     *  again rather than lose them. */
+    function addTabs(where: string | null, tabs: Tab[], show?: string) {
+      if (tabs.length === 0) return
+      set((s) => {
+        const add = (l: WorktreeLayout): WorktreeLayout => ({ tabs: [...l.tabs, ...tabs], activeTab: show ?? tabs[0].id })
+        if (where === null || where === s.activeWorktree) return add({ tabs: s.tabs, activeTab: s.activeTab })
+        const worktrees = s.worktrees.includes(where) ? s.worktrees : [...s.worktrees, where]
+        return { worktrees, parked: { ...s.parked, [where]: add(s.parked[where] ?? { tabs: [], activeTab: '' }) } }
+      })
+    }
+
+    /** Shows worktree `path` at once (goToPane cannot wait). */
+    function swap(path: string) {
+      set((s) => {
+        if (s.activeWorktree === path) return {}
+        const parked = { ...s.parked }
+        const next = parked[path] ?? { tabs: [], activeTab: '' }
+        delete parked[path]
+        const worktrees = s.worktrees.includes(path) ? s.worktrees : [...s.worktrees, path]
+        if (s.activeWorktree !== null) {
+          parked[s.activeWorktree] = { tabs: s.tabs, activeTab: s.activeTab }
+          return { activeWorktree: path, worktrees, parked, ...next }
+        }
+        // Tabs of no worktree have nowhere else to live: they join this one, after its own.
+        return { activeWorktree: path, worktrees, parked, tabs: [...next.tabs, ...s.tabs], activeTab: next.activeTab || s.activeTab }
+      })
+    }
 
     /** Output that arrived before a TerminalPane attached its sink (the shell prompt
      *  usually lands before `pty.spawn` even resolves). Flushed by attachSink. */
@@ -171,13 +246,57 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       tabs: [],
       activeTab: '',
       panes: {},
+      activeWorktree: null,
+      worktrees: [],
+      parked: {},
       paletteOpen: false,
       sinks: {},
 
+      async switchWorktree(path) {
+        swap(path)
+      },
+
+      async closeWorktree(path) {
+        const s = get()
+        if (!s.worktrees.includes(path)) return
+        const shown = s.activeWorktree === path
+        const tabs = shown ? s.tabs : s.parked[path].tabs
+        const ids = tabs.flatMap((t) => leaves(t.root))
+        // Forgotten before the kills are awaited, so nothing opens into it meanwhile.
+        set((s) => {
+          const panes = { ...s.panes }
+          const sinks = { ...s.sinks }
+          for (const p of ids) {
+            delete panes[p]
+            delete sinks[p]
+            pending.delete(p)
+          }
+          const parked = { ...s.parked }
+          delete parked[path]
+          const idx = s.worktrees.indexOf(path)
+          const worktrees = s.worktrees.filter((w) => w !== path)
+          if (s.activeWorktree !== path) return { panes, sinks, parked, worktrees }
+          const next = worktrees[Math.max(0, idx - 1)] ?? null
+          const layout = next === null ? { tabs: [], activeTab: '' } : parked[next]
+          if (next !== null) delete parked[next]
+          return { panes, sinks, parked, worktrees, activeWorktree: next, ...layout }
+        })
+        for (const p of ids) if (p > 0) await pty.kill(p)
+      },
+
+      openWorktrees() {
+        return get().worktrees
+      },
+
+      worktreeTabs(path) {
+        const s = get()
+        return s.activeWorktree === path ? s.tabs : s.parked[path]?.tabs ?? NO_TABS
+      },
+
       async newTab(cwd) {
-        const pane = await spawnPane(cwd)
-        const tab: Tab = { id: `tab-${pane}`, root: leaf(pane), focused: pane }
-        set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id }))
+        const where = get().activeWorktree
+        const pane = await spawnPane(cwd ?? where ?? undefined)
+        addTabs(where, [{ id: `tab-${pane}`, root: leaf(pane), focused: pane }])
       },
 
       showHome() {
@@ -185,26 +304,24 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       async openCommandTab(cwd, cmd, sessionId) {
-        const pane = await spawnPane(cwd)
-        const tab: Tab = { id: `tab-${pane}`, root: leaf(pane), focused: pane }
-        set((s) => ({
-          tabs: [...s.tabs, tab],
-          activeTab: tab.id,
-          panes: { ...s.panes, [pane]: { ...s.panes[pane], id: pane, sessionId } },
-        }))
+        const where = get().activeWorktree
+        const pane = await spawnPane(cwd ?? where ?? undefined)
+        set((s) => ({ panes: { ...s.panes, [pane]: { ...s.panes[pane], id: pane, sessionId } } }))
+        addTabs(where, [{ id: `tab-${pane}`, root: leaf(pane), focused: pane }])
         if (pane > 0) setTimeout(() => void pty.write(pane, cmd + '\n'), PROMPT_DELAY_MS)
       },
 
       async split(dir, cwd) {
         const tab = active()
         if (!tab) return
-        cwd = cwd ?? get().panes[tab.focused]?.cwd
+        cwd = cwd ?? get().panes[tab.focused]?.cwd ?? get().activeWorktree ?? undefined
         const fresh = await spawnPane(cwd)
-        set((s) => ({
-          tabs: s.tabs.map((t) =>
-            t.id === tab.id ? { ...t, root: splitAt(t.root, tab.focused, fresh, dir), focused: fresh } : t,
-          ),
-        }))
+        set((s) =>
+          inLayoutOf(s, tab.id, (l) => ({
+            ...l,
+            tabs: l.tabs.map((t) => (t.id === tab.id ? { ...t, root: splitAt(t.root, tab.focused, fresh, dir), focused: fresh } : t)),
+          })),
+        )
       },
 
       async closePane() {
@@ -212,20 +329,20 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         if (!tab) return
         const closing = tab.focused
         if (closing > 0) await pty.kill(closing)
-        const root = closeLeaf(tab.root, closing)
         set((s) => {
           const panes = { ...s.panes }
           delete panes[closing]
           const sinks = { ...s.sinks }
           delete sinks[closing]
-          if (root === null) {
-            const idx = s.tabs.findIndex((t) => t.id === tab.id)
-            const tabs = s.tabs.filter((t) => t.id !== tab.id)
-            const next = tabs[Math.max(0, idx - 1)]
-            return { tabs, activeTab: next?.id ?? '', panes, sinks }
+          return {
+            panes,
+            sinks,
+            ...inLayoutOf(s, tab.id, (l) => {
+              const root = closeLeaf(l.tabs.find((t) => t.id === tab.id)!.root, closing)
+              if (root === null) return dropTab(l, tab.id)
+              return { ...l, tabs: l.tabs.map((t) => (t.id === tab.id ? { ...t, root, focused: leaves(root)[0] } : t)) }
+            }),
           }
-          const focused = leaves(root)[0]
-          return { tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root, focused } : t)), panes, sinks }
         })
       },
 
@@ -265,12 +382,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             delete panes[p]
             delete sinks[p]
           }
-          return { tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, root: leaf(keep), focused: keep } : t)), panes, sinks }
+          return { panes, sinks, ...inLayoutOf(s, tab.id, (l) => ({ ...l, tabs: l.tabs.map((t) => (t.id === tab.id ? { ...t, root: leaf(keep), focused: keep } : t)) })) }
         })
       },
 
       async closeTab(id) {
-        const tab = get().tabs.find((t) => t.id === id)
+        const s0 = get()
+        const tab = [s0.tabs, ...Object.values(s0.parked).map((l) => l.tabs)].flat().find((t) => t.id === id)
         if (!tab) return
         const ids = leaves(tab.root)
         for (const p of ids) if (p > 0) await pty.kill(p)
@@ -281,10 +399,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             delete panes[p]
             delete sinks[p]
           }
-          const idx = s.tabs.findIndex((t) => t.id === id)
-          const tabs = s.tabs.filter((t) => t.id !== id)
-          const next = s.activeTab === id ? tabs[Math.max(0, idx - 1)]?.id ?? '' : s.activeTab
-          return { tabs, activeTab: next, panes, sinks }
+          return { panes, sinks, ...inLayoutOf(s, id, (l) => dropTab(l, id)) }
         })
       },
 
@@ -293,6 +408,9 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       goToPane(id) {
+        const holds = (tabs: Tab[]) => tabs.some((t) => leaves(t.root).includes(id))
+        const other = Object.entries(get().parked).find(([, l]) => holds(l.tabs))?.[0]
+        if (other !== undefined) swap(other)
         const tab = get().tabs.find((t) => leaves(t.root).includes(id))
         if (!tab) return
         set((s) => ({ activeTab: tab.id, tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, focused: id } : t)) }))
@@ -376,14 +494,16 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         set((s) => (s.panes[id]?.view === 'terminal' ? { panes: { ...s.panes, [id]: { ...s.panes[id], face } } } : {}))
       },
 
+      // A closed pane's shell still reports its exit (and may print a title) after the kill: a
+      // pane that is gone stays gone.
       setCwd(id, cwd) {
-        set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], id, cwd } } }))
+        set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], id, cwd } } } : {}))
       },
       setTitle(id, title) {
-        set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], id, title } } }))
+        set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], id, title } } } : {}))
       },
       paneExited(id, code) {
-        set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], id, exitCode: code } } }))
+        set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], id, exitCode: code } } } : {}))
       },
       attachSink(id, sink) {
         set((s) => ({ sinks: { ...s.sinks, [id]: sink } }))
@@ -395,30 +515,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       snapshotForSave() {
-        const { tabs, panes, activeTab } = get()
-        const out: Saved = { version: SAVED_VERSION, tabs: [], panes: {}, activeTab }
-        for (const t of tabs) {
-          let root: Node | null = t.root
-          for (const id of leaves(t.root)) {
-            const p = panes[id]
-            if (!p || TRANSIENT_VIEWS.has(p.view)) root = root && closeLeaf(root, id)
-          }
-          if (!root) continue
-          const ids = leaves(root)
-          for (const id of ids) {
-            const { view, props, cwd, title, sessionId, face } = panes[id]
-            out.panes[String(id)] = {
-              view,
-              ...(props === undefined ? {} : { props }),
-              ...(cwd ? { cwd } : {}),
-              ...(title ? { title } : {}),
-              ...(sessionId ? { sessionId } : {}),
-              ...(face === 'conversation' ? { face } : {}),
-            }
-          }
-          out.tabs.push({ id: t.id, root, focused: ids.includes(t.focused) ? t.focused : ids[0], ...(t.name ? { name: t.name } : {}) })
-        }
-        return out
+        const s = get()
+        const layouts: [string | null, WorktreeLayout][] = s.worktrees.map((w) => [w, w === s.activeWorktree ? s : s.parked[w]])
+        if (s.activeWorktree === null && s.tabs.length) layouts.unshift([null, s])
+        const worktrees = layouts.map(([path, l]): SavedWorktree => ({ path, ...saveLayout(l, s.panes) }))
+        return { version: SAVED_VERSION, activeWorktree: s.activeWorktree, worktrees }
       },
 
       async restore(saved) {
@@ -426,40 +527,80 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         if (!parsed) return
         // A session still running (another instance of the app has it) would get a second copy,
         // with its hooks and MCP servers, from `claude --resume` (#168). Unknown counts as running.
-        const sessions = Object.values(parsed.panes).flatMap((p) => (p.view === 'terminal' && p.sessionId ? [p.sessionId] : []))
+        const sessions = parsed.worktrees.flatMap((w) => Object.values(w.panes).flatMap((p) => (p.view === 'terminal' && p.sessionId ? [p.sessionId] : [])))
         const running: Set<string> | 'unknown' =
           sessions.length === 0 ? new Set() : await liveSessions(sessions).then((ids) => new Set(ids), () => 'unknown' as const)
-        const made: Tab[] = []
-        let active: string | undefined
-        for (const t of parsed.tabs) {
-          const ids = new Map<PaneId, PaneId>()
-          for (const old of leaves(t.root)) {
-            const p = parsed.panes[String(old)]
-            if (p.view === 'terminal') {
-              const id = await spawnPane(p.cwd)
-              ids.set(old, id)
-              if (p.face) get().setFace(id, p.face)
-              if (p.sessionId) {
-                // Kept on the pane even when not resumed, so the saved layout keeps it too.
-                get().setSessionId(id, p.sessionId)
-                const resumable = running !== 'unknown' && !running.has(p.sessionId)
-                if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+        // Open in the saved order, the shown one shown, before any shell spawns.
+        set((s) => {
+          const fresh = parsed.worktrees.flatMap((w) => (w.path !== null && w.path !== s.activeWorktree && !s.worktrees.includes(w.path) ? [w.path] : []))
+          const parked = { ...s.parked }
+          for (const w of fresh) parked[w] = { tabs: [], activeTab: '' }
+          return { worktrees: [...s.worktrees, ...fresh], parked }
+        })
+        if (parsed.activeWorktree !== null) swap(parsed.activeWorktree)
+        const first = parsed.worktrees.filter((w) => w.path === parsed.activeWorktree)
+        for (const w of [...first, ...parsed.worktrees.filter((w) => w.path !== parsed.activeWorktree)]) {
+          const made: Tab[] = []
+          let shown: string | undefined
+          for (const t of w.tabs) {
+            const ids = new Map<PaneId, PaneId>()
+            for (const old of leaves(t.root)) {
+              const p = w.panes[String(old)]
+              if (p.view === 'terminal') {
+                const id = await spawnPane(p.cwd ?? w.path ?? undefined)
+                ids.set(old, id)
+                if (p.face) get().setFace(id, p.face)
+                if (p.sessionId) {
+                  // Kept on the pane even when not resumed, so the saved layout keeps it too.
+                  get().setSessionId(id, p.sessionId)
+                  const resumable = running !== 'unknown' && !running.has(p.sessionId)
+                  if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+                }
+              } else {
+                const id = synthetic--
+                ids.set(old, id)
+                set((s) => ({ panes: { ...s.panes, [id]: { id, view: p.view, props: p.props ?? {}, title: p.title } } }))
               }
-            } else {
-              const id = synthetic--
-              ids.set(old, id)
-              set((s) => ({ panes: { ...s.panes, [id]: { id, view: p.view, props: p.props ?? {}, title: p.title } } }))
             }
+            const root = mapLeaves(t.root, ids)
+            const tab: Tab = { id: `tab-${leaves(root)[0]}`, root, focused: ids.get(t.focused) ?? leaves(root)[0], ...(t.name ? { name: t.name } : {}) }
+            made.push(tab)
+            if (t.id === w.activeTab) shown = tab.id
           }
-          const root = mapLeaves(t.root, ids)
-          const tab: Tab = { id: `tab-${leaves(root)[0]}`, root, focused: ids.get(t.focused) ?? leaves(root)[0], ...(t.name ? { name: t.name } : {}) }
-          made.push(tab)
-          if (t.id === parsed.activeTab) active = tab.id
+          addTabs(w.path, made, shown)
         }
-        set((s) => ({ tabs: [...s.tabs, ...made], activeTab: active ?? made[0]?.id ?? s.activeTab }))
       },
     }
   })
+}
+
+const NO_TABS: Tab[] = []
+
+/** One layout as the file keeps it: transient views leave their tab, and a tab left with none goes. */
+function saveLayout(l: WorktreeLayout, panes: Record<PaneId, Pane>): SavedLayout {
+  const out: SavedLayout = { tabs: [], panes: {}, activeTab: l.activeTab }
+  for (const t of l.tabs) {
+    let root: Node | null = t.root
+    for (const id of leaves(t.root)) {
+      const p = panes[id]
+      if (!p || TRANSIENT_VIEWS.has(p.view)) root = root && closeLeaf(root, id)
+    }
+    if (!root) continue
+    const ids = leaves(root)
+    for (const id of ids) {
+      const { view, props, cwd, title, sessionId, face } = panes[id]
+      out.panes[String(id)] = {
+        view,
+        ...(props === undefined ? {} : { props }),
+        ...(cwd ? { cwd } : {}),
+        ...(title ? { title } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(face === 'conversation' ? { face } : {}),
+      }
+    }
+    out.tabs.push({ id: t.id, root, focused: ids.includes(t.focused) ? t.focused : ids[0], ...(t.name ? { name: t.name } : {}) })
+  }
+  return out
 }
 
 export const useAppStore = <T,>(store: Store, sel: (s: State & Actions) => T) => useStore(store, sel)
