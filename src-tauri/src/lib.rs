@@ -311,15 +311,28 @@ pub fn run() {
                     ("tab.new", "New Tab", "CmdOrCtrl+T"),
                     ("tab.prev", "Previous Tab", "CmdOrCtrl+Shift+["),
                     ("tab.next", "Next Tab", "CmdOrCtrl+Shift+]"),
-                    ("tab.go.1", "Tab 1", "CmdOrCtrl+1"),
-                    ("tab.go.2", "Tab 2", "CmdOrCtrl+2"),
-                    ("tab.go.3", "Tab 3", "CmdOrCtrl+3"),
-                    ("tab.go.4", "Tab 4", "CmdOrCtrl+4"),
-                    ("tab.go.5", "Tab 5", "CmdOrCtrl+5"),
-                    ("tab.go.6", "Tab 6", "CmdOrCtrl+6"),
-                    ("tab.go.7", "Tab 7", "CmdOrCtrl+7"),
-                    ("tab.go.8", "Tab 8", "CmdOrCtrl+8"),
-                    ("tab.go.9", "Tab 9", "CmdOrCtrl+9"),
+                    ("tab.go.1", "Tab 1", "Ctrl+1"),
+                    ("tab.go.2", "Tab 2", "Ctrl+2"),
+                    ("tab.go.3", "Tab 3", "Ctrl+3"),
+                    ("tab.go.4", "Tab 4", "Ctrl+4"),
+                    ("tab.go.5", "Tab 5", "Ctrl+5"),
+                    ("tab.go.6", "Tab 6", "Ctrl+6"),
+                    ("tab.go.7", "Tab 7", "Ctrl+7"),
+                    ("tab.go.8", "Tab 8", "Ctrl+8"),
+                    ("tab.go.9", "Tab 9", "Ctrl+9"),
+                ];
+                const WORKTREE: &[(&str, &str, &str)] = &[
+                    ("worktree.jump", "Jump to Worktree", "CmdOrCtrl+J"),
+                    ("workspace.new", "New Workspace", "CmdOrCtrl+N"),
+                    ("worktree.go.1", "Worktree 1", "CmdOrCtrl+1"),
+                    ("worktree.go.2", "Worktree 2", "CmdOrCtrl+2"),
+                    ("worktree.go.3", "Worktree 3", "CmdOrCtrl+3"),
+                    ("worktree.go.4", "Worktree 4", "CmdOrCtrl+4"),
+                    ("worktree.go.5", "Worktree 5", "CmdOrCtrl+5"),
+                    ("worktree.go.6", "Worktree 6", "CmdOrCtrl+6"),
+                    ("worktree.go.7", "Worktree 7", "CmdOrCtrl+7"),
+                    ("worktree.go.8", "Worktree 8", "CmdOrCtrl+8"),
+                    ("worktree.go.9", "Worktree 9", "CmdOrCtrl+9"),
                 ];
                 const PANE: &[(&str, &str, &str)] = &[
                     ("pane.split.row", "Split Right", "CmdOrCtrl+D"),
@@ -333,8 +346,8 @@ pub fn run() {
                 ];
                 const VIEW: &[(&str, &str, &str)] = &[
                     ("palette.open", "Command Palette", "CmdOrCtrl+K"),
-                    ("mission.toggle-sidebar", "Toggle Mission Sidebar", "CmdOrCtrl+B"),
-                    ("home.show", "Home", "CmdOrCtrl+Shift+H"),
+                    ("sidebar.toggle-left", "Toggle Left Sidebar", "CmdOrCtrl+B"),
+                    ("sidebar.toggle-right", "Toggle Right Sidebar", "CmdOrCtrl+L"),
                     ("pane.toggle-face", "Toggle Conversation", "CmdOrCtrl+Shift+C"),
                 ];
                 const PREFIX: &str = "action:";
@@ -371,7 +384,7 @@ pub fn run() {
                 let view = submenu("View", VIEW)?.separator().item(&PredefinedMenuItem::fullscreen(h, None)?).build()?;
                 let window = SubmenuBuilder::new(h, "Window").minimize().maximize().build()?;
                 let menu = MenuBuilder::new(h)
-                    .items(&[&app_menu, &edit, &view, &submenu("Tab", TAB)?.build()?, &submenu("Pane", PANE)?.build()?, &window])
+                    .items(&[&app_menu, &edit, &view, &submenu("Worktree", WORKTREE)?.build()?, &submenu("Tab", TAB)?.build()?, &submenu("Pane", PANE)?.build()?, &window])
                     .build()?;
                 app.set_menu(menu)?;
                 app.on_menu_event(|app, event| {

@@ -51,13 +51,13 @@ export function registerBuiltins(store: Store) {
   register({ id: 'tab.prev', title: 'Previous tab', shortcut: '⌘⇧[', run: () => s().cycleTab(-1) })
   register({ id: 'tab.next', title: 'Next tab', shortcut: '⌘⇧]', run: () => s().cycleTab(1) })
   for (let i = 1; i <= 9; i++) {
-    register({ id: `tab.go.${i}`, title: `Go to tab ${i}`, shortcut: `⌘${i}`, run: () => s().goToTab(i - 1) })
+    register({ id: `tab.go.${i}`, title: `Go to tab ${i}`, shortcut: `⌃${i}`, run: () => s().goToTab(i - 1) })
   }
   register({ id: 'focus.left', title: 'Focus pane left', shortcut: '⌘⌥←', run: () => focusToward('left') })
   register({ id: 'focus.right', title: 'Focus pane right', shortcut: '⌘⌥→', run: () => focusToward('right') })
   register({ id: 'focus.up', title: 'Focus pane up', shortcut: '⌘⌥↑', run: () => focusToward('up') })
   register({ id: 'focus.down', title: 'Focus pane down', shortcut: '⌘⌥↓', run: () => focusToward('down') })
-  register({ id: 'home.show', title: 'Home', shortcut: '⌘⇧H', run: () => s().showHome() })
+  register({ id: 'home.show', title: 'Home', run: () => s().showHome() })
   register({
     id: 'pane.toggle-face',
     title: 'Toggle conversation',
