@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const APP_BIN = 'mnemo-desktop'
@@ -42,11 +42,14 @@ export function missingHelpers(kind, files) {
   return [APP_BIN, ...HELPERS].filter((name) => !have.has(`${dir}/${name}`))
 }
 
+/** A directory's files, recursively, relative to it and with `/` whatever the OS says. */
+const walk = (dir) => readdirSync(dir, { recursive: true }).map((p) => String(p).split(sep).join('/'))
+
 /** The files in a bundle, as paths relative to its root. */
 export function listBundle(path) {
   const kind = kindOf(path)
   if (kind === 'app') {
-    return readdirSync(path, { recursive: true }).map(String)
+    return walk(path)
   }
   if (kind === 'deb') {
     // `dpkg-deb -c` prints `ls -l`-style lines ending in the path, `./usr/bin/…`.
@@ -60,7 +63,7 @@ export function listBundle(path) {
     const dir = mkdtempSync(join(tmpdir(), 'mnemo-appimage-'))
     try {
       execFileSync(path, ['--appimage-extract'], { cwd: dir, stdio: 'ignore' })
-      return readdirSync(join(dir, 'squashfs-root'), { recursive: true }).map(String)
+      return walk(join(dir, 'squashfs-root'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
