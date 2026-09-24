@@ -12,6 +12,22 @@ default-run = "mnemo-desktop"
 name = "mnemo_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# The helpers are declared rather than left to cargo's `src/bin/` discovery because the bundle
+# takes its binaries from here: undeclared, `tauri build` (cli 2.11) built all three but put only
+# the daemon in mnemo.app. The app looks for each one beside its own executable, so each must ship
+# in the bundle's binary directory; `scripts/bundle-helpers.mjs` checks that it does.
+[[bin]]
+name = "mnemo-desktop-mcp"
+path = "src/bin/mnemo-desktop-mcp.rs"
+
+[[bin]]
+name = "mnemo-desktop-ptyd"
+path = "src/bin/mnemo-desktop-ptyd.rs"
+
+[[bin]]
+name = "mnemo-desktop-hook"
+path = "src/bin/mnemo-desktop-hook.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

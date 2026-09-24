@@ -33,7 +33,19 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: pnpm tauri build --ci --no-bundle
+      # The bundles a release ships, checked for the helper binaries the app looks for beside
+      # itself (scripts/bundle-helpers.mjs). Windows runs no terminal daemon or hook socket.
+      - if: runner.os == 'macOS'
+        run: pnpm tauri build --ci --bundles app
+      - if: runner.os == 'Linux'
+        run: pnpm tauri build --ci --bundles deb,appimage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+      - if: runner.os == 'Windows'
+        run: pnpm tauri build --ci --no-bundle
+      - name: helpers in the bundle
+        if: runner.os != 'Windows'
+        run: node scripts/bundle-helpers.mjs
       - name: smoke (shell round-trip inside the built app)
         if: runner.os == 'Linux'
         run: MNEMO_DESKTOP_SMOKE=1 xvfb-run -a src-tauri/target/release/mnemo-desktop
