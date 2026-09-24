@@ -50,7 +50,11 @@ export function useVaultLevel(client: LevelClient, pollMs = POLL_MS): number | n
 /** Orca's status bar: the active pane's tokens and pulse count on the left, the fleet's agents
  *  by state and the vault level on the right. */
 export default function StatusBar({ client = liveClient }: { client?: LevelClient }) {
-  const active = useApp((s) => activePane(s))
+  // Two selectors returning what the store holds, never a new object: a selector that builds one
+  // (`activePane(s)`) looks changed on every read, and React re-renders until it gives up.
+  const activeId = useApp((s) => activePane(s)?.id)
+  const pane = useApp((s) => (activeId === undefined ? undefined : s.panes[activeId]))
+  const active = activeId !== undefined && pane ? { id: activeId, pane } : undefined
   const snap = useMission((s) => s.snapshot)
   const tokens = paneTokens(active?.pane, snap)
   const pulses = usePulse((s) => (active ? s.counts[active.id] ?? 0 : 0))
