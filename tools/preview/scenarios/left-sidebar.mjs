@@ -62,6 +62,9 @@ scenario('left-sidebar', {
       protected: 0,
     },
     worktree_list: ({ repo }) => WORKTREES[repo] ?? [],
+    // The current mission sidebar reads which children were looked at; none here.
+    mission_looked: {},
+    gh_auth: { installed: true, logged: true, login: 'preview', scopes: ['repo'] },
     mission_snapshot: {
       repos: [
         {
@@ -87,5 +90,5 @@ scenario('left-sidebar', {
     },
   }),
   // The graph export finishes after launch: its card is not on screen, so it turns unread.
-  events: [{ event: 'agent://event', payload: { sessionId: 's-graph', cwd: `${VAULT}-wt-graph`, kind: 'stop', at: at + 60_000 }, afterMs: 1500 }],
+  events: [{ event: 'agent://event', payload: { sessionId: 's-graph', cwd: `${VAULT}-wt-graph`, kind: 'stop', at: Date.now() + 1500 }, afterMs: 1500 }],
 })
