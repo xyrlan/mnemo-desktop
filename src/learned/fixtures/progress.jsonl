@@ -1,0 +1,6 @@
+{"event": "harvest", "done": 1, "of": 44}
+{"event": "harvest", "done": 3, "of": 44}
+{"event": "harvest", "done": 44, "of": 44}
+{"event": "extract", "done": 1, "of": 8}
+{"event": "extract", "done": 8, "of": 8}
+{"event": "done", "staged": 5, "live": 0, "failed": 1}

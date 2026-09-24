@@ -1,0 +1,52 @@
+{
+  "project": "clubinho",
+  "origin": "backfill",
+  "pages": [
+    {
+      "key": "project/clubinho__cron-annual-bloqueado-183",
+      "type": "project",
+      "name": "Annual cron blocked until #183",
+      "description": "The annual billing cron stays disabled until #183 lands.",
+      "excerpt": "The annual cron is blocked: it double-charged three families in August. Keep it off until #183 adds the idempotency key.",
+      "staged_at": "2026-09-24T10:12:03",
+      "expires_at": "2026-10-08T10:12:03"
+    },
+    {
+      "key": "project/clubinho__staging-db-is-shared",
+      "type": "project",
+      "name": "Staging shares the production database host",
+      "description": "Staging and production run on one Postgres host.",
+      "excerpt": "Staging uses the same Postgres host as production, on another database. A migration run against the wrong URL hits production.",
+      "staged_at": "2026-09-24T10:12:04",
+      "expires_at": "2026-10-08T10:12:04"
+    },
+    {
+      "key": "feedback/clubinho__answer-in-portuguese",
+      "type": "feedback",
+      "name": "Answer in Portuguese",
+      "description": "Replies to the user are in Portuguese.",
+      "excerpt": "The user writes and reads in Portuguese; code and commit messages stay in English.",
+      "staged_at": "2026-09-24T10:12:05",
+      "expires_at": "2026-10-08T10:12:05"
+    },
+    {
+      "key": "reference/clubinho__asaas-sandbox",
+      "type": "reference",
+      "name": "Asaas sandbox keys",
+      "description": "Where the payment sandbox keys live.",
+      "excerpt": "Sandbox keys are in 1Password under \"Asaas sandbox\"; [redacted] is the webhook secret.",
+      "staged_at": "2026-09-24T10:12:06",
+      "expires_at": "2026-10-08T10:12:06"
+    },
+    {
+      "key": "user/clubinho__runs-on-a-mac",
+      "type": "user",
+      "name": "Works on a Mac",
+      "description": "The user's machine is macOS.",
+      "excerpt": "Commands assume macOS: BSD sed, Homebrew paths.",
+      "staged_at": "2026-09-24T10:12:07",
+      "expires_at": "2026-10-08T10:12:07"
+    }
+  ],
+  "counts": {"project": 2, "feedback": 1, "reference": 1, "user": 1}
+}

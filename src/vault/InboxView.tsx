@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { store } from '../layout/app-store'
+import { reviewWhatWasLearned } from '../learned/open'
 import { useVault, vault } from './app-store'
 import { ErrorLine } from './ErrorLine'
 import { splitFrontmatter, type InboxRow } from './inbox'
@@ -165,7 +166,10 @@ export function InboxView({ cwd }: { cwd: string | undefined }) {
           every project
         </label>
         {listing && <span className="vt-count">{listing.summary}</span>}
-        <button className="ib-bar-end" title="Re-read mnemo inbox" disabled={loading} onClick={() => void vault.getState().loadInbox(cwd ?? '')}>
+        <button className="ib-bar-end" title="Review, once, the pages mnemo recovered from this repo's Claude Code history" onClick={() => reviewWhatWasLearned(cwd)}>
+          Review what mnemo learned
+        </button>
+        <button title="Re-read mnemo inbox" disabled={loading} onClick={() => void vault.getState().loadInbox(cwd ?? '')}>
           {loading ? '…' : '↻'}
         </button>
       </div>
