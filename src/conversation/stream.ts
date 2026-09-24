@@ -67,8 +67,8 @@ export function applyEarlier(seg: Segment, chunk: Chunk, gen: number, before: nu
 }
 
 /** The tool call a waiting session is parked on: the first one with no result since the last
- *  prompt typed. An AskUserQuestion always reads as a question, whatever kind the caller
- *  guessed: `claude agents` says only that the session waits, not on what. */
+ *  prompt typed. `claude agents` says an AskUserQuestion waits for `input needed`, a question;
+ *  the card's name says so too, for a status that cannot tell (a snapshot from before #175). */
 export function pendingCard(cards: Card[], waiting: SessionStatus['waiting']): { id: string; kind: Pending } | null {
   if (!waiting) return null
   let from = 0

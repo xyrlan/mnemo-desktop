@@ -1,0 +1,42 @@
+[
+  {
+    "pid": 7753,
+    "cwd": "/Users/me/probe",
+    "kind": "interactive",
+    "startedAt": 1790245831531,
+    "sessionId": "dd0d7b83-b9e5-4f46-b8b3-35cef222ca52",
+    "name": "ask a question",
+    "status": "waiting",
+    "waitingFor": "input needed"
+  },
+  {
+    "pid": 10373,
+    "cwd": "/Users/me/probe",
+    "kind": "interactive",
+    "startedAt": 1790245868282,
+    "sessionId": "2f36dbe9-42ee-4612-af03-b7a85c6f0db9",
+    "name": "approve a plan",
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  },
+  {
+    "pid": 10374,
+    "cwd": "/Users/me/probe",
+    "kind": "interactive",
+    "startedAt": 1790245868842,
+    "sessionId": "a82c0c4c-6146-40a1-887f-a803c788e5f7",
+    "name": "allow a bash command",
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  },
+  {
+    "pid": 10377,
+    "cwd": "/Users/me/probe",
+    "kind": "interactive",
+    "startedAt": 1790245868611,
+    "sessionId": "022d2678-99e4-48ba-8521-684b19f822c5",
+    "name": "open /config",
+    "status": "waiting",
+    "waitingFor": "dialog open"
+  }
+]

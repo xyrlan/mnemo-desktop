@@ -42,7 +42,7 @@ vi.mock('react-virtuoso', async () => {
 })
 
 import { ConversationView } from './ConversationView'
-import ConversationFace, { paneStatus } from './Face'
+import ConversationFace, { paneStatus, waitingKind } from './Face'
 import { RuleActionsContext, type RuleActions } from './cards/context'
 import { DIFF_FOLD, diffRows } from './cards/diff'
 import { tauriConversation, type ConversationClient } from './client'
@@ -56,6 +56,7 @@ import { leaf } from '../layout/tree'
 import { missionStore } from '../mission/app-store'
 import { parent } from '../mission/fixtures'
 import type { Snapshot } from '../mission/types'
+import agentsWaiting from '../../src-tauri/fixtures/agents-waiting.json'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -618,7 +619,14 @@ function paneIn(over: Partial<import('../layout/store').Pane> = {}) {
     panes: { [PANE]: { id: PANE, view: 'terminal', cwd: '/repo', sessionId: 's1', face: 'conversation', ...over } },
   })
 }
-const snapWith = (status: string): Snapshot => ({ repos: [{ root: '/repo', name: 'repo', parents: [parent({ session_id: 's1', status, cwd: '/repo' })], missions: [], children: [] }], errors: [], at: '' })
+const snapWith = (status: string, waiting_for?: string | null): Snapshot => ({
+  repos: [{ root: '/repo', name: 'repo', parents: [parent({ session_id: 's1', status, cwd: '/repo', waiting_for })], missions: [], children: [] }],
+  errors: [],
+  at: '',
+})
+/** Rows of `claude agents --json --all` (Claude Code 2.1.281) while a session sat on an
+ *  AskUserQuestion, a plan approval, a Bash permission and `/config`, in that order. */
+const [asking, planning, allowing, configuring] = agentsWaiting
 
 test('the face follows the pane session under its cwd, with its status from the mission snapshot', async () => {
   paneIn()
@@ -642,7 +650,7 @@ test('with no session the face says so and how to go back', async () => {
 
 test('open terminal flips the pane to its terminal face and gives the xterm the keys', async () => {
   paneIn()
-  missionStore.setState({ snapshot: snapWith('waiting for permission') })
+  missionStore.setState({ snapshot: snapWith(allowing.status, allowing.waitingFor) })
   vi.spyOn(tauriConversation, 'follow').mockImplementation(async (_s, _c, _t, on) => {
     on(lines(0, [user('u1', 0, 'go'), tool('t1', 1, 'Bash', null)]))
     return () => {}
@@ -668,8 +676,53 @@ test('the pane status reads busy and waiting off the parent of that session only
   expect(paneStatus(snap, 's1')).toEqual({ busy: true, waiting: null })
   expect(paneStatus(snap, 'other')).toBeUndefined()
   expect(paneStatus(snap, undefined)).toBeUndefined()
-  for (const s of ['waiting', 'permission prompt', 'waiting for input', 'needs approval']) expect(paneStatus(snapWith(s), 's1')?.waiting).toBe('permission')
   expect(paneStatus(snapWith('idle'), 's1')).toEqual({ busy: false, waiting: null })
+  expect(paneStatus(snapWith(asking.status, asking.waitingFor), 's1')).toEqual({ busy: false, waiting: 'question' })
+})
+
+test('what the pane waits for is what claude agents says it waits for', () => {
+  expect(agentsWaiting.map((r) => [r.status, r.waitingFor])).toEqual([
+    ['waiting', 'input needed'],
+    ['waiting', 'permission prompt'],
+    ['waiting', 'permission prompt'],
+    ['waiting', 'dialog open'],
+  ])
+  expect(waitingKind(asking.status, asking.waitingFor)).toBe('question')
+  // A plan approval is a permission prompt to `claude agents`: nothing there tells it from a Bash one.
+  expect(waitingKind(planning.status, planning.waitingFor)).toBe('permission')
+  expect(waitingKind(allowing.status, allowing.waitingFor)).toBe('permission')
+  // `/config` holds the keys, but no tool call waits on it.
+  expect(waitingKind(configuring.status, configuring.waitingFor)).toBeNull()
+  // Values Claude Code 2.1.281 writes that no probe caught.
+  expect(waitingKind('waiting', 'sandbox request')).toBe('permission')
+  expect(waitingKind('waiting', 'goal proposal')).toBeNull()
+  // A snapshot from before the pane carried `waiting_for` reads as it did.
+  expect(waitingKind('waiting', undefined)).toBe('permission')
+  expect(waitingKind('waiting', null)).toBe('permission')
+  for (const s of ['busy', 'idle', 'unknown']) expect(waitingKind(s, 'permission prompt')).toBeNull()
+})
+
+const pendingIn = async (row: { status: string; waitingFor: string }, name: string) => {
+  paneIn()
+  missionStore.setState({ snapshot: snapWith(row.status, row.waitingFor) })
+  vi.spyOn(tauriConversation, 'follow').mockImplementation(async (_s, _c, _t, on) => {
+    on(lines(0, [user('u1', 0, 'go'), tool('t1', 1, name, null)]))
+    return () => {}
+  })
+  await render(<ConversationFace paneId={PANE} />)
+  return q('.cv-pending-bar')?.textContent ?? null
+}
+
+test.each([
+  ['an AskUserQuestion', asking, 'AskUserQuestion', 'waiting for your answer'],
+  ['a plan approval', planning, 'ExitPlanMode', 'waiting for approval'],
+  ['a Bash permission', allowing, 'Bash', 'waiting for approval'],
+  // A long Bash still running while `/config` is open waits for no one's approval.
+  ['a Bash running under /config', configuring, 'Bash', null],
+])('the pending card agrees with what the pane waits for: %s', async (_, row, name, says) => {
+  const bar = await pendingIn(row, name)
+  if (says === null) expect(bar).toBeNull()
+  else expect(bar).toContain(says)
 })
 
 // ---- the pane bar -----------------------------------------------------------------------------

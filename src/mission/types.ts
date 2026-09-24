@@ -9,6 +9,9 @@ export type ParentSession = {
   tokens?: number
   cache_read?: number
   children_tokens?: number
+  /** What `claude agents` says the session is parked on while `status` is `waiting`
+   *  (`permission prompt`, `input needed`, `dialog open`); absent in snapshots from before #175. */
+  waiting_for?: string | null
 }
 export type ChildSession = {
   id: string
