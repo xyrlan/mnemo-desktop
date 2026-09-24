@@ -9,8 +9,11 @@ stylesheet section, in the comment that opens it.
 https://github.com/stablyai/orca, at commit
 `122b8c25d7c16f76e395bf9a65887d7c4bc5003b`.
 
-Used for: the design tokens in `src/theme.css` (from
-`src/renderer/src/assets/main.css`).
+Used for:
+- the design tokens and the sleek scrollbar in `src/theme.css` (from
+  `src/renderer/src/assets/main.css`);
+- the UI primitives in `src/ui/` other than `kbd.tsx` and `cn.ts` (from
+  `src/renderer/src/components/ui/`).
 
 ```
 MIT License

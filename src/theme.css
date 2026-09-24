@@ -478,3 +478,19 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 .crashed-error { margin: 0; color: var(--fg-muted); white-space: pre-wrap; max-width: 80ch; }
 .crashed button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); padding: 5px 10px; font: inherit; border-radius: 4px; cursor: pointer; }
 .crashed button:hover { border-color: var(--accent); }
+
+/* adapted from stablyai/orca src/renderer/src/assets/main.css (MIT, 122b8c25): the sleek
+   scrollbar the ported menus, selects and dialogs ask for with `scrollbar-sleek`. */
+.scrollbar-sleek {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground, #737373) 34%, transparent) transparent;
+}
+.scrollbar-sleek::-webkit-scrollbar { width: 12px; height: 12px; }
+.scrollbar-sleek::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-sleek::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground, #737373) 28%, transparent);
+  border: 3px solid transparent;
+  border-radius: 0;
+  background-clip: padding-box;
+  min-height: 28px;
+}
