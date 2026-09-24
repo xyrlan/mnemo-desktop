@@ -3,13 +3,13 @@
  *  registers `workspace.new` and mounts the composer and its setup cards in the shell's overlay. */
 import { useMemo } from 'react'
 import type React from 'react'
-import { createRoot } from 'react-dom/client'
 import { listen } from '@tauri-apps/api/event'
 import { register } from '../actions/registry'
 import { store as layout, useApp } from '../layout/app-store'
 import { fleetStore, useFleet } from '../fleet/store'
 import { homeStore } from '../home/app-store'
 import { settingsStore, useSettings } from '../settings/app-store'
+import { mountInSlot } from '../shell/slots'
 import { dispatchIssue } from '../github/actions'
 import { createWorktree } from '../worktrees/client'
 import Composer from './Composer'
@@ -93,10 +93,4 @@ function NewWorkspace(): React.JSX.Element {
 
 register({ id: 'workspace.new', title: 'New workspace', shortcut: '⌘N', run: () => openNewWorkspace() })
 
-// `mountInSlot` is the shell piece's (`src/shell/slots.ts`). Looked up by glob so this file
-// builds whether or not the shell has landed; until it has, the composer mounts in a root of
-// its own (its dialog and cards are portalled and fixed, so where it mounts does not show).
-type MountInSlot = (slot: 'overlay', component: React.ComponentType) => () => void
-const shell = Object.values(import.meta.glob<{ mountInSlot?: MountInSlot }>('../shell/slots.ts', { eager: true }))[0]
-if (shell?.mountInSlot) shell.mountInSlot('overlay', NewWorkspace)
-else if (typeof document !== 'undefined') createRoot(document.body.appendChild(document.createElement('div'))).render(<NewWorkspace />)
+mountInSlot('overlay', NewWorkspace)

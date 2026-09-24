@@ -1,19 +1,12 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { useStore } from 'zustand'
 import { createStore } from 'zustand/vanilla'
 import type { MemoryFeed } from '../memory/types'
 import { MemoryPanel, REFRESH_MS } from './MemoryPanel'
 import { RightSidebar } from './RightSidebar'
 import { createMemoryStore, type MemoryActions, type MemoryState, type MemoryStore, type MemoryTarget } from './memory'
-import { standaloneShell, type ShellState } from './shell'
+import { shellStore } from '../shell/store'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-// Whether or not the shell has landed, these tests drive the sidebar through a shell of their own.
-vi.mock('./shell', async (original) => {
-  const m = await original<typeof import('./shell')>()
-  return { ...m, useShell: <T,>(sel: (s: ShellState) => T) => useStore(m.standaloneShell, sel) }
-})
 
 // Popper-positioned content (the tooltips) is never opened here: see src/ui/primitives.test.tsx.
 
@@ -25,8 +18,8 @@ async function mount(node: React.ReactNode): Promise<HTMLElement> {
 const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))))
 const byLabel = (el: ParentNode, label: string) => el.querySelector<HTMLElement>(`[aria-label="${label}"]`)
 
-const initial = standaloneShell.getState()
-beforeEach(() => standaloneShell.setState({ ...initial, rightOpen: true, rightWidth: 320 }))
+const initial = shellStore.getState()
+beforeEach(() => shellStore.setState({ ...initial, rightOpen: true, rightWidth: 320 }))
 afterEach(() => {
   document.body.innerHTML = ''
   vi.useRealTimers()
@@ -63,7 +56,7 @@ describe('the right sidebar', () => {
   it('closes through the shell, and draws nothing while closed', async () => {
     const host = await mount(<RightSidebar items={items} />)
     await act(async () => byLabel(host, 'Toggle right sidebar')!.click())
-    expect(standaloneShell.getState().rightOpen).toBe(false)
+    expect(shellStore.getState().rightOpen).toBe(false)
     expect(host.querySelector('[data-right-sidebar]')).toBeNull()
   })
 
@@ -73,15 +66,15 @@ describe('the right sidebar', () => {
     const handle = host.querySelector('[data-resize-handle]')!
     await act(async () => void handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 880, button: 0 })))
     await act(async () => void window.dispatchEvent(new MouseEvent('mousemove', { clientX: 800 })))
-    expect(standaloneShell.getState().rightWidth).toBe(400)
+    expect(shellStore.getState().rightWidth).toBe(400)
     // Never under 220, never leaving the workbench less than 320 of the window.
     await act(async () => void window.dispatchEvent(new MouseEvent('mousemove', { clientX: 1150 })))
-    expect(standaloneShell.getState().rightWidth).toBe(220)
+    expect(shellStore.getState().rightWidth).toBe(220)
     await act(async () => void window.dispatchEvent(new MouseEvent('mousemove', { clientX: 0 })))
-    expect(standaloneShell.getState().rightWidth).toBe(880)
+    expect(shellStore.getState().rightWidth).toBe(880)
     await act(async () => void window.dispatchEvent(new MouseEvent('mouseup')))
     await act(async () => void window.dispatchEvent(new MouseEvent('mousemove', { clientX: 500 })))
-    expect(standaloneShell.getState().rightWidth).toBe(880)
+    expect(shellStore.getState().rightWidth).toBe(880)
     expect(document.body.style.cursor).toBe('')
   })
 })

@@ -3,9 +3,9 @@ import { notifyAgent } from '../agents/notify'
 import { fleetStore } from '../fleet/store'
 import { store as layout } from '../layout/app-store'
 import { leaves } from '../layout/tree'
+import { mountInSlot } from '../shell/slots'
 import { NotificationStack } from './NotificationStack'
 import { createNotifier } from './notifier'
-import { mountInSlot } from './slot'
 import { chime } from './sound'
 
 // Imported by `App.tsx`'s view glob: the one notifier of the app run, and its stack in the shell.

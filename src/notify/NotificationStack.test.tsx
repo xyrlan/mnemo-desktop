@@ -4,7 +4,6 @@ import { afterEach, expect, test } from 'vitest'
 import { createStore } from 'zustand/vanilla'
 import { NotificationStack } from './NotificationStack'
 import type { Card, Cards } from './notifier'
-import { ownRoot } from './slot'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const card = (id: number, kind: Card['kind'], over: Partial<Card> = {}): Card => ({
@@ -70,14 +69,4 @@ test('the stack follows its store', async () => {
   expect(host.innerHTML).toBe('')
   await act(async () => store.setState({ cards: [card(2, 'question')] }))
   expect(host.querySelectorAll('[role="complementary"]')).toHaveLength(1)
-})
-
-test('without the shell, the stack gets its own root on <body>, gone on unmount', async () => {
-  let off!: () => void
-  await act(async () => void (off = ownRoot('overlay', () => <p>hi</p>)))
-  const host = document.querySelector('[data-notify-host]')!
-  expect(host.parentElement).toBe(document.body)
-  expect(host.textContent).toBe('hi')
-  await act(async () => off())
-  expect(document.querySelector('[data-notify-host]')).toBeNull()
 })
