@@ -231,6 +231,15 @@ allow.
   up stale worktrees — plus shipping the helper binaries in the release
   bundle.
 
+- **Wave D** (`2026-09-24-orca-redesign-d.md`): the right sidebar's Explorer, Search and Source
+  Control, squash-aware cleanup, and Design Mode's guard. Released as **v0.3.0**.
+- **Wave E** (`2026-09-24-orca-redesign-e.md`), after an audit of the spec against v0.3.0: the
+  surfaces that kept their old look — the conversation face as Orca's native chat in bridge mode
+  (decided 2026-09-24: overlay on the live terminal, no Agent SDK), a dispatched child's session in
+  the same chat, the PR pane, the vault, the learned pane, the editor's chrome — and the Checks
+  panel (CI checks with logs, Fix to the agent, PR actions, review comments read-only). The old
+  stylesheet scope and the monospace UI font go after it.
+
 ### Rules carried over
 
 - `src-tauri/src/lib.rs`: each piece touches only its own anchored blocks.
