@@ -28,7 +28,7 @@ export type Pending = 'permission' | 'question'
 export type Item =
   | { kind: 'card'; key: string; card: Card; pending: Pending | null }
   | { kind: 'clear'; key: string }
-  | { kind: 'marker'; key: string; marker: StatusMarker }
+  | { kind: 'marker'; key: string; marker: StatusMarker; carried?: true }
   | { kind: 'earlier'; key: string; segment: number; loading: boolean }
   | { kind: 'note'; key: string; text: string }
 
@@ -100,20 +100,28 @@ const before = (a: string, b: string) => {
 
 /** Every row of the stream, top to bottom: each segment's cards (a `/clear` divider between
  *  segments, a "load earlier" row atop a later segment that does not start at its file's top),
- *  `markers` merged in by time, and the pending card marked in the last segment. */
+ *  `markers` merged in by time, and the pending card marked in the last segment.
+ *
+ *  Markers older than a segment's first card, when the segment's window starts partway into its
+ *  file, belong among records not loaded yet: shown, they would all stack above the first card.
+ *  Only the newest of them is kept, as the state the window opens in (`carried`); the others come
+ *  back in place once "load earlier" reads their records, as every marker is merged afresh. */
 export function streamItems(segments: Segment[], conversations: Conversation[], markers: StatusMarker[], status: SessionStatus | undefined): Item[] {
   const items: Item[] = []
   const left = [...markers].sort((a, b) => (before(a.at, b.at) ? -1 : before(b.at, a.at) ? 1 : 0))
   const seen = new Map<string, number>()
   let m = 0
-  const flush = (upTo: string | null) => {
-    while (m < left.length && (upTo === null || before(left[m].at, upTo))) {
-      // Keyed by what it says, not its index: a marker added earlier in time moves no other.
-      const base = `m:${left[m].at}:${left[m].label}`
+  const flush = (upTo: string | null, carry = false) => {
+    const from = m
+    while (m < left.length && (upTo === null || before(left[m].at, upTo))) m++
+    for (let j = carry ? Math.max(from, m - 1) : from; j < m; j++) {
+      // Keyed by what it says, not its index: a marker added earlier in time moves no other. A
+      // carried one gets a key of its own, so the row that anchors a "load earlier" is a card.
+      const base = `${carry ? 'carried' : 'm'}:${left[j].at}:${left[j].label}`
       const n = seen.get(base) ?? 0
       seen.set(base, n + 1)
-      items.push({ kind: 'marker', key: n ? `${base}:${n}` : base, marker: left[m] })
-      m++
+      const key = n ? `${base}:${n}` : base
+      items.push(carry ? { kind: 'marker', key, marker: left[j], carried: true } : { kind: 'marker', key, marker: left[j] })
     }
   }
   segments.forEach((seg, i) => {
@@ -122,8 +130,9 @@ export function streamItems(segments: Segment[], conversations: Conversation[], 
     if (i > 0 && seg.start !== null && seg.start > 0) items.push({ kind: 'earlier', key: `earlier:${seg.key}`, segment: seg.key, loading: seg.loadingEarlier })
     const last = i === segments.length - 1
     const pending = last ? pendingCard(conv.cards, status?.waiting ?? null) : null
-    for (const card of conv.cards) {
-      flush(card.at)
+    const partial = seg.start !== null && seg.start > 0
+    for (const [c, card] of conv.cards.entries()) {
+      flush(card.at, c === 0 && partial)
       items.push({ kind: 'card', key: `${seg.key}:${card.id}`, card, pending: pending?.id === card.id ? pending.kind : null })
     }
     if (!conv.cards.length) {
@@ -173,6 +182,12 @@ export function lastPromptAt(cards: Card[]): string | null {
  *  When the old first row is gone (a reset replaced everything) it stays where it was. */
 export function firstIndex(prev: { items: Item[]; first: number } | null, items: Item[], base: number): number {
   if (!prev || !prev.items.length) return base
-  const at = items.findIndex((it) => it.key === prev.items[0].key)
-  return at < 0 ? prev.first : prev.first - at
+  // Anchored on the first old row still there: a carried marker atop the old window is gone
+  // (or back in place among the earlier rows) once they load.
+  const at = new Map(items.map((it, i) => [it.key, i]))
+  for (const [j, it] of prev.items.entries()) {
+    const i = at.get(it.key)
+    if (i !== undefined) return prev.first + j - i
+  }
+  return prev.first
 }

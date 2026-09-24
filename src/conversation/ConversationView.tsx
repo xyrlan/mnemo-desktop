@@ -91,7 +91,13 @@ function Row({ item, onEarlier }: { item: Item; onEarlier: (segment: number) => 
         </div>
       )
     case 'marker':
-      return <div className="cv-thin cv-marker">{item.marker.label}</div>
+      return item.carried ? (
+        <div className="cv-thin cv-marker" title={`since ${item.marker.at}`}>
+          {item.marker.label} <span className="cv-muted">(since earlier)</span>
+        </div>
+      ) : (
+        <div className="cv-thin cv-marker">{item.marker.label}</div>
+      )
     case 'earlier':
       return (
         <div className="cv-thin">

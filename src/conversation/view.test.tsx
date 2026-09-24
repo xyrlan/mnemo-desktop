@@ -358,6 +358,56 @@ test('markers are merged into the stream by time, and the footer is pinned under
   expect(q('.cv-stream .reply')).toBeNull()
 })
 
+// A window that starts partway into the file has records not loaded above it, and the markers
+// of their time with them: those would all stack atop the first card. Only the newest is kept,
+// as the state the window opens in; the rest come back in place with their records.
+test('markers older than a partial window keep only the newest, until earlier records load', async () => {
+  const { client, follows, chunks } = fakeClient()
+  const markers: StatusMarker[] = [
+    { at: at(1), label: 'working' },
+    { at: at(3), label: 'blocked · awaiting approval' },
+    { at: at(6), label: 'working' },
+    { at: at(15), label: 'blocked · needs input' },
+    { at: at(30), label: 'done' },
+  ]
+  await render(view(client, { markers }))
+  await follows[0].emit(lines(4000, [user('u5', 10, 'in window'), said('a5', 20, 'answer')]))
+  const rows = () => qa('.fake-list > [data-index]').map((r) => r.textContent)
+  expect(rows()).toEqual(['working (since earlier)', 'in window', 'blocked · needs input', 'answer', 'done'])
+  expect(qa('.cv-marker .cv-muted')).toHaveLength(1)
+
+  // Loading the older records puts their markers back beside them, and the rows that were on
+  // screen keep their indexes though the carried marker above them is gone.
+  const first = virt.props!.firstItemIndex as number
+  chunks.push({ start: 0, end: 4000, lines: [line(user('u1', 0, 'first')), line(said('a1', 2, 'early answer')), line(said('a2', 5, 'later'))] })
+  await act(async () => virt.props!.startReached())
+  expect(rows()).toEqual(['first', 'working', 'early answer', 'blocked · awaiting approval', 'later', 'working', 'in window', 'blocked · needs input', 'answer', 'done'])
+  expect(qa('.cv-marker .cv-muted')).toHaveLength(0)
+  const index = (key: string) => (virt.props!.data as Item[]).findIndex((it) => it.key === key) + virt.props!.firstItemIndex
+  expect(index('0:u5')).toBe(first + 1)
+})
+
+test('a window at the start of its file keeps every marker before its first card', () => {
+  const seg = { ...applyEvent(newSegment(0, 's1'), lines(0, [said('a1', 10, 'x')])) }
+  const conv = { sessionId: 's1', title: null, prs: [], cards: [said('a1', 10, 'x')] }
+  const markers = [{ at: at(1), label: 'starting' }, { at: at(2), label: 'working' }]
+  const shown = (s: typeof seg) => streamItems([s], [conv], markers, undefined).map((i) => (i.kind === 'marker' ? `${i.marker.label}${i.carried ? '*' : ''}` : i.kind))
+  expect(shown(seg)).toEqual(['starting', 'working', 'card'])
+  expect(shown({ ...seg, start: 900 })).toEqual(['working*', 'card'])
+})
+
+test('after a /clear, markers before a partial later window collapse too, not those of the segment above', () => {
+  const a = applyEvent(newSegment(0, 's1'), lines(0, [said('a1', 0, 'old session')]))
+  const b = applyEvent(newSegment(1, 's2'), lines(700, [said('b1', 20, 'new session')], 's2'))
+  const convs = [
+    { sessionId: 's1', title: null, prs: [], cards: [said('a1', 0, 'old session')] },
+    { sessionId: 's2', title: null, prs: [], cards: [said('b1', 20, 'new session')] },
+  ]
+  const markers = [{ at: at(5), label: 'done' }, { at: at(12), label: 'working' }, { at: at(15), label: 'blocked' }]
+  const shown = streamItems([a, b], convs, markers, undefined).map((i) => (i.kind === 'marker' ? `${i.marker.label}${i.carried ? '*' : ''}` : i.kind))
+  expect(shown).toEqual(['card', 'clear', 'earlier', 'blocked*', 'card'])
+})
+
 test('the title and PR links of the transcript head the view', async () => {
   const { client, follows } = fakeClient()
   await render(view(client))
@@ -657,6 +707,8 @@ test('rows prepended above the first lower the first index by as many; a replace
   expect(firstIndex(prev, [it('a'), it('b'), it('c'), it('d')], 100)).toBe(98)
   expect(firstIndex(prev, [it('c'), it('d'), it('e')], 100)).toBe(100)
   expect(firstIndex(prev, [it('x')], 100)).toBe(100)
+  // The first old row gone, the next one still there anchors.
+  expect(firstIndex(prev, [it('a'), it('b'), it('d')], 100)).toBe(99)
 })
 
 test('markers with the same time and label still get distinct keys', () => {
