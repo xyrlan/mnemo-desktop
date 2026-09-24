@@ -18,16 +18,18 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
       arrowright: 'focus.right',
       arrowup: 'focus.up',
       arrowdown: 'focus.down',
+      a: 'floating-terminal.toggle',
     }
-    return m[k] ?? null
+    // ⌥A types "å" on a Mac, so the physical key decides.
+    return m[e.code === 'KeyA' ? 'a' : k] ?? null
   }
   if (e.altKey) return null
   if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', b: 'cockpit.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
+    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', g: 'diff.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `worktree.go.${k}`
-  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', k: 'palette.open', j: 'worktree.jump', n: 'workspace.new', b: 'sidebar.toggle-left', l: 'sidebar.toggle-right' }
+  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', e: 'dictation.toggle', k: 'palette.open', j: 'worktree.jump', n: 'workspace.new', b: 'sidebar.toggle-left', l: 'sidebar.toggle-right' }
   return m[k] ?? null
 }
 

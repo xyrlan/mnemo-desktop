@@ -57,7 +57,6 @@ export function registerBuiltins(store: Store) {
   register({ id: 'focus.right', title: 'Focus pane right', shortcut: '⌘⌥→', run: () => focusToward('right') })
   register({ id: 'focus.up', title: 'Focus pane up', shortcut: '⌘⌥↑', run: () => focusToward('up') })
   register({ id: 'focus.down', title: 'Focus pane down', shortcut: '⌘⌥↓', run: () => focusToward('down') })
-  register({ id: 'home.show', title: 'Home', run: () => s().showHome() })
   register({
     id: 'pane.toggle-face',
     title: 'Toggle conversation',
