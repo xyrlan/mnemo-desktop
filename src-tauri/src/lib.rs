@@ -80,6 +80,9 @@ pub mod usage;
 // -- app dir (src/app_dir.rs) --
 pub mod app_dir;
 
+// -- install review (src/install_review.rs) --
+pub mod install_review;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -241,6 +244,13 @@ pub fn run() {
 
             // -- usage commands --
             usage::usage_log,
+
+            // -- install review commands --
+            install_review::install_review_project,
+            install_review::install_review_step,
+            install_review::install_review_run,
+            install_review::install_review_decided,
+            install_review::install_review_record,
 
             // -- marketplace commands --
             marketplace::marketplace_list,
