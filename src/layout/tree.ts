@@ -80,12 +80,14 @@ export function replaceRatio(n: Node, path: Path, ratio: number): Node {
   return { ...n, children }
 }
 
-export function neighbour(from: PaneId, side: Side, rects: Map<PaneId, Rect>): PaneId | null {
+/** The box nearest `from` (centre to centre) among those wholly on `side` of it: a pane, or a
+ *  group of tabs. Null when none is. */
+export function neighbour<K>(from: K, side: Side, rects: Map<K, Rect>): K | null {
   const me = rects.get(from)
   if (!me) return null
   const cx = me.x + me.w / 2
   const cy = me.y + me.h / 2
-  let best: PaneId | null = null
+  let best: K | null = null
   let bestD = Infinity
   for (const [id, r] of rects) {
     if (id === from) continue

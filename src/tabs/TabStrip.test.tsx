@@ -27,7 +27,7 @@ import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 let host: HTMLDivElement
 let root: Root
 let onNew: ReturnType<typeof vi.fn<(kind: NewTabKind) => void>>
-/** The panes of three tabs: notes (one pane), docs (two), web (one). */
+/** The panes of three tabs: notes (one pane), docs (two shells: only a terminal tab splits), web (one). */
 let notes: number, docs: number, docsSplit: number, web: number
 
 const fleet = (agents: AgentNode[]) =>
@@ -43,10 +43,12 @@ beforeEach(async () => {
   const s = store.getState()
   s.openView('editor', { root: '/r' }, 'tab', 'notes.md')
   notes = store.getState().tabs[0].focused
-  s.openView('editor', { root: '/r' }, 'tab', 'docs.md')
-  docs = store.getState().tabs[1].focused
-  s.openView('editor', { root: '/r' }, 'split-row', 'more.md')
-  docsSplit = store.getState().tabs[1].focused
+  ;[docs, docsSplit] = [90, 91]
+  store.setState((st) => ({
+    panes: { ...st.panes, [docs]: { id: docs, view: 'terminal', cwd: '/r', title: 'docs' }, [docsSplit]: { id: docsSplit, view: 'terminal', cwd: '/r', title: 'more' } },
+    tabs: [...st.tabs, { id: 'tab-90', root: { kind: 'split', dir: 'row', ratio: 0.5, children: [{ kind: 'leaf', pane: docs }, { kind: 'leaf', pane: docsSplit }] }, focused: docs }],
+    activeTab: 'tab-90',
+  }))
   s.openView('browser', { url: 'https://example.com' }, 'tab', 'web')
   web = store.getState().tabs[2].focused
   onNew = vi.fn<(kind: NewTabKind) => void>()
@@ -69,7 +71,7 @@ const fire = (el: EventTarget, type: string, init: MouseEventInit = {}) =>
   act(() => void el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init })))
 
 test('one tab per tab of the worktree shown, in order, named after its focused pane', () => {
-  expect(titles()).toEqual(['editor', 'editor', 'browser'])
+  expect(titles()).toEqual(['editor', 'docs', 'browser'])
   expect(tabEls().map((t) => t.dataset.tabId)).toEqual(tabIds())
 })
 
@@ -245,6 +247,25 @@ test('moveTab reorders the shown tabs, and the strip follows', async () => {
   expect(store.getState().tabs).toBe(before)
 })
 
+test('the tabs of every group show, in their order; a click shows one in its group and makes that group active', async () => {
+  const [a, b, c] = tabIds()
+  await act(async () => store.getState().openView('editor', { root: '/r' }, 'split-row', 'side.md'))
+  const side = store.getState().activeTab
+  const [left, right] = Object.keys(store.getState().groups)
+  expect(tabEls().map((t) => t.dataset.tabId)).toEqual([a, b, c, side])
+  expect(tabEls().map((t) => t.dataset.active)).toEqual(['false', 'false', 'false', 'true'])
+  await fire(tabEl(0), 'pointerdown', { clientX: 1 })
+  await fire(window, 'pointerup', { clientX: 1 })
+  expect([store.getState().activeTab, store.getState().activeGroup]).toEqual([a, left])
+  await fire(tabEl(3), 'pointerdown', { clientX: 1 })
+  await fire(window, 'pointerup', { clientX: 1 })
+  expect([store.getState().activeTab, store.getState().activeGroup]).toEqual([side, right])
+  // Dropped on a tab of the other group, a tab moves into that group, at its place.
+  await act(async () => moveTab(b, side))
+  expect(store.getState().groups[right].tabs).toEqual([b, side])
+  expect(tabEls().map((t) => t.dataset.tabId)).toEqual([a, c, b, side])
+})
+
 test("switching worktree shows that worktree's tabs", async () => {
   await act(async () => store.getState().switchWorktree('/r'))
   expect(tabEls()).toHaveLength(3)
@@ -262,7 +283,10 @@ test('the tabs of no worktree stay out of the strip, behind a count at its end, 
   const stray = { id: 'tab-77', root: { kind: 'leaf' as const, pane: 77 }, focused: 77 }
   await act(async () => {
     store.getState().switchWorktree('/r')
-    store.setState((s) => ({ panes: { ...s.panes, 77: { id: 77, view: 'terminal', cwd: '/home/me/scratch' } }, parked: { ...s.parked, [ELSEWHERE]: { tabs: [stray], activeTab: '' } } }))
+    store.setState((s) => ({
+      panes: { ...s.panes, 77: { id: 77, view: 'terminal', cwd: '/home/me/scratch' } },
+      parked: { ...s.parked, [ELSEWHERE]: { tabs: [stray], activeTab: '', groups: {}, groupRoot: null, activeGroup: '' } },
+    }))
   })
   expect(tabIds()).not.toContain('tab-77')
   expect(tabEls().map((t) => t.dataset.tabId)).toEqual(tabIds())

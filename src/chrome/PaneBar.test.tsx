@@ -82,10 +82,16 @@ describe('dropping the bar on another pane', () => {
   let beside: number
   let target: HTMLDivElement
 
-  beforeEach(() => {
-    store.getState().openView('editor', { root: '/tmp' }, 'split-row', 'other.md')
-    beside = store.getState().tabs[0].focused
-    store.getState().focusPane(id)
+  beforeEach(async () => {
+    // Only a terminal tab splits: this bar is one of two shells side by side in one tab.
+    ;[id, beside] = [5, 6]
+    const leaf = (pane: number) => ({ kind: 'leaf' as const, pane })
+    store.setState({
+      tabs: [{ id: 'tab-5', root: { kind: 'split', dir: 'row', ratio: 0.5, children: [leaf(id), leaf(beside)] }, focused: id }],
+      activeTab: 'tab-5',
+      panes: { [id]: { id, view: 'terminal', cwd: '/Users/me/github/mnemo-desktop' }, [beside]: { id: beside, view: 'terminal', cwd: '/tmp' } },
+    })
+    await act(async () => root.render(<PaneBar id={id} client={git} />))
     host.className = 'pane'
     host.dataset.pane = String(id)
     target = document.createElement('div')

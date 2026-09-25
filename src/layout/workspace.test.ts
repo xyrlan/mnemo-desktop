@@ -3,7 +3,9 @@ import { createStore, PROMPT_DELAY_MS, type Store } from './store'
 import { parseSaved, type Saved, type SavedWorktree } from './saved'
 import { startWorkspace, type WorkspaceClient } from './persist'
 import type { PtyClient } from '../pty/client'
-import type { Node } from './tree'
+import type { PtyInfo, SessionClient } from '../terminal/sessions'
+import { groupIds } from './groups'
+import { leaves, type Node } from './tree'
 
 function fakePty(first = 1) {
   let next = first
@@ -51,7 +53,7 @@ test('snapshotForSave keeps trees, ratios, focus, names and what each pane is, n
   s.getState().paneExited(1, 0)
   const saved = s.getState().snapshotForSave()
   expect(saved).toEqual({
-    version: 2,
+    version: 3,
     activeWorktree: null,
     worktrees: [
       {
@@ -66,6 +68,9 @@ test('snapshotForSave keeps trees, ratios, focus, names and what each pane is, n
           '2': { view: 'terminal', cwd: '/repo/wt', sessionId: 'sess-1' },
           '-1': { view: 'cockpit', props: { x: 1 }, title: 'cockpit' },
         },
+        groups: { 'group-1': { id: 'group-1', tabs: ['tab-1', 'tab--1'], activeTab: 'tab-1' } },
+        groupRoot: { kind: 'group', group: 'group-1' },
+        activeGroup: 'group-1',
       },
     ],
   })
@@ -73,14 +78,17 @@ test('snapshotForSave keeps trees, ratios, focus, names and what each pane is, n
   expect(JSON.parse(JSON.stringify(saved))).toEqual(saved)
 })
 
-test('snapshotForSave leaves transient views out of their tab', async () => {
+test('snapshotForSave leaves transient views out, and a group they leave empty out of the tree', async () => {
   const s = createStore(fakePty().pty, { workspace: () => null })
   await s.getState().newTab('/a')
   s.getState().openView('terminal-cmd', { cmd: 'claude attach x' }, 'split-row')
   s.getState().openView('terminal-cmd', { cmd: 'claude attach y' }, 'tab')
+  expect(Object.keys(s.getState().groups)).toHaveLength(2)
   const saved = loose(s.getState().snapshotForSave())
   expect(saved.tabs).toEqual([{ id: 'tab-1', root: leaf(1), focused: 1 }])
   expect(Object.keys(saved.panes)).toEqual(['1'])
+  expect(saved).toMatchObject({ groupRoot: { kind: 'group', group: 'group-1' }, activeGroup: 'group-1', activeTab: 'tab-1' })
+  expect(Object.keys(saved.groups)).toEqual(['group-1'])
 })
 
 test('restore recreates the tabs with new ids, spawns shells in their cwd and resumes the Claude session', async () => {
@@ -207,15 +215,19 @@ test('parseSaved drops unreadable panes and tabs, clamps ratios, and never lets 
       '4': { view: 'browser', props: { url: 'https://x' }, cwd: 7 },
     },
   }
-  // A file from before worktrees: its tabs are the layout of no worktree.
+  // A file from before worktrees: its tabs are the layout of no worktree, in one group.
   const saved = loose(parseSaved(v) as Saved)
   expect(saved.tabs).toEqual([
     { id: 'a', root: leaf(1), focused: 1 },
     { id: 'c', root: leaf(4), focused: 4, name: 'kept' },
   ])
   expect(saved.panes).toEqual({ '1': { view: 'terminal', cwd: '/a' }, '4': { view: 'browser', props: { url: 'https://x' } } })
-  expect(saved.activeTab).toBe('b')
-  expect(loose(parseSaved({ tabs: [{ root: split('row', 7, leaf(1), leaf(2)) }], panes: { '1': { view: 'a' }, '2': { view: 'b' } } }) as Saved).tabs[0].root).toEqual(split('row', 0.9, leaf(1), leaf(2)))
+  // The tab it showed could not be read: none is named, and its group shows its first.
+  expect(saved.activeTab).toBe('')
+  expect(Object.values(saved.groups)).toEqual([{ id: 'group-1', tabs: ['a', 'c'], activeTab: 'a' }])
+  // Two shells, as only terminals share a tab now.
+  const two = { '1': { view: 'terminal' }, '2': { view: 'terminal' } }
+  expect(loose(parseSaved({ tabs: [{ root: split('row', 7, leaf(1), leaf(2)) }], panes: two }) as Saved).tabs[0].root).toEqual(split('row', 0.9, leaf(1), leaf(2)))
   expect(parseSaved({})).toBeNull()
   expect(() => parseSaved(null)).toThrow()
   expect(() => parseSaved({ tabs: 'x' })).toThrow()
@@ -238,8 +250,9 @@ describe('per worktree', () => {
 
   test('each open worktree saves its own layout, and the file says which is shown', async () => {
     const saved = (await two()).getState().snapshotForSave()
+    const one = (group: string, tab: string) => ({ groups: { [group]: { id: group, tabs: [tab], activeTab: tab } }, groupRoot: { kind: 'group', group }, activeGroup: group })
     expect(saved).toEqual({
-      version: 2,
+      version: 3,
       activeWorktree: '/repo-wt-a',
       worktrees: [
         {
@@ -247,10 +260,17 @@ describe('per worktree', () => {
           activeTab: 'tab-1',
           tabs: [{ id: 'tab-1', root: split('row', 0.5, leaf(1), leaf(2)), focused: 2 }],
           panes: { '1': { view: 'terminal', cwd: '/repo' }, '2': { view: 'terminal', cwd: '/repo/src', sessionId: 'sess-2' } },
+          ...one('group-1', 'tab-1'),
         },
-        { path: '/repo-wt-a', activeTab: 'tab--1', tabs: [{ id: 'tab--1', root: leaf(-1), focused: -1 }], panes: { '-1': { view: 'vault', props: {}, title: 'vault' } } },
+        {
+          path: '/repo-wt-a',
+          activeTab: 'tab--1',
+          tabs: [{ id: 'tab--1', root: leaf(-1), focused: -1 }],
+          panes: { '-1': { view: 'vault', props: {}, title: 'vault' } },
+          ...one('group-2', 'tab--1'),
+        },
         // Open with no tab: it stays open.
-        { path: '/empty', activeTab: '', tabs: [], panes: {} },
+        { path: '/empty', activeTab: '', tabs: [], panes: {}, groups: {}, groupRoot: null, activeGroup: '' },
       ],
     })
   })
@@ -334,7 +354,7 @@ describe('per worktree', () => {
       await ws.ready
       await s.getState().switchWorktree('/a')
       vi.advanceTimersByTime(500)
-      expect(written).toEqual([{ version: 2, activeWorktree: '/a', worktrees: [{ path: '/a', tabs: [], panes: {}, activeTab: '' }] }])
+      expect(written).toEqual([{ version: 3, activeWorktree: '/a', worktrees: [{ path: '/a', tabs: [], panes: {}, activeTab: '', groups: {}, groupRoot: null, activeGroup: '' }] }])
       ws.stop()
     } finally {
       vi.useRealTimers()
@@ -407,5 +427,198 @@ describe('startWorkspace', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/** Each group's tabs, in the order the groups are laid out. */
+const groupTabs = (l: { groups: Record<string, { tabs: string[] }>; groupRoot: Parameters<typeof groupIds>[0] }) => groupIds(l.groupRoot).map((g) => l.groups[g].tabs)
+
+describe('groups (version 3)', () => {
+  test('the group tree and its ratios, each group’s tabs in order and the one it shows, the active group and previews come back', async () => {
+    const s = createStore(fakePty().pty, { workspace: () => null })
+    await s.getState().newTab('/a')
+    s.getState().openView('editor', { path: '/a/x.ts' }, 'split-row', 'x.ts', { preview: true })
+    s.getState().openView('vault', {}, 'tab', 'vault')
+    s.getState().openView('mission', {}, 'split-col', 'mission')
+    s.getState().setGroupRatio([], 0.3)
+    s.getState().activateTab('tab--1')
+    s.getState().focusPane(1)
+    const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave())) as Saved
+    const file = loose(saved)
+    expect(file.tabs.map((t) => [t.id, t.preview ?? false])).toEqual([
+      ['tab-1', false],
+      ['tab--1', true],
+      ['tab--2', false],
+      ['tab--3', false],
+    ])
+    expect(file.groupRoot).toMatchObject({ kind: 'split', dir: 'row', ratio: 0.3, children: [{ kind: 'group' }, { kind: 'split', dir: 'col' }] })
+    expect(groupTabs(file)).toEqual([['tab-1'], ['tab--1', 'tab--2'], ['tab--3']])
+
+    const r = createStore(fakePty(10).pty, { workspace: () => null })
+    await r.getState().restore(saved)
+    const st = r.getState()
+    // New ids, the same shape: the terminal spawns as 10, the views are issued -1, -2, -3.
+    expect(groupTabs(st)).toEqual([['tab-10'], ['tab--1', 'tab--2'], ['tab--3']])
+    expect(st.groupRoot).toMatchObject({ kind: 'split', dir: 'row', ratio: 0.3, children: [{ kind: 'group' }, { kind: 'split', dir: 'col', ratio: 0.5 }] })
+    const [left, right] = groupIds(st.groupRoot)
+    expect([st.activeGroup, st.activeTab]).toEqual([left, 'tab-10'])
+    expect(st.groups[right].activeTab).toBe('tab--1')
+    expect(st.tabs.map((t) => t.preview ?? false)).toEqual([false, true, false, false])
+    expect(st.panes[-1]).toMatchObject({ view: 'editor', props: { path: '/a/x.ts' } })
+  })
+
+  test('a version 2 workspace like the maintainer’s comes back whole: every worktree, its terminals, their sessions and faces', async () => {
+    vi.useFakeTimers()
+    try {
+      const v2 = {
+        version: 2,
+        activeWorktree: '/code/app',
+        worktrees: [
+          {
+            path: '/code/app',
+            activeTab: 'tab-3',
+            tabs: [
+              { id: 'tab-1', root: leaf(1), focused: 1, name: 'agent' },
+              // A terminal beside a file, the file focused: it was a split before groups.
+              { id: 'tab-3', root: split('row', 0.6, leaf(3), leaf(-2)), focused: -2 },
+              { id: 'tab-4', root: split('col', 0.5, leaf(4), leaf(5)), focused: 5 },
+            ],
+            panes: {
+              '1': { view: 'terminal', cwd: '/code/app', sessionId: 'sess-a', face: 'conversation' },
+              '3': { view: 'terminal', cwd: '/code/app/src', sessionId: 'sess-b' },
+              '-2': { view: 'editor', props: { path: '/code/app/README.md', root: '/code/app' }, title: 'README.md' },
+              '4': { view: 'terminal', cwd: '/code/app' },
+              '5': { view: 'terminal', cwd: '/code/app', sessionId: 'sess-c' },
+            },
+          },
+          {
+            path: '/code/app-wt-login',
+            activeTab: 'tab-6',
+            tabs: [
+              { id: 'tab-6', root: leaf(6), focused: 6 },
+              { id: 'tab-7', root: split('row', 0.5, leaf(7), leaf(-3)), focused: 7 },
+              { id: 'tab--5', root: leaf(-5), focused: -5 },
+            ],
+            panes: {
+              '6': { view: 'terminal', cwd: '/code/app-wt-login', sessionId: 'sess-d', face: 'conversation' },
+              '7': { view: 'terminal', cwd: '/code/app-wt-login' },
+              '-3': { view: 'browser', props: { url: 'http://localhost:5173' } },
+              '-5': { view: 'mission', props: { id: 'c1' }, title: 'mission' },
+            },
+          },
+          {
+            path: '/code/other',
+            activeTab: 'tab-8',
+            tabs: [
+              { id: 'tab-8', root: leaf(8), focused: 8 },
+              { id: 'tab-9', root: leaf(9), focused: 9 },
+            ],
+            panes: { '8': { view: 'terminal', cwd: '/code/other', sessionId: 'sess-e' }, '9': { view: 'terminal', cwd: '/code/other', sessionId: 'sess-f' } },
+          },
+        ],
+      }
+      // The core kept five of the eight shells running; three ended while the app was away.
+      const alive = [1, 3, 4, 6, 8]
+      const held: PtyInfo[] = [1, 3, 4, 5, 6, 7, 8, 9].map((id) => ({ id, cwd: '', pid: 1000 + id, alive: alive.includes(id) }))
+      const attached: number[] = []
+      const sessions: SessionClient = { list: async () => held, attach: async (id) => (attached.push(id), new Uint8Array()) }
+      const { pty, spawned, writes } = fakePty(100)
+      const s = createStore(pty, { workspace: () => null, sessions })
+      await s.getState().restore(JSON.parse(JSON.stringify(v2)))
+      const st = s.getState()
+
+      expect(st.openWorktrees()).toEqual(['/code/app', '/code/app-wt-login', '/code/other'])
+      expect(st.activeWorktree).toBe('/code/app')
+      // The running shells are attached under their ids, and nothing is typed into them.
+      expect(attached).toEqual(alive)
+      expect(spawned).toEqual(['/code/app', '/code/app-wt-login', '/code/other'])
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(writes).toEqual([
+        [100, 'claude --resume sess-c\n'],
+        [102, 'claude --resume sess-f\n'],
+      ])
+      const sessionOf = (id: number) => st.panes[id].sessionId
+      expect([1, 3, 100, 6, 8, 102].map(sessionOf)).toEqual(['sess-a', 'sess-b', 'sess-c', 'sess-d', 'sess-e', 'sess-f'])
+      expect([1, 6].map((id) => st.panes[id].face)).toEqual(['conversation', 'conversation'])
+
+      // One group per worktree, its tabs in order; the file beside a terminal is a tab of its own
+      // right after it, and shows, as it had the focus.
+      const app = st.worktreeLayout('/code/app')!
+      expect(groupTabs(app)).toEqual([['tab-1', 'tab-3', 'tab--1', 'tab-4']])
+      expect(app.activeTab).toBe('tab--1')
+      expect(app.tabs.map((t) => t.root)).toEqual([leaf(1), leaf(3), leaf(-1), split('col', 0.5, leaf(4), leaf(100))])
+      expect(app.tabs[0].name).toBe('agent')
+      expect(st.panes[-1]).toMatchObject({ view: 'editor', props: { path: '/code/app/README.md' }, title: 'README.md' })
+      const login = st.worktreeLayout('/code/app-wt-login')!
+      expect(groupTabs(login)).toEqual([['tab-6', 'tab-101', 'tab--2', 'tab--3']])
+      expect(login.activeTab).toBe('tab-6')
+      expect(login.tabs.map((t) => leaves(t.root).map((id) => st.panes[id].view))).toEqual([['terminal'], ['terminal'], ['browser'], ['mission']])
+      expect(groupTabs(st.worktreeLayout('/code/other')!)).toEqual([['tab-8', 'tab-102']])
+
+      // Saved again, it is a version 3 file of the same.
+      const again = s.getState().snapshotForSave()
+      expect(again.version).toBe(3)
+      expect(again.worktrees.map((w) => groupTabs(w))).toEqual([[['tab-1', 'tab-3', 'tab--1', 'tab-4']], [['tab-6', 'tab-101', 'tab--2', 'tab--3']], [['tab-8', 'tab-102']]])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('a tab of no terminal that mixed views is cut into one tab per view, the first keeping its name', () => {
+    const saved = parseSaved({
+      activeTab: 'a',
+      tabs: [
+        { id: 'a', root: split('row', 0.5, leaf(1), split('col', 0.5, leaf(-1), leaf(2))), focused: -1, name: 'work' },
+        { id: 'b', root: split('row', 0.5, leaf(-4), leaf(-6)), focused: -6, name: 'docs' },
+      ],
+      panes: { '1': { view: 'terminal' }, '2': { view: 'terminal' }, '-1': { view: 'setup' }, '-4': { view: 'editor' }, '-6': { view: 'browser' } },
+    }) as Saved
+    const w = loose(saved)
+    expect(w.tabs).toEqual([
+      { id: 'a', root: split('row', 0.5, leaf(1), leaf(2)), focused: 1, name: 'work' },
+      { id: 'a/-1', root: leaf(-1), focused: -1 },
+      { id: 'b', root: leaf(-4), focused: -4, name: 'docs' },
+      { id: 'b/-6', root: leaf(-6), focused: -6 },
+    ])
+    // The one holding the focused pane shows in the tab's place.
+    expect(w.activeTab).toBe('a/-1')
+    expect(groupTabs(w)).toEqual([['a', 'a/-1', 'b', 'b/-6']])
+  })
+
+  test('parseSaved reads the groups it can, and every tab lands in one', () => {
+    const tab = (id: string, pane: number, more: object = {}) => ({ id, root: leaf(pane), focused: pane, ...more })
+    const g = (group: string) => ({ kind: 'group', group })
+    const saved = parseSaved({
+      version: 3,
+      activeWorktree: '/a',
+      worktrees: [
+        {
+          path: '/a',
+          activeTab: 't2',
+          activeGroup: 'R',
+          tabs: [tab('t1', 1), tab('t2', -2, { preview: true }), tab('t3', -3, { preview: true }), tab('t4', 4, { preview: true }), tab('t5', -5)],
+          panes: { '1': { view: 'terminal' }, '-2': { view: 'editor' }, '-3': { view: 'editor' }, '4': { view: 'terminal' }, '-5': { view: 'vault' } },
+          // `t5` is in no group; `gone` names no tab; the ratio is out of bounds; `X` is not a group.
+          groups: { L: { tabs: ['t1', 't4', 'gone'], activeTab: 'gone' }, R: { tabs: ['t2', 't3'], activeTab: 't3' }, X: 7 },
+          groupRoot: { kind: 'split', dir: 'row', ratio: 0.99, children: [g('L'), { kind: 'split', dir: 'col', ratio: 0.5, children: [g('R'), g('X')] }] },
+        },
+      ],
+    }) as Saved
+    const w = saved.worktrees[0]
+    expect(w.groupRoot).toEqual({ kind: 'split', dir: 'row', ratio: 0.85, children: [g('L'), g('R')] })
+    expect(groupTabs(w)).toEqual([['t1', 't4'], ['t2', 't3', 't5']])
+    expect(w.groups.L.activeTab).toBe('t1')
+    expect([w.activeGroup, w.activeTab]).toEqual(['R', 't2'])
+    // A terminal is never a preview, and a group has one at most.
+    expect(w.tabs.map((t) => [t.id, t.preview ?? false])).toEqual([
+      ['t1', false],
+      ['t4', false],
+      ['t2', true],
+      ['t3', false],
+      ['t5', false],
+    ])
+    // No tree at all: one group of every tab, in the file's order.
+    const flat = parseSaved({ worktrees: [{ path: '/b', tabs: [tab('x', 1), tab('y', 2)], panes: { '1': { view: 'terminal' }, '2': { view: 'terminal' } }, groupRoot: 'junk' }] }) as Saved
+    expect(groupTabs(flat.worktrees[0])).toEqual([['x', 'y']])
   })
 })

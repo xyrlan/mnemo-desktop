@@ -125,6 +125,22 @@ test('every open worktree’s tabs stay mounted; only the shown worktree’s sho
   expect(layers()).toEqual(['tab-1', 'tab-2', 'tab-3'])
 })
 
+test('a tab moved into another group, or to a group of its own, is never remounted', async () => {
+  await s.getState().switchWorktree(A)
+  await s.getState().newTab()
+  await s.getState().newTab()
+  await render()
+  await act(async () => s.getState().moveTab('tab-1', { group: s.getState().activeGroup, side: 'right' }))
+  expect(Object.keys(s.getState().groups)).toHaveLength(2)
+  expect(shown()).toEqual(['tab-1'])
+  const [first] = Object.keys(s.getState().groups)
+  await act(async () => s.getState().moveTab('tab-2', { group: s.getState().activeGroup }))
+  expect(Object.keys(s.getState().groups)).not.toContain(first)
+  expect(shown()).toEqual(['tab-2'])
+  expect(h.mounts.sort()).toEqual([1, 2])
+  expect(h.unmounts).toEqual([])
+})
+
 test('the pane views render with no old stylesheet scope around them', async () => {
   await s.getState().newTab(A)
   await render()

@@ -25,14 +25,18 @@ export function run(id: string) {
 /** Registers the built-in actions against a store. Called once by the app. */
 export function registerBuiltins(store: Store) {
   const s = () => store.getState()
+  // The nearest pane on screen on that side, which may be in another group (focusing it makes
+  // that group active). Panes of tabs not shown are laid out at nothing and are never it.
   const focusToward = (side: Side) => {
     const st = s()
     const tab = st.tabs.find((t) => t.id === st.activeTab)
     if (!tab) return
-    const next = neighbour(tab.focused, side, paneRects())
+    const onScreen = new Map([...paneRects()].filter(([, r]) => r.w > 0 && r.h > 0))
+    const next = neighbour(tab.focused, side, onScreen)
     if (next !== null) st.focusPane(next)
   }
-  // New shells start where you are: the focused pane's directory, or Home's selected repo.
+  // New shells start where you are: the focused pane's directory, or Home's selected repo. A new
+  // tab lands in the active group; a split outside a terminal tab is a terminal tab to that side.
   register({ id: 'tab.new', title: 'New tab', shortcut: '⌘T', run: () => s().newTab(cwdForNewShell(s())) })
   register({ id: 'pane.split.row', title: 'Split right', shortcut: '⌘D', run: () => s().split('row', cwdForNewShell(s())) })
   register({ id: 'pane.split.col', title: 'Split down', shortcut: '⌘⇧D', run: () => s().split('col', cwdForNewShell(s())) })
