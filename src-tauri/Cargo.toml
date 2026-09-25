@@ -45,8 +45,9 @@ vt100 = "0.16"
 log = "0.4"
 env_logger = "0.11"
 
-# Voice dictation (voice.rs): whisper.cpp transcription (its build needs cmake and libclang),
-# microphone capture (ALSA headers, libasound2-dev, on Linux), and the first-use model download.
+# Voice dictation (voice.rs): whisper.cpp transcription (its build needs cmake and libclang; on
+# macOS it runs on Metal, below), microphone capture (ALSA headers, libasound2-dev, on Linux), and
+# the first-use model download.
 whisper-rs = { version = "0.16", features = ["log_backend"] }
 cpal = "0.18"
 ureq = "3"
@@ -72,6 +73,9 @@ libc = "0.2"
 objc2 = "0.6"
 # Completion handlers for WKWebView snapshots (mcp.rs).
 block2 = "0.6"
+# Dictation on the GPU: several times faster than the CPU (voice.rs). The Metal shaders are
+# embedded as source and compiled on first use, so the build needs no Metal compiler.
+whisper-rs = { version = "0.16", features = ["log_backend", "metal"] }
 
 [dev-dependencies]
 # Reads the voice test fixture.
