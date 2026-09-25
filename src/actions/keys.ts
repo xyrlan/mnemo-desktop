@@ -25,7 +25,7 @@ export function actionForKey(e: KeyboardEvent, platform: Platform): string | nul
   }
   if (e.altKey) return null
   if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', g: 'diff.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
+    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', b: 'tab.new-browser', g: 'diff.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `worktree.go.${k}`

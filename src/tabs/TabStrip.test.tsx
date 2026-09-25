@@ -19,13 +19,14 @@ import { store } from '../layout/app-store'
 import { ELSEWHERE } from '../layout/store'
 import { seenStore } from './seen'
 import { strayTab } from './Elsewhere'
+import { NEW_TAB_ITEMS, newTab, type NewTabKind } from './NewTabMenu'
 import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let host: HTMLDivElement
 let root: Root
-let onNew: ReturnType<typeof vi.fn<() => void>>
+let onNew: ReturnType<typeof vi.fn<(kind: NewTabKind) => void>>
 /** The panes of three tabs: notes (one pane), docs (two), web (one). */
 let notes: number, docs: number, docsSplit: number, web: number
 
@@ -48,7 +49,7 @@ beforeEach(async () => {
   docsSplit = store.getState().tabs[1].focused
   s.openView('browser', { url: 'https://example.com' }, 'tab', 'web')
   web = store.getState().tabs[2].focused
-  onNew = vi.fn<() => void>()
+  onNew = vi.fn<(kind: NewTabKind) => void>()
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -167,9 +168,20 @@ test('Escape leaves the name as it was', async () => {
   expect(store.getState().tabs.find((t) => t.id === id)?.name).toBeUndefined()
 })
 
-test('"+" opens a new terminal', async () => {
-  await fire(host.querySelector('[aria-label="New tab"]')!, 'click')
-  expect(onNew).toHaveBeenCalledTimes(1)
+test('"+" is a menu of a terminal or a browser, each through its chord\'s action', async () => {
+  const plus = host.querySelector('[aria-label="New tab"]')!
+  expect(plus.getAttribute('aria-haspopup')).toBe('menu')
+  // It asks which; a click alone opens nothing (the open menu is shot, not driven: Popper hangs jsdom).
+  await fire(plus, 'click')
+  expect(onNew).not.toHaveBeenCalled()
+  expect(NEW_TAB_ITEMS.map((i) => [i.label, i.shortcut])).toEqual([
+    ['New Terminal', '⌘T'],
+    ['New Browser Tab', '⌘⇧B'],
+  ])
+  const ran: string[] = []
+  newTab('terminal', (id) => ran.push(id))
+  newTab('browser', (id) => ran.push(id))
+  expect(ran).toEqual(['tab.new', 'tab.new-browser'])
 })
 
 test("a tab leads with its agent's state: working spins, needs-you asks, done checks", async () => {

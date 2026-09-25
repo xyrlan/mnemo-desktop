@@ -11,6 +11,8 @@ import type { AgentTarget } from './grab-agent'
 export type Shot = { state: 'taking' } | { state: 'ready'; path: string; data: string } | { state: 'none'; error: string }
 
 export type Design =
+  /** Asked for on a pane with no page yet: arms itself once one loads (`loaded`). */
+  | { mode: 'waiting' }
   | { mode: 'picking'; error: string | null }
   | { mode: 'picked'; payload: GrabPayload; shot: Shot; sending: boolean; error: string | null }
   /** Just went to `title`; clears itself after SENT_MS. */
@@ -134,10 +136,19 @@ export function makeDesignMode(deps: Deps) {
 
   /** Leaves Design Mode: the overlay comes off the page and any pick is dropped. */
   function stop(id: number) {
-    if (!get(id)) return
+    const d = get(id)
+    if (!d) return
     bump(id)
     put(id, undefined)
-    void deps.evaluate(id, TEARDOWN_SCRIPT).catch(() => {})
+    // A waiting pane never armed its page.
+    if (d.mode !== 'waiting') void deps.evaluate(id, TEARDOWN_SCRIPT).catch(() => {})
+  }
+
+  /** Turns Design Mode on for a pane whose page has not loaded yet (a blank page, a pane just
+   *  opened): it waits, and `loaded` arms it. */
+  function wait(id: number) {
+    bump(id)
+    put(id, { mode: 'waiting' })
   }
 
   /** The write-up for the pick in pane `id` with `note`, or null when nothing is picked. */
@@ -152,7 +163,13 @@ export function makeDesignMode(deps: Deps) {
     store,
     start,
     stop,
-    toggle: (id: number) => (get(id) && get(id)!.mode !== 'sent' ? stop(id) : start(id)),
+    wait,
+    /** On or off. `ready` is false while the pane has no page to arm: it waits for one. */
+    toggle: (id: number, ready = true) => (get(id) && get(id)!.mode !== 'sent' ? stop(id) : ready ? start(id) : wait(id)),
+    /** The pane's page finished loading: a waiting Design Mode arms it now. */
+    loaded(id: number) {
+      if (get(id)?.mode === 'waiting') start(id)
+    },
     text,
     /** Sends the pick with `note` to the worktree's agent. Resolves true once it went; on
      *  failure the card stays with the reason. */

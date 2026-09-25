@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type FormEvent } from 'react'
+import { useStore } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { cursorPosition, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
@@ -12,8 +13,9 @@ import { BLANK, normalizeUrl } from './url'
 import { terminalCwd } from './pr'
 import { focusedEvent, toViewport, watchPageFocus, type FocusHost } from './focus'
 import { registerReuse } from '../layout/reuse'
-import { DesignStrip, DesignToggle, designPane } from './design-view'
+import { DesignStrip, DesignToggle, runDesignMode } from './design-view'
 import { design } from './design-live'
+import { BlankPage } from './BlankPage'
 import './browser.css'
 
 export const browser = makeBrowserClient(invoke, <T,>(event: string, cb: (payload: T) => void) =>
@@ -72,15 +74,21 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
   const page = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
+  const waiting = useStore(design.store, (s) => s.panes[id]?.mode === 'waiting')
+  // A blank page draws the pane's explainer in its place: its webview stays hidden.
+  const blank = bar.url === BLANK
+  const blankRef = useRef(blank)
+  blankRef.current = blank
 
   useEffect(() => {
     const el = page.current!
     let alive = true
-    const measure = () => pageBounds(el.getBoundingClientRect(), !store.getState().paletteOpen)
+    const measure = () => pageBounds(el.getBoundingClientRect(), !store.getState().paletteOpen && !blankRef.current)
     const unlisten = [
       browser.onState(id, (s) => {
         webviews.remember(id, s.url)
         dispatch({ type: 'page', ...s })
+        if (!s.loading && s.url !== BLANK) design.loaded(id)
       }),
       browser.onTitle(id, (title) => {
         if (title) store.getState().setTitle(id, title)
@@ -112,7 +120,8 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
       untrack()
       for (const u of unlisten) void u.then((off) => off())
       webviews.release(id)
-      design.stop(id)
+      // A remount (a split, StrictMode) keeps a Design Mode that is only waiting for a page.
+      if (design.store.getState().panes[id]?.mode !== 'waiting' || !(id in store.getState().panes)) design.stop(id)
     }
   }, [id, start])
 
@@ -143,10 +152,11 @@ export default function BrowserPane({ id, props }: PaneViewProps) {
         input={input}
         onSubmit={submit}
         onError={fail}
-        tools={<DesignToggle id={id} />}
+        tools={<DesignToggle id={id} ready={!blank} />}
       />
       <DesignStrip id={id} />
       <div ref={page} className="browser-page">
+        {blank && <BlankPage waiting={waiting} onDesign={() => design.toggle(id, false)} />}
         {error && <div className="pane-message">{error}</div>}
       </div>
     </div>
@@ -173,12 +183,16 @@ register({
 })
 
 register({
+  id: 'tab.new-browser',
+  title: 'New browser tab',
+  shortcut: '⌘⇧B',
+  run: () => store.getState().openView('browser', { url: '' }, 'tab', 'browser'),
+})
+
+register({
   id: 'browser.design-mode',
   title: 'Design Mode: pick an element in the browser for the agent',
-  run: () => {
-    const id = designPane(store.getState())
-    if (id !== null) design.toggle(id)
-  },
+  run: () => runDesignMode(store, design, (id) => webviews.url(id)),
 })
 
 register({

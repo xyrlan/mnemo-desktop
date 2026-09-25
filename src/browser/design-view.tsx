@@ -1,8 +1,10 @@
 import { useStore } from 'zustand'
 import { SquareDashedMousePointer } from 'lucide-react'
 import { leaves } from '../layout/tree'
-import type { State } from '../layout/store'
+import type { Actions, State } from '../layout/store'
 import { DesignCard } from './DesignCard'
+import type { DesignMode } from './design'
+import { BLANK } from './url'
 import { design, useAgentTarget } from './design-live'
 
 /** The pane `browser.design-mode` acts on: the focused pane when it is a browser, else the
@@ -14,8 +16,27 @@ export function designPane(s: Pick<State, 'tabs' | 'activeTab' | 'panes'>): numb
   return leaves(tab.root).find((id) => s.panes[id]?.view === 'browser') ?? null
 }
 
-/** Design Mode's toggle in the pane's bar, lit while it is on. */
-export function DesignToggle({ id }: { id: number }) {
+/** ⌘K "Design Mode": toggles it on the tab's browser pane. With none open it opens one, whose
+ *  blank page says what to do, and Design Mode waits there for a page to arm; so does a pane
+ *  still on a blank page. `url` is what a pane's page has loaded, if anything. */
+export function runDesignMode(
+  layout: { getState(): Pick<State, 'tabs' | 'activeTab' | 'panes'> & Pick<Actions, 'openView'> },
+  design: Pick<DesignMode, 'toggle' | 'wait'>,
+  url: (id: number) => string | undefined,
+) {
+  const id = designPane(layout.getState())
+  if (id !== null) {
+    const page = url(id)
+    return design.toggle(id, !!page && page !== BLANK)
+  }
+  layout.getState().openView('browser', { url: '' }, 'auto', 'browser')
+  const opened = designPane(layout.getState())
+  if (opened !== null) design.wait(opened)
+}
+
+/** Design Mode's toggle in the pane's bar, named in words and lit while it is on. `ready` is
+ *  false while the pane has no page: turning it on then waits for one. */
+export function DesignToggle({ id, ready = true }: { id: number; ready?: boolean }) {
   const on = useStore(design.store, (s) => !!s.panes[id] && s.panes[id].mode !== 'sent')
   return (
     <button
@@ -24,9 +45,10 @@ export function DesignToggle({ id }: { id: number }) {
       title={on ? 'Leave Design Mode' : 'Design Mode: pick an element on the page and send it to the agent'}
       aria-label="Design Mode"
       aria-pressed={on}
-      onClick={() => design.toggle(id)}
+      onClick={() => design.toggle(id, ready)}
     >
-      <SquareDashedMousePointer size={15} strokeWidth={1.75} />
+      <SquareDashedMousePointer size={14} strokeWidth={1.75} />
+      <span>Design</span>
     </button>
   )
 }
