@@ -1,4 +1,7 @@
+// the thumbnail's look adapted from stablyai/orca
+// src/renderer/src/components/native-chat/NativeChatTranscriptChrome.tsx (TranscriptImagePreview)
 import { useEffect, useRef, useState } from 'react'
+import { Image as ImageIcon } from 'lucide-react'
 import type { ImageRef } from '../types'
 import { useCards } from './context'
 
@@ -25,16 +28,23 @@ function Thumb({ img }: { img: ImageRef }) {
     return () => io.disconnect()
   }, [near])
   return (
-    <button ref={ref} className="cv-thumb" title="Enlarge" onClick={() => openImage(img)}>
-      {near ? <img src={dataUrl(img)} alt="" decoding="async" /> : <span className="cv-thumb-wait">image</span>}
+    <button
+      ref={ref}
+      type="button"
+      className="cv-thumb flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-background transition-colors hover:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      title="View image"
+      aria-label="View image"
+      onClick={() => openImage(img)}
+    >
+      {near ? <img src={dataUrl(img)} alt="" decoding="async" className="size-full object-cover" /> : <ImageIcon className="cv-thumb-wait size-4 text-muted-foreground" aria-hidden />}
     </button>
   )
 }
 
-export function Thumbs({ images }: { images: ImageRef[] }) {
+export function Thumbs({ images, className }: { images: ImageRef[]; className?: string }) {
   if (!images.length) return null
   return (
-    <div className="cv-thumbs">
+    <div className={`cv-thumbs mt-1.5 flex flex-wrap gap-1.5 ${className ?? ''}`}>
       {images.map((img, i) => (
         <Thumb key={i} img={img} />
       ))}
@@ -55,8 +65,8 @@ export function Lightbox({ img, onClose }: { img: ImageRef; onClose: () => void 
     return () => window.removeEventListener('keydown', onKey, true)
   }, [onClose])
   return (
-    <div className="cv-lightbox" role="dialog" aria-label="Image" onClick={onClose}>
-      <img src={dataUrl(img)} alt="" />
+    <div className="cv-lightbox absolute inset-0 z-10 flex cursor-zoom-out items-center justify-center bg-black/80 p-4" role="dialog" aria-label="Image" onClick={onClose}>
+      <img src={dataUrl(img)} alt="" className="max-h-full max-w-full object-contain" />
     </div>
   )
 }
