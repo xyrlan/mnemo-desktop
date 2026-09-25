@@ -31,6 +31,13 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev xvfb
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # The preview harness's own tests drive Chromium, so once, on Linux.
+      - name: preview harness tests
+        if: runner.os == 'Linux'
+        run: |
+          pnpm --dir tools/preview install --frozen-lockfile
+          pnpm --dir tools/preview exec playwright install --with-deps chromium
+          pnpm --dir tools/preview test
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       # The bundles a release ships, checked for the helper binaries the app looks for beside
