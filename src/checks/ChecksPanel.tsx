@@ -95,6 +95,9 @@ const REVIEW: Record<string, { label: string; tone: string }> = {
   COMMENTED: { label: 'Reviewed', tone: 'text-muted-foreground' },
 }
 
+/** A check's link is whatever the CI app that reported it wrote: only a web page is opened. */
+const web = (url: string | null): url is string => !!url && /^https?:\/\//i.test(url)
+
 /** What a send button says about where its prompt goes. */
 function sendTitle(d: Destination, what: string): string {
   if (d.kind === 'agent') return `Send ${what} to ${d.target.title}`
@@ -263,7 +266,7 @@ function CheckRunDetails({ check, state, onRetry, onOpenUrl }: { check: Check; s
               {check.conclusion === 'action_required'
                 ? 'Needs a manual action on GitHub (e.g. approving the run) to unblock merging.'
                 : 'This check did not run on GitHub Actions: its details are on the page it links to.'}
-              {check.url && (
+              {web(check.url) && (
                 <button type="button" className="ml-1 text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground" onClick={() => onOpenUrl(check.url!, check.name)}>
                   Open it
                 </button>
@@ -367,7 +370,7 @@ function ChecksList({
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
                     <span className="text-[11px] text-muted-foreground">{statusLabel(c)}</span>
-                    {c.url && (
+                    {web(c.url) && (
                       <Button
                         type="button"
                         variant="ghost"

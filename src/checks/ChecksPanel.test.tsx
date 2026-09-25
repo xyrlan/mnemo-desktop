@@ -177,6 +177,13 @@ test('checks list failing first, with counts, and each opens its page', async ()
   expect($$('[data-check]')).toEqual([])
 })
 
+test('a check linking anywhere but a web page offers no link', async () => {
+  await show({ view: { ...VIEW, checks: [{ ...VIEW.checks[3], url: 'javascript:alert(1)' }] } })
+  expect($('[data-check="vercel"] button[aria-label="Open check details"]')).toBeNull()
+  await click($('[data-check="vercel"] [role="button"]'))
+  expect(button('Open it')).toBeNull()
+})
+
 test('a failing check opens on its failed step, annotations and log tail', async () => {
   await show()
   await click($('[data-check="test (windows-latest)"] [role="button"]'))
