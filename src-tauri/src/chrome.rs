@@ -40,6 +40,16 @@ impl<T: Clone> Cache<T> {
         entries.insert(key.to_string(), (now, v.clone()));
         v
     }
+
+    /// The value last computed for `key` and when, however old it is.
+    pub fn last(&self, key: &str) -> Option<(Instant, T)> {
+        self.entries.lock().unwrap().get(key).cloned()
+    }
+
+    /// Keeps `v` as `key`'s value computed at `now`.
+    pub fn put(&self, key: &str, now: Instant, v: T) {
+        self.entries.lock().unwrap().insert(key.to_string(), (now, v));
+    }
 }
 
 /// The branch checked out in `cwd` (a worktree reports its own), the short commit when
@@ -127,14 +137,78 @@ pub fn session_of(pane_pid: u32) -> Option<String> {
     session_below(pane_pid, &agents, children_of)
 }
 
-/// Like `session_of`, but asks `claude agents` now instead of reusing the last few seconds'
-/// answer: for a check that gates keystrokes into the pane.
-pub fn session_of_fresh(pane_pid: u32) -> Option<String> {
-    let agents = run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j))?;
-    if agents.is_empty() {
+/// Whether `pid` is alive and is `root` or sits below it, at most `MAX_DEPTH` levels down, walking
+/// up through `parent` (None: the process is gone). A pid that is not alive is under nothing.
+pub fn under(root: u32, pid: u32, parent: impl Fn(u32) -> Option<u32>) -> bool {
+    let mut at = pid;
+    for _ in 0..=MAX_DEPTH {
+        let Some(up) = parent(at) else { return false };
+        if at == root {
+            return true;
+        }
+        if up <= 1 || up == at {
+            return false;
+        }
+        at = up;
+    }
+    false
+}
+
+/// How old a `claude agents` answer may be and still vouch for a pid: the panes' 5 s poll keeps
+/// it younger than this, and pids are not reused within it.
+const VOUCH: Duration = Duration::from_secs(30);
+
+/// Whether a Claude Code process runs under the pane's shell `pane_pid`. First the last few
+/// seconds' `claude agents` answer, checked live: one of its pids still alive under the pane is
+/// enough, and costs no process spawn. A Claude that exited is gone from the process table, so
+/// it is refused at once. Only when no cached pid vouches (none cached, or a Claude started since)
+/// is `claude agents` asked again, and its answer kept for the next check.
+pub fn claude_running(
+    pane_pid: u32,
+    cached: Option<(Instant, Option<HashMap<u32, (String, u64)>>)>,
+    now: Instant,
+    parent: impl Fn(u32) -> Option<u32>,
+    fresh: impl FnOnce() -> Option<HashMap<u32, (String, u64)>>,
+    children: impl FnMut(&[u32]) -> Vec<u32>,
+) -> bool {
+    if let Some((at, Some(agents))) = &cached {
+        if now.saturating_duration_since(*at) < VOUCH && agents.keys().any(|&pid| under(pane_pid, pid, &parent)) {
+            return true;
+        }
+    }
+    match fresh() {
+        Some(agents) if !agents.is_empty() => session_below(pane_pid, &agents, children).is_some(),
+        _ => false,
+    }
+}
+
+/// The parent of a live process, None once it has exited (a zombie counts as exited). Asked of
+/// the kernel, no process spawned.
+#[cfg(target_os = "macos")]
+pub fn parent_of(pid: u32) -> Option<u32> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is a plain C struct of exactly `size` bytes that the call fills.
+    let n = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    (n == size && info.pbi_status != libc::SZOMB).then_some(info.pbi_ppid)
+}
+
+#[cfg(target_os = "linux")]
+pub fn parent_of(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // `pid (comm) state ppid …`: the name may hold spaces and parentheses.
+    let mut rest = stat[stat.rfind(')')? + 1..].split_whitespace();
+    let state = rest.next()?;
+    if state == "Z" || state == "X" {
         return None;
     }
-    session_below(pane_pid, &agents, children_of)
+    rest.next()?.parse().ok()
+}
+
+/// Elsewhere no pid is vouched for from the cache: every check asks `claude agents`.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn parent_of(_pid: u32) -> Option<u32> {
+    None
 }
 
 /// Every pane asks on its own poll; one `claude agents` answers them all.
@@ -169,10 +243,22 @@ pub async fn chrome_session(pane_pid: u32) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || session_of(pane_pid)).await.ok().flatten()
 }
 
-/// Whether a terminal pane runs Claude Code this moment (never cached).
+/// Whether a terminal pane runs Claude Code this moment: the gate before keys are typed into it.
+/// A pid from the cached `claude agents` answer is checked live, so this is cheap and still
+/// refuses the moment Claude exits (`claude_running`).
 #[tauri::command]
 pub async fn chrome_claude_running(pane_pid: u32) -> bool {
-    tauri::async_runtime::spawn_blocking(move || session_of_fresh(pane_pid).is_some()).await.unwrap_or(false)
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = Instant::now();
+        let fresh = || {
+            let found = run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j));
+            agents().put("", Instant::now(), found.clone());
+            found
+        };
+        claude_running(pane_pid, agents().last(""), now, parent_of, fresh, children_of)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -266,6 +352,97 @@ mod tests {
         assert_eq!(session_below(100, &HashMap::from([(100 + MAX_DEPTH as u32, ("x".into(), 0))]), &mut deep).as_deref(), Some("x"));
     }
 
+    /// The fixture table's parents, as `parent_of` answers them; `gone` have exited.
+    fn parents<'a>(gone: &'a [u32]) -> impl Fn(u32) -> Option<u32> + 'a {
+        let table: HashMap<u32, u32> = PGREP
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .map(|l| {
+                let mut f = l.split_whitespace().map(|x| x.parse().unwrap());
+                (f.next().unwrap(), f.next().unwrap())
+            })
+            .collect();
+        move |pid| if gone.contains(&pid) { None } else { table.get(&pid).copied() }
+    }
+
+    #[test]
+    fn under_walks_up_from_a_live_pid_to_the_pane() {
+        let p = parents(&[]);
+        assert!(under(5001, 9102, &p), "typed by hand");
+        assert!(under(5002, 9101, &p), "through a wrapper and npx");
+        assert!(under(5001, 9103, &p), "a claude that session's Bash started");
+        assert!(under(9103, 9103, &p), "a pane whose program is claude itself");
+        assert!(!under(5003, 9102, &p), "another pane's claude");
+        assert!(!under(5001, 20147, &p), "a background session under no pane");
+        assert!(!under(5001, 4242, &p), "no such process");
+        assert!(!under(5001, 9102, parents(&[9102])), "an exited claude is under nothing");
+        assert!(!under(5001, 9102, parents(&[5001])), "nor is anything once the pane's shell is gone");
+        // Deeper than a session is looked for.
+        let chain = |pid: u32| (100..=100 + MAX_DEPTH as u32 + 1).contains(&pid).then(|| pid - 1);
+        assert!(under(100, 100 + MAX_DEPTH as u32, chain));
+        assert!(!under(100, 100 + MAX_DEPTH as u32 + 1, chain));
+        // A process that is its own parent does not spin.
+        assert!(!under(1, 50, |p| Some(p)));
+    }
+
+    #[test]
+    fn claude_running_trusts_a_cached_pid_only_while_it_lives_under_the_pane() {
+        let agents = parse_agent_pids(AGENTS);
+        let t0 = Instant::now();
+        let asked = Cell::new(0);
+        let fresh = |a: Option<HashMap<u32, (String, u64)>>| {
+            let asked = &asked;
+            move || {
+                asked.set(asked.get() + 1);
+                a
+            }
+        };
+        let calls = Cell::new(0);
+        let cached = Some((t0, Some(agents.clone())));
+
+        // A cached pid alive under the pane: no `claude agents`, no pgrep.
+        assert!(claude_running(5001, cached.clone(), t0 + Duration::from_secs(10), parents(&[]), fresh(None), pgrep(&calls)));
+        assert_eq!((asked.get(), calls.get()), (0, 0));
+
+        // It exited: asked again, and the fresh answer, without it, refuses.
+        let mut after = agents.clone();
+        after.remove(&9102);
+        after.remove(&9103);
+        assert!(!claude_running(5001, cached.clone(), t0, parents(&[9102, 9103]), fresh(Some(after)), pgrep(&calls)));
+        assert_eq!(asked.get(), 1);
+
+        // A claude started after the cached answer: found by asking again.
+        asked.set(0);
+        let mut before = agents.clone();
+        before.remove(&17759);
+        assert!(claude_running(5004, Some((t0, Some(before))), t0, parents(&[]), fresh(Some(agents.clone())), pgrep(&calls)));
+        assert_eq!(asked.get(), 1);
+
+        // Too old to vouch, or nothing cached, or `claude` missing.
+        asked.set(0);
+        assert!(claude_running(5001, cached.clone(), t0 + VOUCH, parents(&[]), fresh(Some(agents.clone())), pgrep(&calls)));
+        assert!(claude_running(5001, None, t0, parents(&[]), fresh(Some(agents.clone())), pgrep(&calls)));
+        assert!(!claude_running(5001, Some((t0, None)), t0, parents(&[]), fresh(None), pgrep(&calls)));
+        assert_eq!(asked.get(), 3);
+
+        // An idle pane is refused either way.
+        assert!(!claude_running(5003, cached, t0, parents(&[]), fresh(Some(agents)), pgrep(&calls)));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn parent_of_reads_the_kernel_and_forgets_an_exited_process() {
+        let mut child = crate::proc::command("sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        assert_eq!(parent_of(pid), Some(std::process::id()));
+        assert!(under(std::process::id(), pid, parent_of));
+        let _ = child.kill();
+        // Reaped, it is gone; before that a zombie counts as gone too.
+        let _ = child.wait();
+        assert_eq!(parent_of(pid), None);
+        assert!(!under(std::process::id(), pid, parent_of));
+    }
+
     #[cfg(unix)]
     #[test]
     fn children_of_asks_pgrep_for_several_parents() {
@@ -320,6 +497,28 @@ mod tests {
         m.kill(id);
         let found = found.expect("the claude typed in the pane was not found");
         assert!(agents.contains(&found), "{found} is not a live session");
+    }
+
+    /// What the send guard costs against a live Claude: any running session that is not this
+    /// test's own ancestor (macOS `pgrep` never lists those), under its parent as the pane.
+    /// `cargo test claude_running_live -- --ignored --nocapture` with Claude Code running.
+    #[test]
+    #[ignore]
+    fn claude_running_live() {
+        let fresh = || run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j));
+        let t = Instant::now();
+        let agents = fresh().expect("claude agents");
+        let asked = t.elapsed();
+        let pid = *agents.keys().find(|&&p| !under(p, std::process::id(), parent_of) && parent_of(p).is_some()).expect("a live session");
+        let pane = parent_of(pid).unwrap();
+        let t = Instant::now();
+        assert!(session_below(pane, &agents, children_of).is_some());
+        let walked = t.elapsed();
+        let t = Instant::now();
+        assert!(claude_running(pane, Some((Instant::now(), Some(agents))), Instant::now(), parent_of, || panic!("asked again"), |_: &[u32]| panic!("pgrep")));
+        let cached = t.elapsed();
+        eprintln!("claude agents --json {asked:?}, pgrep walk {walked:?}, cached pid checked live {cached:?}");
+        assert!(cached < Duration::from_millis(5), "{cached:?}");
     }
 
     #[test]

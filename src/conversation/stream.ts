@@ -1,5 +1,6 @@
 import { parseRecord } from './parse'
 import type { Card, Chunk, Conversation, FollowEvent, SessionStatus, StatusMarker, TranscriptRecord } from './types'
+import type { Outgoing } from './outbox'
 
 /** How many lines the first send and each "load earlier" ask for (spec Q16). */
 export const TAIL = 200
@@ -42,6 +43,8 @@ export type Item =
   | { kind: 'marker'; key: string; marker: StatusMarker; carried?: true }
   | { kind: 'earlier'; key: string; segment: number; loading: boolean }
   | { kind: 'note'; key: string; text: string }
+  /** A message the chat sent that the transcript does not have yet: always last. */
+  | { kind: 'outgoing'; key: string; out: Outgoing }
 
 export const newSegment = (key: number, sessionId: string): Segment => ({
   key,

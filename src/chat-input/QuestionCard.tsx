@@ -24,12 +24,13 @@ export function QuestionCard({ question, options, onAnswer, onOther }: QuestionC
   const [phase, setPhase] = useState<Phase>({ at: 'open' })
   const [other, setOther] = useState('')
   const alive = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Set again on every mount: StrictMode unmounts and remounts it once in dev.
+    alive.current = true
+    return () => {
       alive.current = false
-    },
-    [],
-  )
+    }
+  }, [])
   const busy = phase.at === 'sending' || phase.at === 'sent'
 
   const run = async (pick: number | 'other', send: () => Promise<void>) => {

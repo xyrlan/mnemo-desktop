@@ -10,12 +10,13 @@ import { clockText, firstIndex, lastPromptAt, pendingCard, SOLO_TOOLS, streamIte
 import { describeCall } from './run'
 import { useFollow } from './useFollow'
 import { CardsContext, RuleActionsContext, type CardsState, type Veto } from './cards/context'
-import { CardView, Separator } from './cards'
+import { CardView, OutgoingView, Separator } from './cards'
 import { ToolRun } from './cards/ToolRun'
 import { Lightbox } from './cards/image'
 import { ContextRing } from './ContextRing'
 import { Foot, type Parked } from './Foot'
 import type { ChatAgent } from './agent'
+import { showsAsSent, unsettled, type Outgoing } from './outbox'
 import { openUrl } from '../github/actions'
 import './conversation.css'
 
@@ -143,6 +144,8 @@ function Row({ item, busy, onEarlier }: { item: Item; busy: boolean; onEarlier: 
       )
     case 'note':
       return <div className="cv-note py-4 text-center text-xs text-muted-foreground">{item.text}</div>
+    case 'outgoing':
+      return <OutgoingView out={item.out} />
   }
 }
 
@@ -172,13 +175,59 @@ function useWorkingSince(busy: boolean, prompt: string | null): number | null {
   return busy ? workingSince(prompt, seen.current.idleAt, seen.current.at) : null
 }
 
+const NOTHING_OUT: Outgoing[] = []
+
+/** What the chat sent and the transcript has not recorded yet (`outbox.ts`), and `agent` with its
+ *  sends going through it: a message shows the moment it is sent, is marked if it fails, and
+ *  gives way to its record once the follow reads that. */
+function useOutbox(agent: ChatAgent | undefined, conversations: Conversation[]) {
+  const [out, setOut] = useState<Outgoing[]>(NOTHING_OUT)
+  const seq = useRef(0)
+  const segments = useMemo(() => conversations.map((c) => c.cards), [conversations])
+  const shown = useMemo(() => unsettled(out, segments), [out, segments])
+  // Forget what settled; a message added since this render is kept.
+  useEffect(() => {
+    if (shown === out) return
+    const keep = new Set(shown.map((o) => o.id))
+    const seen = new Set(out.map((o) => o.id))
+    setOut((all) => all.filter((o) => keep.has(o.id) || !seen.has(o.id)))
+  }, [shown, out])
+
+  const post = useCallback(async (kind: Outgoing['kind'], text: string, deliver: () => Promise<void>) => {
+    if (!showsAsSent(kind, text)) return deliver()
+    const id = ++seq.current
+    const mark = (o: Partial<Outgoing>) => setOut((all) => all.map((x) => (x.id === id ? { ...x, ...o } : x)))
+    setOut((all) => [...all.filter((o) => o.state !== 'failed'), { id, kind, text, at: Date.now(), state: 'sending' }])
+    try {
+      await deliver()
+    } catch (e) {
+      mark({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
+      throw e
+    }
+    mark({ state: 'sent' })
+  }, [])
+
+  const sender = useMemo<ChatAgent | undefined>(() => {
+    if (!agent) return undefined
+    const bash = agent.bash
+    return {
+      ...agent,
+      send: (text) => post('prompt', text, () => agent.send(text)),
+      bash: bash && ((command) => post('bash', command, () => bash(command))),
+    }
+  }, [agent, post])
+  return { shown, sender }
+}
+
 /** A Claude Code session's transcript as Orca's native chat: followed live from the last `TAIL`
  *  lines, earlier ones read on scroll-up, in a virtualised list that stays at the bottom while
  *  you are there; the foot answers it when there is an `agent` to answer through. */
 export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS, footer, onOpenTerminal, agent, client = tauriConversation }: ConversationViewProps) {
   const { segments, loadEarlier } = useFollow(client, sessionId, cwd)
   const conversations = useMemo(() => segments.map((s) => derive(s.records)), [segments])
-  const items = useMemo(() => streamItems(segments, conversations, markers, status), [segments, conversations, markers, status])
+  const { shown, sender } = useOutbox(agent, conversations)
+  const stream = useMemo(() => streamItems(segments, conversations, markers, status), [segments, conversations, markers, status])
+  const items = useMemo<Item[]>(() => (shown.length ? [...stream, ...shown.map((out): Item => ({ kind: 'outgoing', key: `out:${out.id}`, out }))] : stream), [stream, shown])
   const current = conversations.at(-1) ?? null
   const busy = !!status?.busy
   const since = useWorkingSince(busy, current ? lastPromptAt(current.cards) : null)
@@ -201,6 +250,25 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
   useEffect(() => {
     if (atBottom) setFresh(false)
   }, [atBottom])
+  // The list follows new rows at the bottom, not its own viewport shrinking: when the foot grows
+  // (a reason under the composer, an approval card), what was at the bottom stays in view.
+  const streamRef = useRef<HTMLDivElement>(null)
+  const bottom = useRef(atBottom)
+  bottom.current = atBottom
+  useEffect(() => {
+    const el = streamRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (bottom.current) list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // What you just sent is where you look next, even from up the stream.
+  const newest = shown.at(-1)?.id
+  useEffect(() => {
+    if (newest !== undefined) list.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+  }, [newest])
 
   const rules = useContext(RuleActionsContext)
   const [vetoes, setVetoes] = useState<Record<string, Veto>>({})
@@ -323,7 +391,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
             )}
           </div>
         )}
-        <div className="cv-stream relative min-h-0 flex-1">
+        <div ref={streamRef} className="cv-stream relative min-h-0 flex-1">
           {body}
           {fresh && (
             <button
@@ -336,7 +404,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
             </button>
           )}
         </div>
-        {agent && sessionId && <Foot agent={agent} cwd={cwd || null} status={status} parked={parked} onOpenTerminal={onOpenTerminal} />}
+        {sender && sessionId && <Foot agent={sender} cwd={cwd || null} status={status} parked={parked} onOpenTerminal={onOpenTerminal} />}
         {footer && <div className="cv-footer shrink-0 border-t border-border">{footer}</div>}
         {image && <Lightbox img={image} onClose={closeImage} />}
       </div>

@@ -2,11 +2,12 @@
 // NativeChatNoticeRow.tsx, NativeChatAwaitingInputRow.tsx, NativeChatSubagentRun.tsx and
 // NativeChatMessageTimestamp.tsx
 import type { ReactNode } from 'react'
-import { Check, ChevronRight, Info, LoaderCircle } from 'lucide-react'
+import { Check, ChevronRight, Info, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { cn } from '@/ui/cn'
 import { Markdown } from '../../vault/Markdown'
 import { openUrl } from '../../github/actions'
 import type { Card } from '../types'
+import type { Outgoing } from '../outbox'
 import type { Pending, ToolCard } from '../stream'
 import { askQuestions } from '../run'
 import { useCards } from './context'
@@ -14,7 +15,7 @@ import { CopyButton } from './copy'
 import { ToolIcon } from './icons'
 import { Thumbs } from './image'
 import { RuleChips } from './rules'
-import { Answers, Denied, ToolLine } from './tool'
+import { Answers, Denied, Out, ToolLine } from './tool'
 import { AwaitingRow } from './ToolRun'
 
 /** Transcript text as the vault renders a page: `[[slug]]` opens the rule, a link opens in the
@@ -178,6 +179,60 @@ function PlanCard({ card, pending }: { card: ToolCard; pending: Pending | null }
   )
 }
 
+const COMMAND_CHIP = 'cv-command rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground'
+
+/** Colour codes a command printed, which the chat cannot draw. */
+const plain = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+
+/** A `!` command run in Claude Code's shell mode, and what it printed once that is in: shown
+ *  open, as the terminal shows it. */
+function ShellCommand({ card }: { card: Extract<Card, { kind: 'command' }> }) {
+  const out = card.output
+  return (
+    <div className="cv-command-row cv-shell flex flex-col items-end gap-1">
+      <span className={COMMAND_CHIP}>
+        !{card.args && <span className="text-muted-foreground"> {card.args}</span>}
+      </span>
+      {out && (
+        <div className="cv-shell-out w-full max-w-[85%] space-y-1">
+          <Out text={plain(out.stdout)} />
+          <Out text={plain(out.stderr)} err />
+          {!out.stdout.trim() && !out.stderr.trim() && <div className="text-right text-[11px] text-muted-foreground">No output</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A message the chat sent, drawn as its record will be until the transcript has it; one that
+ *  was not delivered is marked, its reason under the composer that got its text back. */
+export function OutgoingView({ out }: { out: Outgoing }) {
+  const failed = out.state === 'failed'
+  const note = failed && (
+    <div className="cv-not-sent flex items-center gap-1 text-[11px] text-destructive" title={out.error}>
+      <TriangleAlert className="size-3 shrink-0" aria-hidden />
+      Not sent
+    </div>
+  )
+  if (out.kind === 'bash')
+    return (
+      <div className="cv-command-row cv-outgoing flex flex-col items-end gap-1" data-state={out.state}>
+        <span className={cn(COMMAND_CHIP, failed && 'outline outline-destructive/60')}>
+          !<span className="text-muted-foreground"> {out.text}</span>
+        </span>
+        {note}
+      </div>
+    )
+  return (
+    <div className="cv-outgoing group relative flex flex-col items-end gap-0.5" data-state={out.state}>
+      <div className={cn('cv-bubble max-w-[85%] rounded-lg rounded-tr-sm bg-muted px-3.5 py-2.5 text-sm text-foreground', failed && 'outline outline-destructive/60')}>
+        <Md text={out.text} />
+      </div>
+      {note}
+    </div>
+  )
+}
+
 /** One card of the stream. `k` is its row key: where its folds are remembered. */
 export function CardView({ card, pending, k }: { card: Card; pending: Pending | null; k: string }) {
   switch (card.kind) {
@@ -233,6 +288,7 @@ export function CardView({ card, pending, k }: { card: Card; pending: Pending | 
         </Notice>
       )
     case 'command':
+      if (card.name === '!') return <ShellCommand card={card} />
       return (
         <div className="cv-command-row flex justify-end">
           <span className="cv-command rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground">

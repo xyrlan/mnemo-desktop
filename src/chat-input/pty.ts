@@ -4,13 +4,18 @@ import { invoke } from '@tauri-apps/api/core'
 import { pasteOf } from '../browser/grab-agent'
 import { ptyPid, tauriPty } from '../pty/client'
 
-/** How a prompt, an approval and an answer are typed into a live Claude Code TUI. Every key
- *  below was checked against Claude Code 2.1.282 in a real pty (2026-09-24):
+/** How a prompt, a shell command, an approval and an answer are typed into a live Claude Code
+ *  TUI. Every key below was checked against Claude Code 2.1.282 in a real pty (2026-09-25, the
+ *  numbers are in the chat-send PR):
  *
- *  - a prompt: Ctrl+U empties whatever was left typed on the input line, a moment later the
- *    text goes in (one bracketed paste when it spans lines, so the newlines stay inside the
- *    turn), and Enter follows as a write of its own: an Enter in the same write as a paste
- *    lands inside it;
+ *  - clearing the line: Ctrl+U empties what was left typed, and a Backspace after it leaves the
+ *    shell mode a leftover `!` put the line in (Ctrl+U alone keeps it: the prompt then ran as a
+ *    command). Each needs a read of its own: Ctrl+U read with the paste after it lands inside it;
+ *  - a prompt: always one bracketed paste, Enter in the same write. The paste's end marker closes
+ *    it, so no wait is needed; typed bare, a line of 150 characters or more reads as a paste
+ *    and swallows an Enter sent less than ~100 ms after it;
+ *  - a shell command: `!` alone, then the command pasted and Enter. `!` read with the paste
+ *    after it types the command twice;
  *  - a permission prompt: `1` picks "Yes", Esc is "No, and tell Claude what to do differently";
  *  - an AskUserQuestion: the option's digit answers it outright; answering in words is the
  *    digit of the "Type something." row that follows the options, the words, then Enter.
@@ -27,21 +32,29 @@ export type PtySinks = {
 
 /** Kill-to-start-of-line in Claude Code's input (vim mode's insert state too). */
 export const CLEAR_LINE = '\x15'
+/** On the emptied line: leaves shell mode, and does nothing otherwise. */
+export const BACKSPACE = '\x7f'
+/** Typed alone on an empty line, puts the input in shell mode. */
+export const BANG = '!'
 export const ENTER = '\r'
 export const ESC = '\x1b'
-/** Between the prompt's text and its Enter: less and a busy TUI takes the Enter as part of the
- *  paste (Orca's measured submit delay). */
+/** Between the keys of a prompt or a shell command, so each is read on its own. In the probes
+ *  20 ms was enough idle and 30 while Claude streamed a reply; 50 keeps a margin. */
+export const SEND_GAP_MS = 50
+/** Between the words of a question's "Type something." row and its Enter (Orca's measured submit
+ *  delay; not probed again). */
 export const SUBMIT_GAP_MS = 500
-/** Between two keys that change what the TUI shows, so the second lands on the new screen. */
+/** Between the key that opens that row and the words. */
 export const KEY_GAP_MS = 150
 
-/** What reaches the input line for `text`: bare on one line, a bracketed paste over several.
- *  Control characters are dropped either way, so the text cannot press keys. */
+/** What reaches the input line for `text`: one bracketed paste, its control characters dropped
+ *  so the text cannot press keys or end the paste early. */
 export function promptBytes(text: string): string {
-  const clean = text.replace(/\r\n?/g, '\n')
-  if (clean.includes('\n')) return pasteOf(clean)
-  return clean.replace(/\t/g, ' ').replace(/[\x00-\x1f\x7f]/g, '')
+  return pasteOf(text.replace(/\r\n?/g, '\n'))
 }
+
+/** Whether `promptBytes` would paste anything but blanks. */
+const blank = (text: string) => !text.replace(/[\x00-\x20\x7f]/g, '')
 
 /** The key that picks option `index` (0-based) of a question: its number, 1 to 9. */
 export function optionKey(index: number): string {
@@ -58,6 +71,8 @@ export const answerText = (text: string) =>
 
 export type ChatPty = {
   sendPrompt(pane: number, text: string): Promise<void>
+  /** Runs `command` in Claude Code's shell mode (`!`): its output goes into the transcript. */
+  sendBash(pane: number, command: string): Promise<void>
   answerApproval(pane: number, allow: boolean): Promise<void>
   answerQuestion(pane: number, index: number): Promise<void>
   /** Answers in words: `optionCount` is how many options the question offered. */
@@ -83,18 +98,29 @@ export function makeChatPty(s: PtySinks): ChatPty {
       await keys()
     })
 
+  /** Empties the input line and leaves shell mode, each key read on its own. */
+  const clear = async (pane: number) => {
+    await s.writePty(pane, CLEAR_LINE)
+    await s.sleep(SEND_GAP_MS)
+    await s.writePty(pane, BACKSPACE)
+    await s.sleep(SEND_GAP_MS)
+  }
+
   return {
     sendPrompt(pane, text) {
-      const body = promptBytes(text)
-      if (!body.trim()) return Promise.reject(new Error('nothing to send'))
+      if (blank(text)) return Promise.reject(new Error('nothing to send'))
       return guarded(pane, async () => {
-        await s.writePty(pane, CLEAR_LINE)
-        // Read in one burst with the text, the Ctrl+U is lost and the text lands after what was
-        // left on the line (2.1.282).
-        await s.sleep(KEY_GAP_MS)
-        await s.writePty(pane, body)
-        await s.sleep(SUBMIT_GAP_MS)
-        await s.writePty(pane, ENTER)
+        await clear(pane)
+        await s.writePty(pane, promptBytes(text) + ENTER)
+      })
+    },
+    sendBash(pane, command) {
+      if (blank(command)) return Promise.reject(new Error('nothing to run'))
+      return guarded(pane, async () => {
+        await clear(pane)
+        await s.writePty(pane, BANG)
+        await s.sleep(SEND_GAP_MS)
+        await s.writePty(pane, promptBytes(command) + ENTER)
       })
     },
     answerApproval: (pane, allow) => guarded(pane, () => s.writePty(pane, allow ? '1' : ESC)),
@@ -139,6 +165,8 @@ export const chatPty = makeChatPty({
 
 /** Types `text` into pane `pane`'s Claude as a prompt and submits it. */
 export const ptySendPrompt = (pane: number, text: string): Promise<void> => chatPty.sendPrompt(pane, text)
+/** Runs `command` in pane `pane`'s Claude as a `!` shell command. */
+export const ptySendBash = (pane: number, command: string): Promise<void> => chatPty.sendBash(pane, command)
 /** Answers the permission prompt pane `pane`'s Claude is showing: allow, or deny. */
 export const ptyAnswerApproval = (pane: number, allow: boolean): Promise<void> => chatPty.answerApproval(pane, allow)
 /** Picks option `index` (0-based) of the question pane `pane`'s Claude is asking. */

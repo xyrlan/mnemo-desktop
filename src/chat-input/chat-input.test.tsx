@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SlashCommand } from './catalog'
@@ -99,7 +99,7 @@ function later() {
 }
 
 describe('ChatComposer', () => {
-  it('sends on Enter, and empties once the send is through', async () => {
+  it('sends on Enter and empties at once, ready for the next while the first is delivered', async () => {
     const sent: string[] = []
     const gate = later()
     await render(<ChatComposer cwd="/wt" onSend={(t) => (sent.push(t), gate.promise)} />)
@@ -107,16 +107,18 @@ describe('ChatComposer', () => {
     const e = await key('Enter')
     expect(e.defaultPrevented).toBe(true)
     expect(sent).toEqual(['fix the bug'])
-    // Kept while it is on its way, and not sent twice.
-    expect(textarea().value).toBe('fix the bug')
-    expect(textarea().readOnly).toBe(true)
+    expect(textarea().value).toBe('')
+    expect(textarea().readOnly).toBe(false)
+    expect(textarea().disabled).toBe(false)
+    // An Enter on the emptied box sends nothing more.
     await key('Enter')
-    await click($('button[aria-label="Send"]')!)
     expect(sent).toEqual(['fix the bug'])
+    await type('and the test')
+    await key('Enter')
+    expect(sent).toEqual(['fix the bug', 'and the test'])
     await act(async () => gate.resolve())
     await flush()
     expect(textarea().value).toBe('')
-    expect(textarea().readOnly).toBe(false)
   })
 
   it('breaks the line on Shift+Enter and sends on ⌘↵', async () => {
@@ -148,7 +150,7 @@ describe('ChatComposer', () => {
     expect(sent).toEqual([])
   })
 
-  it('keeps the draft and says why when the send is refused', async () => {
+  it('gives the text back and says why when the send is refused', async () => {
     let refuse = true
     const sent: string[] = []
     await render(
@@ -170,6 +172,38 @@ describe('ChatComposer', () => {
     expect($('[role="alert"]')).toBeNull()
   })
 
+  it('gives the text back under StrictMode too, which mounts it twice in dev', async () => {
+    await render(
+      <StrictMode>
+        <ChatComposer
+          cwd="/wt"
+          onSend={async () => {
+            throw new Error('nothing was sent')
+          }}
+        />
+      </StrictMode>,
+    )
+    await type('deploy it')
+    await key('Enter')
+    expect($('[role="alert"]')!.textContent).toBe('nothing was sent')
+    expect(textarea().value).toBe('deploy it')
+  })
+
+  it('leaves a new draft alone when an earlier send is refused: ↑ has the refused one', async () => {
+    const gate = later()
+    await render(<ChatComposer cwd="/wt" onSend={() => gate.promise} />)
+    await type('first')
+    await key('Enter')
+    await type('second, half written')
+    await act(async () => gate.reject(new Error('nothing was sent')))
+    await flush()
+    expect($('[role="alert"]')!.textContent).toBe('nothing was sent')
+    expect(textarea().value).toBe('second, half written')
+    await type('')
+    await key('ArrowUp')
+    expect(textarea().value).toBe('first')
+  })
+
   it('recalls sent prompts with ↑ and comes back down with ↓', async () => {
     await render(<ChatComposer cwd="/wt" onSend={async () => {}} />)
     await type('first')
@@ -184,6 +218,97 @@ describe('ChatComposer', () => {
     await key('ArrowDown')
     await key('ArrowDown')
     expect(textarea().value).toBe('')
+  })
+
+  describe('! shell mode', () => {
+    const shell = () => $('[data-shell]')
+
+    it("enters on a `!` typed first, as Claude Code's input does, and runs the command there", async () => {
+      const ran: string[] = []
+      const sent: string[] = []
+      await render(<ChatComposer cwd="/wt" onSend={async (t) => void sent.push(t)} onBash={async (c) => void ran.push(c)} />)
+      expect($('[data-chat-composer]')!.textContent).toContain('! shell')
+      await type('!')
+      expect(shell()).not.toBeNull()
+      expect(textarea().value).toBe('')
+      expect(textarea().getAttribute('aria-label')).toBe('Shell command')
+      expect(textarea().placeholder).toBe('Run a shell command…')
+      await type('git status')
+      await click($('button[aria-label="Run"]')!)
+      expect(ran).toEqual(['git status'])
+      expect(sent).toEqual([])
+      // Back to prompts once it has run.
+      expect(shell()).toBeNull()
+      expect(textarea().value).toBe('')
+    })
+
+    it('keeps the caret where typing puts it once the `!` is taken', async () => {
+      await render(<ChatComposer cwd="/wt" onSend={async () => {}} onBash={async () => {}} />)
+      await type('!')
+      await type('g')
+      expect(textarea().selectionStart).toBe(1)
+    })
+
+    it('takes a pasted `!command` whole, and opens no / or @ menu', async () => {
+      const ran: string[] = []
+      await render(<ChatComposer cwd="/wt" onSend={async () => {}} onBash={async (c) => void ran.push(c)} />)
+      await type('!ls -la')
+      expect(shell()).not.toBeNull()
+      expect(textarea().value).toBe('ls -la')
+      await type('/comp')
+      expect($('[role="listbox"]')).toBeNull()
+      await key('Enter')
+      expect(ran).toEqual(['/comp'])
+    })
+
+    it('leaves on Backspace or Esc on an empty line, and not while there is a command', async () => {
+      await render(<ChatComposer cwd="/wt" onSend={async () => {}} onBash={async () => {}} />)
+      await type('!x')
+      expect((await key('Backspace')).defaultPrevented).toBe(false)
+      expect(shell()).not.toBeNull()
+      await type('')
+      expect((await key('Backspace')).defaultPrevented).toBe(true)
+      expect(shell()).toBeNull()
+      await type('!')
+      await key('Escape')
+      expect(shell()).toBeNull()
+      // A `!` later in a prompt is only a character.
+      await type('say hi!')
+      expect(shell()).toBeNull()
+    })
+
+    it('recalls a command in shell mode, and gives a refused one back in it', async () => {
+      let refuse = false
+      await render(
+        <ChatComposer
+          cwd="/wt"
+          onSend={async () => {}}
+          onBash={async () => {
+            if (refuse) throw new Error('nothing was run')
+          }}
+        />,
+      )
+      await type('!make test')
+      await key('Enter')
+      await key('ArrowUp')
+      expect(shell()).not.toBeNull()
+      expect(textarea().value).toBe('make test')
+      refuse = true
+      await key('Enter')
+      expect($('[role="alert"]')!.textContent).toBe('nothing was run')
+      expect(shell()).not.toBeNull()
+      expect(textarea().value).toBe('make test')
+    })
+
+    it('is not offered without a shell to run in: a `!` is sent as it is', async () => {
+      const sent: string[] = []
+      await render(<ChatComposer cwd="/wt" onSend={async (t) => void sent.push(t)} />)
+      expect($('[data-chat-composer]')!.textContent).not.toContain('shell')
+      await type('!important')
+      expect(shell()).toBeNull()
+      await key('Enter')
+      expect(sent).toEqual(['!important'])
+    })
   })
 
   describe('/ commands', () => {
