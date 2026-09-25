@@ -18,7 +18,7 @@ const cap = (s: string) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}\n
 
 const PRE = 'scrollbar-sleek max-h-64 overflow-auto rounded bg-accent p-2 font-mono text-[11px] break-words whitespace-pre-wrap'
 
-function Out({ text, err }: { text: string; err?: boolean }) {
+export function Out({ text, err }: { text: string; err?: boolean }) {
   return text ? <pre className={cn('cv-out', PRE, err ? 'cv-err text-destructive' : 'text-foreground/80')}>{cap(text)}</pre> : null
 }
 

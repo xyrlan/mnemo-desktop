@@ -22,12 +22,13 @@ type Phase = { at: 'open' } | { at: 'sending' | 'sent'; allow: boolean } | { at:
 export function ApprovalCard({ tool, summary, detail, onAllow, onDeny }: ApprovalCardProps) {
   const [phase, setPhase] = useState<Phase>({ at: 'open' })
   const alive = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Set again on every mount: StrictMode unmounts and remounts it once in dev.
+    alive.current = true
+    return () => {
       alive.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   const answer = async (allow: boolean) => {
     setPhase({ at: 'sending', allow })

@@ -5,7 +5,14 @@ import { createContext, type ComponentType } from 'react'
  *  reached through `import.meta.glob`: with its files missing the glob finds nothing and the
  *  foot draws only what it can without them; once they merge, they wire themselves. */
 
-export type ComposerProps = { onSend(text: string): Promise<void>; cwd: string | null; placeholder?: string; disabled?: boolean }
+export type ComposerProps = {
+  onSend(text: string): Promise<void>
+  /** Given, a `!` typed first puts the composer in shell mode and what it sends runs here. */
+  onBash?(command: string): Promise<void>
+  cwd: string | null
+  placeholder?: string
+  disabled?: boolean
+}
 export type ApprovalCardProps = { tool: string; summary: string; detail?: string; onAllow(): Promise<void>; onDeny(): Promise<void> }
 export type QuestionCardProps = { question: string; options: string[]; onAnswer(index: number): Promise<void>; onOther?(text: string): Promise<void> }
 
@@ -17,6 +24,7 @@ export type ChatInputParts = {
 
 export type ChatInputPty = {
   ptySendPrompt?(pane: number, text: string): Promise<void>
+  ptySendBash?(pane: number, command: string): Promise<void>
   ptyAnswerApproval?(pane: number, allow: boolean): Promise<void>
   ptyAnswerQuestion?(pane: number, index: number): Promise<void>
 }

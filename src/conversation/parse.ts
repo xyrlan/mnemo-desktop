@@ -38,6 +38,14 @@ const HIDDEN = new Set([
 /** Everything a user record's text can open with that is not something the user typed:
  *  the output of a `!` command or a local slash command, and the caveat before it. */
 const HIDDEN_PROMPT = /^\s*<(bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat)>/
+const BASH_OUTPUT = /^\s*<bash-(stdout|stderr)>/
+/** A long paste, as Claude Code (2.1.282) sends it: wrapped in a tag with an id. */
+const PASTED = /\n*<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content id="\1">\n*/g
+
+/** What was typed and pasted, without the wrapper Claude Code puts around a long paste. */
+export function unpaste(text: string): string {
+  return text.includes('<pasted_content') ? text.replace(PASTED, '\n\n$2\n\n').replace(/^\n+|\n+$/g, '') : text
+}
 
 const REFLEX = 'mnemo reflex context:'
 const SLUG = /\[\[([^\]\s]+)\]\]/g
@@ -274,6 +282,12 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
     if (kind === 'task-notification') return notification(r, text)
     if (r.isMeta === true) return
     if (r.isCompactSummary === true) return prompt(r, { kind: 'notification', id: recordId(r), at, text: 'conversation compacted' })
+    // A `!` command's output follows its input: it goes on that command's card.
+    const ran = lastPrompt
+    if (BASH_OUTPUT.test(text) && ran?.kind === 'command' && ran.name === '!' && !ran.output) {
+      ran.output = { stdout: tag(text, 'bash-stdout') ?? '', stderr: tag(text, 'bash-stderr') ?? '' }
+      return
+    }
     if (HIDDEN_PROMPT.test(text)) return
     const interrupted = /^\s*\[(Request interrupted by user[^\]]*)\]\s*$/.exec(text)
     if (interrupted) return prompt(r, { kind: 'notification', id: recordId(r), at, text: interrupted[1] })
@@ -282,9 +296,9 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
       if (name !== null) return prompt(r, { kind: 'command', id: recordId(r), at, name: name.trim(), args: (tag(text, 'command-args') ?? '').trim() })
     }
     const bash = /^\s*<bash-input>([\s\S]*?)<\/bash-input>/.exec(text)
-    if (bash) return prompt(r, { kind: 'command', id: recordId(r), at, name: '!', args: bash[1].trim() })
+    if (bash) return prompt(r, { kind: 'command', id: recordId(r), at, name: '!', args: unpaste(bash[1]).trim() })
     if (!text.trim() && !images.length) return
-    prompt(r, { kind: 'user', id: recordId(r), at, text, images, rules: [], queued: false })
+    prompt(r, { kind: 'user', id: recordId(r), at, text: unpaste(text), images, rules: [], queued: false })
   }
 
   const assistantRecord = (r: Rec) => {
@@ -357,7 +371,7 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
       const { text, images } = flatten(a.prompt)
       if (a.commandMode === 'task-notification' || origin?.kind === 'task-notification') return notification(r, text)
       if (origin?.kind === 'peer') return peer(r, origin, text)
-      return prompt(r, { kind: 'user', id: recordId(r), at, text, images, rules: [], queued: true })
+      return prompt(r, { kind: 'user', id: recordId(r), at, text: unpaste(text), images, rules: [], queued: true })
     }
     const hookName = str(a.hookName) ?? ''
     if (hookName.startsWith('SessionStart:')) startSource = hookName.slice('SessionStart:'.length) || 'startup'

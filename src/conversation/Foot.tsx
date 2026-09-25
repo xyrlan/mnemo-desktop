@@ -1,6 +1,6 @@
 // adapted from stablyai/orca src/renderer/src/components/native-chat/NativeChatInteractiveCard.tsx
 // (dismiss-on-answer) and the foot of NativeChatResolvedView.tsx
-import { useCallback, useContext, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import type { SessionStatus } from './types'
 import type { Pending, ToolCard } from './stream'
@@ -30,8 +30,8 @@ function Waiting({ text, onOpenTerminal }: { text: string; onOpenTerminal?: () =
 /** The chat's foot: while the session waits on a permission or a question, the card that
  *  answers it; otherwise the composer. An answered card stays down until the session is parked
  *  on something else — its status can lag the answer by a poll — and a question of several
- *  asks them one at a time. What failed to go through is said above it, and the card or the
- *  composer keeps what was in it. */
+ *  asks them one at a time. What failed to go through is said above it (the composer says it
+ *  itself), and the card or the composer keeps what was in it. */
 export function Foot({
   agent,
   cwd,
@@ -63,6 +63,26 @@ export function Foot({
     }
     then?.()
   }, [])
+
+  // What the composer sends shows in the stream at once and is marked there if it fails; the
+  // composer, given its text back, says why.
+  const send = useCallback(
+    (text: string) => {
+      setError(null)
+      return agent.send(text)
+    },
+    [agent],
+  )
+  const shell = agent.bash
+  const bash = useMemo(
+    () =>
+      shell &&
+      ((command: string) => {
+        setError(null)
+        return shell(command)
+      }),
+    [shell],
+  )
 
   const waiting = status?.waiting ?? null
   const key = parked && waiting ? `${parked.tool.id}:${parked.kind}` : null
@@ -100,8 +120,8 @@ export function Foot({
   } else if (status?.parked) {
     body = <Waiting text="Claude Code is showing a dialog: answer it in the terminal." onOpenTerminal={onOpenTerminal} />
   } else {
-    // Never remounted: a prompt that did not go through stays in it to send again.
-    body = Composer ? <Composer cwd={cwd} placeholder="Message Claude…" onSend={(text) => run(() => agent.send(text))} /> : null
+    // Never remounted: a prompt that did not go through comes back into it to send again.
+    body = Composer ? <Composer cwd={cwd} placeholder="Message Claude…" onSend={send} onBash={bash} /> : null
   }
 
   return (

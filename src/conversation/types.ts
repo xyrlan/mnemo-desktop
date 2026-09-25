@@ -64,13 +64,17 @@ export type Card =
   /** A message another session sent over the inbox socket (`origin.kind: peer`). */
   | { kind: 'peer'; id: string; at: string; from: string; text: string }
   | { kind: 'notification'; id: string; at: string; text: string }
-  /** A slash command the user ran (`/clear` never shows: it starts a new transcript). */
-  | { kind: 'command'; id: string; at: string; name: string; args: string }
+  /** A slash command the user ran (`/clear` never shows: it starts a new transcript), or a
+   *  shell command (`name` `!`), with what it printed once that is in. */
+  | { kind: 'command'; id: string; at: string; name: string; args: string; output?: BashOutput }
   /** The SessionStart block: mnemo's briefing and what it learned, as chips. */
   | { kind: 'session'; id: string; at: string; source: string; briefing: string | null; rules: RuleChip[] }
   /** A record type this parser does not know: shown as a grey chip so a Claude Code format
    *  change is visible at once instead of silently dropped. */
   | { kind: 'unknown'; id: string; at: string; type: string }
+
+/** What a `!` command printed. */
+export type BashOutput = { stdout: string; stderr: string }
 
 export type PrLink = { number: number; url: string }
 

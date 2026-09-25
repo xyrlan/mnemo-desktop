@@ -1,4 +1,4 @@
-import { deriveConversation, parseRecord, toolSummary } from './parse'
+import { deriveConversation, parseRecord, toolSummary, unpaste } from './parse'
 import type { Card, TranscriptRecord } from './types'
 
 const SID = 'sess-1'
@@ -228,7 +228,7 @@ describe('cards', () => {
     ])
   })
 
-  test('slash commands and ! commands are command cards; their output and caveat are hidden', () => {
+  test("slash commands and ! commands are command cards; a slash command's output and caveat are hidden, a ! command's is on its card", () => {
     const got = cards([
       user('c0', '<local-command-caveat>Caveat: the messages below…</local-command-caveat>', { isMeta: true }),
       user('c1', '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>'),
@@ -240,8 +240,33 @@ describe('cards', () => {
     expect(got).toEqual([
       { kind: 'command', id: 'c1', at: expect.any(String), name: '/model', args: 'opus' },
       { kind: 'command', id: 'c3', at: expect.any(String), name: '/review', args: '' },
-      { kind: 'command', id: 'c4', at: expect.any(String), name: '!', args: 'git status' },
+      { kind: 'command', id: 'c4', at: expect.any(String), name: '!', args: 'git status', output: { stdout: 'clean', stderr: '' } },
     ])
+  })
+
+  test("a ! command's output goes on its own card only, and a command with none yet has none", () => {
+    const got = cards([
+      user('b1', '<bash-input>make</bash-input>'),
+      user('b2', '<bash-stdout></bash-stdout><bash-stderr>make: *** No targets.  Stop.\n</bash-stderr>'),
+      user('b3', 'why?'),
+      // Output with no command before it (the command is in an earlier chunk) goes nowhere.
+      user('b4', '<bash-stdout>stray</bash-stdout><bash-stderr></bash-stderr>'),
+      user('b5', '<bash-input> ls </bash-input>'),
+    ])
+    expect(got).toEqual([
+      { kind: 'command', id: 'b1', at: expect.any(String), name: '!', args: 'make', output: { stdout: '', stderr: 'make: *** No targets.  Stop.\n' } },
+      expect.objectContaining({ kind: 'user', id: 'b3', text: 'why?' }),
+      { kind: 'command', id: 'b5', at: expect.any(String), name: '!', args: 'ls' },
+    ])
+  })
+
+  test('a long paste is shown as pasted, without the wrapper Claude Code sends it in', () => {
+    const wrapped = (id: string, body: string) => `\n\n<pasted_content id="${id}">\n${body}\n</pasted_content id="${id}">\n`
+    expect(unpaste(wrapped('02a2', 'line one\nline two'))).toBe('line one\nline two')
+    expect(unpaste(`look at this${wrapped('ab', 'x')}and this${wrapped('cd', 'y')}`)).toBe('look at this\n\nx\n\nand this\n\ny')
+    expect(unpaste('<pasted_content id="1">unclosed')).toBe('<pasted_content id="1">unclosed')
+    const got = cards([user('p1', wrapped('9f', 'a long paste')), user('p2', `<bash-input>${wrapped('e1', 'echo hi')}</bash-input>`)])
+    expect(got).toEqual([expect.objectContaining({ kind: 'user', text: 'a long paste' }), expect.objectContaining({ kind: 'command', args: 'echo hi' })])
   })
 
   test('an interrupt is a notification line', () => {

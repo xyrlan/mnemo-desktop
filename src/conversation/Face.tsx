@@ -33,7 +33,7 @@ export function paneStatus(snap: Snapshot, sessionId: string | undefined): Sessi
 
 /** The conversation face of terminal pane `paneId`: laid over the xterm, which stays mounted and
  *  sized underneath so the PTY and the TUI never notice the face changed. What the chat's foot
- *  sends is typed into that PTY, and only while it still runs Claude (`paneAgent`). */
+ *  sends is typed into that PTY (`paneAgent`), and only while it still runs Claude (`sinks`). */
 export default function ConversationFace({ paneId, sinks = tauriPaneSinks }: { paneId: PaneId; sinks?: PaneSinks }) {
   const ref = useRef<HTMLDivElement>(null)
   const sessionId = useApp((s) => s.panes[paneId]?.sessionId)

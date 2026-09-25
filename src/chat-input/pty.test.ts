@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answerText, makeChatPty, optionKey, promptBytes, SUBMIT_GAP_MS, KEY_GAP_MS, type PtySinks } from './pty'
+import { answerText, makeChatPty, optionKey, promptBytes, SEND_GAP_MS, SUBMIT_GAP_MS, KEY_GAP_MS, type PtySinks } from './pty'
 
 type Step = ['write', number, string] | ['sleep', number] | ['ask', number]
 
@@ -20,18 +20,14 @@ function rig(runsClaude: boolean | ((pane: number) => boolean) = true) {
 }
 
 describe('promptBytes', () => {
-  it('types one line bare, without the keys a pasted escape would press', () => {
-    expect(promptBytes('fix the bug')).toBe('fix the bug')
-    expect(promptBytes('a\x1b[201~b\x07c')).toBe('a[201~bc')
-    expect(promptBytes('a\tb')).toBe('a b')
-  })
-
-  it('pastes several lines as one bracketed paste, so they stay one turn', () => {
+  it('pastes every prompt, one line or several, so its Enter can follow at once', () => {
+    expect(promptBytes('fix the bug')).toBe('\x1b[200~fix the bug\x1b[201~')
     expect(promptBytes('one\ntwo')).toBe('\x1b[200~one\ntwo\x1b[201~')
     expect(promptBytes('one\r\ntwo\rthree')).toBe('\x1b[200~one\ntwo\nthree\x1b[201~')
   })
 
-  it('cannot close the paste early from inside it', () => {
+  it('drops the keys a pasted escape would press, and cannot close the paste early', () => {
+    expect(promptBytes('a\x1b[201~b\x07c')).toBe('\x1b[200~a[201~bc\x1b[201~')
     expect(promptBytes('a\n\x1b[201~\rrm -rf /')).toBe('\x1b[200~a\n[201~\nrm -rf /\x1b[201~')
   })
 })
@@ -55,16 +51,53 @@ describe('optionKey and answerText', () => {
 })
 
 describe('makeChatPty', () => {
-  it('sends a prompt: clears the line, then types it, then Enter on its own', async () => {
+  it('sends a prompt: clears the line and leaves shell mode, a key at a time, then pastes it with its Enter', async () => {
     const { steps, pty } = rig()
     await pty.sendPrompt(3, 'hello')
-    expect(steps).toEqual([['ask', 3], ['write', 3, '\x15'], ['sleep', KEY_GAP_MS], ['write', 3, 'hello'], ['sleep', SUBMIT_GAP_MS], ['write', 3, '\r']])
+    expect(steps).toEqual([
+      ['ask', 3],
+      ['write', 3, '\x15'],
+      ['sleep', SEND_GAP_MS],
+      ['write', 3, '\x7f'],
+      ['sleep', SEND_GAP_MS],
+      ['write', 3, '\x1b[200~hello\x1b[201~\r'],
+    ])
   })
 
-  it('pastes a prompt of several lines', async () => {
+  it('pastes a prompt of several lines as one', async () => {
     const { steps, pty } = rig()
     await pty.sendPrompt(3, 'a\nb')
-    expect(steps).toContainEqual(['write', 3, '\x1b[200~a\nb\x1b[201~'])
+    expect(steps.at(-1)).toEqual(['write', 3, '\x1b[200~a\nb\x1b[201~\r'])
+  })
+
+  it('waits far less than it did: 100 ms of gaps where 650 were', async () => {
+    const { steps, pty } = rig()
+    await pty.sendPrompt(3, 'hello')
+    expect(steps.reduce((ms, s) => (s[0] === 'sleep' ? ms + s[1] : ms), 0)).toBeLessThanOrEqual(100)
+  })
+
+  it('runs a shell command through `!` typed alone, then the command pasted with its Enter', async () => {
+    const { steps, pty } = rig()
+    await pty.sendBash(3, 'git status')
+    expect(steps).toEqual([
+      ['ask', 3],
+      ['write', 3, '\x15'],
+      ['sleep', SEND_GAP_MS],
+      ['write', 3, '\x7f'],
+      ['sleep', SEND_GAP_MS],
+      ['write', 3, '!'],
+      ['sleep', SEND_GAP_MS],
+      ['write', 3, '\x1b[200~git status\x1b[201~\r'],
+    ])
+  })
+
+  it('refuses an empty command, and types none when Claude has exited', async () => {
+    const { steps, pty } = rig()
+    await expect(pty.sendBash(3, ' \t ')).rejects.toThrow('nothing to run')
+    expect(steps).toEqual([])
+    const gone = rig(false)
+    await expect(gone.pty.sendBash(3, 'ls')).rejects.toThrow(/no longer running/)
+    expect(gone.steps.filter((s) => s[0] === 'write')).toEqual([])
   })
 
   it('refuses an empty prompt without asking the pane', async () => {
@@ -123,7 +156,7 @@ describe('makeChatPty', () => {
     expect(steps).toEqual([])
   })
 
-  it("never lets a second send's text land between the first's text and its Enter", async () => {
+  it("never lets a second send's keys land inside the first's", async () => {
     const { steps, sinks } = rig()
     let open!: () => void
     const gate = new Promise<void>((r) => (open = r))
@@ -132,7 +165,7 @@ describe('makeChatPty', () => {
       ...sinks,
       sleep: async (ms) => {
         steps.push(['sleep', ms])
-        if (first && ms === SUBMIT_GAP_MS) {
+        if (first) {
           first = false
           await gate
         }
@@ -141,10 +174,11 @@ describe('makeChatPty', () => {
     const a = pty.sendPrompt(1, 'one')
     const b = pty.sendPrompt(1, 'two')
     await new Promise((r) => setTimeout(r, 0))
-    expect(steps.filter((s) => s[0] === 'write').map((s) => s[2])).toEqual(['\x15', 'one'])
+    expect(steps.filter((s) => s[0] === 'write').map((s) => s[2])).toEqual(['\x15'])
     open()
     await Promise.all([a, b])
-    expect(steps.filter((s) => s[0] === 'write').map((s) => s[2])).toEqual(['\x15', 'one', '\r', '\x15', 'two', '\r'])
+    const p = (t: string) => `\x1b[200~${t}\x1b[201~\r`
+    expect(steps.filter((s) => s[0] === 'write').map((s) => s[2])).toEqual(['\x15', '\x7f', p('one'), '\x15', '\x7f', p('two')])
   })
 
   it('a refused send does not hold up the next one on that pane', async () => {

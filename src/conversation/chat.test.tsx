@@ -34,7 +34,8 @@ vi.mock('react-virtuoso', async () => {
 import { ConversationView } from './ConversationView'
 import ConversationFace from './Face'
 import { ChatInputContext, type ApprovalCardProps, type ChatInputParts, type ComposerProps, type QuestionCardProps } from './chat-input'
-import { NOT_RUNNING, paneAgent, type ChatAgent, type PaneSinks } from './agent'
+import { paneAgent, type ChatAgent, type PaneSinks } from './agent'
+import { makeChatPty } from '../chat-input/pty'
 import { contextPercent, contextWindow, formatTokens } from './ContextRing'
 import { approvalDetail, approvalSummary, askQuestions, proposedHunks, runSentence } from './run'
 import type { ConversationClient } from './client'
@@ -50,6 +51,7 @@ import type { Snapshot } from '../mission/types'
 
 // ---- builders ---------------------------------------------------------------------------------
 
+const NOT_RUNNING = 'Claude is no longer running in this terminal: nothing was sent'
 const T0 = Date.parse('2026-09-24T10:00:00Z')
 const at = (s: number) => new Date(T0 + s * 1000).toISOString()
 const user = (id: string, s: number, text: string): Card => ({ kind: 'user', id, at: at(s), text, images: [], rules: [], queued: false })
@@ -109,11 +111,17 @@ function parts() {
   return { p, seen }
 }
 
-/** An agent that records what it was asked to send, and fails when told to. */
-function recorder() {
+/** A prompt Claude Code recorded a moment after now: what a send from the chat becomes. */
+const recorded = (id: string, text: string): Card => ({ kind: 'user', id, at: new Date(Date.now() + 1000).toISOString(), text, images: [], rules: [], queued: false })
+
+/** An agent that records what it was asked to send, fails when told to, and holds its sends
+ *  back while `hold` is on. */
+function recorder({ shell = true } = {}) {
   const sent: string[] = []
   let fail: string | null = null
+  let held: (() => void)[] | null = null
   const note = (what: string) => async () => {
+    if (held) await new Promise<void>((r) => held!.push(r))
     if (fail) throw new Error(fail)
     sent.push(what)
   }
@@ -122,8 +130,14 @@ function recorder() {
     allow: note('allow'),
     deny: note('deny'),
     answer: async (i) => note(`answer ${i}`)(),
+    ...(shell ? { bash: async (c: string) => note(`bash ${c}`)() } : {}),
   }
-  return { agent, sent, failWith: (m: string | null) => void (fail = m) }
+  const release = () => {
+    const h = held ?? []
+    held = null
+    h.forEach((r) => r())
+  }
+  return { agent, sent, failWith: (m: string | null) => void (fail = m), hold: () => void (held = []), release }
 }
 
 let host: HTMLDivElement
@@ -165,7 +179,31 @@ test('idle, the foot is the composer, and what it sends goes to the agent', asyn
   expect(r.sent).toEqual(['send fix it'])
 })
 
-test('a send that fails says why above the composer, rejects so the composer keeps the text, and never remounts it', async () => {
+test('a send shows in the stream at once, and gives way to its record: never shown twice', async () => {
+  const { client, emit } = feed()
+  const { p, seen } = parts()
+  const r = recorder()
+  await render(chat(client, p, r.agent, { busy: false, waiting: null }))
+  await emit(lines([user('u1', 0, 'hi')]))
+  r.hold()
+  let sent!: Promise<void>
+  await act(async () => void (sent = seen.composer!.onSend('fix  the\nbug')))
+  // Shown before the keys are even typed.
+  expect(q('.cv-outgoing')?.dataset.state).toBe('sending')
+  expect(q('.cv-outgoing')?.textContent).toContain('fix  the')
+  await act(async () => {
+    r.release()
+    await sent
+  })
+  expect(r.sent).toEqual(['send fix  the\nbug'])
+  expect(q('.cv-outgoing')?.dataset.state).toBe('sent')
+  // Claude Code writes it; the follow reads it back: the record takes its place.
+  await emit(lines([recorded('u2', 'fix the bug')]))
+  expect(q('.cv-outgoing')).toBeNull()
+  expect(host.querySelectorAll('.cv-user')).toHaveLength(2)
+})
+
+test('a send that fails is marked in the stream and rejects, so the composer gets its text back; the composer is never remounted', async () => {
   const { client, emit } = feed()
   const { p, seen } = parts()
   const r = recorder()
@@ -173,11 +211,53 @@ test('a send that fails says why above the composer, rejects so the composer kee
   await emit(lines([user('u1', 0, 'hi')]))
   r.failWith(NOT_RUNNING)
   await act(() => expect(seen.composer!.onSend('lost?')).rejects.toThrow(NOT_RUNNING))
-  expect(q('.cv-foot-error')?.textContent).toBe(NOT_RUNNING)
-  expect(seen.composerMounts).toBe(1)
-  r.failWith(null)
-  await act(() => seen.composer!.onSend('again'))
+  expect(q('.cv-outgoing')?.dataset.state).toBe('failed')
+  expect(q('.cv-not-sent')?.textContent).toBe('Not sent')
+  expect(q('.cv-not-sent')?.title).toBe(NOT_RUNNING)
+  // The composer says why, beside the text it got back; the foot does not say it again.
   expect(q('.cv-foot-error')).toBeNull()
+  expect(seen.composerMounts).toBe(1)
+  // Sent again, the failed one goes.
+  r.failWith(null)
+  await act(() => seen.composer!.onSend('lost?'))
+  expect(host.querySelectorAll('.cv-outgoing')).toHaveLength(1)
+  expect(q('.cv-outgoing')?.dataset.state).toBe('sent')
+})
+
+test('a slash command is sent but not drawn: Claude Code may record nothing for it', async () => {
+  const { client, emit } = feed()
+  const { p, seen } = parts()
+  const r = recorder()
+  await render(chat(client, p, r.agent))
+  await emit(lines([user('u1', 0, 'hi')]))
+  await act(() => seen.composer!.onSend('/config'))
+  expect(r.sent).toEqual(['send /config'])
+  expect(q('.cv-outgoing')).toBeNull()
+})
+
+test("a pane's composer offers the shell; the command runs through the agent, shows at once, then its record with the output", async () => {
+  const { client, emit } = feed()
+  const { p, seen } = parts()
+  const r = recorder()
+  await render(chat(client, p, r.agent))
+  await emit(lines([user('u1', 0, 'hi')]))
+  expect(seen.composer?.onBash).toBeTypeOf('function')
+  await act(() => seen.composer!.onBash!('git status'))
+  expect(r.sent).toEqual(['bash git status'])
+  expect(q('.cv-outgoing')?.textContent).toBe('! git status')
+  const ran: Card = { kind: 'command', id: 'b1', at: new Date(Date.now() + 1000).toISOString(), name: '!', args: 'git status', output: { stdout: 'On branch main', stderr: '' } }
+  await emit(lines([ran]))
+  expect(q('.cv-outgoing')).toBeNull()
+  expect(q('.cv-shell .cv-out')?.textContent).toBe('On branch main')
+})
+
+test('an agent with no shell (a child answering through its mission) gives the composer no `!`', async () => {
+  const { client, emit } = feed()
+  const { p, seen } = parts()
+  await render(chat(client, p, recorder({ shell: false }).agent))
+  await emit(lines([user('u1', 0, 'hi')]))
+  expect(seen.composer).not.toBeNull()
+  expect(seen.composer?.onBash).toBeUndefined()
 })
 
 test('parked on a permission, the approval card says what is asked and answers it; it stays down until the session moves on', async () => {
@@ -318,40 +398,63 @@ test('no agent, no foot: the mission pane keeps its own footer', async () => {
 
 // ---- the pane's agent -------------------------------------------------------------------------
 
-function sinks(runs: boolean | 'throws') {
+function sinks() {
   const writes: string[] = []
   const s: PaneSinks = {
-    runsClaude: async (pane) => {
-      writes.push(`check ${pane}`)
-      if (runs === 'throws') throw new Error('no pid')
-      return runs
-    },
     sendPrompt: async (pane, text) => void writes.push(`prompt ${pane} ${text}`),
+    sendBash: async (pane, command) => void writes.push(`bash ${pane} ${command}`),
     answerApproval: async (pane, allow) => void writes.push(`approval ${pane} ${allow}`),
     answerQuestion: async (pane, i) => void writes.push(`question ${pane} ${i}`),
   }
   return { s, writes }
 }
 
-test('the pane agent asks whether the pane still runs Claude before every write', async () => {
-  const { s, writes } = sinks(true)
+test('the pane agent writes each answer through its pane', async () => {
+  const { s, writes } = sinks()
   const a = paneAgent(7, s)
   await a.send('hello')
+  await a.bash!('ls')
   await a.allow()
   await a.deny()
   await a.answer(2)
-  expect(writes).toEqual(['check 7', 'prompt 7 hello', 'check 7', 'approval 7 true', 'check 7', 'approval 7 false', 'check 7', 'question 7 2'])
+  expect(writes).toEqual(['prompt 7 hello', 'bash 7 ls', 'approval 7 true', 'approval 7 false', 'question 7 2'])
   expect(a.other).toBeUndefined()
+})
+
+/** The pane agent over chat-input's real keystrokes, with the pane's check counted. */
+function typed(runs: boolean | 'throws') {
+  let asked = 0
+  const keys: string[] = []
+  const pty = makeChatPty({
+    writePty: async (_pane, data) => void keys.push(data),
+    paneRunsClaude: async () => {
+      asked++
+      if (runs === 'throws') throw new Error('no pid')
+      return runs
+    },
+    sleep: async () => {},
+  })
+  const s: PaneSinks = { sendPrompt: pty.sendPrompt, sendBash: pty.sendBash, answerApproval: pty.answerApproval, answerQuestion: pty.answerQuestion }
+  return { a: paneAgent(7, s), keys, asked: () => asked }
+}
+
+test('whether the pane still runs Claude is asked once per write, right before it types', async () => {
+  const { a, asked } = typed(true)
+  await a.send('hello')
+  expect(asked()).toBe(1)
+  await a.bash!('ls')
+  await a.allow()
+  await a.answer(0)
+  expect(asked()).toBe(4)
 })
 
 test.each([
   ['Claude has exited', false],
   ['the check itself failed', 'throws'],
 ] as const)('nothing is typed when %s', async (_, runs) => {
-  const { s, writes } = sinks(runs)
-  const a = paneAgent(7, s)
-  for (const write of [() => a.send('rm -rf /'), () => a.allow(), () => a.deny(), () => a.answer(0)]) await expect(write()).rejects.toThrow(NOT_RUNNING)
-  expect(writes.filter((w) => !w.startsWith('check'))).toEqual([])
+  const { a, keys } = typed(runs)
+  for (const write of [() => a.send('rm -rf /'), () => a.bash!('rm -rf /'), () => a.allow(), () => a.deny(), () => a.answer(0)]) await expect(write()).rejects.toThrow()
+  expect(keys).toEqual([])
 })
 
 const PANE = 5
@@ -361,7 +464,7 @@ const snapWith = (status: string, waiting_for?: string | null): Snapshot => ({
   at: '',
 })
 
-test('the face answers through its pane, guarded, and its terminal button flips back to the terminal', async () => {
+test('the face answers through its pane, and its terminal button flips back to the terminal', async () => {
   store.setState({
     tabs: [{ id: 't', root: leaf(PANE), focused: PANE }],
     activeTab: 't',
@@ -374,7 +477,7 @@ test('the face answers through its pane, guarded, and its terminal button flips 
     return () => {}
   })
   const { p, seen } = parts()
-  const { s, writes } = sinks(true)
+  const { s, writes } = sinks()
   await render(
     <ChatInputContext.Provider value={p}>
       <ConversationFace paneId={PANE} sinks={s} />
@@ -382,7 +485,7 @@ test('the face answers through its pane, guarded, and its terminal button flips 
   )
   expect(q('.conversation-face')?.hasAttribute('data-ui')).toBe(true)
   await act(() => seen.approval!.onAllow())
-  expect(writes).toEqual([`check ${PANE}`, `approval ${PANE} true`])
+  expect(writes).toEqual([`approval ${PANE} true`])
 
   await act(async () => q('.cv-to-terminal')!.click())
   expect(store.getState().panes[PANE].face).toBe('terminal')
