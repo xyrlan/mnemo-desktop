@@ -2,14 +2,15 @@
 // [322-373], components/sidebar/worktree-list/rows/SectionHeader.tsx [179-403],
 // components/sidebar/worktree-list/rows/item-row.tsx [149-229], components/sidebar/ProjectHeaderActions.tsx
 // and components/repo/repo-icon.tsx [130-186] (MIT, 122b8c25)
-import React, { useCallback } from 'react'
+import React, { useCallback, useContext } from 'react'
 import { useStore } from 'zustand'
 import { ChevronDown, Folder } from 'lucide-react'
 import { cn } from '@/ui/cn'
 import type { RepoNode } from '../fleet/types'
 import { StatusIndicator } from './agent-glyphs'
 import { activateWorktree } from './actions'
-import { activePath, repoColor, sidebarOrder, worktreeStatus, type WorktreeStatus } from './model'
+import { DispatchContext } from './dispatch'
+import { activePath, repoColor, shownWorktrees, sidebarOrder, worktreeStatus, type WorktreeStatus } from './model'
 import { useSidebar } from './store'
 import { homeStore, layoutStore, useFleet } from './upstream'
 import { RepoHeaderContextMenu, RepoHeaderMenu, WorktreeContextMenu } from './menus'
@@ -32,7 +33,8 @@ const PROJECT_HEADER_ACTIONS_CLASS_NAME = cn(
 
 const URGENCY: WorktreeStatus[] = ['permission', 'working', 'done', 'inactive']
 
-/** A folded repo still says the most urgent thing inside it, so nobody waits unseen. */
+/** A folded repo still says the most urgent thing inside it, so nobody waits unseen: its
+ *  dispatched children too, whose cards the list leaves out. */
 function foldedStatus(repo: RepoNode): WorktreeStatus {
   const all = repo.worktrees.map((w) => worktreeStatus(w.agents))
   return URGENCY.find((s) => all.includes(s)) ?? 'inactive'
@@ -44,14 +46,17 @@ function RepoSection({
   collapsed,
   active,
   tabbable,
+  routed,
 }: {
   repo: RepoNode
   first: boolean
   collapsed: boolean
   active: string | null
   tabbable: string | null
+  routed: boolean
 }): React.JSX.Element {
   const toggle = useSidebar((s) => s.toggleRepo)
+  const worktrees = shownWorktrees(repo, routed)
   const folded = collapsed ? foldedStatus(repo) : null
   const unread = collapsed && repo.worktrees.some((w) => w.unread)
   return (
@@ -85,7 +90,7 @@ function RepoSection({
                       {folded !== 'inactive' && <StatusIndicator status={folded!} tooltipSide="right" />}
                       {unread && <span className="size-[6px] rounded-full bg-amber-500" aria-label="Unread" />}
                       <span className="text-[11px] font-normal leading-none tabular-nums text-muted-foreground/70">
-                        {repo.worktrees.length}
+                        {worktrees.length}
                       </span>
                     </span>
                   )}
@@ -107,7 +112,7 @@ function RepoSection({
       </div>
 
       {!collapsed &&
-        repo.worktrees.map((w) => (
+        worktrees.map((w) => (
           <WorktreeContextMenu key={w.path} worktree={w}>
             <div
               role="option"
@@ -163,8 +168,9 @@ export function WorktreeList(): React.JSX.Element {
   const activeWorktree = useStore(layoutStore, (s) => s.activeWorktree)
   const loading = useStore(homeStore, (s) => s.loading)
   const onKeyDown = useListKeys()
+  const routed = useContext(DispatchContext) !== null
   const active = activePath(activeWorktree, repos)
-  const visible = sidebarOrder(repos, collapsed)
+  const visible = sidebarOrder(repos, collapsed, routed)
   // One card takes Tab at a time (roving focus): the active one when it is showing, else the first.
   const tabbable = visible.find((w) => w.path === active)?.path ?? visible[0]?.path ?? null
 
@@ -186,7 +192,7 @@ export function WorktreeList(): React.JSX.Element {
         className="worktree-sidebar-scrollbar h-full overflow-y-auto overflow-x-hidden pl-1 pt-px pb-2 scrollbar-sleek outline-none"
       >
         {repos.map((r, i) => (
-          <RepoSection key={r.root} repo={r} first={i === 0} collapsed={collapsed.has(r.root)} active={active} tabbable={tabbable} />
+          <RepoSection key={r.root} repo={r} first={i === 0} collapsed={collapsed.has(r.root)} active={active} tabbable={tabbable} routed={routed} />
         ))}
       </div>
     </div>

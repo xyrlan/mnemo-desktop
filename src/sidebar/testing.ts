@@ -4,6 +4,7 @@ import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import type { Action } from '../actions/registry'
 import type { AgentNode, RepoNode, WorktreeNode } from '../fleet/types'
+import type { Snapshot } from '../mission/types'
 import type { CleanupFacts, WorktreeInfo } from '../worktrees/client'
 import { archiveStore } from './archive-store'
 import { sidebarStore } from './store'
@@ -15,6 +16,8 @@ export const fleetStore = createStore(() => ({
   markRead: vi.fn((_path: string) => {}),
   refresh: vi.fn(async () => {}),
 }))
+
+export const missionStore = createStore(() => ({ snapshot: { repos: [], errors: [], at: '' } as Snapshot }))
 
 export const layoutStore = createStore(() => ({
   activeWorktree: null as string | null,
@@ -84,6 +87,7 @@ export const useShell = <T,>(sel: (s: ReturnType<typeof shellStore.getState>) =>
 /** Fresh stores and spies, nothing folded or expanded. */
 export function resetFakes() {
   fleetStore.setState({ repos: [], markRead: vi.fn(), refresh: vi.fn(async () => {}) })
+  missionStore.setState({ snapshot: { repos: [], errors: [], at: '' } })
   layoutStore.setState({
     activeWorktree: null,
     tabs: [],

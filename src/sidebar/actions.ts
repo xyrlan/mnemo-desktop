@@ -2,6 +2,7 @@ import { fleetStore, homeStore, layoutStore, register } from './upstream'
 import { sidebarStore } from './store'
 import { sidebarOrder } from './model'
 import { openCleanup } from './archive'
+import { dispatchRoutes } from './dispatch'
 
 /** Show worktree `path` and mark it read: what a card click does. */
 export function activateWorktree(path: string) {
@@ -28,7 +29,8 @@ export async function addProject(): Promise<string | null> {
   return after
 }
 
-/** `worktree.go.1` … `worktree.go.9`: the Nth card in sidebar order, folded repos left out.
+/** `worktree.go.1` … `worktree.go.9`: the Nth card in sidebar order, folded repos (and, once the
+ *  Dispatch tab takes them, dispatched children) left out.
  *  `worktree.cleanup`: the view that removes stale worktrees in one go. */
 export function registerSidebarActions() {
   register({ id: 'worktree.cleanup', title: 'Clean up workspaces…', run: openCleanup })
@@ -38,7 +40,7 @@ export function registerSidebarActions() {
       title: `Go to workspace ${n}`,
       shortcut: `⌘${n}`,
       run: () => {
-        const w = sidebarOrder(fleetStore.getState().repos, sidebarStore.getState().collapsed)[n - 1]
+        const w = sidebarOrder(fleetStore.getState().repos, sidebarStore.getState().collapsed, dispatchRoutes !== null)[n - 1]
         if (w) activateWorktree(w.path)
       },
     })
