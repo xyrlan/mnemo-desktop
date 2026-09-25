@@ -1,0 +1,25 @@
+/* The Dispatch tab's frame: the waves on the left, the selected child on the right, which fills
+   the rest. A tab to the side is often narrow: under 620px it shows one of them, the waves until
+   a child is picked, then the child with a way back. The rows and the detail are Tailwind. */
+.dispatch-pane { height: 100%; min-height: 0; container-type: inline-size; background: var(--background); }
+.dispatch-body { height: 100%; min-height: 0; display: flex; }
+.dispatch-list { width: clamp(260px, 42%, 440px); flex-shrink: 0; min-height: 0; overflow-y: auto; border-right: 1px solid var(--border); }
+.dispatch-detail { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.dispatch-detail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dispatch-detail-body > * { flex: 1; min-height: 0; }
+
+.dispatch-back { display: none; }
+
+@container (max-width: 620px) {
+  .dispatch-list { width: auto; flex: 1; border-right: 0; }
+  .dispatch-pane[data-picked] .dispatch-list,
+  .dispatch-pane:not([data-picked]) .dispatch-detail { display: none; }
+  .dispatch-back { display: flex; }
+}
+
+/* A row's answer card is the chat's foot, which pads itself for a pane: the row pads it already. */
+.dispatch-answer .cv-foot { padding-inline: 0; padding-bottom: 0; }
+
+/* Merging, marking ready and opening a PR are the parent session's (spec, *Not in this work*). */
+.dispatch-checks [data-pr-actions],
+.dispatch-checks [data-create-pr] { display: none; }
