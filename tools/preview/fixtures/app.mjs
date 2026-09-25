@@ -37,6 +37,9 @@ export const BASE = {
   chrome_repo: () => null,
   chrome_branch: () => null,
   chrome_session: () => null,
+  // No terminal sessions survive from an earlier run; the Memory panel has nothing for the project.
+  pty_list: () => [],
+  memory_feed: () => ({ project: 'mnemo-desktop', briefing: null, fired: [], learned: [], inbox: [] }),
   // No project to offer "what mnemo learned" for, so that screen never opens by itself.
   install_review_project: () => null,
 }
