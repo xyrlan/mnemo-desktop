@@ -7,6 +7,10 @@
 //! disk. What crosses to the front is bounded: a side past `MAX_SIDE_BYTES`, or one that looks
 //! binary, comes back empty with the reason, and the list stops at `MAX_FILES`.
 //!
+//! A child's branch is compared to where it was cut from instead: given a `base`, both the list and
+//! the sides are taken against the merge base of that ref (or, for an empty `base`, of the repo's
+//! default branch) and `HEAD`, so the child's commits and its uncommitted work show together.
+//!
 //! The file named must be one of the tree's own: a relative path with no `..`, read under the
 //! tree's top level.
 
@@ -48,6 +52,9 @@ pub struct ChangeList {
     pub files: Vec<ChangedFile>,
     /// More files changed than `MAX_FILES`.
     pub truncated: bool,
+    /// What the files are compared to when that is a branch's base rather than `HEAD`: the ref's
+    /// name and the merge base's short hash, e.g. `main @ 1a2b3c4`.
+    pub base: Option<String>,
 }
 
 /// `FileSides` in `src/diff/client.ts`.
@@ -180,7 +187,80 @@ fn line_count(bytes: &[u8]) -> u32 {
 
 /// The changed files of the tree `worktree` is in, in the order git lists them.
 pub fn changes(worktree: &str) -> Result<ChangeList, String> {
+    changes_against(worktree, None)
+}
+
+/// Where a branch was cut from: the merge base of `HEAD` and `base` (an empty `base`: the default
+/// branch), as a full hash and a label. None when no default branch is found, and when `HEAD`
+/// is the merge base itself the diff is simply the uncommitted work.
+fn resolve_base(top: &Path, base: &str) -> Result<Option<(String, String)>, String> {
+    let name = if base.is_empty() {
+        match default_branch(top) {
+            Some(n) => n,
+            None => return Ok(None),
+        }
+    } else {
+        base.to_string()
+    };
+    if !has_head(top) {
+        return Ok(None);
+    }
+    let out = git_bytes(&["merge-base", &name, "HEAD"], top)?;
+    let sha = String::from_utf8_lossy(&out).trim().to_string();
+    if sha.is_empty() {
+        return Err(format!("no merge base between {name} and HEAD"));
+    }
+    let short: String = sha.chars().take(7).collect();
+    Ok(Some((sha, format!("{name} @ {short}"))))
+}
+
+fn ref_exists(top: &Path, name: &str) -> bool {
+    git_bytes(&["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")], top).is_ok()
+}
+
+/// The repo's default branch: what `origin/HEAD` names (its local branch when there is one, since
+/// that is where the work lands first), else `main` or `master`.
+fn default_branch(top: &Path) -> Option<String> {
+    let mut candidates = Vec::new();
+    if let Ok(out) = git_bytes(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], top) {
+        let full = String::from_utf8_lossy(&out).trim().to_string();
+        if let Some(short) = full.strip_prefix("origin/") {
+            candidates.push(short.to_string());
+        }
+        candidates.push(full);
+    }
+    for n in ["main", "master", "origin/main", "origin/master"] {
+        candidates.push(n.to_string());
+    }
+    candidates.into_iter().find(|c| ref_exists(top, c))
+}
+
+/// One `git diff --name-status -z` entry: its letter, path and, for a rename, the path it had.
+fn parse_name_status(raw: &[u8]) -> Vec<(char, String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut parts = raw.split(|b| *b == 0).filter(|p| !p.is_empty());
+    while let Some(code) = parts.next() {
+        let letter = code[0] as char;
+        let Some(first) = parts.next() else { break };
+        let first = String::from_utf8_lossy(first).to_string();
+        if letter == 'R' || letter == 'C' {
+            let Some(to) = parts.next() else { break };
+            out.push((letter, String::from_utf8_lossy(to).to_string(), Some(first)));
+        } else {
+            out.push((letter, first, None));
+        }
+    }
+    out
+}
+
+/// The changed files against `base` (see `resolve_base`); `None` is against `HEAD`.
+pub fn changes_against(worktree: &str, base: Option<&str>) -> Result<ChangeList, String> {
     let top = top_level(worktree)?;
+    if let Some(base) = base {
+        if let Some((sha, label)) = resolve_base(&top, base)? {
+            return branch_changes(&top, &sha, label);
+        }
+    }
     let status = git_bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"], &top)?;
     let head = has_head(&top);
     let counts = if head {
@@ -220,7 +300,62 @@ pub fn changes(worktree: &str) -> Result<ChangeList, String> {
             binary,
         });
     }
-    Ok(ChangeList { root: top.to_string_lossy().to_string(), files, truncated })
+    Ok(ChangeList { root: top.to_string_lossy().to_string(), files, truncated, base: None })
+}
+
+/// Everything that differs from `sha` in the working tree: the branch's commits, its staged and
+/// unstaged edits and its untracked files.
+fn branch_changes(top: &Path, sha: &str, label: String) -> Result<ChangeList, String> {
+    let tracked = parse_name_status(&git_bytes(&["diff", sha, "--name-status", "-z", "-M"], top)?);
+    let counts = parse_numstat(&git_bytes(&["diff", sha, "--numstat", "-z", "-M"], top).unwrap_or_default());
+    let status = parse_status(&git_bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"], top)?);
+    let mut rows: Vec<(String, Option<String>, &str)> = Vec::new();
+    for (letter, path, from) in tracked {
+        let word = match letter {
+            'A' | 'C' => "added",
+            'D' => "deleted",
+            'R' => "renamed",
+            'U' => "conflicted",
+            _ => "modified",
+        };
+        rows.push((path, from, word));
+    }
+    for e in &status {
+        match status_word(e.x, e.y) {
+            Some("untracked") => rows.push((e.path.clone(), None, "untracked")),
+            Some("conflicted") => {
+                if let Some(r) = rows.iter_mut().find(|r| r.0 == e.path) {
+                    r.2 = "conflicted";
+                } else {
+                    rows.push((e.path.clone(), None, "conflicted"));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut files = Vec::new();
+    let mut truncated = false;
+    for (path, from, word) in rows {
+        if files.len() == MAX_FILES {
+            truncated = true;
+            break;
+        }
+        let count = counts.iter().find(|c| c.path == path);
+        let (mut additions, mut deletions, mut binary) =
+            (count.and_then(|c| c.added), count.and_then(|c| c.removed), count.is_some_and(|c| c.added.is_none()));
+        if count.is_none() && word == "untracked" {
+            if let Ok(bytes) = std::fs::read(top.join(&path)) {
+                binary = looks_binary(&bytes);
+                if !binary {
+                    additions = Some(line_count(&bytes));
+                    deletions = Some(0);
+                }
+            }
+        }
+        files.push(ChangedFile { path, old_path: from, status: word.to_string(), additions, deletions, binary });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(ChangeList { root: top.to_string_lossy().to_string(), files, truncated, base: Some(label) })
 }
 
 /// `file` as a path under the tree: relative, and never climbing out of it.
@@ -269,12 +404,12 @@ fn working_side(top: &Path, rel: &Path) -> Result<Side, String> {
     std::fs::read(&full).map(side_of).map_err(|e| format!("{}: {e}", rel.display()))
 }
 
-/// `HEAD`'s side of `rel`: empty when `HEAD` has no such file (or there is no `HEAD`).
-fn head_side(top: &Path, rel: &str) -> Side {
+/// `rev`'s side of `rel`: empty when `rev` has no such file (or there is no `HEAD`).
+fn head_side(top: &Path, rev: &str, rel: &str) -> Side {
     if !has_head(top) {
         return Side::Text(String::new());
     }
-    match git_bytes(&["show", &format!("HEAD:{rel}")], top) {
+    match git_bytes(&["show", &format!("{rev}:{rel}")], top) {
         Ok(bytes) => side_of(bytes),
         Err(_) => Side::Text(String::new()),
     }
@@ -282,8 +417,13 @@ fn head_side(top: &Path, rel: &str) -> Side {
 
 /// Both sides of `file` in the tree `worktree` is in; `old_path` is where a renamed file was.
 pub fn sides(worktree: &str, file: &str, old_path: Option<&str>) -> Result<FileSides, String> {
+    sides_against(worktree, file, old_path, None)
+}
+
+/// As `sides`, the original taken from the merge base `changes_against` compares to.
+pub fn sides_against(worktree: &str, file: &str, old_path: Option<&str>, base: Option<&str>) -> Result<FileSides, String> {
     let rel = safe_relative(file)?;
-    let base = match old_path {
+    let base_path = match old_path {
         Some(o) => {
             safe_relative(o)?;
             o
@@ -291,7 +431,12 @@ pub fn sides(worktree: &str, file: &str, old_path: Option<&str>) -> Result<FileS
         None => file,
     };
     let top = top_level(worktree)?;
-    let original = head_side(&top, &base.replace('\\', "/"));
+    let rev = match base {
+        Some(b) => resolve_base(&top, b)?.map(|(sha, _)| sha),
+        None => None,
+    }
+    .unwrap_or_else(|| "HEAD".to_string());
+    let original = head_side(&top, &rev, &base_path.replace('\\', "/"));
     let modified = working_side(&top, rel)?;
     let mut out = FileSides::default();
     for (side, slot) in [(original, &mut out.original), (modified, &mut out.modified)] {
@@ -309,13 +454,18 @@ pub fn sides(worktree: &str, file: &str, old_path: Option<&str>) -> Result<FileS
 }
 
 #[tauri::command]
-pub async fn worktree_diff_files(worktree: String) -> Result<ChangeList, String> {
-    tauri::async_runtime::spawn_blocking(move || changes(&worktree)).await.map_err(|e| e.to_string())?
+pub async fn worktree_diff_files(worktree: String, base: Option<String>) -> Result<ChangeList, String> {
+    tauri::async_runtime::spawn_blocking(move || changes_against(&worktree, base.as_deref())).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn worktree_diff_file(worktree: String, file: String, old_path: Option<String>) -> Result<FileSides, String> {
-    tauri::async_runtime::spawn_blocking(move || sides(&worktree, &file, old_path.as_deref()))
+pub async fn worktree_diff_file(
+    worktree: String,
+    file: String,
+    old_path: Option<String>,
+    base: Option<String>,
+) -> Result<FileSides, String> {
+    tauri::async_runtime::spawn_blocking(move || sides_against(&worktree, &file, old_path.as_deref(), base.as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -482,5 +632,90 @@ mod tests {
     fn a_folder_that_is_no_repo_is_an_error() {
         let dir = temp_dir("wtdiff-norepo");
         assert!(changes(&s(&dir)).is_err());
+    }
+
+    /// A repo on `main` with a child branch that committed one edit, one add and one delete, then
+    /// left an uncommitted edit and an untracked file.
+    fn child_repo(tag: &str) -> PathBuf {
+        let root = repo(tag);
+        sh_git(&["checkout", "-q", "-b", "feat/x/child"], &root);
+        std::fs::write(root.join("edit.txt"), "one\ntwo\nthree\n").unwrap();
+        std::fs::write(root.join("added.txt"), "a\n").unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+        sh_git(&["add", "-A"], &root);
+        sh_git(&["commit", "-q", "-m", "child work"], &root);
+        // The base moves on after the cut: its own change is not the child's.
+        sh_git(&["checkout", "-q", "main"], &root);
+        std::fs::write(root.join("keep.txt"), "main moved\n").unwrap();
+        sh_git(&["commit", "-qam", "main moves"], &root);
+        sh_git(&["checkout", "-q", "feat/x/child"], &root);
+        std::fs::write(root.join("added.txt"), "a\nb\n").unwrap();
+        std::fs::write(root.join("loose.txt"), "x\ny\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn a_child_diff_covers_its_commits_and_its_uncommitted_work() {
+        let root = child_repo("wtdiff-child");
+        for base in [Some(""), Some("main")] {
+            let list = changes_against(&s(&root), base).unwrap();
+            let by = |p: &str| list.files.iter().find(|f| f.path == p).unwrap_or_else(|| panic!("{p} listed: {:?}", list.files));
+            assert_eq!(by("edit.txt").status, "modified");
+            assert_eq!(by("edit.txt").additions, Some(1));
+            assert_eq!(by("added.txt").status, "added");
+            assert_eq!(by("added.txt").additions, Some(2));
+            assert_eq!(by("gone.txt").status, "deleted");
+            assert_eq!(by("loose.txt").status, "untracked");
+            assert!(list.files.iter().all(|f| f.path != "keep.txt"), "the base's own moves are not the child's");
+            assert!(list.base.as_deref().is_some_and(|b| b.starts_with("main @ ")), "{:?}", list.base);
+        }
+        // Against HEAD the same tree shows only the uncommitted work.
+        let head = changes(&s(&root)).unwrap();
+        assert!(head.files.iter().all(|f| f.path != "edit.txt"));
+        assert!(head.base.is_none());
+    }
+
+    #[test]
+    fn a_child_diffs_read_the_merge_base_side() {
+        let root = child_repo("wtdiff-child-sides");
+        let edit = sides_against(&s(&root), "edit.txt", None, Some("")).unwrap();
+        assert_eq!((edit.original.as_str(), edit.modified.as_str()), ("one\ntwo\n", "one\ntwo\nthree\n"));
+        let gone = sides_against(&s(&root), "gone.txt", None, Some("")).unwrap();
+        assert_eq!((gone.original.as_str(), gone.modified.as_str()), ("bye\n", ""));
+        let keep = sides_against(&s(&root), "keep.txt", None, Some("")).unwrap();
+        assert_eq!(keep.original, "same\n");
+    }
+
+    #[test]
+    fn a_renamed_file_is_one_entry_against_the_base() {
+        let root = repo("wtdiff-child-rename");
+        sh_git(&["checkout", "-q", "-b", "feat/x/child"], &root);
+        sh_git(&["mv", "old.txt", "new.txt"], &root);
+        sh_git(&["commit", "-qm", "rename"], &root);
+        let list = changes_against(&s(&root), Some("")).unwrap();
+        assert_eq!(list.files.len(), 1, "{:?}", list.files);
+        assert_eq!(list.files[0].status, "renamed");
+        assert_eq!(list.files[0].old_path.as_deref(), Some("old.txt"));
+        let side = sides_against(&s(&root), "new.txt", Some("old.txt"), Some("")).unwrap();
+        assert_eq!(side.original, "moved\nalong\n");
+    }
+
+    #[test]
+    fn on_the_default_branch_or_with_none_the_diff_is_the_uncommitted_work() {
+        let root = repo("wtdiff-child-main");
+        std::fs::write(root.join("edit.txt"), "changed\n").unwrap();
+        let list = changes_against(&s(&root), Some("")).unwrap();
+        assert_eq!(list.files.len(), 1);
+        // No default branch to find (a repo whose only branch is another name).
+        sh_git(&["branch", "-m", "trunk"], &root);
+        let list = changes_against(&s(&root), Some("")).unwrap();
+        assert_eq!(list.files.len(), 1);
+        assert!(list.base.is_none());
+    }
+
+    #[test]
+    fn an_unknown_base_is_an_error() {
+        let root = repo("wtdiff-child-bad");
+        assert!(changes_against(&s(&root), Some("no-such-branch")).is_err());
     }
 }

@@ -12,18 +12,19 @@ export type Sides = { data: FileSides | null; loading: boolean; error: string | 
 export type Sent = { sending: boolean; ok: string | null; error: string | null }
 
 export type DiffState = {
-  /** By worktree path. */
+  /** By `scopeOf(worktree, base)`. */
   changes: Record<string, Changes>
-  /** By `sidesKey(worktree, file)`. */
+  /** By `sidesKey(scopeOf(worktree, base), file)`. */
   sides: Record<string, Sides>
   /** Every worktree's notes, oldest first. Kept across launches. */
   comments: DiffComment[]
   /** By worktree path. */
   sent: Record<string, Sent>
-  /** Read the worktree's changed files again, and forget the sides read before. */
-  load(worktree: string): Promise<void>
+  /** Read the worktree's changed files again, and forget the sides read before. With `base`, the
+   *  branch's changes since it was cut from there (empty: the default branch). */
+  load(worktree: string, base?: string): Promise<void>
   /** Read one file's sides, unless they are read already (`force`: again). */
-  loadSides(worktree: string, file: string, oldPath: string | null, force?: boolean): Promise<void>
+  loadSides(worktree: string, file: string, oldPath: string | null, force?: boolean, base?: string): Promise<void>
   addComment(c: Omit<DiffComment, 'id' | 'createdAt'>): DiffComment
   updateComment(id: string, body: string): void
   deleteComment(id: string): void
@@ -32,6 +33,10 @@ export type DiffState = {
    *  nothing went. */
   send(worktree: string, ids?: readonly string[]): Promise<boolean>
 }
+
+/** Where a worktree's changes are kept: the uncommitted ones under the path itself, a branch's
+ *  under the path and its base, so the two views of one worktree never overwrite each other. */
+export const scopeOf = (worktree: string, base?: string) => (base === undefined ? worktree : `${worktree}\u0001${base}`)
 
 export const sidesKey = (worktree: string, file: string) => `${worktree}\0${file}`
 
@@ -99,29 +104,30 @@ export function createDiffStore(deps: DiffDeps): StoreApi<DiffState> {
     comments: kept,
     sent: {},
 
-    async load(worktree) {
-      const current = turn(`files\0${worktree}`)
+    async load(worktree, base) {
+      const scope = scopeOf(worktree, base)
+      const current = turn(`files\0${scope}`)
       set((s) => ({
-        changes: { ...s.changes, [worktree]: { list: s.changes[worktree]?.list ?? null, loading: true, error: null } },
+        changes: { ...s.changes, [scope]: { list: s.changes[scope]?.list ?? null, loading: true, error: null } },
         // The sides read before may be stale now; each is read again when shown.
-        sides: Object.fromEntries(Object.entries(s.sides).filter(([k]) => !k.startsWith(`${worktree}\0`))),
+        sides: Object.fromEntries(Object.entries(s.sides).filter(([k]) => !k.startsWith(`${scope}\0`))),
       }))
       try {
-        const list = await deps.client.files(worktree)
-        if (current()) set((s) => ({ changes: { ...s.changes, [worktree]: { list, loading: false, error: null } } }))
+        const list = await (base === undefined ? deps.client.files(worktree) : deps.client.files(worktree, base))
+        if (current()) set((s) => ({ changes: { ...s.changes, [scope]: { list, loading: false, error: null } } }))
       } catch (e) {
-        if (current()) set((s) => ({ changes: { ...s.changes, [worktree]: { list: s.changes[worktree]?.list ?? null, loading: false, error: String(e) } } }))
+        if (current()) set((s) => ({ changes: { ...s.changes, [scope]: { list: s.changes[scope]?.list ?? null, loading: false, error: String(e) } } }))
       }
     },
 
-    async loadSides(worktree, file, oldPath, force = false) {
-      const key = sidesKey(worktree, file)
+    async loadSides(worktree, file, oldPath, force = false, base) {
+      const key = sidesKey(scopeOf(worktree, base), file)
       const had = get().sides[key]
       if (had && !force && (had.data || had.loading)) return
       const current = turn(`sides\0${key}`)
       set((s) => ({ sides: { ...s.sides, [key]: { data: had?.data ?? null, loading: true, error: null } } }))
       try {
-        const data = await deps.client.sides(worktree, file, oldPath)
+        const data = await (base === undefined ? deps.client.sides(worktree, file, oldPath) : deps.client.sides(worktree, file, oldPath, base))
         if (current()) set((s) => ({ sides: { ...s.sides, [key]: { data, loading: false, error: null } } }))
       } catch (e) {
         if (current()) set((s) => ({ sides: { ...s.sides, [key]: { data: null, loading: false, error: String(e) } } }))
