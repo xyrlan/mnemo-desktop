@@ -16,6 +16,18 @@ read it first.
   - `childAgent(child)`, the answers for the three kinds of block;
   - `ChildDiff({ worktree, base })`.
 
+All of them landed. Build on what is on `main`:
+
+- **#264:** a child on `feat/<feature>/<piece>` belongs to the mission of `<feature>`, with
+  `contract_path` empty when no contract file was found.
+- **#265:** `ChildDiff({ worktree, base })` in `src/diff/ChildDiff.tsx`.
+- **#266:** `ChildConversation({ child, markers?, onOpenTerminal? })` in
+  `src/mission/conversation.tsx`. It is the child's conversation with its answers already
+  wired (`childAgent`, `childStatus`, the default "As me" route). The detail's Conversation
+  embeds it.
+- **#267, #269 and #270:** tab groups, each group with its own tab row. `openView(…, 'split-row')` is
+  "to the side".
+
 Re-read the boundaries below against what those waves actually landed before dispatching.
 
 This contract reaches `main` as its own squash. Before your first push, run
@@ -38,6 +50,12 @@ The Dispatch tab, as the spec's decisions 3 to 6 describe:
 **Opening.** The tab opens by itself, to the right of the parent's terminal with focus left
 where it was, when a parent dispatches a wave: new children whose parent session runs in a
 workspace. It opens once per wave. After the user closes it, only `openDispatch` brings it back.
+
+**Finished waves.** The snapshot keeps a mission for as long as any of its pieces has a PR,
+merged ones included (`mission.rs` counts a merged PR as delivered). Without a rule, every
+old wave would stay in the tab forever. A wave whose PRs are all merged or closed, and none
+of whose children is live, leaves the tab. A wave with work still open folds the pieces that
+are done.
 
 **Parent.** `parentWorktree` is the spec's parent workspace: the worktree holding the cwd of
 the child's `parent_session`, else the repo's main checkout.
@@ -70,7 +88,7 @@ its three signatures in a way that still builds while `src/dispatch/` does not e
 wires itself once it merges (memory `glob-import-a-sibling-piece-not-yet-landed`). Test
 against stand-ins.
 
-- **files:** src/sidebar/, src/dashboard/store.ts, src/dashboard/drawer.test.tsx, src/dashboard/view.test.tsx, src/notify/view.tsx, src/notify/notifier.ts, src/notify/notifier.test.ts, tools/preview/scenarios/left-sidebar.mjs
+- **files:** src/sidebar/, src/dashboard/, src/notify/, tools/preview/scenarios/left-sidebar.mjs
 - **exposes:** nothing
 - **consumes:** `openDispatch(parent: string, child?: string): void` from dispatch-tab, `parentWorktree(childId: string): string | null` from dispatch-tab, `useWaveLines(parent: string): WaveLine[]` from dispatch-tab
 - **model:** opus
