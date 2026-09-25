@@ -7,7 +7,7 @@ import { cn } from '@/ui/cn'
 import type { PaneViewProps } from '../panes/registry'
 import type { ChangedFile } from './client'
 import type { DiffEditorProps } from './DiffEditor'
-import { sidesKey, type DiffState } from './store'
+import { scopeOf, sidesKey, type DiffState } from './store'
 import './diff.css'
 
 /** Monaco loads with the first diff shown, never at boot. */
@@ -30,6 +30,16 @@ export type DiffPaneProps = PaneViewProps & {
   store: StoreApi<DiffState>
   /** The Commit… button: the commit composer for the worktree shown. */
   onCommit(): void
+}
+
+export type DiffViewProps = {
+  store: StoreApi<DiffState>
+  worktree: string
+  /** Show the branch's changes since it was cut from here (empty: the default branch), its commits
+   *  and its uncommitted work, not only the uncommitted work. */
+  base?: string
+  /** The Commit… button; left out, there is none. */
+  onCommit?: () => void
 }
 
 function FileRow({ file, notes, on, onPick }: { file: ChangedFile; notes: number; on: boolean; onPick(): void }) {
@@ -85,7 +95,14 @@ function Notice({ children, tone = 'muted' }: { children: React.ReactNode; tone?
  *  worktree's agent together, in one message; Commit… opens the commit composer. */
 export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
   const worktree = typeof props.worktree === 'string' ? props.worktree : ''
-  const changes = useStore(store, (s) => s.changes[worktree])
+  return <DiffView store={store} worktree={worktree} onCommit={onCommit} />
+}
+
+/** `DiffPane`'s body for any worktree, and for a branch's changes when given a `base`: the
+ *  child's diff in the Dispatch tab. */
+export function DiffView({ store, worktree, base, onCommit }: DiffViewProps) {
+  const scope = scopeOf(worktree, base)
+  const changes = useStore(store, (s) => s.changes[scope])
   const allComments = useStore(store, (s) => s.comments)
   const sent = useStore(store, (s) => s.sent[worktree])
   const [picked, setPicked] = useState<string | null>(null)
@@ -94,7 +111,7 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
 
   const files = changes?.list?.files
   const file = files?.find((f) => f.path === picked) ?? files?.[0] ?? null
-  const sides = useStore(store, (s) => (file ? s.sides[sidesKey(worktree, file.path)] : undefined))
+  const sides = useStore(store, (s) => (file ? s.sides[sidesKey(scope, file.path)] : undefined))
   const comments = useMemo(() => allComments.filter((c) => c.worktreeId === worktree), [allComments, worktree])
   const notesByFile = useMemo(() => {
     const m = new Map<string, number>()
@@ -104,12 +121,12 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
 
   useEffect(() => {
     if (!worktree) return
-    void store.getState().load(worktree)
+    void store.getState().load(worktree, base)
     // An agent works while the diff is open: coming back to the window reads the changes again.
-    const again = () => void store.getState().load(worktree)
+    const again = () => void store.getState().load(worktree, base)
     window.addEventListener('focus', again)
     return () => window.removeEventListener('focus', again)
-  }, [store, worktree])
+  }, [store, worktree, base])
 
   // A re-read list hands a new but equal file, so the file is keyed by its paths; its sides are
   // dropped on every re-read, and read again here.
@@ -117,9 +134,9 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
   const unread = sides === undefined
   useEffect(() => {
     if (!file || !worktree) return
-    void store.getState().loadSides(worktree, file.path, file.oldPath)
+    void store.getState().loadSides(worktree, file.path, file.oldPath, false, base)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, worktree, fileKey, unread])
+  }, [store, worktree, base, fileKey, unread])
 
   if (!worktree) {
     return (
@@ -136,7 +153,7 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
   let body: React.ReactNode
   if (changes?.error && !changes.list) body = <Notice tone="error">Could not read the changes: {changes.error}</Notice>
   else if (!files) body = <Notice>Reading the changes…</Notice>
-  else if (!file) body = <Notice>No uncommitted changes in {folderName(worktree)}.</Notice>
+  else if (!file) body = <Notice>{base === undefined ? `No uncommitted changes in ${folderName(worktree)}.` : `${folderName(worktree)} has no changes against ${changes?.list?.base?.split(' @ ')[0] || 'its base'}.`}</Notice>
   else if (sides?.error) body = <Notice tone="error">Could not read {file.path}: {sides.error}</Notice>
   else if (!sides?.data) body = <Notice>Reading {baseOf(file.path)}…</Notice>
   else if (sides.data.binary || file.binary) body = <Notice>{file.path} is a binary file: no text diff to show.</Notice>
@@ -165,10 +182,15 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
     <div className="pane-body diff-pane flex flex-col bg-background text-foreground" data-ui>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
         <GitCompareArrows className="size-4 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-[13px] font-medium">Changes</span>
+        <span className="shrink-0 text-[13px] font-medium">{base === undefined ? 'Changes' : 'Branch changes'}</span>
         <span className="min-w-0 truncate text-[12px] text-muted-foreground" title={worktree}>
           {folderName(worktree)}
         </span>
+        {changes?.list?.base && (
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title="The merge base every file is compared to">
+            vs {changes.list.base}
+          </span>
+        )}
         {files && files.length > 0 && (
           <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
             {files.length} {files.length === 1 ? 'file' : 'files'}
@@ -195,7 +217,7 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
             className="text-muted-foreground hover:text-foreground"
             aria-label="Refresh"
             title="Read the changes again"
-            onClick={() => void st.load(worktree)}
+            onClick={() => void st.load(worktree, base)}
           >
             <RotateCw className={cn(loading && 'animate-spin')} />
           </Button>
@@ -211,10 +233,12 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
             <SendHorizontal />
             {sent?.sending ? 'Sending…' : `Send ${comments.length} ${comments.length === 1 ? 'note' : 'notes'}`}
           </Button>
-          <Button type="button" variant="default" size="xs" data-action="commit" disabled={!files?.length} onClick={onCommit}>
-            <GitCommitHorizontal />
-            Commit…
-          </Button>
+          {onCommit && (
+            <Button type="button" variant="default" size="xs" data-action="commit" disabled={!files?.length} onClick={onCommit}>
+              <GitCommitHorizontal />
+              Commit…
+            </Button>
+          )}
         </div>
       </div>
       {(sent?.ok || sent?.error || changes?.list?.truncated || (changes?.error && changes.list)) && (
