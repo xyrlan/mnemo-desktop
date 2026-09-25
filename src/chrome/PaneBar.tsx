@@ -66,8 +66,7 @@ function usePulseFlash(id: PaneId): { live: Pulse | undefined; count: number } {
 /** The header of every pane, in Orca's pane-title look (chrome.css): drag handle, repo · branch,
  *  Claude tokens, face toggle, close. Pressing it focuses the pane without taking keyboard focus
  *  from a terminal that already has it. It also learns the Claude session a terminal runs
- *  (`useSessionLearn`). `data-ui`: new chrome, so inside the current views' `.app` scope it gets
- *  the new tokens and base styles back (theme.css). */
+ *  (`useSessionLearn`). */
 export default function PaneBar({ id, client = tauriChrome, sessions = tauriSession }: { id: PaneId; client?: ChromeClient; sessions?: SessionClient }) {
   const ref = useRef<HTMLDivElement>(null)
   useSessionLearn(id, sessions)

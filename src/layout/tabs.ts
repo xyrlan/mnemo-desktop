@@ -2,9 +2,8 @@ import type { Pane, Tab } from './store'
 import { leaves, type PaneId, type Side } from './tree'
 import type { Snapshot } from '../mission/types'
 import type { HomeSnapshot } from '../home/types'
-import { paneCwd, repoOfCwd } from '../mission/scope'
+import { paneCwd } from '../mission/scope'
 import { barInfo, paneParent } from '../chrome/info'
-import { repoAccent } from '../home/repo-color'
 import { dropPane, type Zone } from '../chrome/drag'
 
 /** What Claude Code in a tab is doing, from its parent row in the mission snapshot. */
@@ -87,14 +86,6 @@ export function groupLabel(tab: Tab, panes: Record<number, Pane>, snap: Snapshot
   const states = ids.map((id) => paneClaude(panes[id], snap))
   const state = LOUDEST.find((s) => states.includes(s))
   return { name: tab.name || 'group', sub: `${ids.length} panes`, ...(state ? { state } : {}) }
-}
-
-/** The accent a pane's line carries: its repo's, the very colour the lens gives that repo. A pane
- *  in no repo the snapshot knows is keyed by its own directory instead, so two panes sitting in
- *  one folder still agree; a pane in no directory at all (a vault, a cockpit) has no accent. */
-export function paneAccent(pane: Pane | undefined, snap: Snapshot): string | undefined {
-  const cwd = paneCwd(pane, snap)
-  return cwd ? repoAccent(repoOfCwd(snap, cwd)?.root ?? cwd) : undefined
 }
 
 /** What letting a dragged pane go over a sidebar line does. Inside the line's own group it is the
