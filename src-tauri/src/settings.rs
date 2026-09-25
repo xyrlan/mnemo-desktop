@@ -23,6 +23,19 @@ pub fn write(v: &serde_json::Value) -> Result<(), String> {
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
+/// The saved projects (`Settings['projects']`): their folders, as the front wrote them. Anything
+/// that is not a non-empty string is left out.
+pub fn projects() -> Vec<String> {
+    projects_in(&read())
+}
+
+fn projects_in(v: &serde_json::Value) -> Vec<String> {
+    v.get("projects")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().filter_map(|p| p.as_str()).filter(|p| !p.is_empty()).map(String::from).collect())
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn settings_read() -> serde_json::Value {
     read()
@@ -31,4 +44,17 @@ pub fn settings_read() -> serde_json::Value {
 #[tauri::command]
 pub fn settings_write(value: serde_json::Value) -> Result<(), String> {
     write(&value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projects_keep_only_non_empty_strings() {
+        let v = serde_json::json!({ "projects": ["/opt/src/a", "", 3, null, "/Volumes/w/b"] });
+        assert_eq!(projects_in(&v), vec!["/opt/src/a", "/Volumes/w/b"]);
+        assert!(projects_in(&serde_json::json!({})).is_empty());
+        assert!(projects_in(&serde_json::json!({ "projects": "/opt/src/a" })).is_empty());
+    }
 }
