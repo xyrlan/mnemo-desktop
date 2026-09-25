@@ -1,0 +1,57 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRRT_kwDOA1",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src-tauri/src/checks.rs",
+              "line": 42,
+              "originalLine": 40,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "octo-reviewer" },
+                    "body": "This runs `gh` with no timeout: a hung network call freezes the tab.",
+                    "createdAt": "2026-09-24T16:58:10Z",
+                    "url": "https://github.com/xyrlan/mnemo-desktop/pull/240#discussion_r1",
+                    "diffHunk": "@@ -30,6 +30,14 @@ use std::path::Path;\n+fn gh(args: &[&str]) -> String {\n+    let out = crate::proc::command(\"gh\")\n+        .args(args)\n+        .output()"
+                  },
+                  {
+                    "author": { "login": "xyrlan" },
+                    "body": "Good catch, will add one.",
+                    "createdAt": "2026-09-24T17:00:00Z",
+                    "url": "https://github.com/xyrlan/mnemo-desktop/pull/240#discussion_r2",
+                    "diffHunk": "@@ -30,6 +30,14 @@ use std::path::Path;\n+fn gh(args: &[&str]) -> String {"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOA2",
+              "isResolved": true,
+              "isOutdated": true,
+              "path": "src/checks/model.ts",
+              "line": null,
+              "originalLine": 12,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": null,
+                    "body": "Typo in the label.",
+                    "createdAt": "2026-09-24T16:57:00Z",
+                    "url": "https://github.com/xyrlan/mnemo-desktop/pull/240#discussion_r3",
+                    "diffHunk": "@@ -10,3 +10,3 @@\n-  return 'Sucessful'\n+  return 'Successful'"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

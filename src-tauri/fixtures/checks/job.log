@@ -1,0 +1,87 @@
+﻿2026-09-24T16:16:12.9540395Z Current runner version: '2.337.0'
+2026-09-24T16:16:12.9557454Z ##[group]Runner Image Provisioner
+2026-09-24T16:16:12.9557947Z Hosted Compute Agent
+2026-09-24T16:18:07.6860211Z ##[group]Run cargo test --manifest-path src-tauri/Cargo.toml
+2026-09-24T16:18:07.6860896Z [36;1mcargo test --manifest-path src-tauri/Cargo.toml[0m
+2026-09-24T16:18:07.6909502Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-09-24T16:18:07.6909715Z env:
+2026-09-24T16:18:07.6909890Z   CARGO_TARGET_DIR: D:\a\mnemo-desktop\mnemo-desktop/src-tauri/target
+2026-09-24T16:18:07.6910145Z   PNPM_HOME: C:\Users\runneradmin\setup-pnpm\node_modules\.bin
+2026-09-24T16:18:07.6910341Z   CARGO_HOME: C:\Users\runneradmin\.cargo
+2026-09-24T16:18:07.6910498Z   CARGO_INCREMENTAL: 0
+2026-09-24T16:23:18.2120029Z test vault::tests::strip_ansi_removes_csi_sequences_only ... ok
+2026-09-24T16:23:18.2136474Z test vault::tests::the_best_xp_only_climbs ... ok
+2026-09-24T16:23:18.2140559Z test vault::tests::the_inbox_counts_the_staged_pages_mnemo_inbox_lists ... ok
+2026-09-24T16:23:18.2142398Z test vault::tests::tiles_parse_the_numbers_mnemo_status_prints ... ok
+2026-09-24T16:23:18.2149277Z test vault::tests::tree_orders_shared_then_repos_then_noise_and_groups_by_type ... ok
+2026-09-24T16:23:18.2156438Z test vault::tests::tree_skips_inbox_index_files_briefings_and_home ... ok
+2026-09-24T16:23:18.2156733Z test vault::tests::vault_live ... ignored
+2026-09-24T16:23:18.2157978Z test vault::tests::wikilinks_take_the_target_and_skip_code_fences ... ok
+2026-09-24T16:23:18.2159239Z test voice::tests::languages_parse ... ok
+2026-09-24T16:23:18.2160813Z test voice::tests::mixes_interleaved_frames_to_their_mean ... ok
+2026-09-24T16:23:18.2610496Z test voice::tests::resample_filters_what_16k_cannot_hold_instead_of_aliasing ... ok
+2026-09-24T16:23:18.2840546Z test voice::tests::resample_keeps_length_ratio_and_passes_speech_band ... ok
+2026-09-24T16:23:18.2850218Z test voice::tests::silence_is_detected_and_speech_level_is_not ... ok
+2026-09-24T16:23:26.5554785Z test tools::tests::refresh_keeps_the_same_path_on_an_unchanged_machine ... ok
+2026-09-24T16:23:26.5603476Z test tools::tests::refresh_and_every_status_read_path_again ... ok
+2026-09-24T16:23:26.6375901Z test voice::tests::transcript_drops_non_speech_annotations ... ok
+2026-09-24T16:23:26.6526003Z test workspace::tests::a_session_with_a_process_is_live_and_a_finished_one_is_not ... ok
+2026-09-24T16:23:26.6807077Z test workspace::tests::missing_or_junk_file_reads_as_empty_object ... ok
+2026-09-24T16:23:26.6902513Z test workspace::tests::write_creates_the_folder_round_trips_and_leaves_no_temp_file ... ok
+2026-09-24T16:23:29.3360933Z test worktree::tests::create_list_and_remove_a_sibling_tree ... FAILED
+2026-09-24T16:23:30.0653298Z test worktree::tests::a_base_starts_the_new_branch_there ... ok
+2026-09-24T16:23:31.0731655Z test worktree::tests::create_refuses_what_it_should ... ok
+2026-09-24T16:23:31.1062539Z test worktree::tests::names_that_are_not_one_plain_segment_are_refused ... ok
+2026-09-24T16:23:31.1391849Z test worktree::tests::porcelain_keeps_main_first_and_drops_bare_and_prunable ... ok
+2026-09-24T16:23:32.6779216Z test voice::tests::transcribes_the_fixtures ... ok
+2026-09-24T16:23:32.7274670Z test worktree::tests::dispatched_is_the_dispatch_mark ... ok
+2026-09-24T16:23:32.8600339Z test worktree::tests::remove_refuses_main_strangers_and_paths_outside_the_parent ... FAILED
+2026-09-24T16:23:33.8974688Z test worktree::tests::worktreeinclude_copies_only_ignored_files_it_names ... ok
+2026-09-24T16:23:36.6243987Z test tools::tests::status_has_one_row_per_tool_in_order ... ok
+2026-09-24T16:23:36.6244333Z 
+2026-09-24T16:23:36.6244456Z failures:
+2026-09-24T16:23:36.6244598Z 
+2026-09-24T16:23:36.6244847Z ---- worktree::tests::create_list_and_remove_a_sibling_tree stdout ----
+2026-09-24T16:23:36.6245135Z 
+2026-09-24T16:23:36.6245835Z thread 'worktree::tests::create_list_and_remove_a_sibling_tree' (9112) panicked at src\worktree.rs:377:9:
+2026-09-24T16:23:36.6246371Z assertion `left == right` failed
+2026-09-24T16:23:36.6247067Z   left: "C:/Users/runneradmin/AppData/Local/Temp/mnemo-test-wt-cycle-18d84e5b7c1759b4-69/repo-wt-task"
+2026-09-24T16:23:36.6247799Z  right: "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\mnemo-test-wt-cycle-18d84e5b7c1759b4-69\\repo-wt-task"
+2026-09-24T16:23:36.6249128Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-09-24T16:23:36.6249476Z 
+2026-09-24T16:23:36.6249828Z ---- worktree::tests::remove_refuses_main_strangers_and_paths_outside_the_parent stdout ----
+2026-09-24T16:23:36.6250202Z 
+2026-09-24T16:23:36.6250699Z thread 'worktree::tests::remove_refuses_main_strangers_and_paths_outside_the_parent' (3964) panicked at src\worktree.rs:323:9:
+2026-09-24T16:23:36.6252270Z git ["worktree", "add", "-q", "-b", "far", "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\mnemo-test-wt-far-18d84e5ce6eeb628-75\\far"]: fatal: could not create leading directories of '//?/C:/Users/runneradmin/AppData/Local/Temp/mnemo-test-wt-far-18d84e5ce6eeb628-75/far/.git': Invalid argument
+2026-09-24T16:23:36.6253308Z 
+2026-09-24T16:23:36.6253314Z 
+2026-09-24T16:23:36.6253318Z 
+2026-09-24T16:23:36.6253412Z failures:
+2026-09-24T16:23:36.6253816Z     worktree::tests::create_list_and_remove_a_sibling_tree
+2026-09-24T16:23:36.6254320Z     worktree::tests::remove_refuses_main_strangers_and_paths_outside_the_parent
+2026-09-24T16:23:36.6254650Z 
+2026-09-24T16:23:36.6255035Z test result: FAILED. 280 passed; 2 failed; 10 ignored; 0 measured; 0 filtered out; finished in 24.09s
+2026-09-24T16:23:36.6255419Z 
+2026-09-24T16:23:36.6282970Z [1m[91merror[0m: test failed, to rerun pass `--lib`
+2026-09-24T16:23:36.7179273Z ##[error]Process completed with exit code 1.
+2026-09-24T16:23:36.7346745Z Post job cleanup.
+2026-09-24T16:23:36.8535620Z Pruning is unnecessary.
+2026-09-24T16:23:36.8800404Z Post job cleanup.
+2026-09-24T16:23:37.0029121Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-24T16:23:37.0238108Z git version 2.55.0.windows.5
+2026-09-24T16:23:37.0322615Z Temporarily overriding HOME='D:\a\_temp\0431eaa4-35e5-46ab-974b-a0354354ec47' before making global git config changes
+2026-09-24T16:23:37.0323347Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-24T16:23:37.0342493Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\mnemo-desktop\mnemo-desktop
+2026-09-24T16:23:37.0600056Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-24T16:23:37.0897025Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-24T16:23:37.5088320Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-24T16:23:37.5285569Z http.https://github.com/.extraheader
+2026-09-24T16:23:37.5343403Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-09-24T16:23:37.5653739Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-24T16:23:38.2196461Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-24T16:23:38.2432817Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-24T16:23:38.7634199Z Cleaning up orphan processes
+2026-09-24T16:23:38.7734593Z Terminate orphan process: pid (2796) (vctip)
+2026-09-24T16:23:38.7926363Z Terminate orphan process: pid (1232) (MSBuild)
+2026-09-24T16:23:38.7973076Z Terminate orphan process: pid (3620) (conhost)
+2026-09-24T16:23:38.8020518Z Terminate orphan process: pid (8876) (MSBuild)
