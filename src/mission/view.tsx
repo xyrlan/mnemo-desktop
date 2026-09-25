@@ -8,8 +8,7 @@ import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
 import { allChildren, childWord, isRecent, needKind, type TimelineLine } from './types'
-import { attachChild, MissionFooter, openMissionPane, ReplyBox } from './rows'
-import { chatParts } from './chat'
+import { attachChild, MissionFooter, openMissionPane } from './rows'
 import { AgentStateDot, type DotState } from '../dashboard/AgentStateDot'
 import { estimateUsd, fmtUsd } from './cost'
 import { statusMarkers } from './timeline'
@@ -83,8 +82,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   const word = child ? childWord(child) : 'stopped'
   // What the transcript cannot say: the snapshot knows whether the child is working or parked.
   const status: SessionStatus = { busy: word === 'active', waiting: word === 'BLOCKED' && child ? needKind(child) : null }
-  const parts = chatParts()
-  const footer = child && (parts ? <MissionFooter c={child} parts={parts} /> : <ReplyBox c={child} rows={3} className="mission-reply" />)
+  const footer = child && <MissionFooter c={child} />
   const folder = child?.cwd.split('/').pop()
   return (
     <div className="ms-pane" data-pane={paneId}>
@@ -184,10 +182,8 @@ register({
     const c = allChildren(missionStore.getState().snapshot).find((x) => childWord(x) === 'BLOCKED')
     if (!c) return
     openMissionPane(c)
-    // The pane mounts on the next frame; its composer (or the old reply box) takes the focus.
-    requestAnimationFrame(() =>
-      document.querySelector<HTMLElement>('.ms-composer textarea, .ms-composer [contenteditable="true"], .m-reply textarea')?.focus(),
-    )
+    // The pane mounts on the next frame; its composer takes the focus.
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('.ms-composer textarea, .ms-composer [contenteditable="true"]')?.focus())
   },
 })
 

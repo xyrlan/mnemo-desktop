@@ -34,20 +34,21 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }))
 // The composer and approval card are the chat-input piece's: stand-ins that keep the props the
-// pane handed them. `parts: null` is the pane before that piece lands.
+// pane handed them.
 type Props = Record<string, unknown>
-const chat = vi.hoisted(() => ({ parts: null as unknown, composer: null as null | Props, approval: null as null | Props }))
-vi.mock('./chat', () => ({ chatParts: () => chat.parts }))
-const stubs = {
+const chat = vi.hoisted(() => ({ composer: null as null | Props, approval: null as null | Props }))
+vi.mock('../chat-input/Composer', () => ({
   ChatComposer: (props: Props) => {
     chat.composer = props
     return <div className="composer-stub" data-placeholder={String(props.placeholder)} data-disabled={String(props.disabled)} />
   },
+}))
+vi.mock('../chat-input/ApprovalCard', () => ({
   ApprovalCard: (props: Props) => {
     chat.approval = props
     return <div className="approval-stub">{`${props.tool} | ${props.summary}`}</div>
   },
-}
+}))
 // Answering a prompt types into `claude attach`: recorded here, its outcome set per test.
 const answers = vi.hoisted(() => ({ calls: [] as [string, string][], phase: 'sent' as 'sent' | 'error' }))
 vi.mock('../cockpit/approve', async (orig) => ({
@@ -100,7 +101,6 @@ beforeEach(() => {
   memory.value = null
   conversation.props = null
   ipc.calls = []
-  chat.parts = stubs
   chat.composer = null
   chat.approval = null
   answers.calls = []
@@ -234,18 +234,6 @@ test('the status handed to the conversation follows the child: working, parked o
   expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: 'permission prompt' })).toEqual({ busy: false, waiting: 'permission' })
   expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: null })).toEqual({ busy: false, waiting: 'question' })
   expect(await statusOf({ state: 'done' })).toEqual({ busy: false, waiting: null })
-})
-
-test('before the chat-input piece lands, a blocked child keeps its reply box as the footer', async () => {
-  chat.parts = null
-  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
-  const Pane = paneView('mission')!
-  await act(async () => {
-    root.render(<Pane id={1} props={{ id: blocked.id }} />)
-  })
-  const reply = host.querySelector('.stub-footer .mission-reply')
-  expect(reply).not.toBeNull()
-  expect(reply?.textContent).toContain('may I add a crate?')
 })
 
 test('open terminal on the pending card attaches to the child beside the pane', async () => {

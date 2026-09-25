@@ -1,2 +1,2 @@
-.brand-wordmark { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+.brand-wordmark { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--brand); letter-spacing: .04em; }
 .brand-wordmark-mark { display: block; flex: 0 0 auto; }

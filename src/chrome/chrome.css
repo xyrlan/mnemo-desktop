@@ -1,17 +1,18 @@
 /* The pane frame: adapted from stablyai/orca src/renderer/src/assets/main.css
    (`.tab-group-split-resize-handle`) and terminal.css (`.tab-drop-overlay`, the pane title bar,
-   the drag source), and TabGroupPanel's focus dimming.
-
-   theme.css still carries the frame the current views were drawn with (`.pane`, `.pane-bar`,
-   `.divider`, all unlayered and global); every rule here is written to outrank it, so which of
-   the two stylesheets loads first does not matter. Colour is state or `--brand` only. */
+   the drag source), and TabGroupPanel's focus dimming. Colour is state or `--brand` only. */
 
 /* ── Panes ──────────────────────────────────────────── */
 
-/* No box around each pane: the seams between them are the resize handles' lines. */
-.split-root > .pane,
-.split-root > .pane.focused,
-.split-root > .pane.drop-target { border: 0; }
+/* A tab's panes and the dividers between them, each placed absolutely in the split root by
+   geometry.ts. No box around each pane: the seams between them are the resize handles' lines. */
+.split-root { position: relative; width: 100%; height: 100%; }
+.pane { position: absolute; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--background); outline: none; }
+/* A terminal is its own colour to the pane's edges: xterm paints `--bg` (src/theme.ts). */
+.pane:has(.xterm) { background: var(--bg); }
+.pane-content { position: relative; flex: 1 1 0; min-height: 0; padding: 4px; }
+.pane-body { position: relative; height: 100%; outline: none; }
+.pane .xterm { height: 100%; }
 
 /* With more than one pane, the ones without focus dim a little, so the focused one reads as
    selected; a lone pane has nothing to contrast with. */
@@ -23,10 +24,13 @@
 /* ── Resize handle ──────────────────────────────────── */
 
 /* A 6px transparent grab strip (geometry.ts GAP) drawing a 3px line in its middle. The line is
-   the ::after, so a background on the strip never hides it. */
-.split-root > .divider,
-.split-root > .divider:hover,
-.split-root > .divider.dragging { background: transparent; z-index: 3; }
+   the ::after, so a background on the strip never hides it. While one is dragged, the whole
+   window keeps its cursor. */
+.divider { position: absolute; z-index: 3; }
+.divider.row { cursor: col-resize; }
+.divider.col { cursor: row-resize; }
+body.resizing-row, body.resizing-row * { cursor: col-resize !important; user-select: none; }
+body.resizing-col, body.resizing-col * { cursor: row-resize !important; user-select: none; }
 .split-root > .divider::after {
   content: '';
   position: absolute;
@@ -43,6 +47,7 @@
 
 .pane > .pane-bar[data-ui] {
   --pane-bar-h: 24px;
+  position: relative;
   flex: 0 0 var(--pane-bar-h);
   height: var(--pane-bar-h);
   display: flex;
@@ -78,14 +83,19 @@
 .pane-bar[data-ui] .pane-bar-branch-row { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 3px; color: var(--muted-foreground); }
 .pane-bar[data-ui] .pane-bar-branch-icon { flex: 0 0 auto; width: 11px; height: 11px; }
 .pane-bar[data-ui] .pane-bar-branch { min-width: 0; color: inherit; overflow: hidden; text-overflow: ellipsis; }
-.pane-bar[data-ui] .pane-bar-branch::before { content: none; }
 .pane-bar[data-ui] .pane-bar-title { flex: 1 1 0; min-width: 0; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; }
 .pane-bar[data-ui] .pane-bar-tokens { flex: 0 0 auto; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
-/* The pulse glow and badge keep their tones (theme.css); only the fallback, which was the old
-   accent, becomes the brand. */
-.pane-bar[data-ui] .pane-bar-glow { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pulse-tone, var(--brand)) 28%, transparent), transparent); }
-.pane-bar[data-ui] .pane-bar-pulse { font: inherit; font-size: 11px; color: var(--muted-foreground); }
+/* pulse (#44): a mnemo event in this pane's repo glows the bar and names the rule for ~3 s, in
+   its kind's tone (the terminal's red, cyan, magenta); any other kind is the brand. */
+.pane-bar.pulse-enforce { --pulse-tone: var(--ansi-red); }
+.pane-bar.pulse-enrich { --pulse-tone: var(--ansi-cyan); }
+.pane-bar.pulse-tool { --pulse-tone: var(--ansi-magenta); }
+.pane-bar[data-ui] .pane-bar-glow { position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pulse-tone, var(--brand)) 28%, transparent), transparent); background-size: 200% 100%; animation: pane-bar-glow 3s ease-out forwards; }
+@keyframes pane-bar-glow { 0% { opacity: 0; background-position: 100% 0; } 12% { opacity: 1; } 100% { opacity: 0; background-position: -100% 0; } }
+.pane-bar[data-ui] .pane-bar-pulse { position: relative; flex: 0 1 auto; min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 5px; background: transparent; border: 1px solid transparent; border-radius: 9px; font: inherit; font-size: 11px; color: var(--muted-foreground); cursor: pointer; }
+.pane-bar[data-ui] .pane-bar-pulse-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar[data-ui] .pane-bar-pulse-count { flex: 0 0 auto; opacity: .8; }
 .pane-bar[data-ui] .pane-bar-pulse:hover { color: var(--foreground); border-color: var(--border); }
 .pane-bar[data-ui] .pane-bar-pulse.live { color: var(--pulse-tone, var(--brand)); border-color: color-mix(in srgb, var(--pulse-tone, var(--brand)) 55%, transparent); }
 
@@ -121,6 +131,8 @@
    blue; the new one leaves the bar as it is and lays a translucent brand overlay where the drop
    lands. A file covers the whole pane (`::after`); a pane bar gets DropZoneOverlay instead. */
 .split-root > .pane.drop-target > .pane-bar[data-ui] { background: var(--card); color: var(--foreground); }
+.pane.drop-target .pane-bar > * { color: inherit; }
+body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-select: none; }
 .split-root > .pane.drop-target::after {
   content: '';
   position: absolute;
@@ -168,6 +180,13 @@
   .pane-drop-zone { animation: none; transition: none; }
   .split-root.is-split > .pane { transition: none; }
 }
+
+/* ── A pane's message ───────────────────────────────── */
+
+/* Over the view: an unknown view, a terminal that exited or never spawned, a page that failed. */
+.pane-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; background: color-mix(in srgb, var(--background) 85%, transparent); color: var(--muted-foreground); font-size: 13px; text-align: center; }
+.pane-message button { height: 24px; padding: 0 8px; border: 1px solid var(--input); border-radius: calc(var(--radius) * 0.8); background: color-mix(in srgb, var(--input) 30%, transparent); color: var(--foreground); font: inherit; font-size: 12px; font-weight: 500; }
+.pane-message button:hover { background: color-mix(in srgb, var(--input) 50%, transparent); }
 
 /* ── Terminal ───────────────────────────────────────── */
 

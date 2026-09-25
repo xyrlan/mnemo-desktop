@@ -13,7 +13,6 @@ const disconnect = connectPulse(tauriPulse).catch((e) => {
   return () => {}
 })
 const host = document.createElement('div')
-host.className = 'pulse-host'
 document.body.appendChild(host)
 const root = createRoot(host)
 root.render(<Toasts />)

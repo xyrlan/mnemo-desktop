@@ -83,8 +83,7 @@ type Props = {
 }
 
 /** The panes of every open worktree, only the shown worktree's shown tab visible; its empty
- *  state when that worktree has no tab. The pane views keep today's look inside the `.app`
- *  scope `src/theme.css` keeps for them. */
+ *  state when that worktree has no tab. */
 export default function Workbench({ ready, notice, onDismissNotice, layout = appLayout }: Props) {
   const worktrees = useStore(layout, (s) => s.openWorktrees())
   const loose = useStore(layout, (s) => (s.activeWorktree === null ? s.tabs : NONE))
@@ -96,7 +95,7 @@ export default function Workbench({ ready, notice, onDismissNotice, layout = app
 
   return (
     <div data-shell-workbench className="relative flex min-h-0 min-w-0 flex-1">
-      <div className="app" style={{ position: 'absolute', inset: 0 }}>
+      <div className="absolute inset-0">
         {layers.map(({ tab, worktree }) => (
           <TabLayer key={tab.id} tab={tab} visible={worktree === active && tab.id === activeTab} layout={layout} />
         ))}

@@ -1,8 +1,7 @@
 /* The vault draws with Tailwind (wave E, vault-restyle); what is left here cannot be a utility.
    `.vt-md` is a rendered page body, also used by the conversation's cards
-   (src/conversation/cards/index.tsx imports this file): its rules are spelled out whole so they
-   read the same under Tailwind's preflight (the vault, `data-ui`) and under the old views'
-   `revert-layer` scope (the conversation). Tokens only from :root, which both scopes see. */
+   (src/conversation/cards/index.tsx imports this file): its rules are spelled out whole, over
+   Tailwind's preflight, so a page reads the same in both. */
 
 .vt-md { font-family: var(--font-sans); font-size: 13px; line-height: 1.6; color: var(--foreground); max-width: 80ch; overflow-wrap: anywhere; }
 .vt-md > :first-child { margin-top: 0; }
