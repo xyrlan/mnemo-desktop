@@ -82,6 +82,9 @@ pub mod conversation;
 // -- github (src/github.rs) --
 pub mod github;
 
+// -- checks (src/checks.rs) --
+pub mod checks;
+
 // -- ai-commit-pr (src/commit.rs) --
 pub mod commit;
 
@@ -280,6 +283,12 @@ pub fn run() {
             github::gh_auth,
             github::gh_issues,
             github::gh_project,
+
+            // -- checks commands --
+            checks::checks_read,
+            checks::checks_details,
+            checks::checks_merge,
+            checks::checks_ready,
 
             // -- ai-commit-pr commands --
             commit::commit_status,

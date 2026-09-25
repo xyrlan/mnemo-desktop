@@ -1,0 +1,110 @@
+{
+  "additions": 412,
+  "author": { "id": "MDQ6VXNlcjY4MjI4Mjg1", "is_bot": false, "login": "xyrlan", "name": "xyrlan; pedro" },
+  "baseRefName": "main",
+  "changedFiles": 9,
+  "comments": [
+    {
+      "author": { "login": "octo-reviewer" },
+      "authorAssociation": "COLLABORATOR",
+      "body": "Does this still build on Windows? The last run failed there.",
+      "createdAt": "2026-09-24T17:02:11Z",
+      "id": "IC_kwDOA1",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/xyrlan/mnemo-desktop/pull/240#issuecomment-1",
+      "viewerDidAuthor": false
+    },
+    {
+      "author": { "login": "spam-bot" },
+      "authorAssociation": "NONE",
+      "body": "Buy now",
+      "createdAt": "2026-09-24T17:03:00Z",
+      "id": "IC_kwDOA2",
+      "includesCreatedEdit": false,
+      "isMinimized": true,
+      "minimizedReason": "SPAM",
+      "reactionGroups": [],
+      "url": "https://github.com/xyrlan/mnemo-desktop/pull/240#issuecomment-2",
+      "viewerDidAuthor": false
+    }
+  ],
+  "deletions": 37,
+  "headRefName": "feat/orca-redesign-e/checks",
+  "headRefOid": "de92f99410241cdcb2de6aad015b0482e065943e",
+  "isDraft": false,
+  "mergeStateStatus": "UNSTABLE",
+  "mergeable": "MERGEABLE",
+  "number": 240,
+  "reviewDecision": "CHANGES_REQUESTED",
+  "reviews": [
+    {
+      "id": "PRR_kwDOA1",
+      "author": { "login": "octo-reviewer" },
+      "authorAssociation": "COLLABORATOR",
+      "body": "Two things before this lands, inline.",
+      "submittedAt": "2026-09-24T16:58:40Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "CHANGES_REQUESTED",
+      "commit": { "oid": "de92f99410241cdcb2de6aad015b0482e065943e" }
+    },
+    {
+      "id": "PRR_kwDOA2",
+      "author": { "login": "octo-reviewer" },
+      "authorAssociation": "COLLABORATOR",
+      "body": "",
+      "submittedAt": "2026-09-24T16:59:02Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "COMMENTED",
+      "commit": { "oid": "de92f99410241cdcb2de6aad015b0482e065943e" }
+    }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-24T16:18:19Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/xyrlan/mnemo-desktop/actions/runs/36026166545/job/107723124824",
+      "name": "test (macos-latest)",
+      "startedAt": "2026-09-24T16:16:16Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/xyrlan/mnemo-desktop/actions/runs/36026166545/job/107723125082",
+      "name": "test (ubuntu-latest)",
+      "startedAt": "2026-09-24T16:16:12Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-24T16:23:41Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/xyrlan/mnemo-desktop/actions/runs/36026166545/job/107723124603",
+      "name": "test (windows-latest)",
+      "startedAt": "2026-09-24T16:16:12Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "vercel",
+      "description": "Deployment has completed",
+      "startedAt": "2026-09-24T16:17:00Z",
+      "state": "SUCCESS",
+      "targetUrl": "https://vercel.com/xyrlan/mnemo/abc"
+    }
+  ],
+  "title": "feat(checks): Orca's Checks panel as a right-sidebar tab (orca-redesign-e)",
+  "updatedAt": "2026-09-24T17:03:00Z",
+  "url": "https://github.com/xyrlan/mnemo-desktop/pull/240"
+}
