@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { Button, TooltipProvider } from '@/ui'
 import { cn } from '@/ui/cn'
 import { store, useApp } from '../layout/app-store'
-import type { Pane, Tab } from '../layout/store'
+import { ELSEWHERE, type Pane, type Tab } from '../layout/store'
 import { leaves } from '../layout/tree'
 import { paneName } from '../layout/tabs'
 import { useMission } from '../mission/app-store'
@@ -16,6 +16,7 @@ import { run } from '../actions/registry'
 import { dropIndicatorFor, fleetAgents, reorderTabs, tabAgent, tabUnread } from './model'
 import { seenAt, seenStore, useSeen } from './seen'
 import SortableTab, { ViewIcon } from './SortableTab'
+import Elsewhere, { strayTab } from './Elsewhere'
 import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 import './tabs.css'
 
@@ -84,10 +85,14 @@ function TabDragPreview({ title, view }: { title: string; view: string }) {
   )
 }
 
+const NONE: Tab[] = []
+
 /** The shown worktree's tabs, for the titlebar: the active one barred, unread ones washed, each
- *  led by its agent's state, closed on hover, dragged to reorder; "+" opens a terminal. */
+ *  led by its agent's state, closed on hover, dragged to reorder; "+" opens a terminal. The tabs
+ *  of no worktree are never among them: a menu at the end lists them, to bring one here. */
 export default function TabStrip({ onNew = () => run('tab.new') }: { onNew?: () => void }) {
   const tabs = useApp((s) => s.tabs)
+  const away = useApp((s) => s.parked[ELSEWHERE]?.tabs ?? NONE)
   const activeTab = useApp((s) => s.activeTab)
   const panes = useApp((s) => s.panes)
   const snap = useMission((s) => s.snapshot)
@@ -197,6 +202,7 @@ export default function TabStrip({ onNew = () => run('tab.new') }: { onNew?: () 
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+        <Elsewhere tabs={away.map((t) => strayTab(t, titleOf(t, panes, snap, home), panes[t.focused]))} onBring={(id) => store.getState().bringTab(id)} />
       </div>
     </TooltipProvider>
   )

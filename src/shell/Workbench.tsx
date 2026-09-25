@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { X } from 'lucide-react'
 import { store as appLayout } from '../layout/app-store'
-import type { Store, Tab } from '../layout/store'
+import { ELSEWHERE, type Store, type Tab } from '../layout/store'
 import SplitView from '../layout/SplitView'
 import ErrorBoundary from '../panes/ErrorBoundary'
 import { useFleet } from '../fleet/store'
@@ -11,18 +11,24 @@ import type { RepoNode } from '../fleet/types'
 import { homeStore } from '../home/app-store'
 import { settingsStore } from '../settings/app-store'
 import { EmptyWorktree, NoProjects } from './EmptyWorkbench'
+import { firstWorktree } from './first-worktree'
 
 const NONE: readonly Tab[] = []
 
 /** One tab the workbench keeps mounted, and the worktree it belongs to (null: a tab opened
- *  before any worktree was chosen). */
+ *  before any worktree was chosen; `ELSEWHERE`: a tab of no open worktree, never shown here). */
 export type Layer = { tab: Tab; worktree: string | null }
 
-/** Every open worktree's tabs, in the order the worktrees were opened, after the tabs of no
- *  worktree. A worktree switch changes nothing here — only which layer shows — so no pane view
- *  is remounted by one: a terminal keeps its screen. */
-export function workbenchLayers(loose: readonly Tab[], worktrees: readonly string[], tabsOf: readonly (readonly Tab[])[]): Layer[] {
-  return [...loose.map((tab) => ({ tab, worktree: null })), ...worktrees.flatMap((worktree, i) => (tabsOf[i] ?? NONE).map((tab) => ({ tab, worktree })))]
+/** Every open worktree's tabs, in the order the worktrees were opened, after the tabs opened
+ *  before any was chosen, and then the tabs of no worktree (`away`). A worktree switch changes
+ *  nothing here — only which layer shows — and neither does a tab moving between them, so no pane
+ *  view is remounted by one: a terminal keeps its screen. */
+export function workbenchLayers(loose: readonly Tab[], worktrees: readonly string[], tabsOf: readonly (readonly Tab[])[], away: readonly Tab[] = NONE): Layer[] {
+  return [
+    ...loose.map((tab) => ({ tab, worktree: null })),
+    ...worktrees.flatMap((worktree, i) => (tabsOf[i] ?? NONE).map((tab) => ({ tab, worktree }))),
+    ...away.map((tab) => ({ tab, worktree: ELSEWHERE })),
+  ]
 }
 
 /** What "Launch agent" types: `claude`, skipping its permission prompts unless Settings say
@@ -66,10 +72,11 @@ function Empty({ path, layout }: { path: string; layout: Store }) {
   )
 }
 
-function Unchosen() {
-  const known = useFleet((f) => f.repos.length > 0)
-  // With a repo known, the first one's main checkout is about to show (`keepAWorktreeShown`).
-  return known ? null : <NoProjects onOpenFolder={() => void homeStore.getState().openFolder()} />
+function Unchosen({ layout }: { layout: Store }) {
+  const first = useFleet((f) => firstWorktree(f.repos))
+  // With a repo known, the first one's main checkout is about to show (`keepAWorktreeShown`): its
+  // empty state already, rather than nothing meanwhile.
+  return first !== null ? <Empty path={first} layout={layout} /> : <NoProjects onOpenFolder={() => void homeStore.getState().openFolder()} />
 }
 
 type Props = {
@@ -83,14 +90,15 @@ type Props = {
 }
 
 /** The panes of every open worktree, only the shown worktree's shown tab visible; its empty
- *  state when that worktree has no tab. */
+ *  state when that worktree shows no tab. The tabs of no worktree stay mounted, never shown. */
 export default function Workbench({ ready, notice, onDismissNotice, layout = appLayout }: Props) {
   const worktrees = useStore(layout, (s) => s.openWorktrees())
   const loose = useStore(layout, (s) => (s.activeWorktree === null ? s.tabs : NONE))
   const tabsOf = useStore(layout, useShallow((s) => s.openWorktrees().map((w) => s.worktreeTabs(w))))
+  const away = useStore(layout, (s) => s.worktreeTabs(ELSEWHERE))
   const active = useStore(layout, (s) => s.activeWorktree)
   const activeTab = useStore(layout, (s) => s.activeTab)
-  const layers = useMemo(() => workbenchLayers(loose, worktrees, tabsOf), [loose, worktrees, tabsOf])
+  const layers = useMemo(() => workbenchLayers(loose, worktrees, tabsOf, away), [loose, worktrees, tabsOf, away])
   const showing = layers.some((l) => l.worktree === active && l.tab.id === activeTab)
 
   return (
@@ -100,7 +108,7 @@ export default function Workbench({ ready, notice, onDismissNotice, layout = app
           <TabLayer key={tab.id} tab={tab} visible={worktree === active && tab.id === activeTab} layout={layout} />
         ))}
       </div>
-      {ready && !showing && (active === null ? <Unchosen /> : <Empty path={active} layout={layout} />)}
+      {ready && !showing && (active === null ? <Unchosen layout={layout} /> : <Empty path={active} layout={layout} />)}
       {notice && (
         <button
           type="button"

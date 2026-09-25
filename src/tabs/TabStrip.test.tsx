@@ -16,7 +16,9 @@ import TabStrip, { moveTab } from './TabStrip'
 import { fleetStore } from '../fleet/store'
 import type { AgentNode, Fleet } from '../fleet/types'
 import { store } from '../layout/app-store'
+import { ELSEWHERE } from '../layout/store'
 import { seenStore } from './seen'
+import { strayTab } from './Elsewhere'
 import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -239,4 +241,30 @@ test("switching worktree shows that worktree's tabs", async () => {
   expect(host.querySelector('[aria-label="New tab"]')).not.toBeNull()
   await act(async () => store.getState().switchWorktree('/r'))
   expect(tabEls()).toHaveLength(3)
+})
+
+test('the tabs of no worktree stay out of the strip, behind a count at its end, until one is brought here', async () => {
+  const elsewhere = () => host.querySelector<HTMLElement>('[data-testid="tabs-elsewhere"]')
+  expect(elsewhere()).toBeNull()
+  // A shell that outlived a restart in a folder no worktree holds.
+  const stray = { id: 'tab-77', root: { kind: 'leaf' as const, pane: 77 }, focused: 77 }
+  await act(async () => {
+    store.getState().switchWorktree('/r')
+    store.setState((s) => ({ panes: { ...s.panes, 77: { id: 77, view: 'terminal', cwd: '/home/me/scratch' } }, parked: { ...s.parked, [ELSEWHERE]: { tabs: [stray], activeTab: '' } } }))
+  })
+  expect(tabIds()).not.toContain('tab-77')
+  expect(tabEls().map((t) => t.dataset.tabId)).toEqual(tabIds())
+  expect(elsewhere()!.textContent).toBe('1')
+  expect(elsewhere()!.getAttribute('aria-label')).toBe('1 tab outside any workspace')
+
+  // The menu itself is not opened here: Popper content in jsdom never goes idle (see
+  // src/ui/primitives.test.tsx); the `workbench-empty` preview scenario shows it. Its rows:
+  const row = strayTab(stray, 'scratch', store.getState().panes[77])
+  expect(row).toEqual({ id: 'tab-77', title: 'scratch', view: 'terminal', folder: '/home/me/scratch' })
+  // What choosing one does.
+  await act(async () => store.getState().bringTab('tab-77'))
+  expect(store.getState().activeTab).toBe('tab-77')
+  expect(tabEls().map((t) => t.dataset.tabId)).toEqual(tabIds())
+  expect(tabIds()).toContain('tab-77')
+  expect(elsewhere()).toBeNull()
 })

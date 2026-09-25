@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { createStore, PROMPT_DELAY_MS } from './store'
+import { createStore, ELSEWHERE, PROMPT_DELAY_MS } from './store'
 import { registerReuse } from './reuse'
 import { leaves } from './tree'
 import { startWorkspace } from './persist'
@@ -851,7 +851,7 @@ describe('terminals that outlived the page', () => {
     expect(pty.exits[1]).toBeUndefined()
   })
 
-  test('shells no saved pane claims come back as tabs where their folder is, and what is shown stays shown', async () => {
+  test('shells no saved pane claims come back as tabs where their folder is, else elsewhere, and what is shown stays shown', async () => {
     const src = createStore(fakePty(), { workspace: () => null })
     await src.getState().switchWorktree('/r')
     await src.getState().newTab()
@@ -874,7 +874,10 @@ describe('terminals that outlived the page', () => {
     expect(s.getState().worktreeTabs('/r-wt').map((t) => t.id)).toEqual(['tab-2', 'tab-50'])
     expect(s.getState().parked['/r-wt'].activeTab).toBe('tab-2')
     expect(s.getState().worktreeTabs('/r/.claude/worktrees/x').map((t) => t.id)).toEqual(['tab-3', 'tab-54'])
-    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1', 'tab-51', 'tab-53'])
+    // A folder no open worktree holds is no worktree's: not the shown one's either.
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1'])
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-51', 'tab-53'])
+    expect(s.getState().openWorktrees()).toEqual(['/r', '/r-wt', '/r/.claude/worktrees/x'])
     expect(s.getState().panes[50]).toEqual({ id: 50, view: 'terminal', cwd: '/r-wt/src' })
     expect(pty.killed).toEqual([52])
     expect(pty.spawned).toEqual([])
@@ -884,13 +887,77 @@ describe('terminals that outlived the page', () => {
     const core = fakeSessions([live(7, '/x')])
     const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
     await expect(s.getState().restore('not a workspace')).rejects.toThrow()
-    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-7'])
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-7'])
+    expect(s.getState().tabs).toEqual([])
     expect(s.getState().activeTab).toBe('')
 
     // No file at all: the same.
     const t = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: fakeSessions([live(8, '/y')]).client })
     await t.getState().restore({})
-    expect(t.getState().tabs.map((tab) => tab.id)).toEqual(['tab-8'])
+    expect(t.getState().worktreeTabs(ELSEWHERE).map((tab) => tab.id)).toEqual(['tab-8'])
+  })
+
+  /** A store restored with `/r` shown and no tab of its own, and shells in `/r/src`, `/w/a` and `~/scratch` no worktree held. */
+  async function strays() {
+    const pty = fakePty({ first: 100 })
+    const saved = { version: 2, activeWorktree: '/r', worktrees: [{ path: '/r', activeTab: '', tabs: [], panes: {} }] }
+    const s = createStore(pty, { workspace: () => null, sessions: fakeSessions([live(5, '/r/src'), live(6, '/w/a'), live(7, '/home/me/scratch')]).client })
+    await s.getState().restore(saved)
+    return { s, pty }
+  }
+
+  test('a worktree that opens later takes the shells in its folder, without showing them', async () => {
+    const { s } = await strays()
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-5'])
+    expect(s.getState().activeTab).toBe('')
+    await s.getState().switchWorktree('/w')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-6'])
+    expect(s.getState().activeTab).toBe('')
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-7'])
+    // Never a worktree: nothing opens or shows it.
+    await s.getState().switchWorktree(ELSEWHERE)
+    expect(s.getState().activeWorktree).toBe('/w')
+    expect(s.getState().openWorktrees()).toEqual(['/r', '/w'])
+  })
+
+  test('bringTab moves a tab of no worktree into the one shown and shows it; goToPane does the same', async () => {
+    const { s } = await strays()
+    s.getState().bringTab('tab-7')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-5', 'tab-7'])
+    expect(s.getState().activeTab).toBe('tab-7')
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-6'])
+    s.getState().bringTab('tab-5')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-5', 'tab-7'])
+
+    await s.getState().switchWorktree('/q')
+    s.getState().goToPane(6)
+    expect(s.getState().activeWorktree).toBe('/q')
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-6'])
+    expect(s.getState().activeTab).toBe('tab-6')
+    expect(s.getState().worktreeTabs(ELSEWHERE)).toEqual([])
+  })
+
+  test('a tab of no worktree closes like any other', async () => {
+    const { s, pty } = await strays()
+    await s.getState().closeTab('tab-7')
+    expect(pty.killed).toEqual([7])
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-6'])
+    expect(s.getState().panes[7]).toBeUndefined()
+  })
+
+  test('the tabs of no worktree are saved as the layout of no worktree, and come back there', async () => {
+    const { s } = await strays()
+    const saved = JSON.parse(JSON.stringify(s.getState().snapshotForSave()))
+    expect(saved.activeWorktree).toBe('/r')
+    expect(saved.worktrees.map((w: { path: string | null; tabs: unknown[] }) => [w.path, w.tabs.length])).toEqual([
+      ['/r', 1],
+      [null, 2],
+    ])
+    const again = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: fakeSessions([live(5, '/r/src'), live(6, '/w/a'), live(7, '/x')]).client })
+    await again.getState().restore(saved)
+    expect(again.getState().tabs.map((t) => t.id)).toEqual(['tab-5'])
+    expect(again.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-6', 'tab-7'])
+    expect(again.getState().openWorktrees()).toEqual(['/r'])
   })
 
   test('a shell is claimed by one saved pane only', async () => {
