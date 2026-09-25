@@ -124,10 +124,12 @@ test('every open worktree’s tabs stay mounted; only the shown worktree’s sho
   expect(layers()).toEqual(['tab-1', 'tab-2', 'tab-3'])
 })
 
-test('the pane views render inside the `.app` scope the current views are styled in', async () => {
+test('the pane views render with no old stylesheet scope around them', async () => {
   await s.getState().newTab(A)
   await render()
-  expect(host.querySelector('.app [data-tab] [data-probe]')).not.toBeNull()
+  expect(host.querySelector('[data-tab] [data-probe]')).not.toBeNull()
+  // theme.css kept the pre-redesign look alive inside `.app` until orca-redesign-f.
+  expect(host.querySelector('.app')).toBeNull()
 })
 
 test('tabs opened before any worktree was chosen join the first one without remounting', async () => {

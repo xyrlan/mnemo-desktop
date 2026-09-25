@@ -1,7 +1,7 @@
 /* The diff look the PR view (review/DiffView.tsx) and the conversation's cards share: line
    numbers, signs and colours. The rest of the PR view is Tailwind. Written against the tokens
-   `:root` defines for every scope (`--status-success`, `--destructive`, `--muted-foreground`),
-   so a card in an old view and the PR view draw the same lines. */
+   (`--status-success`, `--destructive`, `--muted-foreground`), so a conversation card and the PR
+   view draw the same lines. */
 .rv-counts { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rv-plus { color: var(--status-success); }
 .rv-minus { color: var(--destructive); }

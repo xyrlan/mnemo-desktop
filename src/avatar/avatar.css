@@ -1,19 +1,19 @@
 /* The octopus. One block per scene; every colour is a theme token. */
 .av { display: block; }
-.av .av-head { fill: var(--accent); }
-.av .av-eye { fill: var(--bg); }
-.av .av-arm { fill: color-mix(in srgb, var(--accent) 60%, var(--bg)); }
-.av .av-node { fill: var(--accent); }
-.av .av-object { fill: var(--fg); }
+.av .av-head { fill: var(--brand); }
+.av .av-eye { fill: var(--background); }
+.av .av-arm { fill: color-mix(in srgb, var(--brand) 60%, var(--background)); }
+.av .av-node { fill: var(--brand); }
+.av .av-object { fill: var(--foreground); }
 
 .av-green .av-head, .av-green .av-node { fill: var(--ansi-green); }
-.av-green .av-arm { fill: color-mix(in srgb, var(--ansi-green) 60%, var(--bg)); }
+.av-green .av-arm { fill: color-mix(in srgb, var(--ansi-green) 60%, var(--background)); }
 .av-yellow .av-head, .av-yellow .av-node { fill: var(--ansi-yellow); }
-.av-yellow .av-arm { fill: color-mix(in srgb, var(--ansi-yellow) 60%, var(--bg)); }
+.av-yellow .av-arm { fill: color-mix(in srgb, var(--ansi-yellow) 60%, var(--background)); }
 .av-red .av-head, .av-red .av-node { fill: var(--ansi-red); }
-.av-red .av-arm { fill: color-mix(in srgb, var(--ansi-red) 60%, var(--bg)); }
-.av-muted .av-head, .av-muted .av-node { fill: var(--fg-muted); }
-.av-muted .av-arm { fill: color-mix(in srgb, var(--fg-muted) 60%, var(--bg)); }
+.av-red .av-arm { fill: color-mix(in srgb, var(--ansi-red) 60%, var(--background)); }
+.av-muted .av-head, .av-muted .av-node { fill: var(--muted-foreground); }
+.av-muted .av-arm { fill: color-mix(in srgb, var(--muted-foreground) 60%, var(--background)); }
 
 /* Shared: the head breathes in every action scene. */
 @keyframes av-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .84; } }
@@ -21,7 +21,7 @@
 /* reflex — pages descend into the pane, staggered. */
 @keyframes av-page-in { 0% { transform: translateY(-4px); opacity: 0; } 20% { opacity: 1; } 80% { transform: translateY(9px); opacity: 1; } 100% { transform: translateY(12px); opacity: 0; } }
 .av-injecting .av-head { animation: av-breathe 1.8s ease-in-out infinite; }
-.av-injecting .av-object { fill: var(--fg); animation: av-page-in 1.6s ease-in infinite; }
+.av-injecting .av-object { fill: var(--foreground); animation: av-page-in 1.6s ease-in infinite; }
 .av-injecting .av-object-1 { animation-delay: .45s; }
 .av-injecting .av-object-2 { animation-delay: .9s; }
 /* `av-object-N` is the Nth object *of this scene* — see `withPartIndex` in scenes.ts. */
@@ -35,7 +35,7 @@
 .av-reading .av-node-1, .av-reading .av-node-3 { animation: av-node-on 1.5s ease-in-out infinite; }
 .av-reading .av-node-3 { animation-delay: .4s; }
 /* The thread flows from the ring (object-2) toward the arm (object-0), one node after another. */
-.av-reading .av-object { fill: var(--fg); animation: av-thread-down 1.5s ease-in infinite; }
+.av-reading .av-object { fill: var(--foreground); animation: av-thread-down 1.5s ease-in infinite; }
 .av-reading .av-object-1 { animation-delay: .25s; }
 .av-reading .av-object-0 { animation-delay: .5s; }
 /* The reaching arm is the fifth and sixth arm rect of this scene: it tugs with each node. */
@@ -45,7 +45,7 @@
 @keyframes av-hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 /* The note hangs from its pin and sways; `view-box` keeps all four rects on one origin. */
 .av-remembering .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 16px 2px; animation: av-hold 2.2s ease-in-out infinite; }
-.av-remembering .av-object-2, .av-remembering .av-object-3 { fill: var(--bg); }
+.av-remembering .av-object-2, .av-remembering .av-object-3 { fill: var(--background); }
 
 /* enforce — the sign slams in, the body shakes. */
 @keyframes av-slam { 0% { transform: scale(2.4); opacity: 0; } 14% { transform: scale(1); opacity: 1; } 76% { opacity: 1; } 100% { opacity: 0; } }
@@ -53,7 +53,7 @@
 /* The sign slams in as one piece: each rect shares the timing, so they move together. */
 .av-blocked .av-object { fill: var(--ansi-red); transform-box: view-box; transform-origin: 16px 7px; animation: av-slam 1.7s ease-out infinite; }
 /* The cross-bar is the last rect of `sign` — light, so the shape reads as a sign. */
-.av-blocked .av-object-5 { fill: var(--bg); }
+.av-blocked .av-object-5 { fill: var(--background); }
 .av-blocked .av-head, .av-blocked .av-arm { animation: av-tremor .42s ease-in-out infinite; }
 
 /* briefing — the disk shrinks into his side and is put away. */
@@ -61,13 +61,13 @@
 /* The origin is the head, so the disk shrinks toward the body and drops behind it. */
 .av-saving .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 16px 10px; animation: av-tuck 2.1s ease-in-out infinite; }
 /* The label and the shutter slot are light, so the shape reads as a disk and not a box. */
-.av-saving .av-object-2, .av-saving .av-object-3 { fill: var(--bg); }
+.av-saving .av-object-2, .av-saving .av-object-3 { fill: var(--background); }
 
 /* catchup — the speech bubble unfolds downward from its top edge. */
 @keyframes av-unroll { 0% { transform: scaleY(.08); opacity: 0; } 12% { opacity: 1; } 38%, 88% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(1); opacity: 0; } }
 /* The origin is the bubble's top edge; the text lines, the last two rects, sit light on it. */
 .av-catchup .av-object { fill: var(--ansi-yellow); transform-box: view-box; transform-origin: 25px 1px; animation: av-unroll 1.6s ease-out infinite; }
-.av-catchup .av-object-4, .av-catchup .av-object-5 { fill: var(--bg); }
+.av-catchup .av-object-4, .av-catchup .av-object-5 { fill: var(--background); }
 
 /* learned — a new node pops into the ring, which turns slowly. */
 @keyframes av-pop { 0%, 55% { opacity: 0; transform: scale(.3); } 68% { opacity: 1; transform: scale(1.7); } 80%, 100% { opacity: 1; transform: scale(1); } }
@@ -80,7 +80,7 @@
 
 /* dispatch — three little ones fly out in a fan. */
 @keyframes av-kid-out { 0% { transform: translate(0, 0) scale(.35); opacity: 0; } 22% { opacity: 1; transform: scale(1); } 100% { transform: translate(var(--av-kx), var(--av-ky)) scale(1); opacity: 0; } }
-.av-dispatching .av-object { fill: var(--accent); transform-box: fill-box; transform-origin: center; animation: av-kid-out 1.9s ease-out infinite; }
+.av-dispatching .av-object { fill: var(--brand); transform-box: fill-box; transform-origin: center; animation: av-kid-out 1.9s ease-out infinite; }
 .av-dispatching .av-object-0 { --av-kx: -11px; --av-ky: 7px; }
 .av-dispatching .av-object-1 { --av-kx: 0px; --av-ky: 11px; animation-delay: .3s; }
 .av-dispatching .av-object-2 { --av-kx: 11px; --av-ky: 7px; animation-delay: .6s; }

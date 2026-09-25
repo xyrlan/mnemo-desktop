@@ -60,7 +60,7 @@ describe('resolveTarget', () => {
   })
 
   it('falls back to the focused pane when the palette input or nothing has focus', () => {
-    document.body.innerHTML = '<div class="palette-overlay"><input id="cmdk"></div>'
+    document.body.innerHTML = '<div data-palette><input id="cmdk"></div>'
     const l = layout(5, [shell(5)])
     expect(resolveTarget(document.getElementById('cmdk'), l)).toEqual({ kind: 'pty', pane: 5 })
     expect(resolveTarget(document.body, l)).toEqual({ kind: 'pty', pane: 5 })

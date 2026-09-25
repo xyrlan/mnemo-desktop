@@ -35,7 +35,8 @@ function terminal(pane: Pane | undefined): Target | null {
  *  a terminal, a text field, a contenteditable. When nothing typeable has focus (the palette
  *  just closed, say), the active tab's focused pane. */
 export function resolveTarget(active: Element | null, layout: Layout, root: ParentNode = document): Target {
-  const el = active instanceof HTMLElement && !active.closest('.palette-overlay') ? active : null
+  // A palette's or a prompt's field (`data-palette`) is for choosing, not for dictating into.
+  const el = active instanceof HTMLElement && !active.closest('[data-palette]') ? active : null
   if (el) {
     const monaco = el.closest<HTMLElement>('.monaco-editor')
     if (monaco) return { kind: 'monaco', el: monaco }

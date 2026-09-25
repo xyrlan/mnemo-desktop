@@ -1,4 +1,5 @@
 import { compile } from 'tailwindcss'
+import { xtermTheme } from '../theme'
 
 // jsdom lays nothing out and a `?raw` import of a `.css` comes back empty under vitest, so the
 // stylesheet is compiled here the way @tailwindcss/vite does it, off disk. `node:` is spelled
@@ -126,8 +127,8 @@ describe('tokens', () => {
     expect(z('modal')).toBeLessThan(z('popover'))
     expect(z('popover')).toBeLessThan(z('menu'))
     expect(z('menu')).toBeLessThan(z('tooltip'))
-    // The current views' highest layer is the palette overlay, at 10.
-    expect(z('drawer')).toBeGreaterThan(10)
+    // A pane's own layers (its dividers, the pulse overlay, the drop zone) go up to 6.
+    expect(z('drawer')).toBeGreaterThan(6)
   })
 
   test('JetBrains Mono stays the code font, on <html>, where the terminal reads it', async () => {
@@ -142,23 +143,41 @@ describe('tokens', () => {
   })
 })
 
-describe('the current views keep their tokens', () => {
-  const scope = ':is(.app, .palette-overlay, .pulse-host, .voice-host)'
-
-  test('inside their roots, --accent and --border are the old blue and hairline again', async () => {
+describe('one look: the pre-redesign stylesheet scope is gone', () => {
+  test('no scope, no reverts, no legacy tokens', async () => {
     const css = await build([])
-    const legacy = rule(css, scope)
-    expect(legacy).toContain('--accent: var(--legacy-accent)')
-    expect(legacy).toContain('--border: var(--legacy-border)')
-    expect(rule(css, ':root')).toContain('--legacy-accent: #7aa2f7')
+    for (const root of ['.app', '.palette-overlay', '.pulse-host', '.voice-host']) {
+      expect(css, root).not.toMatch(new RegExp(`\\${root}(?![\\w-])`))
+    }
+    expect(css).not.toContain('revert-layer')
+    for (const token of ['--legacy-accent', '--legacy-border', '--fg-muted', '--bg-elev', '--border-focus']) {
+      expect(css, token).not.toContain(`${token}:`)
+    }
   })
 
-  test('new UI inside them gets Orca’s back', async () => {
+  test('--accent and --border are Orca’s, light and dark', async () => {
     const css = await build([])
-    expect(rule(css, `.dark, .dark ${scope} :where([data-slot], [data-ui])`)).toContain('--accent: #404040')
+    expect(rule(css, ':root')).toContain('--accent: #f5f5f5')
+    expect(rule(css, ':root')).toContain('--border: #e5e5e5')
+    expect(rule(css, '.dark')).toContain('--accent: #404040')
+    expect(rule(css, '.dark')).toContain('--border: rgb(255 255 255 / 0.07)')
   })
 
-  test('every custom property a current view reads is still defined', async () => {
+  test('the UI font is sans', async () => {
+    const css = await build([])
+    expect(css).toMatch(/\bbody \{[^}]*font-family: var\(--font-sans\)/)
+  })
+
+  test('the terminal keeps its palette: every colour src/theme.ts hands xterm is defined', async () => {
+    const root = rule(await build([]), ':root')
+    const read: string[] = []
+    xtermTheme((name) => (read.push(name), ''))
+    expect(read).toContain('--bg')
+    expect(read).toContain('--ansi-bright-white')
+    for (const name of read) expect(root, name).toContain(`${name}:`)
+  })
+
+  test('every custom property a view reads is defined', async () => {
     const { fs, path } = await node()
     const { src } = await paths()
     const files = fs
@@ -169,6 +188,8 @@ describe('the current views keep their tokens', () => {
     for (const f of files) {
       const text = fs.readFileSync(path.resolve(src, f), 'utf8')
       for (const m of text.matchAll(/var\(\s*(--[\w-]+)/g)) used.add(m[1])
+      // Read from <html> in script: the terminal's and the editors' fonts and colours.
+      for (const m of text.matchAll(/cssVar\(\s*['"](--[\w-]+)/g)) used.add(m[1])
       // Declared in CSS (`--x:`), or set from a component (`'--x':` in a style object, or setProperty).
       for (const m of text.matchAll(/(?:^|[\s{;'"])(--[\w-]+)['"]?\s*:/gm)) defined.add(m[1])
       for (const m of text.matchAll(/setProperty\(\s*['"](--[\w-]+)/g)) defined.add(m[1])
@@ -178,6 +199,6 @@ describe('the current views keep their tokens', () => {
     for (const m of css.matchAll(/(--[\w-]+):/g)) defined.add(m[1])
     const missing = [...used].filter((v) => !defined.has(v))
     expect(missing).toEqual([])
-    expect(used.has('--accent') && used.has('--fg-muted') && used.has('--font-mono')).toBe(true)
+    expect(used.has('--accent') && used.has('--brand') && used.has('--font-mono') && used.has('--font-size')).toBe(true)
   })
 })
