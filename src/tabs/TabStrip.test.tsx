@@ -12,7 +12,8 @@ vi.mock('../fleet/store', async () => {
   return { fleetStore, useFleet: (sel: (f: unknown) => unknown) => useStore(fleetStore, sel as never) }
 })
 
-import TabStrip, { moveTab } from './TabStrip'
+import TabGroups from '../tab-group/TabGroups'
+import { slotIndicator } from './TabStrip'
 import { fleetStore } from '../fleet/store'
 import type { AgentNode, Fleet } from '../fleet/types'
 import { store } from '../layout/app-store'
@@ -55,7 +56,7 @@ beforeEach(async () => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  await act(async () => root.render(<TabStrip onNew={onNew} />))
+  await act(async () => root.render(<TabGroups layout={store} onNew={onNew} />))
 })
 
 afterEach(() => {
@@ -63,7 +64,8 @@ afterEach(() => {
   host.remove()
 })
 
-const tabEls = () => [...host.querySelectorAll<HTMLElement>('[data-testid="sortable-tab"]')]
+const tabEls = (el: ParentNode = host) => [...el.querySelectorAll<HTMLElement>('[data-testid="sortable-tab"]')]
+const rowOf = (group: string) => host.querySelector<HTMLElement>(`[data-tab-group-strip-id="${group}"]`)!
 const tabEl = (i: number) => tabEls()[i]
 const titles = () => tabEls().map((t) => t.querySelector('[data-testid="tab-title"]')?.textContent)
 const tabIds = () => store.getState().tabs.map((t) => t.id)
@@ -237,33 +239,61 @@ test('news from before the tab was last seen is not news', async () => {
   expect(tabEl(0).querySelector('[data-testid="tab-unread-wash"]')).toBeNull()
 })
 
-test('moveTab reorders the shown tabs, and the strip follows', async () => {
-  const [a, b, c] = tabIds()
-  await act(async () => moveTab(a, c))
-  expect(tabIds()).toEqual([b, c, a])
-  expect(tabEls().map((t) => t.dataset.tabId)).toEqual([b, c, a])
-  const before = store.getState().tabs
-  await act(async () => moveTab(a, a))
-  expect(store.getState().tabs).toBe(before)
-})
-
-test('the tabs of every group show, in their order; a click shows one in its group and makes that group active', async () => {
+test('each group draws its own row of its own tabs; a click shows one in its group and makes that group active', async () => {
   const [a, b, c] = tabIds()
   await act(async () => store.getState().openView('editor', { root: '/r' }, 'split-row', 'side.md'))
   const side = store.getState().activeTab
   const [left, right] = Object.keys(store.getState().groups)
-  expect(tabEls().map((t) => t.dataset.tabId)).toEqual([a, b, c, side])
-  expect(tabEls().map((t) => t.dataset.active)).toEqual(['false', 'false', 'false', 'true'])
+  expect(tabEls(rowOf(left)).map((t) => t.dataset.tabId)).toEqual([a, b, c])
+  expect(tabEls(rowOf(right)).map((t) => t.dataset.tabId)).toEqual([side])
+  // Each row bars the tab its group shows.
+  expect(tabEls(rowOf(left)).map((t) => t.dataset.active)).toEqual(['false', 'false', 'true'])
+  expect(tabEls(rowOf(right)).map((t) => t.dataset.active)).toEqual(['true'])
   await fire(tabEl(0), 'pointerdown', { clientX: 1 })
   await fire(window, 'pointerup', { clientX: 1 })
   expect([store.getState().activeTab, store.getState().activeGroup]).toEqual([a, left])
-  await fire(tabEl(3), 'pointerdown', { clientX: 1 })
+  await fire(tabEls(rowOf(right))[0], 'pointerdown', { clientX: 1 })
   await fire(window, 'pointerup', { clientX: 1 })
   expect([store.getState().activeTab, store.getState().activeGroup]).toEqual([side, right])
-  // Dropped on a tab of the other group, a tab moves into that group, at its place.
-  await act(async () => moveTab(b, side))
-  expect(store.getState().groups[right].tabs).toEqual([b, side])
-  expect(tabEls().map((t) => t.dataset.tabId)).toEqual([a, c, b, side])
+})
+
+test('a press on a row\'s own space makes its group active; one on a tab waits for the release', async () => {
+  await act(async () => store.getState().openView('editor', { root: '/r' }, 'split-row', 'side.md'))
+  const [left, right] = Object.keys(store.getState().groups)
+  expect(store.getState().activeGroup).toBe(right)
+  // (The "+" is pressed the same way: `tab.new` then lands in that group, the active one. It is
+  // not pressed here: Radix opens its menu on pointerdown, and an open Popper hangs jsdom.)
+  await fire(rowOf(left).querySelector('[data-testid="workbench-tabs"]')!, 'pointerdown', { clientX: 1 })
+  expect(store.getState().activeGroup).toBe(left)
+  await fire(tabEls(rowOf(right))[0], 'pointerdown', { clientX: 1 })
+  expect(store.getState().activeGroup).toBe(left)
+  await fire(window, 'pointerup', { clientX: 1 })
+  expect(store.getState().activeGroup).toBe(right)
+})
+
+test('a preview tab is in italics; a double click keeps it instead of renaming it', async () => {
+  await act(async () => store.getState().openView('editor', { root: '/r', path: '/r/a.md' }, 'tab', 'a.md', { preview: true }))
+  const preview = store.getState().activeTab
+  const el = () => tabEls().find((t) => t.dataset.tabId === preview)!
+  const title = () => el().querySelector<HTMLElement>('[data-testid="tab-title"]')!
+  expect(store.getState().tabs.find((t) => t.id === preview)?.preview).toBe(true)
+  expect(title().classList.contains('italic')).toBe(true)
+  expect(title().dataset.preview).toBe('true')
+  await fire(el(), 'dblclick')
+  expect(store.getState().tabs.find((t) => t.id === preview)?.preview).toBeUndefined()
+  expect(title().classList.contains('italic')).toBe(false)
+  expect(el().querySelector('[data-tab-rename-input]')).toBeNull()
+  // Kept, the next double click renames it.
+  await fire(el(), 'dblclick')
+  expect(el().querySelector('[data-tab-rename-input]')).not.toBeNull()
+})
+
+test('the insertion bar: on the left of the tab at the slot, or on the right of the last one past them all', () => {
+  const ids = ['a', 'b', 'c']
+  expect(ids.map((id) => slotIndicator(ids, 1, id))).toEqual([null, 'left', null])
+  expect(ids.map((id) => slotIndicator(ids, 3, id))).toEqual([null, null, 'right'])
+  expect(ids.map((id) => slotIndicator(ids, null, id))).toEqual([null, null, null])
+  expect(slotIndicator([], 0, 'a')).toBeNull()
 })
 
 test("switching worktree shows that worktree's tabs", async () => {

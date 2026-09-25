@@ -1,10 +1,9 @@
-// The workbench of one worktree: four tabs in the titlebar strip, the second a split of three
+// The workbench of one worktree: one group, its row of four tabs the top band of the window
+// between the sidebars' headers (no titlebar row above it), the second tab a split of three
 // terminals (the middle one focused), with a Claude session working in the first tab, one waiting
 // on you in the split, and one that finished in the last — each tab led by its agent's state,
-// and the finished one, not on screen, washed as unread.
-//
-// The strip mounts in the shell's `titlebar-tabs` slot; before `shell` lands, the shot needs a
-// stand-in `src/shell/slots.ts` (see the PR for the one used).
+// and the finished one, not on screen, washed as unread. The row ends with the titlebar's right
+// cluster. A version 2 file, read as one group holding its tabs in order.
 import { scenario } from '../scenario.mjs'
 import { appIpc, REPO } from '../fixtures/app.mjs'
 import { TERMINAL_OUTPUT } from '../fixtures/terminal-output.mjs'

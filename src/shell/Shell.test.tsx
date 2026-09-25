@@ -4,8 +4,15 @@ import { vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-// The workbench has its own tests; here it is the box the columns sit around.
-vi.mock('./Workbench', () => ({ default: () => null }))
+// The workbench has its own tests; here it is the box the columns sit around, drawing the ends
+// of the window's top band where its top groups' rows would.
+vi.mock('./Workbench', async () => {
+  const { createElement } = await import('react')
+  return {
+    default: ({ lead, trail }: { lead?: unknown; trail?: unknown }) =>
+      createElement('div', { 'data-top-row': '' }, createElement('span', { 'data-start': '' }, lead as never), createElement('span', { 'data-end': '' }, trail as never)),
+  }
+})
 
 import Shell from './Shell'
 import { mountInSlot, resetSlots } from './slots'
@@ -39,9 +46,14 @@ const mouse = (type: string, target: EventTarget, x: number) =>
 const Left = () => <nav data-left>workspaces</nav>
 const Right = () => <aside data-right>memory</aside>
 
-test('with nothing mounted: the titlebar with the app’s name, and the status bar’s strip; no columns, no toggles', async () => {
+const start = () => q('[data-top-row] [data-start]')!
+const end = () => q('[data-top-row] [data-end]')!
+
+test('with nothing mounted: the app’s name at the start of the top row, and the status bar’s strip; no columns, no toggles', async () => {
   await render()
-  expect(q('[data-shell-titlebar]')?.textContent).toContain('mnemo')
+  expect(start().textContent).toContain('mnemo')
+  // No titlebar row of its own: the workbench's top groups' rows are the window's top band.
+  expect(q('[data-shell-titlebar]')).toBeNull()
   expect(column('left')).toBeNull()
   expect(column('right')).toBeNull()
   expect(toggles('Toggle sidebar')).toHaveLength(0)
@@ -54,28 +66,25 @@ test('with nothing mounted: the titlebar with the app’s name, and the status b
 test('each slot draws where Orca has it', async () => {
   mountInSlot('left-sidebar', Left)
   mountInSlot('right-sidebar', Right)
-  mountInSlot('titlebar-tabs', () => <div data-tabs>tabs</div>)
   mountInSlot('titlebar-right', () => <div data-cluster>cluster</div>)
   mountInSlot('status-bar', () => <footer data-status>bar</footer>)
   mountInSlot('overlay', () => <div data-drawer>drawer</div>)
   await render()
   expect(column('left')!.querySelector('[data-shell-slot="left-sidebar"] [data-left]')).not.toBeNull()
   expect(column('right')!.querySelector('[data-shell-slot="right-sidebar"] [data-right]')).not.toBeNull()
-  const titlebar = q('[data-shell-titlebar]')!
-  expect(titlebar.querySelector('[data-shell-slot="titlebar-tabs"] [data-tabs]')).not.toBeNull()
-  expect(titlebar.querySelector('[data-shell-slot="titlebar-right"] [data-cluster]')).not.toBeNull()
-  // The tabs take the titlebar's free width; the cluster sits after them.
-  expect(titlebar.querySelector('[data-shell-slot="titlebar-tabs"]')!.className).toContain('flex-1')
+  // The right cluster ends the top-right group's row.
+  expect(end().querySelector('[data-shell-slot="titlebar-right"] [data-cluster]')).not.toBeNull()
+  expect(start().childElementCount).toBe(0)
   expect(q('[data-shell-slot="status-bar"] [data-status]')).not.toBeNull()
   // Overlays are drawn after the shell, not inside any of its columns.
   const overlay = q('[data-drawer]')!
   expect(q('[data-shell]')!.contains(overlay)).toBe(false)
-  // The order on screen: left column, then the titlebar and workbench, then the right column.
+  // The order on screen: left column, then the workbench, then the right column.
   const row = column('left')!.parentElement!
   expect([...row.children].map((c) => (c as HTMLElement).dataset.shellColumn ?? 'center')).toEqual(['left', 'center', 'right'])
 })
 
-test('the left column is the sidebar’s width; closed, it is 0 wide and inert, its component still mounted, and its controls move to the titlebar', async () => {
+test('the left column is the sidebar’s width; closed, it is 0 wide and inert, its component still mounted, and its controls move to the top-left row', async () => {
   let mounts = 0
   let unmounts = 0
   function Counted() {
@@ -91,25 +100,27 @@ test('the left column is the sidebar’s width; closed, it is 0 wide and inert, 
   expect(left.style.width).toBe('280px')
   expect(left.hasAttribute('inert')).toBe(false)
   expect(left.querySelector('.titlebar-left')?.textContent).toContain('mnemo')
-  expect(q('[data-shell-titlebar]')!.textContent).not.toContain('mnemo')
+  expect(start().textContent).not.toContain('mnemo')
 
   act(() => toggles('Toggle sidebar')[0].click())
   expect(shellStore.getState().leftOpen).toBe(false)
   expect(left.style.width).toBe('0px')
   expect(left.hasAttribute('inert')).toBe(true)
   expect(left.querySelector('[data-sidebar-resize-handle]')).toBeNull()
-  expect(q('[data-shell-titlebar]')!.textContent).toContain('mnemo')
+  expect(start().textContent).toContain('mnemo')
   expect([mounts, unmounts]).toEqual([1, 0])
 
-  // The titlebar's copy of the toggle opens it again.
-  const inTitlebar = q('[data-shell-titlebar]')!.querySelector<HTMLButtonElement>('button[aria-label="Toggle sidebar"]')!
-  act(() => inTitlebar.click())
+  // The row's copy of the toggle opens it again.
+  const inRow = start().querySelector<HTMLButtonElement>('button[aria-label="Toggle sidebar"]')!
+  act(() => inRow.click())
+  expect(start().textContent).not.toContain('mnemo')
   expect(left.style.width).toBe('280px')
   expect([mounts, unmounts]).toEqual([1, 0])
 })
 
-test('the right sidebar’s toggle sits in the titlebar only while it is closed', async () => {
+test('the right sidebar’s toggle ends the top-right row, after the cluster, only while it is closed', async () => {
   mountInSlot('right-sidebar', Right)
+  mountInSlot('titlebar-right', () => <div data-cluster>cluster</div>)
   await render()
   expect(column('right')!.style.width).toBe('320px')
   expect(toggles('Toggle right sidebar')).toHaveLength(0)
@@ -117,6 +128,8 @@ test('the right sidebar’s toggle sits in the titlebar only while it is closed'
   expect(column('right')!.style.width).toBe('0px')
   expect(column('right')!.hasAttribute('inert')).toBe(true)
   expect(q('[data-right]')).not.toBeNull()
+  const [cluster, toggle] = [end().querySelector('[data-cluster]')!, end().querySelector('button[aria-label="Toggle right sidebar"]')!]
+  expect(cluster.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   act(() => toggles('Toggle right sidebar')[0].click())
   expect(shellStore.getState().rightOpen).toBe(true)
   expect(toggles('Toggle right sidebar')).toHaveLength(0)

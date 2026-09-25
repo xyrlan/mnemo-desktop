@@ -16,6 +16,22 @@ const px = (v: number): Len => ({ f: 0, px: v })
 
 export const FULL: Box = { x: px(0), y: px(0), w: { f: 1, px: 0 }, h: { f: 1, px: 0 } }
 
+/** `box` cut along `dir` at `ratio`: the two sides and the GAP-wide divider centred on the cut. */
+export function cutBox(box: Box, dir: Dir, ratio: number): { a: Box; b: Box; divider: Box } {
+  const [pos, size] = dir === 'row' ? (['x', 'w'] as const) : (['y', 'h'] as const)
+  const cut = add(box[pos], scale(box[size], ratio))
+  const end = add(box[pos], box[size])
+  const a = { ...box, [size]: add(scale(box[size], ratio), px(-GAP / 2)) }
+  const bStart = add(cut, px(GAP / 2))
+  const b = { ...box, [pos]: bStart, [size]: add(end, scale(bStart, -1)) }
+  return { a, b, divider: { ...box, [pos]: add(cut, px(-GAP / 2)), [size]: px(GAP) } }
+}
+
+/** `box` with `top` pixels taken off its top (a group's tab row, above its body). */
+export function below(box: Box, top: number): Box {
+  return { ...box, y: add(box.y, px(top)), h: add(box.h, px(-top)) }
+}
+
 /** Every pane's box and every divider's box, flat. SplitView renders panes as siblings keyed
  *  by id, so moving a pane in the tree (swap) moves its box, never remounts its view. */
 export function flatLayout(n: Node, box: Box = FULL, path: Path = [], out = { panes: new Map<PaneId, Box>(), dividers: [] as DividerBox[] }) {
@@ -23,13 +39,8 @@ export function flatLayout(n: Node, box: Box = FULL, path: Path = [], out = { pa
     out.panes.set(n.pane, box)
     return out
   }
-  const [pos, size] = n.dir === 'row' ? (['x', 'w'] as const) : (['y', 'h'] as const)
-  const cut = add(box[pos], scale(box[size], n.ratio))
-  const end = add(box[pos], box[size])
-  const a = { ...box, [size]: add(scale(box[size], n.ratio), px(-GAP / 2)) }
-  const bStart = add(cut, px(GAP / 2))
-  const b = { ...box, [pos]: bStart, [size]: add(end, scale(bStart, -1)) }
-  out.dividers.push({ path, dir: n.dir, split: box, box: { ...box, [pos]: add(cut, px(-GAP / 2)), [size]: px(GAP) } })
+  const { a, b, divider } = cutBox(box, n.dir, n.ratio)
+  out.dividers.push({ path, dir: n.dir, split: box, box: divider })
   flatLayout(n.children[0], a, [...path, 0], out)
   flatLayout(n.children[1], b, [...path, 1], out)
   return out

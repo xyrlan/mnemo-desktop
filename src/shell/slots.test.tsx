@@ -27,8 +27,8 @@ const drawn = (slot: ShellSlot) => {
   return host.textContent
 }
 
-test('the six slots are the contract’s', () => {
-  expect(SLOTS).toEqual(['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-tabs', 'titlebar-right', 'overlay'])
+test('the five slots are the contract’s: the tab rows are the workbench’s own, one per group', () => {
+  expect(SLOTS).toEqual(['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-right', 'overlay'])
 })
 
 test('a slot draws what is mounted in it, in mount order, and nothing of the others', () => {

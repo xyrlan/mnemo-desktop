@@ -20,7 +20,11 @@ Used for:
   `src/onboarding/`, `src/diff/`, `src/commit/`, `src/floating/`, `src/quick-commands/`,
   `src/voice/`, `src/browser/`, `src/explorer/`, `src/search/`, `src/source-control/`,
   `src/checks/`, `src/chat-input/`, `src/conversation/`, `src/vault/`, `src/home/`,
-  `src/tasks/` — where a file opens with `// adapted from stablyai/orca <path>`.
+  `src/tasks/` — where a file opens with `// adapted from stablyai/orca <path>`;
+- the split tab groups in `src/tab-group/` (from
+  `src/renderer/src/components/tab-group/`: the group layout and panel, the tab drag across
+  rows and onto a body's edge, the "New split" overlay) and `src/chrome/Divider.tsx` (its resize
+  handle).
 
 ```
 MIT License

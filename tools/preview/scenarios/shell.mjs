@@ -1,6 +1,8 @@
-// The shell (wave B, `shell`): titlebar, workbench and status strip around a worktree. Two of
-// them: a repo known and nothing saved, so its main checkout shows its empty state; and a saved
-// workspace whose worktree shows one terminal.
+// The shell (wave B, `shell`): sidebars, workbench and status strip around a worktree, with no
+// titlebar row: the workbench's top group row is the window's top band, the app's name above the
+// left sidebar and the titlebar's right cluster at the end of that row. Two of them: a repo known
+// and nothing saved, so its main checkout shows its empty state under a row holding the "+"
+// alone; and a saved workspace whose worktree shows one terminal in one group.
 import { scenario } from '../scenario.mjs'
 import { appIpc, HOME, REPO } from '../fixtures/app.mjs'
 import { TERMINAL_OUTPUT } from '../fixtures/terminal-output.mjs'

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { GitBranch, GripVertical, X } from 'lucide-react'
 import { store, useApp } from '../layout/app-store'
 import { useMission } from '../mission/app-store'
-import type { PaneId } from '../layout/tree'
+import { leaves, type PaneId } from '../layout/tree'
 import { tauriChrome, type ChromeClient } from './client'
 import { barInfo, FLASH_MS, pulseLabel, pulseTitle } from './info'
 import { dropPane, startPaneDrag } from './drag'
@@ -87,7 +87,10 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
     const active = document.activeElement
     if (active instanceof HTMLElement && own && !own.contains(active)) active.blur()
     store.getState().focusPane(id)
-    startPaneDrag(id, e, (from, to, zone) => dropPane(store.getState(), from, to, zone))
+    // A pane that shares its tab can also leave it: dropped on a tab row, it is a tab of its own.
+    const tab = store.getState().tabs.find((t) => leaves(t.root).includes(id))
+    const rows = tab && leaves(tab.root).length > 1 ? { detach: (group: string, index: number) => store.getState().detachPane(id, { group, index }) } : undefined
+    startPaneDrag(id, e, (from, to, zone) => dropPane(store.getState(), from, to, zone), rows)
   }
 
   const close = (e: React.MouseEvent) => {
@@ -111,7 +114,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
 
   return (
     <>
-      <div ref={ref} data-ui className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap, or onto its edge to move beside it'}>
+      <div ref={ref} data-ui className={`pane-bar${live ? ` pane-bar-pulsing pulse-${live.event.kind}` : ''}`} onMouseDown={onMouseDown} title={info.cwd ?? 'Drag onto another pane to swap, onto its edge to move beside it, or onto a tab row to make it a tab'}>
         <GripVertical className="pane-bar-grip" aria-hidden />
         {info.place && <span className="pane-bar-repo">{info.place}</span>}
         {info.branch && (

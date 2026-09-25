@@ -14,9 +14,9 @@ import { useStore } from 'zustand'
  *   mounted there: no column at all.
  * - `status-bar`: the bar along the bottom. The component draws the whole bar (Orca's h-6,
  *   `border-t`); with none mounted, the shell holds the row with an empty strip of that height.
- * - `titlebar-tabs`: the tab strip, which gets the titlebar's free width (`flex-1 min-w-0`,
- *   full height).
- * - `titlebar-right`: a cluster at the titlebar's right end, before the right-sidebar toggle.
+ * - `titlebar-right`: a cluster at the right end of the window's top band (the top-right group's
+ *   tab row), before the right-sidebar toggle. The tab rows themselves are the workbench's own:
+ *   one per group (src/tab-group), not a slot.
  * - `overlay`: drawers, dialogs, palettes, the pet, notification stacks — rendered once at the
  *   root after everything else, inside the shell's `TooltipProvider`; each positions itself
  *   (fixed, or a Radix portal).
@@ -30,9 +30,9 @@ import { useStore } from 'zustand'
  * of drawing a second copy; the earlier mount's undo then does nothing. So in dev two different
  * components in one slot need different names; a component with no name is never replaced.
  */
-export type ShellSlot = 'left-sidebar' | 'right-sidebar' | 'status-bar' | 'titlebar-tabs' | 'titlebar-right' | 'overlay'
+export type ShellSlot = 'left-sidebar' | 'right-sidebar' | 'status-bar' | 'titlebar-right' | 'overlay'
 
-export const SLOTS: readonly ShellSlot[] = ['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-tabs', 'titlebar-right', 'overlay']
+export const SLOTS: readonly ShellSlot[] = ['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-right', 'overlay']
 
 /** One component in one slot; `key` tells React two entries apart. */
 export type SlotEntry = { key: number; component: ComponentType }

@@ -1,6 +1,6 @@
 import type { Tab } from '../layout/store'
 import type { AgentNode, RepoNode } from '../fleet/types'
-import { dropIndicatorFor, fleetAgents, reorderTabs, tabAgent, tabUnread } from './model'
+import { fleetAgents, tabAgent, tabUnread } from './model'
 
 const tab = (id: string, ...panes: number[]): Tab => ({
   id,
@@ -63,39 +63,5 @@ describe('tabUnread', () => {
   })
   test('never the tab on screen', () => {
     expect(tabUnread(t, [agent(2, 'done', 200)], true, 150)).toBe(false)
-  })
-})
-
-describe('reorderTabs', () => {
-  const tabs = [tab('a', 1), tab('b', 2), tab('c', 3), tab('d', 4)]
-  const ids = (ts: Tab[]) => ts.map((t) => t.id).join('')
-  test('moves the tab to where the other one is', () => {
-    expect(ids(reorderTabs(tabs, 'a', 'c'))).toBe('bcad')
-    expect(ids(reorderTabs(tabs, 'd', 'b'))).toBe('adbc')
-    expect(ids(reorderTabs(tabs, 'b', 'a'))).toBe('bacd')
-  })
-  test('the same array when nothing moves', () => {
-    expect(reorderTabs(tabs, 'a', 'a')).toBe(tabs)
-    expect(reorderTabs(tabs, 'a', 'zz')).toBe(tabs)
-    expect(reorderTabs(tabs, 'zz', 'a')).toBe(tabs)
-  })
-  test('leaves the input alone', () => {
-    reorderTabs(tabs, 'a', 'd')
-    expect(ids(tabs)).toBe('abcd')
-  })
-})
-
-describe('dropIndicatorFor', () => {
-  const ids = ['a', 'b', 'c']
-  test('on the side of the target the tab lands on', () => {
-    expect(dropIndicatorFor(ids, 'a', 'c', 'c')).toBe('right')
-    expect(dropIndicatorFor(ids, 'c', 'a', 'a')).toBe('left')
-  })
-  test('only on the tab it is over, and never over itself or with no drag', () => {
-    expect(dropIndicatorFor(ids, 'a', 'c', 'b')).toBeNull()
-    expect(dropIndicatorFor(ids, 'a', 'a', 'a')).toBeNull()
-    expect(dropIndicatorFor(ids, null, 'b', 'b')).toBeNull()
-    expect(dropIndicatorFor(ids, 'a', null, 'b')).toBeNull()
-    expect(dropIndicatorFor(ids, 'zz', 'b', 'b')).toBeNull()
   })
 })

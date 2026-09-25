@@ -70,7 +70,7 @@ function RightSidebarToggle() {
 }
 
 /** The titlebar's left cluster: the app's name and the sidebar toggle. Above the open left
- *  sidebar, or at the start of the titlebar while it is closed. */
+ *  sidebar, or at the start of the top-left group's row while it is closed. */
 function TitlebarLeftControls({ toggle }: { toggle: boolean }) {
   return (
     <div className="flex h-full w-full shrink-0 items-center">
@@ -164,24 +164,31 @@ function RightColumn({ leftTaken }: { leftTaken: number }) {
   )
 }
 
-/** The titlebar over the workbench: the tab strip, the right-end cluster, and the right
- *  sidebar's toggle while it is closed (open, its own header has one). */
-function TitlebarMainStrip({ leftControls, leftToggle, rightToggle }: { leftControls: boolean; leftToggle: boolean; rightToggle: boolean }) {
+/** The start of the window's top band while the left sidebar is closed (open, the column's own
+ *  header has it): the app's name and the sidebar's toggle, in the top-left group's row. */
+function RowLead({ toggle }: { toggle: boolean }) {
   return (
-    <div className="titlebar" data-shell-titlebar="">
-      {leftControls && (
-        <div className="mr-2 flex h-full shrink-0 items-center border-r border-border">
-          <TitlebarLeftControls toggle={leftToggle} />
-        </div>
-      )}
-      <div data-shell-slot="titlebar-tabs" className="flex min-w-0 flex-1 self-stretch">
-        <SlotOutlet slot="titlebar-tabs" />
-      </div>
+    <div data-shell-lead="" className="mr-2 flex h-full shrink-0 items-center border-r border-border">
+      <TitlebarLeftControls toggle={toggle} />
+    </div>
+  )
+}
+
+/** The end of the window's top band, in the top-right group's row: the titlebar's right cluster
+ *  (quick commands, the floating terminal's toggle), then the right sidebar's toggle while it is
+ *  closed (open, its own header has one). One place for all of it, so its mounts never move. */
+function RowTrail({ rightToggle }: { rightToggle: boolean }) {
+  return (
+    <>
       <div data-shell-slot="titlebar-right" className="flex shrink-0 items-center self-stretch">
         <SlotOutlet slot="titlebar-right" />
       </div>
-      {rightToggle && <RightSidebarToggle />}
-    </div>
+      {rightToggle && (
+        <div className="flex shrink-0 items-center">
+          <RightSidebarToggle />
+        </div>
+      )}
+    </>
   )
 }
 
@@ -204,8 +211,9 @@ type Props = {
   onDismissNotice(): void
 }
 
-/** Orca's app shell: titlebar, left sidebar, workbench, right sidebar, status bar, and the
- *  overlays over all of it. Every screen in it mounts itself through `mountInSlot`. */
+/** Orca's app shell: left sidebar, workbench, right sidebar, status bar, and the overlays over all
+ *  of it. The workbench's top groups' rows are the top band of the window, between the sidebars'
+ *  headers. Every screen in it mounts itself through `mountInSlot`. */
 export default function Shell({ ready, notice, onDismissNotice }: Props) {
   const leftOpen = useShell((s) => s.leftOpen)
   const leftWidth = useShell((s) => s.leftWidth)
@@ -220,8 +228,14 @@ export default function Shell({ ready, notice, onDismissNotice }: Props) {
         <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
           {hasLeft && <LeftColumn />}
           <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', leftShown && 'border-l border-border')}>
-            <TitlebarMainStrip leftControls={!leftShown} leftToggle={hasLeft} rightToggle={hasRight && !rightOpen} />
-            <Workbench ready={ready} notice={notice} onDismissNotice={onDismissNotice} />
+            {/* No titlebar row: the rows of the top groups are the window's top band. */}
+            <Workbench
+              ready={ready}
+              notice={notice}
+              onDismissNotice={onDismissNotice}
+              lead={leftShown ? undefined : <RowLead toggle={hasLeft} />}
+              trail={<RowTrail rightToggle={hasRight && !rightOpen} />}
+            />
           </div>
           {hasRight && <RightColumn leftTaken={leftShown ? leftWidth : 0} />}
         </div>
