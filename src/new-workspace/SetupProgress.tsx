@@ -17,7 +17,7 @@ export default function SetupProgress({ store, onOpen }: { store: StoreApi<Setup
   const dismiss = useCallback((id: string) => store.getState().dismiss(id), [store])
   if (shown.length === 0) return null
   return (
-    // `data-ui`: new look even when the shell mounts this inside the old `.app` scope.
+    // `data-ui` marks Orca UI.
     <div data-ui className="pointer-events-none fixed right-4 bottom-10 z-toast flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
       {shown.map((run) => (
         <SetupCard key={run.id} run={run} onOpen={() => onOpen(run.path)} dismiss={dismiss} />
