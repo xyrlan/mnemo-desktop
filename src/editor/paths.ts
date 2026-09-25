@@ -56,7 +56,7 @@ export function languageFor(path: string, languages: LanguageInfo[]): string {
   return best?.id ?? 'plaintext'
 }
 
-/** The tree's default root: the focused terminal's cwd, else any terminal cwd in the
+/** The default root: the focused terminal's cwd, else any terminal cwd in the
  *  active tab (an editor that just opened as a split is itself focused), else home. */
 export function defaultRoot(state: Pick<State, 'tabs' | 'activeTab' | 'panes'>, home: string): string {
   const tab = state.tabs.find((t) => t.id === state.activeTab)

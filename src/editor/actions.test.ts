@@ -59,20 +59,3 @@ test('editor.open cancelled or empty opens nothing', async () => {
     expect(Object.values(app.getState().panes).map((p) => p.view)).toEqual(['terminal'])
   }
 })
-
-test('editor.toggle-tree toggles only a focused editor pane', async () => {
-  const { app, sessions, actions } = setup(null)
-  await app.getState().newTab()
-  app.getState().openView('editor', { path: '/w/a.ts' }, 'split-row')
-  const id = app.getState().tabs[0].focused
-  sessions.getState().open(id, '/w/a.ts', '/w')
-  sessions.getState().open(1, '/decoy', '/w')
-
-  await actions['editor.toggle-tree'].run()
-  expect(sessions.getState().sessions[id].treeOpen).toBe(false)
-
-  app.getState().focusPane(1)
-  await actions['editor.toggle-tree'].run()
-  expect(sessions.getState().sessions[id].treeOpen).toBe(false)
-  expect(sessions.getState().sessions[1].treeOpen).toBe(true)
-})

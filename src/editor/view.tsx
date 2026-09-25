@@ -8,11 +8,10 @@ import { detectPlatform } from '../actions/keys'
 import { cssVar } from '../theme'
 import { tauriFs } from './client'
 import { createSessions } from './sessions'
-import { openEditor, registerEditorActions } from './actions'
+import { registerEditorActions } from './actions'
 import { registerReuse } from '../layout/reuse'
 import { promptPath } from './Prompt'
 import { basename, defaultRoot, languageFor } from './paths'
-import Tree from './Tree'
 import './editor.css'
 
 const fs = tauriFs
@@ -149,7 +148,7 @@ function EditorPane({ id, props }: PaneViewProps) {
     if (focused) editor?.focus()
   }, [focused, editor])
 
-  // ⌘S outside Monaco (tree, banners); inside it the editor command handles it.
+  // ⌘S outside Monaco (banners); inside it the editor command handles it.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (host.current?.contains(e.target as Node)) return
     if (e[modKey] && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
@@ -166,13 +165,6 @@ function EditorPane({ id, props }: PaneViewProps) {
   return (
     <div className="pane-body editor-pane" data-ui onKeyDown={onKeyDown}>
       <div className="editor-head">
-        <button
-          className={`editor-icon${session?.treeOpen ? ' on' : ''}`}
-          onClick={() => st.toggleTree(id)}
-          title="Toggle file tree"
-        >
-          ☰
-        </button>
         <span className="editor-path" title={path}>
           {shown || 'no file'}
         </span>
@@ -200,24 +192,10 @@ function EditorPane({ id, props }: PaneViewProps) {
         </div>
       )}
       <div className="editor-main">
-        {session?.treeOpen &&
-          (root ? (
-            <Tree
-              fs={fs}
-              root={root}
-              current={path}
-              expanded={session.expanded}
-              onToggleDir={(dir) => st.toggleDir(id, dir)}
-              onOpen={(p, split) => (split ? openEditor(store, p, root, 'split-row') : st.navigate(id, p))}
-              modKey={modKey}
-            />
-          ) : (
-            <div className="editor-tree" />
-          ))}
         <div className="editor-code">
           <div ref={host} className="editor-monaco" />
           {!hasBuffer && !session?.error && (
-            <div className="editor-empty">{loading || !editor ? 'loading…' : path ? '' : 'pick a file from the tree'}</div>
+            <div className="editor-empty">{loading || !editor ? 'loading…' : path ? '' : 'no file open'}</div>
           )}
         </div>
       </div>
