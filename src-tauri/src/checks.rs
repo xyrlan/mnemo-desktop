@@ -625,8 +625,11 @@ fn no_pr(e: &str) -> bool {
     e.contains("no pull requests found") || e.contains("no open pull requests")
 }
 
-fn methods_cache() -> &'static Mutex<HashMap<PathBuf, (Instant, Vec<String>)>> {
-    static C: OnceLock<Mutex<HashMap<PathBuf, (Instant, Vec<String>)>>> = OnceLock::new();
+/// Each repository's merge methods, and when they were read.
+type Methods = Mutex<HashMap<PathBuf, (Instant, Vec<String>)>>;
+
+fn methods_cache() -> &'static Methods {
+    static C: OnceLock<Methods> = OnceLock::new();
     C.get_or_init(Default::default)
 }
 
@@ -957,10 +960,12 @@ mod tests {
         assert_eq!(gate(&gate_json("OPEN", false, "abc", running), "abc"), Err("2 checks not finished: a, b".into()));
     }
 
+    type Answer = Box<dyn Fn(&str) -> Result<String, String> + Sync + Send>;
+
     /// A scripted `git`/`gh`: each call is recorded; `answer` maps the joined argv to a reply.
     struct Script {
         calls: StdMutex<Vec<String>>,
-        answer: Box<dyn Fn(&str) -> Result<String, String> + Sync + Send>,
+        answer: Answer,
     }
 
     impl Script {
