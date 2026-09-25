@@ -393,10 +393,10 @@ fn group(root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileR
         .collect()
 }
 
-/// Searches the files under `root` (which must lie inside `home`) for `query`.
-pub fn search_in(root: &str, query: &str, opts: &SearchOpts, home: &Path, limit: Duration, superseded: &dyn Fn() -> bool) -> Result<SearchResult, String> {
+/// Searches the files under `root` (which must lie in `scope`, as the editor's files do) for `query`.
+pub fn search_in(root: &str, query: &str, opts: &SearchOpts, scope: &crate::fs::Scope, limit: Duration, superseded: &dyn Fn() -> bool) -> Result<SearchResult, String> {
     let deadline = Instant::now() + limit;
-    let root: PathBuf = crate::fs::guard(root, home)?;
+    let root: PathBuf = crate::fs::guard(root, scope)?;
     if !root.is_dir() {
         return Err(format!("{} is not a folder", root.display()));
     }
@@ -444,18 +444,11 @@ pub fn search_in(root: &str, query: &str, opts: &SearchOpts, home: &Path, limit:
 /// Bumped by every search; a search whose number is no longer the latest stops.
 static LATEST: AtomicU64 = AtomicU64::new(0);
 
-fn home() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "cannot determine home directory".to_string())
-}
-
 #[tauri::command]
 pub async fn search_worktree(root: String, query: String, opts: SearchOpts) -> Result<SearchResult, String> {
     let n = LATEST.fetch_add(1, Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn_blocking(move || {
-        search_in(&root, &query, &opts, &home()?, TIME_LIMIT, &|| LATEST.load(Ordering::SeqCst) != n)
+        search_in(&root, &query, &opts, &crate::fs::Scope::current()?, TIME_LIMIT, &|| LATEST.load(Ordering::SeqCst) != n)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -464,6 +457,7 @@ pub async fn search_worktree(root: String, query: String, opts: SearchOpts) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::Scope;
     use crate::testutil::temp_dir;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -492,7 +486,7 @@ mod tests {
     }
 
     fn run(root: &Path, query: &str, opts: SearchOpts) -> Result<SearchResult, String> {
-        search_in(root.to_str().unwrap(), query, &opts, root.parent().unwrap(), TIME_LIMIT, &|| false)
+        search_in(root.to_str().unwrap(), query, &opts, &Scope::home(root.parent().unwrap()), TIME_LIMIT, &|| false)
     }
 
     fn found(r: &SearchResult) -> Vec<(String, u32, u32)> {
@@ -587,10 +581,10 @@ mod tests {
     #[test]
     fn stops_at_the_time_limit_and_when_superseded() {
         let d = repo();
-        let r = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), d.parent().unwrap(), Duration::ZERO, &|| false).unwrap();
+        let r = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), &Scope::home(d.parent().unwrap()), Duration::ZERO, &|| false).unwrap();
         assert!(r.truncated && r.timed_out);
         assert_eq!(r.total_matches, 0);
-        let err = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), d.parent().unwrap(), TIME_LIMIT, &|| true).unwrap_err();
+        let err = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), &Scope::home(d.parent().unwrap()), TIME_LIMIT, &|| true).unwrap_err();
         assert_eq!(err, "search superseded");
     }
 
@@ -623,11 +617,15 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_root_outside_home_and_answers_an_empty_query_with_nothing() {
+    fn refuses_a_root_outside_home_and_its_projects_and_answers_an_empty_query_with_nothing() {
         let d = repo();
         let elsewhere = temp_dir("search-home");
-        let err = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), &elsewhere, TIME_LIMIT, &|| false).unwrap_err();
+        let err = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), &Scope::home(&elsewhere), TIME_LIMIT, &|| false).unwrap_err();
         assert!(err.contains("outside the home directory"), "{err}");
+        // Saved as a project, the same folder is searched though it is outside home.
+        let scope = Scope { home: elsewhere, projects: vec![d.to_string_lossy().into_owned()] };
+        let r = search_in(d.to_str().unwrap(), "foo", &SearchOpts::default(), &scope, TIME_LIMIT, &|| false).unwrap();
+        assert!(!r.files.is_empty());
         assert_eq!(run(&d, "", SearchOpts::default()).unwrap(), SearchResult::default());
     }
 
