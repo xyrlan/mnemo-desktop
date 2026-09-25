@@ -573,13 +573,30 @@ pub fn join(mut input: JoinInput) -> Vec<RepoGroup> {
                 let pr = prs.iter().find(|p| p.head == branch).cloned();
                 ps.push(Piece { name: piece, branch, child, pr });
             }
-            // A contract nobody is working on and nobody delivered is noise.
-            if ps.iter().all(|p| p.child.is_none() && p.pr.is_none()) {
-                continue;
-            }
-            let landable = !ps.is_empty()
-                && ps.iter().all(|p| p.pr.as_ref().map(|pr| pr.state == "OPEN" && pr.ci == "pass").unwrap_or(false));
+            let landable = is_landable(&ps);
             g.missions.push(Mission { feature, contract_path: path, pieces: ps, landable });
+        }
+        // A child on `feat/<feature>/<piece>` belongs to that feature's mission
+        // whether or not a contract was found for it.
+        let mut wave_children: Vec<ChildSession> = Vec::new();
+        for k in by_branch.keys().filter(|(r, b)| *r == root && wave_of(b).is_some()).cloned().collect::<Vec<_>>() {
+            wave_children.extend(by_branch.remove(&k));
+        }
+        wave_children.sort_by(|a, b| a.branch.cmp(&b.branch));
+        for c in wave_children {
+            let branch = c.branch.clone().unwrap_or_default();
+            let (feature, piece) = wave_of(&branch).map(|(f, p)| (f.to_string(), p.to_string())).unwrap();
+            let pr = prs.iter().find(|p| p.head == branch).cloned();
+            let piece = Piece { name: piece, branch, child: Some(c), pr };
+            match g.missions.iter_mut().find(|m| m.feature == feature) {
+                Some(m) => m.pieces.push(piece),
+                None => g.missions.push(Mission { feature, contract_path: String::new(), pieces: vec![piece], landable: false }),
+            }
+        }
+        // A contract nobody is working on and nobody delivered is noise.
+        g.missions.retain(|m| m.pieces.iter().any(|p| p.child.is_some() || p.pr.is_some()));
+        for m in &mut g.missions {
+            m.landable = is_landable(&m.pieces);
         }
         let mut leftover: Vec<ChildSession> = by_branch
             .iter()
@@ -807,16 +824,32 @@ pub fn worktree_branches(root: &str) -> HashMap<String, String> {
     map
 }
 
+/// `feat/<feature>/<piece>` -> (feature, piece).
+fn wave_of(branch: &str) -> Option<(&str, &str)> {
+    let (feature, piece) = branch.strip_prefix("feat/")?.split_once('/')?;
+    (!feature.is_empty() && !piece.is_empty()).then_some((feature, piece))
+}
+
+fn is_landable(pieces: &[Piece]) -> bool {
+    !pieces.is_empty()
+        && pieces.iter().all(|p| p.pr.as_ref().map(|pr| pr.state == "OPEN" && pr.ci == "pass").unwrap_or(false))
+}
+
+/// Where a repo keeps its contracts.
+const CONTRACT_DIRS: [&[&str]; 3] = [&["docs", "contracts"], &["docs", "superpowers", "contracts"], &["contracts"]];
+
 pub fn contracts_in(root: &str) -> Vec<(String, String, Vec<String>)> {
-    let dir = Path::new(root).join("docs").join("contracts");
-    let Ok(rd) = std::fs::read_dir(&dir) else { return vec![] };
     let mut out = Vec::new();
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.extension().map(|x| x == "md").unwrap_or(false) {
-            if let Ok(md) = std::fs::read_to_string(&p) {
-                if let Some((f, pieces)) = parse_contract(&md) {
-                    out.push((p.to_string_lossy().to_string(), f, pieces));
+    for parts in CONTRACT_DIRS {
+        let dir = parts.iter().fold(PathBuf::from(root), |d, p| d.join(p));
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "md").unwrap_or(false) {
+                if let Ok(md) = std::fs::read_to_string(&p) {
+                    if let Some((f, pieces)) = parse_contract(&md) {
+                        out.push((p.to_string_lossy().to_string(), f, pieces));
+                    }
                 }
             }
         }
@@ -1348,6 +1381,72 @@ mod tests {
         assert!(groups[0].parents.iter().any(|p| p.status == "busy"));
         let groups = fixture_join(Some("/Users/xyrlan/github/mnemo-desktop"));
         assert_eq!(groups[0].name, "mnemo-desktop");
+    }
+
+    fn bare_child(id: &str, cwd: &str) -> ChildSession {
+        ChildSession {
+            id: id.into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
+            detail: String::new(), suggested_reply: None, cwd: cwd.into(), tokens: 0, live: false,
+            updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
+            model: None, effort: None, pr: None,
+        }
+    }
+
+    #[test]
+    fn join_groups_children_by_feature_without_a_contract() {
+        let mut roots = HashMap::new();
+        let mut branches = HashMap::new();
+        for (cwd, b) in [("/r-a", "feat/wave/a"), ("/r-b", "feat/wave/b"), ("/r-c", "fix/other")] {
+            roots.insert(cwd.to_string(), "/r".to_string());
+            branches.insert(cwd.to_string(), b.to_string());
+        }
+        let children = vec![bare_child("a", "/r-a"), bare_child("b", "/r-b"), bare_child("c", "/r-c")];
+        let mut prs = HashMap::new();
+        prs.insert("/r".to_string(), vec![Pr { number: 1, url: "u".into(), state: "OPEN".into(), head: "feat/wave/a".into(), ci: "pass".into(), draft: false, failing: vec![] }]);
+        let groups = join(JoinInput {
+            parents: vec![], children, roots: &roots, branches: &branches, contracts: &HashMap::new(), prs: &prs,
+            recorded: &HashMap::new(), focused_root: None, parent_starts: &HashMap::new(), child_starts: &HashMap::new(),
+        });
+        let g = &groups[0];
+        assert_eq!(g.missions.len(), 1);
+        let m = &g.missions[0];
+        assert_eq!((m.feature.as_str(), m.contract_path.as_str()), ("wave", ""));
+        assert_eq!(m.pieces.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(m.pieces[0].pr.as_ref().unwrap().number, 1);
+        assert!(!m.landable, "piece b has no PR");
+        assert_eq!(g.children.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["c"]);
+    }
+
+    #[test]
+    fn join_adds_a_child_outside_the_contract_to_its_mission() {
+        let mut roots = HashMap::new();
+        let mut branches = HashMap::new();
+        roots.insert("/r-x".to_string(), "/r".to_string());
+        branches.insert("/r-x".to_string(), "feat/wave/extra".to_string());
+        let mut contracts = HashMap::new();
+        contracts.insert("/r".to_string(), vec![("c.md".to_string(), "wave".to_string(), vec!["a".to_string()])]);
+        let groups = join(JoinInput {
+            parents: vec![], children: vec![bare_child("x", "/r-x")], roots: &roots, branches: &branches, contracts: &contracts,
+            prs: &HashMap::new(), recorded: &HashMap::new(), focused_root: None, parent_starts: &HashMap::new(), child_starts: &HashMap::new(),
+        });
+        let m = &groups[0].missions[0];
+        assert_eq!(m.contract_path, "c.md");
+        assert_eq!(m.pieces.len(), 2);
+        assert_eq!(groups[0].missions.len(), 1);
+    }
+
+    #[test]
+    fn contracts_are_found_in_all_three_directories() {
+        let root = std::env::temp_dir().join(format!("mnemo-contracts-{}", std::process::id()));
+        for (i, d) in ["docs/contracts", "docs/superpowers/contracts", "contracts"].iter().enumerate() {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+            std::fs::write(root.join(d).join("c.md"), format!("---\nfeature: f{i}\n---\n## p\n")).unwrap();
+        }
+        let found = contracts_in(&root.to_string_lossy());
+        std::fs::remove_dir_all(&root).ok();
+        let mut features: Vec<_> = found.iter().map(|c| c.1.clone()).collect();
+        features.sort();
+        assert_eq!(features, ["f0", "f1", "f2"]);
     }
 
     #[test]
