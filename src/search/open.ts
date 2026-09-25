@@ -57,9 +57,9 @@ export async function revealWhenShown(
 
 const liveEditors = () => import('../editor/monaco').then((m) => m.monaco.editor.getEditors() as unknown as EditorLike[])
 
-/** Opens a result's file in an editor pane rooted at the searched worktree, at the match. */
+/** Opens a result's file as a preview tab rooted at the searched worktree, at the match. */
 export function openMatch(app: Store, root: string, file: SearchFileResult, match: SearchMatch, editors: () => Promise<EditorLike[]> = liveEditors): Promise<boolean> {
   const name = file.relativePath.slice(file.relativePath.lastIndexOf('/') + 1)
-  app.getState().openView('editor', { path: file.filePath, root }, 'auto', name)
+  app.getState().openView('editor', { path: file.filePath, root }, 'auto', name, { preview: true })
   return revealWhenShown(file.filePath, match, editors)
 }

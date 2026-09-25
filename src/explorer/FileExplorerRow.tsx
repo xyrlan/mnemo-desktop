@@ -52,7 +52,8 @@ export type FileExplorerRowProps = {
   statusColor: string | null
   isIgnored: boolean
   canCollapseFolderSubtree: boolean
-  onClick: () => void
+  onClick: (e: React.MouseEvent) => void
+  onDoubleClick: () => void
   onOpenToSide: () => void
   onCopyPath: (kind: 'absolute' | 'relative') => void
   onOpenInTerminal: () => void
@@ -69,6 +70,7 @@ export function FileExplorerRow({
   isIgnored,
   canCollapseFolderSubtree,
   onClick,
+  onDoubleClick,
   onOpenToSide,
   onCopyPath,
   onOpenInTerminal,
@@ -96,6 +98,7 @@ export function FileExplorerRow({
           )}
           style={{ paddingLeft: `${node.depth * 16 + 8}px` }}
           onClick={onClick}
+          onDoubleClick={onDoubleClick}
         >
           {node.isDirectory ? (
             <>

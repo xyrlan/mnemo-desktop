@@ -19,6 +19,8 @@ import './explorer.css'
 export const REFRESH_MS = 10_000
 export const ROW_HEIGHT = 24
 
+export type OpenHow = 'preview' | 'keep' | 'side'
+
 export type FileExplorerProps = {
   store: ExplorerStore
   /** The worktree on screen; null before there is one. */
@@ -28,7 +30,9 @@ export type FileExplorerProps = {
   activeFile: string | null
   /** Changes when something may have written files (an agent finishing a turn): read again. */
   stamp?: string | null
-  onOpenFile: (path: string, place: 'auto' | 'split-row') => void
+  /** `preview`: a click (the target group's preview tab); `keep`: a double click (a kept tab there);
+   *  `side`: Shift-click and "Open to the Side" (a kept tab in the group to the right). */
+  onOpenFile: (path: string, how: OpenHow) => void
   onOpenInTerminal: (dir: string) => void
   onCopy: (text: string) => void
 }
@@ -133,7 +137,7 @@ function FileExplorerFiles({ store, root, repoName, activeFile, stamp, onOpenFil
     (node: TreeNode) => {
       setSelected(node.path)
       if (node.isDirectory) toggleDir(node.path)
-      else onOpenFile(node.path, 'auto')
+      else onOpenFile(node.path, 'preview')
     },
     [toggleDir, onOpenFile],
   )
@@ -156,7 +160,7 @@ function FileExplorerFiles({ store, root, repoName, activeFile, stamp, onOpenFil
     if (!node) return
     e.preventDefault()
     if (node.isDirectory) toggleDir(node.path)
-    else onOpenFile(node.path, e.shiftKey ? 'split-row' : 'auto')
+    else onOpenFile(node.path, e.shiftKey ? 'side' : 'preview')
   }
 
   const onFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -248,8 +252,9 @@ function FileExplorerFiles({ store, root, repoName, activeFile, stamp, onOpenFil
                     statusColor={nodeStatus ? STATUS_COLORS[nodeStatus] : null}
                     isIgnored={isIgnored}
                     canCollapseFolderSubtree={!hasNameFilter}
-                    onClick={() => activate(n)}
-                    onOpenToSide={() => onOpenFile(n.path, 'split-row')}
+                    onClick={(e) => (e.shiftKey && !n.isDirectory ? (setSelected(n.path), onOpenFile(n.path, 'side')) : activate(n))}
+                    onDoubleClick={() => !n.isDirectory && onOpenFile(n.path, 'keep')}
+                    onOpenToSide={() => onOpenFile(n.path, 'side')}
                     onCopyPath={(kind) => onCopy(kind === 'absolute' ? n.path : n.relativePath)}
                     onOpenInTerminal={() => onOpenInTerminal(n.path)}
                     onCollapseFolderSubtree={() => store.getState().collapseSubtree(root, n.path)}

@@ -1,5 +1,6 @@
-// Design Mode in a browser pane: a worktree with a Claude session in a terminal on the left and
-// a browser pane on the right. The palette's `browser.design-mode` turns it on, the page answers
+// Design Mode from a worktree with a Claude session in a terminal. The palette's
+// `browser.design-mode` opens a browser to the side of the terminal (a group of its own on the
+// right, both on screen), and once a page loads it arms itself and turns Design Mode on. The page answers
 // that the "Save changes" button was clicked, and the pane's card shows the pick with its
 // screenshot, ready for a note to the session.
 //
@@ -90,8 +91,8 @@ scenario('design-mode', {
       worktrees: [
         {
           path: REPO,
-          tabs: [{ id: 'tab-1', root: { kind: 'split', dir: 'row', ratio: 0.42, children: [{ kind: 'leaf', pane: 1 }, { kind: 'leaf', pane: 2 }] }, focused: 2 }],
-          panes: { 1: { view: 'terminal', cwd: REPO, sessionId: SESSION }, 2: { view: 'browser', props: { url: 'http://localhost:3000/settings' } } },
+          tabs: [{ id: 'tab-1', root: { kind: 'leaf', pane: 1 }, focused: 1 }],
+          panes: { 1: { view: 'terminal', cwd: REPO, sessionId: SESSION } },
           activeTab: 'tab-1',
         },
       ],
@@ -119,5 +120,9 @@ scenario('design-mode', {
     mcp_browser_snapshot: () => ({ mime: 'image/png', data: pagePng() }),
     browser_save_shot: ({ id }) => `/var/folders/preview/T/mnemo-desktop-design/browser-n${Math.abs(id)}-1727190000000.png`,
   }),
-  events: [{ event: 'app://action', payload: { id: 'browser.design-mode' }, afterMs: 1500 }],
+  events: [
+    { event: 'app://action', payload: { id: 'browser.design-mode' }, afterMs: 1500 },
+    // The dev server answers: the new pane (the first synthetic id) has a page to pick from.
+    { event: 'browser://state/-1', payload: { url: 'http://localhost:3000/settings', loading: false }, afterMs: 2200 },
+  ],
 })

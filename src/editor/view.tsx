@@ -10,6 +10,7 @@ import { tauriFs } from './client'
 import { createSessions } from './sessions'
 import { registerEditorActions } from './actions'
 import { registerReuse } from '../layout/reuse'
+import { editorShows, keepEditedTabs } from './tabs'
 import { promptPath } from './Prompt'
 import { basename, defaultRoot, languageFor } from './paths'
 import './editor.css'
@@ -206,13 +207,15 @@ function EditorPane({ id, props }: PaneViewProps) {
 registerPaneView('editor', EditorPane)
 registerEditorActions({ app: store, fs, prompt: promptPath, register })
 
-// `openView('editor', …, 'auto')` reuses an open editor only when its buffer is clean.
+// `openView('editor', …, 'auto')` shows the tab already holding the file; a preview tab is replaced
+// by reuse, which only a clean buffer takes (an edited one is kept, see `keepEditedTabs`).
 registerReuse('editor', (id, p) => {
   const s = sessions.getState().sessions[id]
   if (!s || s.dirty || typeof p.path !== 'string') return false
   sessions.getState().navigate(id, p.path)
   return true
-})
+}, editorShows(store, sessions))
+keepEditedTabs(store, sessions)
 
 // Closing a pane drops its session and disposes its Monaco model.
 store.subscribe((s, prev) => {

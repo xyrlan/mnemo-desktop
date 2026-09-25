@@ -13,11 +13,10 @@ export type Deps = {
   register: (a: Action) => void
 }
 
-/** Opens `path` as an editor pane. Split panes inherit the opener's root. */
+/** Opens `path` as a tab: `split-row` to the side of the active group, `tab` in the active group
+ *  (`auto` too, showing the tab that has the file). Root is inherited by the opener. */
 export function openEditor(app: Store, path: string, root: string | undefined, place: Place) {
-  // A plain split becomes 'auto': reuse a clean editor, else place by size.
-  const where: Place = place === 'split-row' ? 'auto' : place
-  app.getState().openView('editor', root === undefined ? { path } : { path, root }, where, basename(path))
+  app.getState().openView('editor', root === undefined ? { path } : { path, root }, place, basename(path))
 }
 
 export function registerEditorActions({ app, fs, prompt, register }: Deps) {
@@ -29,7 +28,7 @@ export function registerEditorActions({ app, fs, prompt, register }: Deps) {
       const root = defaultRoot(app.getState(), home)
       const got = await prompt({
         initial: root === '/' ? '/' : `${root}/`,
-        hint: 'Enter: split right · ⌘Enter: new tab · relative paths resolve from the current root',
+        hint: 'Enter: to the side · ⌘Enter: tab in this group · relative paths resolve from the current root',
       })
       if (!got || !got.value.trim()) return
       openEditor(app, resolvePath(got.value, root, home), root, got.place)
