@@ -49,6 +49,12 @@ export type StoreOptions = {
 /** A worktree's workbench: its tabs and the one it shows (`''`: none, Home shows). */
 export type WorktreeLayout = { tabs: Tab[]; activeTab: string }
 
+/** The key under `parked` of the tabs that belong to no open worktree: shells that outlived the
+ *  page in a folder none holds. They keep running, never show in a worktree's strip, and are
+ *  reached from the strip's own menu (`bringTab`); a worktree that opens later holding one's
+ *  folder takes it. Never a path: `worktrees` never lists it and nothing switches to it. */
+export const ELSEWHERE = ''
+
 export type State = {
   /** The shown worktree's tabs and the tab it shows: what is on screen now. */
   tabs: Tab[]
@@ -61,7 +67,8 @@ export type State = {
   activeWorktree: string | null
   /** The open worktrees, in the order they were opened; the shown one is among them. */
   worktrees: string[]
-  /** The layouts of the open worktrees not shown now, by path. */
+  /** The layouts of the open worktrees not shown now, by path; and under `ELSEWHERE`, the tabs
+   *  of no open worktree. */
   parked: Record<string, WorktreeLayout>
   paletteOpen: boolean
   /** Output subscribers keyed by pane; set by TerminalPane on mount. */
@@ -70,7 +77,8 @@ export type State = {
 
 export type Actions = {
   /** Show worktree `path`'s workbench: the one shown is parked with its panes running, and `path`
-   *  comes back as it was left, or opens with no tab. Tabs of no worktree join it. */
+   *  comes back as it was left, or opens with no tab. Tabs opened before any worktree was chosen
+   *  join it, and so do the tabs `ELSEWHERE` whose folder it holds, without being shown. */
   switchWorktree(path: string): Promise<void>
   /** Kill every pane of worktree `path` and forget its layout. When it was shown, the worktree
    *  opened before it shows instead (else the one after, else none). */
@@ -100,8 +108,10 @@ export type Actions = {
   focusPane(id: PaneId): void
   goToTab(index: number): void
   /** Show the tab holding `id` with that pane focused, switching to its worktree when it is not
-   *  the one shown; nothing when no tab holds it. */
+   *  the one shown (a tab of no worktree comes to the one shown); nothing when no tab holds it. */
   goToPane(id: PaneId): void
+  /** Move tab `id` of no open worktree (`ELSEWHERE`) into the one shown, and show it. */
+  bringTab(id: string): void
   /** Set (or, with an empty or missing name, clear) a tab's own name. */
   renameTab(id: string, name: string | undefined): void
   cycleTab(delta: 1 | -1): void
@@ -131,7 +141,7 @@ export type Actions = {
   setPalette(open: boolean): void
   /** The layout as `~/.mnemo-desktop/workspace.json` keeps it, per open worktree: tabs, trees
    *  with ratios, focus, and each pane's view, props, cwd, title and session; and which worktree
-   *  is shown. Transient views are left out. */
+   *  is shown. The tabs of no worktree are the layout of path `null`. Transient views are left out. */
   snapshotForSave(): Saved
   /** Recreate the worktrees of a saved workspace (what `workspace_read` returned), each one's tabs
    *  after the ones it already has, and show the worktree that was shown, which comes back first.
@@ -143,11 +153,14 @@ export type Actions = {
    *  after the prompt unless that session is live elsewhere (or liveness cannot be told), keeping the
    *  id on the pane either way. Other views reopen with their props.
    *
+   *  The layout of no worktree comes back shown when the file showed no worktree, else `ELSEWHERE`.
+   *
    *  Then, whatever the file held (or failed to), a shell no saved pane claims — opened too late to
    *  be saved, or the file lost — comes back as a tab of its own, in the open worktree holding its
-   *  folder (else the one shown), without changing what is shown; a terminal whose program ended is
-   *  forgotten. Resolves once every pane exists; rejects when the file holds tabs but none could be
-   *  read. A missing or empty workspace restores nothing of its own. */
+   *  folder (else `ELSEWHERE`, never in a worktree it is not in), without changing what is shown;
+   *  a terminal whose program ended is forgotten. Resolves once every pane exists; rejects when
+   *  the file holds tabs but none could be read. A missing or empty workspace restores nothing of
+   *  its own. */
   restore(saved: unknown): Promise<void>
 }
 
@@ -182,25 +195,33 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 
     /** Puts `tabs` after worktree `where`'s own, showing `show` (else the first of them). The worktree
      *  is the one it was when the tabs were asked for: a switch while their shells spawned leaves
-     *  them in it, a tab of no worktree joins the one shown, and a worktree closed meanwhile opens
-     *  again rather than lose them. */
+     *  them in it, a tab opened before any worktree was chosen joins the one shown, and a worktree
+     *  closed meanwhile opens again rather than lose them. `ELSEWHERE` shows none of them. */
     function addTabs(where: string | null, tabs: Tab[], show?: string) {
       if (tabs.length === 0) return
       set((s) => {
-        const add = (l: WorktreeLayout): WorktreeLayout => ({ tabs: [...l.tabs, ...tabs], activeTab: show ?? tabs[0].id })
+        const add = (l: WorktreeLayout): WorktreeLayout => ({ tabs: [...l.tabs, ...tabs], activeTab: where === ELSEWHERE ? '' : show ?? tabs[0].id })
         if (where === null || where === s.activeWorktree) return add({ tabs: s.tabs, activeTab: s.activeTab })
-        const worktrees = s.worktrees.includes(where) ? s.worktrees : [...s.worktrees, where]
+        const worktrees = where === ELSEWHERE || s.worktrees.includes(where) ? s.worktrees : [...s.worktrees, where]
         return { worktrees, parked: { ...s.parked, [where]: add(s.parked[where] ?? { tabs: [], activeTab: '' }) } }
       })
     }
 
     /** Shows worktree `path` at once (goToPane cannot wait). */
     function swap(path: string) {
+      if (path === ELSEWHERE) return
       set((s) => {
         if (s.activeWorktree === path) return {}
         const parked = { ...s.parked }
-        const next = parked[path] ?? { tabs: [], activeTab: '' }
+        let next = parked[path] ?? { tabs: [], activeTab: '' }
         delete parked[path]
+        // The tabs of no worktree whose folder this one holds are its own now; what shows stays.
+        const away = parked[ELSEWHERE]?.tabs ?? NO_TABS
+        const mine = away.filter((t) => inside(s.panes[t.focused]?.cwd, path))
+        if (mine.length) {
+          next = { ...next, tabs: [...next.tabs, ...mine] }
+          parked[ELSEWHERE] = { tabs: away.filter((t) => !mine.includes(t)), activeTab: '' }
+        }
         const worktrees = s.worktrees.includes(path) ? s.worktrees : [...s.worktrees, path]
         if (s.activeWorktree !== null) {
           parked[s.activeWorktree] = { tabs: s.tabs, activeTab: s.activeTab }
@@ -285,15 +306,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       }
     }
 
-    /** The open worktree holding `folder` (the deepest), else the one shown. */
-    function worktreeOf(folder: string): string | null {
-      const holds = (w: string) => folder === w || folder.startsWith(w.endsWith('/') ? w : `${w}/`)
-      const s = get()
-      return s.worktrees.filter(holds).sort((a, b) => b.length - a.length)[0] ?? s.activeWorktree
+    /** The open worktree holding `folder` (the deepest), else `ELSEWHERE`. */
+    function worktreeOf(folder: string): string {
+      return get().worktrees.filter((w) => inside(folder, w)).sort((a, b) => b.length - a.length)[0] ?? ELSEWHERE
     }
 
-    /** Shells that kept running with no saved pane to claim them come back as tabs; the ended are
-     *  forgotten. What is shown stays shown. */
+    /** Shells that kept running with no saved pane to claim them come back as tabs, where their
+     *  folder is; the ended are forgotten. What is shown stays shown. */
     async function adopt(sessions: SessionClient, orphans: PtyInfo[]) {
       for (const info of orphans) {
         if (!info.alive) {
@@ -304,7 +323,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const tab: Tab = { id: `tab-${info.id}`, root: leaf(info.id), focused: info.id }
         const where = worktreeOf(info.cwd)
         set((s) => {
-          if (where === null || where === s.activeWorktree) return { tabs: [...s.tabs, tab] }
+          if (where === s.activeWorktree) return { tabs: [...s.tabs, tab] }
           const l = s.parked[where] ?? { tabs: [], activeTab: '' }
           return { parked: { ...s.parked, [where]: { ...l, tabs: [...l.tabs, tab] } } }
         })
@@ -360,7 +379,8 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           made.push(tab)
           if (t.id === w.activeTab) shown = tab.id
         }
-        addTabs(w.path, made, shown)
+        // The layout of no worktree is the one shown only when the file showed no worktree.
+        addTabs(w.path === null && parsed.activeWorktree !== null ? ELSEWHERE : w.path, made, shown)
       }
     }
 
@@ -532,11 +552,23 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 
       goToPane(id) {
         const holds = (tabs: Tab[]) => tabs.some((t) => leaves(t.root).includes(id))
+        const away = get().parked[ELSEWHERE]?.tabs.find((t) => holds([t]))
         const other = Object.entries(get().parked).find(([, l]) => holds(l.tabs))?.[0]
-        if (other !== undefined) swap(other)
+        if (away) get().bringTab(away.id)
+        else if (other !== undefined) swap(other)
         const tab = get().tabs.find((t) => leaves(t.root).includes(id))
         if (!tab) return
         set((s) => ({ activeTab: tab.id, tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, focused: id } : t)) }))
+      },
+
+      bringTab(id) {
+        set((s) => {
+          const away = s.parked[ELSEWHERE]?.tabs ?? NO_TABS
+          const tab = away.find((t) => t.id === id)
+          if (!tab) return {}
+          const parked = { ...s.parked, [ELSEWHERE]: { tabs: away.filter((t) => t !== tab), activeTab: '' } }
+          return { parked, tabs: [...s.tabs, tab], activeTab: tab.id }
+        })
       },
 
       renameTab(id, name) {
@@ -642,7 +674,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       snapshotForSave() {
         const s = get()
         const layouts: [string | null, WorktreeLayout][] = s.worktrees.map((w) => [w, w === s.activeWorktree ? s : s.parked[w]])
-        if (s.activeWorktree === null && s.tabs.length) layouts.unshift([null, s])
+        const away = s.parked[ELSEWHERE]?.tabs ?? NO_TABS
+        // With no worktree shown, the file has one layout of no worktree for both kinds of tab.
+        if (s.activeWorktree === null && s.tabs.length + away.length) layouts.unshift([null, { tabs: [...s.tabs, ...away], activeTab: s.activeTab }])
+        else if (away.length) layouts.push([null, { tabs: away, activeTab: '' }])
         const worktrees = layouts.map(([path, l]): SavedWorktree => ({ path, ...saveLayout(l, s.panes) }))
         return { version: SAVED_VERSION, activeWorktree: s.activeWorktree, worktrees }
       },
@@ -670,6 +705,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 }
 
 const NO_TABS: Tab[] = []
+
+/** Whether `folder` is worktree `w` or lies in it (a sibling whose name only starts the same does not). */
+function inside(folder: string | undefined, w: string): boolean {
+  return !!folder && (folder === w || folder.startsWith(w.endsWith('/') ? w : `${w}/`))
+}
 
 /** One layout as the file keeps it: transient views leave their tab, and a tab left with none goes. */
 function saveLayout(l: WorktreeLayout, panes: Record<PaneId, Pane>): SavedLayout {

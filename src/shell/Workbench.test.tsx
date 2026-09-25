@@ -37,7 +37,8 @@ vi.mock('../home/app-store', () => ({ homeStore: { getState: () => ({ openFolder
 vi.mock('../settings/app-store', () => ({ settingsStore: { getState: () => h.settings } }))
 
 import Workbench, { agentCommand, describeWorktree, workbenchLayers } from './Workbench'
-import { createStore, PROMPT_DELAY_MS, type Store } from '../layout/store'
+import { createStore, ELSEWHERE, PROMPT_DELAY_MS, type Store } from '../layout/store'
+import type { PtyInfo, SessionClient } from '../terminal/sessions'
 import type { PtyClient } from '../pty/client'
 import { fleetStore } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
@@ -206,9 +207,43 @@ test('with no worktree chosen and no repo known, it offers to open a folder', as
   expect(host.querySelector('[data-shell-empty="projects"]')).not.toBeNull()
   await act(async () => button('Open a folder').click())
   expect(h.openFolder).toHaveBeenCalledTimes(1)
-  // A repo is known: its main checkout is about to show, and nothing is drawn in its place.
+  // A repo is known: its main checkout is about to show, and its empty state shows already
+  // rather than nothing meanwhile.
   await act(async () => (fleetStore as unknown as { setState(p: object): void }).setState({ repos }))
+  expect(host.querySelector('[data-shell-empty="worktree"] h2')?.textContent).toBe('app')
+  await act(async () => button('New terminal').click())
+  expect(pty.spawned).toEqual([A])
   expect(host.querySelector('[data-shell-empty]')).toBeNull()
+})
+
+/** `s` restored after a restart with `A` shown and no tab of its own, and a shell kept running
+ *  in `~/scratch`, which no worktree holds. */
+async function restartedWithAStray() {
+  const held: PtyInfo[] = [{ id: 7, cwd: '/home/me/scratch', pid: 1, alive: true }]
+  const sessions: SessionClient = { list: async () => held, attach: async () => new Uint8Array() }
+  s = createStore(pty.pty, { workspace: () => null, sessions })
+  await s.getState().restore({ version: 2, activeWorktree: A, worktrees: [{ path: A, activeTab: '', tabs: [], panes: {} }] })
+}
+
+test('a worktree with no tab of its own shows its empty state, not a shell from elsewhere', async () => {
+  await restartedWithAStray()
+  await render()
+  expect(s.getState().tabs).toEqual([])
+  expect(host.querySelector('[data-shell-empty="worktree"] h2')?.textContent).toBe('app')
+  // The stray shell stays mounted, so its terminal keeps its screen, and never shows here.
+  expect(layers()).toEqual(['tab-7'])
+  expect(shown()).toEqual([])
+})
+
+test('a tab brought here from elsewhere shows without remounting', async () => {
+  await restartedWithAStray()
+  await render()
+  await act(async () => s.getState().bringTab('tab-7'))
+  expect(shown()).toEqual(['tab-7'])
+  expect(host.querySelector('[data-shell-empty]')).toBeNull()
+  expect(h.mounts).toEqual([7])
+  expect(h.unmounts).toEqual([])
+  expect(s.getState().worktreeTabs(ELSEWHERE)).toEqual([])
 })
 
 test('the restore’s notice shows over the workbench until dismissed', async () => {
@@ -220,13 +255,14 @@ test('the restore’s notice shows over the workbench until dismissed', async ()
   expect(dismiss).toHaveBeenCalledTimes(1)
 })
 
-test('layers: tabs of no worktree first, then each worktree’s in opening order', () => {
+test('layers: tabs opened before any worktree first, then each worktree’s in opening order, then the tabs of none', () => {
   const t = (id: string) => ({ id, root: { kind: 'leaf' as const, pane: 0 }, focused: 0 })
-  expect(workbenchLayers([t('x')], [A, B], [[t('a1'), t('a2')], [t('b1')]]).map((l) => [l.worktree, l.tab.id])).toEqual([
+  expect(workbenchLayers([t('x')], [A, B], [[t('a1'), t('a2')], [t('b1')]], [t('z')]).map((l) => [l.worktree, l.tab.id])).toEqual([
     [null, 'x'],
     [A, 'a1'],
     [A, 'a2'],
     [B, 'b1'],
+    [ELSEWHERE, 'z'],
   ])
 })
 
