@@ -121,12 +121,15 @@ set -e
 APP=${APP}
 NEW=${NEW}
 OLD=${OLD}
-running() { pgrep -f "^$APP/${EXE}" >/dev/null 2>&1; }
+# The app's own binary, not the terminal daemon beside it (\`mnemo-desktop-ptyd\`): the daemon
+# outlives the app by design, so a bare prefix saw the app as still running and killed both.
+APP_RE="^$APP/${EXE}( |\$)"
+running() { pgrep -f "$APP_RE" >/dev/null 2>&1; }
 if running; then
   osascript -e 'tell application id "sh.mnemo.desktop" to quit' >/dev/null 2>&1 || true
   n=0
   while running && [ $n -lt 100 ]; do sleep 0.1; n=$((n+1)); done
-  if running; then pkill -f "^$APP/${EXE}" >/dev/null 2>&1 || true; sleep 0.5; fi
+  if running; then pkill -f "$APP_RE" >/dev/null 2>&1 || true; sleep 0.5; fi
 fi
 rm -rf "$OLD"
 if [ -e "$APP" ]; then mv "$APP" "$OLD"; fi
