@@ -1,31 +1,45 @@
+// the look adapted from stablyai/orca src/renderer/src/components/native-chat/
+// NativeChatMessageList.tsx, NativeChatTurnActivityLine.tsx and NativeChatEmptyState.tsx
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
+import { ArrowDown, GitPullRequest, LoaderCircle, MessageSquare, SquareTerminal, TriangleAlert } from 'lucide-react'
 import { tauriConversation, type ConversationClient } from './client'
 import type { Conversation, ImageRef, SessionStatus, StatusMarker, TranscriptRecord } from './types'
 import { deriveConversation } from './parse'
-import { clockText, firstIndex, lastPromptAt, streamItems, workingSince, type Item } from './stream'
+import { clockText, firstIndex, lastPromptAt, pendingCard, SOLO_TOOLS, streamItems, workingSince, type Item, type ToolCard } from './stream'
+import { describeCall } from './run'
 import { useFollow } from './useFollow'
 import { CardsContext, RuleActionsContext, type CardsState, type Veto } from './cards/context'
-import { CardView } from './cards'
+import { CardView, Separator } from './cards'
+import { ToolRun } from './cards/ToolRun'
 import { Lightbox } from './cards/image'
+import { ContextRing } from './ContextRing'
+import { Foot, type Parked } from './Foot'
+import type { ChatAgent } from './agent'
 import { openUrl } from '../github/actions'
 import './conversation.css'
 
+export type { ChatAgent } from './agent'
+
 export type ConversationViewProps = {
   /** The session to follow. When it changes (a `/clear` in the pane), what was shown stays above
-   *  a `── /clear ──` divider and the new session continues below. `null`: no session yet. */
+   *  a `/clear` divider and the new session continues below. `null`: no session yet. */
   sessionId: string | null
   /** Where the session runs; the transcript lives under this cwd's project dir. */
   cwd: string
-  /** From `claude agents` / the mission snapshot: drives the `working… 0:42` row and the pending
-   *  card (a tool call with no result while `waiting` is set). */
+  /** From `claude agents` / the mission snapshot: drives the working line and the pending card
+   *  (a tool call with no result while `waiting` is set). */
   status?: SessionStatus
   /** Thin lines merged into the stream by time (a child's status transitions). */
   markers?: StatusMarker[]
-  /** Pinned under the stream (a child's Approve / Deny / reply box). */
+  /** Pinned under the stream (a child's Approve / Deny / reply box), under the foot when there
+   *  is one. */
   footer?: ReactNode
   /** The pending card's button: a pane flips to its terminal face, a child opens `claude attach`. */
   onOpenTerminal?: () => void
+  /** How to answer the session from the chat. Given, the foot shows the approval or question
+   *  card while the session waits on one, else the composer. */
+  agent?: ChatAgent
   client?: ConversationClient
 }
 
@@ -42,80 +56,111 @@ function derive(records: TranscriptRecord[]): Conversation {
   return c
 }
 
-/** `working… 0:42` while the session generates. */
-function Working({ since }: { since: number }) {
+/** What the live turn is doing, in words, when the transcript can say and nothing above the
+ *  line already does: thinking, the agent it waits for, a question or plan it is writing. A
+ *  call in a run is named by the live run itself. */
+export function activityOf(c: Conversation | null): string | null {
+  if (!c) return null
+  if (c.thinkingAt) return 'Thinking…'
+  const last = c.cards.at(-1)
+  if (last?.kind === 'agent' && last.report === null) return `Waiting for agent · ${last.description}`
+  if (last?.kind === 'tool' && last.outcome === null && SOLO_TOOLS.has(last.name)) return describeCall(last)
+  return null
+}
+
+/** The live turn's one indicator: a spinner, what it is doing, and how long it has been at it. */
+function Working({ since, activity }: { since: number; activity: string | null }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
   return (
-    <div className="cv-working" role="status">
-      working… {clockText(now - since)}
+    <div className="cv-working mx-auto flex min-h-6 w-full max-w-4xl items-center gap-1.5 px-4 pt-1 pb-4 text-sm leading-relaxed text-muted-foreground" role="status" aria-live="polite">
+      <LoaderCircle aria-hidden className="size-4 shrink-0 animate-spin motion-reduce:animate-none" />
+      <span className="min-w-0 truncate text-foreground/85">{activity ?? 'Working…'}</span>
+      <span className="ml-auto shrink-0 tabular-nums">{clockText(now - since)}</span>
     </div>
   )
 }
 
-type ListContext = { working: number | null; top: { loading: boolean; error: string | null; atTop: boolean; retry: () => void } | null }
+type ListContext = {
+  working: { since: number; activity: string | null } | null
+  top: { loading: boolean; error: string | null; atTop: boolean; retry: () => void } | null
+}
+
+const THIN = 'cv-thin mx-auto flex w-full max-w-4xl justify-center px-4 py-2 text-xs text-muted-foreground'
 
 function ListHeader({ context }: { context?: ListContext }) {
   const top = context?.top
-  if (!top) return null
-  if (top.loading) return <div className="cv-thin">loading earlier…</div>
+  if (!top) return <div className="h-4" />
+  if (top.loading) return <div className={THIN}>Loading earlier…</div>
   if (top.error)
     return (
-      <div className="cv-thin cv-err">
-        could not load earlier lines: {top.error}{' '}
-        <button className="cv-link" onClick={top.retry}>
-          retry
+      <div className={`${THIN} cv-err gap-1 text-destructive`}>
+        Could not load earlier lines: {top.error}
+        <button type="button" className="cv-link underline-offset-2 hover:underline" onClick={top.retry}>
+          Retry
         </button>
       </div>
     )
-  return top.atTop ? <div className="cv-thin">start of the session</div> : <div className="cv-thin">scroll up for earlier</div>
+  return top.atTop ? <div className={THIN}>Start of the session</div> : <div className={THIN}>Scroll up for earlier</div>
 }
 
 function ListFooter({ context }: { context?: ListContext }) {
-  return context?.working != null ? <Working since={context.working} /> : <div className="cv-end" />
+  return context?.working ? <Working since={context.working.since} activity={context.working.activity} /> : <div className="cv-end h-4" />
 }
 
 const COMPONENTS = { Header: ListHeader, Footer: ListFooter }
 
-function Row({ item, onEarlier }: { item: Item; onEarlier: (segment: number) => void }) {
+function Row({ item, busy, onEarlier }: { item: Item; busy: boolean; onEarlier: (segment: number) => void }) {
   switch (item.kind) {
     case 'card':
       return <CardView card={item.card} pending={item.pending} k={item.key} />
+    case 'run':
+      return <ToolRun item={item} busy={busy} />
     case 'clear':
-      return (
-        <div className="cv-clear" role="separator">
-          ── /clear ──
-        </div>
-      )
+      return <Separator label="/clear" className="cv-clear font-mono" />
     case 'marker':
-      return item.carried ? (
-        <div className="cv-thin cv-marker" title={`since ${item.marker.at}`}>
-          {item.marker.label} <span className="cv-muted">(since earlier)</span>
+      return (
+        <div className="cv-marker flex items-center gap-1.5 text-xs text-muted-foreground" title={item.carried ? `since ${item.marker.at}` : item.marker.at}>
+          <span className="size-1.5 shrink-0 rounded-full bg-state-needs-you" aria-hidden />
+          <span className="min-w-0 truncate">{item.marker.label}</span>
+          {item.carried && <span className="cv-carried shrink-0 opacity-70">(since earlier)</span>}
         </div>
-      ) : (
-        <div className="cv-thin cv-marker">{item.marker.label}</div>
       )
     case 'earlier':
       return (
-        <div className="cv-thin">
+        <div className="flex justify-center">
           {item.loading ? (
-            'loading earlier…'
+            <span className="text-xs text-muted-foreground">Loading…</span>
           ) : (
-            <button className="cv-link" onClick={() => onEarlier(item.segment)}>
-              load earlier
+            <button type="button" className="cv-link rounded-md px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => onEarlier(item.segment)}>
+              Load earlier messages
             </button>
           )}
         </div>
       )
     case 'note':
-      return <div className="cv-note">{item.text}</div>
+      return <div className="cv-note py-4 text-center text-xs text-muted-foreground">{item.text}</div>
   }
 }
 
-/** When the `working…` row started, per `workingSince`. What it remembers moves only when
+/** A chat with nothing in it yet, or that could not start: an icon, a title, a line. */
+export function EmptyState({ title, subtitle, error, children }: { title: string; subtitle?: ReactNode; error?: boolean; children?: ReactNode }) {
+  return (
+    <div className="cv-empty flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className={error ? 'flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive' : 'flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground'}>
+        {error ? <TriangleAlert className="size-6" aria-hidden /> : <MessageSquare className="size-6" aria-hidden />}
+      </div>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      {subtitle && <p className="max-w-sm text-xs text-balance text-muted-foreground">{subtitle}</p>}
+      {children}
+    </div>
+  )
+}
+
+/** When the working line started, per `workingSince`. What it remembers moves only when
  *  `busy` flips, so a re-render never moves the start. */
 function useWorkingSince(busy: boolean, prompt: string | null): number | null {
   const seen = useRef<{ busy: boolean; at: number; idleAt: number | null } | null>(null)
@@ -127,21 +172,23 @@ function useWorkingSince(busy: boolean, prompt: string | null): number | null {
   return busy ? workingSince(prompt, seen.current.idleAt, seen.current.at) : null
 }
 
-/** A Claude Code session's transcript as cards: followed live from the last `TAIL` lines, earlier
- *  ones read on scroll-up, in a virtualised list that stays at the bottom while you are there. */
-export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS, footer, onOpenTerminal, client = tauriConversation }: ConversationViewProps) {
+/** A Claude Code session's transcript as Orca's native chat: followed live from the last `TAIL`
+ *  lines, earlier ones read on scroll-up, in a virtualised list that stays at the bottom while
+ *  you are there; the foot answers it when there is an `agent` to answer through. */
+export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS, footer, onOpenTerminal, agent, client = tauriConversation }: ConversationViewProps) {
   const { segments, loadEarlier } = useFollow(client, sessionId, cwd)
   const conversations = useMemo(() => segments.map((s) => derive(s.records)), [segments])
   const items = useMemo(() => streamItems(segments, conversations, markers, status), [segments, conversations, markers, status])
   const current = conversations.at(-1) ?? null
-  const since = useWorkingSince(!!status?.busy, current ? lastPromptAt(current.cards) : null)
+  const busy = !!status?.busy
+  const since = useWorkingSince(busy, current ? lastPromptAt(current.cards) : null)
 
   // Keep the rows on screen still when earlier ones are put above them.
   const prev = useRef<{ items: Item[]; first: number } | null>(null)
   const first = prev.current?.items === items ? prev.current.first : firstIndex(prev.current, items, BASE)
   useEffect(() => void (prev.current = { items, first }), [items, first])
 
-  // "↓ new": rows arrived at the bottom while you were reading above it.
+  // "Jump to latest": rows arrived at the bottom while you were reading above it.
   const list = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
   const [fresh, setFresh] = useState(false)
@@ -171,7 +218,8 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
           .catch((e): Veto => ({ state: 'failed', message: String(e) }))
           .then((res) => setVetoes((v) => ({ ...v, [slug]: res })))
       },
-      isOpen: (key) => open.has(key),
+      // A toggle flips the fold from however it opens by default.
+      isOpen: (key, dflt = false) => open.has(key) !== dflt,
       toggle: (key) =>
         setOpen((o) => {
           const n = new Set(o)
@@ -180,36 +228,57 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
         }),
       openImage: setImage,
       onOpenTerminal,
+      foot: !!agent,
+      cwd,
     }),
-    [rules, vetoes, open, onOpenTerminal],
+    [rules, vetoes, open, onOpenTerminal, agent, cwd],
   )
 
   const top = segments[0]
   const retryTop = useCallback(() => top && loadEarlier(top.key), [top, loadEarlier])
+  const activity = busy ? activityOf(current) : null
   const context = useMemo<ListContext>(
     () => ({
-      working: since,
+      working: since === null ? null : { since, activity },
       top: top && top.start !== null ? { loading: top.loadingEarlier, error: top.earlierError, atTop: top.start === 0, retry: retryTop } : null,
     }),
-    [since, top, retryTop],
+    [since, activity, top, retryTop],
   )
   const closeImage = useCallback(() => setImage(null), [])
 
+  // The call the session is parked on, for the foot's card.
+  const parked = useMemo<Parked>(() => {
+    if (!current) return null
+    const p = pendingCard(current.cards, status?.waiting ?? null)
+    const tool = p && current.cards.find((c): c is ToolCard => c.id === p.id && c.kind === 'tool')
+    return p && tool ? { tool, kind: p.kind } : null
+  }, [current, status?.waiting])
+
   let body: ReactNode
-  if (!segments.length) body = <div className="cv-note">{sessionId ? 'loading…' : 'no Claude session yet'}</div>
-  else if (segments.length === 1 && top.state === 'loading') body = <div className="cv-note">loading…</div>
+  if (!segments.length)
+    body = sessionId ? (
+      <EmptyState title="Loading the conversation…" subtitle="Reading the session's transcript." />
+    ) : (
+      <EmptyState title="No Claude session yet" subtitle="Its conversation shows here once it starts." />
+    )
+  else if (segments.length === 1 && top.state === 'loading') body = <EmptyState title="Loading the conversation…" subtitle="Reading the session's transcript." />
   else
     body = (
       <Virtuoso
         ref={list}
-        className="cv-list"
+        className="cv-list scrollbar-sleek h-full"
         data={items}
         context={context}
         components={COMPONENTS}
         firstItemIndex={first}
         initialTopMostItemIndex={Math.max(0, items.length - 1)}
         computeItemKey={(_, it) => it.key}
-        itemContent={(_, it) => <Row item={it} onEarlier={loadEarlier} />}
+        itemContent={(_, it) => (
+          // Padding, never margin: the list measures each row's box.
+          <div className="cv-row mx-auto w-full max-w-4xl px-4 py-2">
+            <Row item={it} busy={busy} onEarlier={loadEarlier} />
+          </div>
+        )}
         followOutput={(bottom) => (bottom ? 'auto' : false)}
         atBottomStateChange={setAtBottom}
         atBottomThreshold={48}
@@ -218,28 +287,57 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
       />
     )
 
+  const usage = current?.usage ?? null
+  const terminal = agent && onOpenTerminal
+  const head = current && (current.title || current.prs.length > 0 || usage)
   return (
     <CardsContext.Provider value={cards}>
-      <div className="conversation" data-session={sessionId ?? undefined}>
-        {current && (current.title || current.prs.length > 0) && (
-          <div className="cv-head">
-            {current.title && <span className="cv-title">{current.title}</span>}
-            {current.prs.map((p) => (
-              <button key={p.number} className="cv-chip cv-pr" title={p.url} onClick={() => openUrl(p.url, `#${p.number}`)}>
-                #{p.number}
+      <div className="conversation relative flex min-h-0 flex-1 flex-col bg-background text-foreground" data-ui data-session={sessionId ?? undefined}>
+        {(head || terminal) && (
+          <div className="cv-head flex h-8 shrink-0 items-center gap-2 border-b border-border pr-1.5 pl-3 text-xs text-muted-foreground">
+            <span className="cv-title min-w-0 flex-1 truncate text-foreground" title={current?.title ?? undefined}>
+              {current?.title}
+            </span>
+            {current?.prs.map((p) => (
+              <button
+                key={p.number}
+                type="button"
+                className="cv-pr flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                title={p.url}
+                onClick={() => openUrl(p.url, `#${p.number}`)}
+              >
+                <GitPullRequest className="size-3.5" aria-hidden />#{p.number}
               </button>
             ))}
+            {usage && <ContextRing usage={usage} />}
+            {terminal && (
+              <button
+                type="button"
+                className="cv-to-terminal flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                title="Back to the terminal (⌘⇧C)"
+                aria-label="Back to the terminal"
+                onClick={onOpenTerminal}
+              >
+                <SquareTerminal className="size-4" aria-hidden />
+              </button>
+            )}
           </div>
         )}
-        <div className="cv-stream">
+        <div className="cv-stream relative min-h-0 flex-1">
           {body}
           {fresh && (
-            <button className="cv-new" onClick={() => list.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}>
-              ↓ new
+            <button
+              type="button"
+              className="cv-new absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-accent-foreground"
+              onClick={() => list.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
+            >
+              <ArrowDown className="size-3.5" aria-hidden />
+              Jump to latest
             </button>
           )}
         </div>
-        {footer && <div className="cv-footer">{footer}</div>}
+        {agent && sessionId && <Foot agent={agent} cwd={cwd || null} status={status} parked={parked} onOpenTerminal={onOpenTerminal} />}
+        {footer && <div className="cv-footer shrink-0 border-t border-border">{footer}</div>}
         {image && <Lightbox img={image} onClose={closeImage} />}
       </div>
     </CardsContext.Provider>

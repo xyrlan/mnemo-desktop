@@ -41,7 +41,7 @@ describe('parseRecord', () => {
 })
 
 describe('cards', () => {
-  test('a typed prompt is a user card with its images; thinking is dropped', () => {
+  test('a typed prompt is a user card with its images; redacted thinking makes no card', () => {
     const got = cards([
       user('u1', [{ type: 'text', text: 'look at this' }, IMG], { origin: { kind: 'human' } }),
       assistant('a1', [{ type: 'thinking', thinking: '', signature: 'sig' }]),
@@ -50,6 +50,43 @@ describe('cards', () => {
     expect(got.map((c) => c.kind)).toEqual(['user', 'assistant'])
     expect(got[0]).toMatchObject({ id: 'u1', text: 'look at this', queued: false, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] })
     expect(got[1]).toMatchObject({ id: 'a2', text: 'I see a cat' })
+  })
+
+  test('thinking the transcript kept is a card of its own, before what the record says next', () => {
+    const got = cards([
+      user('u1', 'why?'),
+      assistant('a1', [{ type: 'thinking', thinking: 'The user asks why.', signature: 's' }, { type: 'text', text: 'Because.' }]),
+    ])
+    expect(got.map((c) => c.kind)).toEqual(['user', 'thinking', 'assistant'])
+    expect(got[1]).toMatchObject({ kind: 'thinking', text: 'The user asks why.' })
+  })
+
+  test('thinkingAt is the last thought while nothing came after it, redacted or not', () => {
+    const think = assistant('a1', [{ type: 'thinking', thinking: '', signature: 's' }])
+    const at = think.timestamp
+    expect(deriveConversation([user('u1', 'go'), think]).thinkingAt).toBe(at)
+    expect(deriveConversation([user('u1', 'go'), think, assistant('a2', [{ type: 'text', text: 'done' }])]).thinkingAt).toBeNull()
+    expect(deriveConversation([user('u1', 'go'), think, assistant('a3', [use('t1', 'Bash', { command: 'ls' })])]).thinkingAt).toBeNull()
+    expect(deriveConversation([user('u1', 'go')]).thinkingAt).toBeNull()
+  })
+
+  test('usage is the last response of the main chain: prompt, cache and output together', () => {
+    const withUsage = (uuid: string, usage: Record<string, unknown>, model = 'claude-opus-5', extra: Record<string, unknown> = {}) =>
+      assistant(uuid, [{ type: 'text', text: 'x' }], { ...extra, message: { role: 'assistant', model, content: [{ type: 'text', text: 'x' }], usage } })
+    const first = withUsage('a1', { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 10 })
+    const last = withUsage('a2', { input_tokens: 3, cache_creation_input_tokens: 50, cache_read_input_tokens: 2000, output_tokens: 7 })
+    expect(deriveConversation([first, last]).usage).toEqual({ tokens: 2060, model: 'claude-opus-5', at: last.timestamp })
+    // A subagent's own records, and an error Claude Code wrote itself, leave it where it was.
+    const side = withUsage('a3', { input_tokens: 90_000 }, 'claude-opus-5', { isSidechain: true })
+    const synthetic = withUsage('a4', { input_tokens: 0, output_tokens: 0 }, '<synthetic>')
+    expect(deriveConversation([first, last, side, synthetic]).usage?.tokens).toBe(2060)
+    expect(deriveConversation([user('u1', 'hi')]).usage).toBeNull()
+  })
+
+  test('the pane fixture ends with the usage of its last response', async () => {
+    const usage = derive((await fixtures()).get('pane.jsonl')!).conversation.usage
+    expect(usage?.model).toBe('claude-opus-5')
+    expect(usage?.tokens).toBeGreaterThan(10_000)
   })
 
   test('a tool call has no outcome until its result arrives, then joins it by tool_use_id', () => {
@@ -330,7 +367,7 @@ describe('metadata, hidden records and unknown ones', () => {
       { type: 'pr-link', prNumber: 9, prUrl: 'https://github.com/o/r/pull/9', sessionId: SID },
     ])
     expect(c).toEqual({
-      sessionId: SID, title: 'Second', cards: [],
+      sessionId: SID, title: 'Second', cards: [], usage: null, thinkingAt: null,
       prs: [{ number: 7, url: 'https://github.com/o/r/pull/7' }, { number: 9, url: 'https://github.com/o/r/pull/9' }],
     })
   })

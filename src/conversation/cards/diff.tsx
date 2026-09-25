@@ -1,9 +1,10 @@
-import type { CSSProperties } from 'react'
+// adapted from stablyai/orca src/renderer/src/components/native-chat/NativeChatDiffCard.tsx
+import { useMemo } from 'react'
+import { ChevronRight, FilePen, FilePlus2 } from 'lucide-react'
+import { cn } from '@/ui/cn'
 import type { DiffHunk } from '../types'
-import '../../home/home.css'
-
-/** Lines shown before an Edit/Write diff folds (spec Q4). */
-export const DIFF_FOLD = 20
+import { useCards } from './context'
+import { CopyButton } from './copy'
 
 type Row = { key: string; kind: 'hunk'; text: string } | { key: string; kind: 'add' | 'del' | 'ctx' | 'note'; old: number | null; new: number | null; text: string }
 
@@ -38,40 +39,87 @@ export function diffCounts(hunks: DiffHunk[]): { additions: number; deletions: n
   return { additions, deletions }
 }
 
-/** The diff an Edit or Write made, in the review diff's look (`src/home/review/`). Folds past
- *  `DIFF_FOLD` changed-or-context lines; `open` shows them all. */
-export function DiffBody({ hunks, open, onToggle }: { hunks: DiffHunk[]; open: boolean; onToggle: () => void }) {
-  const rows = diffRows(hunks)
-  const lines = rows.filter((r) => r.kind !== 'hunk').length
-  let left = open ? Infinity : DIFF_FOLD
-  const shown: Row[] = []
-  for (const r of rows) {
-    if (left <= 0) break
-    shown.push(r)
-    if (r.kind !== 'hunk') left--
-  }
-  const top = Math.max(0, ...rows.map((r) => (r.kind === 'hunk' ? 0 : Math.max(r.old ?? 0, r.new ?? 0))))
-  const style = { '--rv-num': `${Math.max(3, String(top).length)}ch` } as CSSProperties
+/** `+12 -3`, each side only when it counts. */
+export function DiffCounts({ additions, deletions }: { additions: number; deletions: number }) {
+  if (!additions && !deletions) return null
   return (
-    <div className="rv-body cv-diff" style={style}>
-      {shown.map((r) =>
-        r.kind === 'hunk' ? (
-          <div key={r.key} className="rv-hunk">
-            {r.text}
-          </div>
-        ) : (
-          <div key={r.key} className={`rv-line rv-${r.kind}`}>
-            <span className="rv-num">{r.old ?? ''}</span>
-            <span className="rv-num">{r.new ?? ''}</span>
-            <span className="rv-sign">{r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ''}</span>
-            <span className="rv-text">{r.text}</span>
-          </div>
-        ),
-      )}
-      {lines > DIFF_FOLD && (
-        <button className="cv-more" onClick={onToggle}>
-          {open ? 'fold' : `show all ${lines} lines`}
-        </button>
+    <span className="shrink-0 font-mono text-[11px] tabular-nums" aria-label={`${additions} added, ${deletions} removed`}>
+      {additions > 0 && <span className="text-status-success">+{additions}</span>}
+      {additions > 0 && deletions > 0 && ' '}
+      {deletions > 0 && <span className="text-destructive">-{deletions}</span>}
+    </span>
+  )
+}
+
+const baseName = (path: string) => path.split(/[\\/]/).at(-1) || path
+
+/** What the card says the change is. `proposed`: asked for, not made yet (a permission prompt
+ *  is about it), so its line numbers are only where the snippet starts. */
+export type DiffVerb = 'edited' | 'added' | 'proposed'
+const VERB: Record<DiffVerb, string> = { edited: 'Edited file', added: 'Added file', proposed: 'Wants to edit' }
+
+/** One file an agent edited: verb header, name with counts and a copy of the patch, and the
+ *  unified rows in a scrolling box. Opens with the run that holds it; its header folds it. */
+export function DiffCard({ filePath, hunks, verb, k, open: dflt = true }: { filePath: string; hunks: DiffHunk[]; verb: DiffVerb; k: string; open?: boolean }) {
+  const { isOpen, toggle } = useCards()
+  const open = isOpen(k, dflt)
+  const rows = useMemo(() => diffRows(hunks), [hunks])
+  const { additions, deletions } = diffCounts(hunks)
+  const patch = useMemo(() => hunks.flatMap((h) => h.lines).join('\n'), [hunks])
+  const hasBody = rows.some((r) => r.kind !== 'hunk')
+  const numbered = verb !== 'proposed'
+  const widest = numbered ? Math.max(0, ...rows.map((r) => (r.kind === 'hunk' ? 0 : ((r.kind === 'del' ? r.old : r.new) ?? 0)))) : 0
+  const gutter = numbered ? Math.max(3, String(widest).length + 1) : 0
+  const Icon = verb === 'added' ? FilePlus2 : FilePen
+  return (
+    <div className="cv-diff my-1 overflow-hidden rounded-md border border-border" data-verb={verb}>
+      <button
+        type="button"
+        onClick={() => hasBody && toggle(k)}
+        className={cn('group/diff-card flex w-full items-center gap-1.5 px-2 py-1 text-left', hasBody ? 'cursor-pointer hover:bg-accent/30' : 'cursor-default')}
+        aria-expanded={hasBody ? open : undefined}
+      >
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="shrink-0 text-[11px] text-muted-foreground group-hover/diff-card:text-foreground/80">{VERB[verb]}</span>
+        {hasBody && <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />}
+      </button>
+      <div className="flex items-center gap-1.5 border-t border-border bg-accent/40 px-2 py-1">
+        <span className="min-w-0 truncate font-mono text-[11px] font-medium text-foreground" title={filePath}>
+          {baseName(filePath)}
+        </span>
+        <DiffCounts additions={additions} deletions={deletions} />
+        <CopyButton text={patch} label="Copy diff" className="ml-auto" />
+      </div>
+      {hasBody && open && (
+        // Focusable so the rows scroll from the keyboard.
+        <div tabIndex={0} className="scrollbar-sleek max-h-72 overflow-auto font-mono text-[11px] leading-relaxed focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset">
+          {rows.map((r) =>
+            r.kind === 'hunk' ? (
+              // Between two regions of the file only: the first needs no break before it.
+              r.key !== 'h0' && (
+              <div key={r.key} role="separator" aria-label="Lines not shown" className="cv-diff-gap border-y border-border/60 bg-accent/30 py-0.5 text-center text-muted-foreground select-none">
+                ⋯
+              </div>
+              )
+            ) : (
+              <div key={r.key} className={cn('cv-diff-row flex items-start', `cv-diff-${r.kind}`, r.kind === 'add' && 'bg-emerald-500/10', r.kind === 'del' && 'bg-rose-500/10')}>
+                {gutter > 0 && (
+                  <span
+                    className={cn('shrink-0 pr-1.5 text-right text-muted-foreground tabular-nums select-none', r.kind === 'add' ? 'bg-emerald-500/15' : r.kind === 'del' ? 'bg-rose-500/15' : 'bg-accent/40')}
+                    style={{ width: `${gutter}ch` }}
+                    aria-hidden
+                  >
+                    {(r.kind === 'del' ? r.old : r.new) ?? ''}
+                  </span>
+                )}
+                <span className={cn('w-3 shrink-0 text-center select-none', r.kind === 'add' && 'text-status-success', r.kind === 'del' && 'text-destructive')} aria-hidden>
+                  {r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' '}
+                </span>
+                <span className={cn('min-w-0 pr-2 break-words whitespace-pre-wrap', r.kind === 'note' ? 'text-muted-foreground italic' : 'text-foreground/85')}>{r.text}</span>
+              </div>
+            ),
+          )}
+        </div>
       )}
     </div>
   )

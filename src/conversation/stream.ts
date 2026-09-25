@@ -22,11 +22,22 @@ export type Segment = {
 }
 
 export type Pending = 'permission' | 'question'
+export type ToolCard = Extract<Card, { kind: 'tool' }>
+
+/** Tools that are never folded into a run: a question and a plan are read, not skimmed. */
+export const SOLO_TOOLS: ReadonlySet<string> = new Set(['AskUserQuestion', 'ExitPlanMode'])
 
 /** One row of the virtualised list. `key` is stable across re-derivations (a card id prefixed by
- *  its segment), so a row's expanded state and scroll anchor survive new lines. */
+ *  its segment), so a row's expanded state and scroll anchor survive new lines.
+ *
+ *  A `run` is Orca's tool run: the tool calls that came one after another with nothing said
+ *  between them, folded under one line. Its key is its first call's, so it keeps its row as
+ *  calls join it. `pending` is the call the session is parked on, when it is one of these;
+ *  `trailing`: nothing the session said or did came after it, so while it works this run is
+ *  the live one. */
 export type Item =
   | { kind: 'card'; key: string; card: Card; pending: Pending | null }
+  | { kind: 'run'; key: string; tools: ToolCard[]; pending: { id: string; kind: Pending } | null; trailing: boolean }
   | { kind: 'clear'; key: string }
   | { kind: 'marker'; key: string; marker: StatusMarker; carried?: true }
   | { kind: 'earlier'; key: string; segment: number; loading: boolean }
@@ -133,8 +144,20 @@ export function streamItems(segments: Segment[], conversations: Conversation[], 
     const partial = seg.start !== null && seg.start > 0
     for (const [c, card] of conv.cards.entries()) {
       flush(card.at, c === 0 && partial)
-      items.push({ kind: 'card', key: `${seg.key}:${card.id}`, card, pending: pending?.id === card.id ? pending.kind : null })
+      const mine = pending?.id === card.id ? pending : null
+      if (card.kind === 'tool' && !SOLO_TOOLS.has(card.name)) {
+        // A marker flushed above ends the run: the call after it opens a new one.
+        const run = items.at(-1)
+        if (run?.kind === 'run') {
+          run.tools.push(card)
+          run.pending ??= mine
+        } else items.push({ kind: 'run', key: `${seg.key}:run:${card.id}`, tools: [card], pending: mine, trailing: false })
+        continue
+      }
+      items.push({ kind: 'card', key: `${seg.key}:${card.id}`, card, pending: mine?.kind ?? null })
     }
+    const tail = items.at(-1)
+    if (last && tail?.kind === 'run') tail.trailing = true
     if (!conv.cards.length) {
       const text =
         seg.state === 'missing' ? 'waiting for the transcript…' : seg.state === 'error' ? `could not read the transcript: ${seg.error}` : seg.state === 'loading' ? 'loading…' : 'nothing in this session yet'

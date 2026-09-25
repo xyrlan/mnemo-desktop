@@ -16,6 +16,8 @@ vi.mock('./parse', async (orig) => {
       title: ([...records].reverse().find((r) => r.type === 'title')?.title as string | undefined) ?? null,
       prs: records.filter((r) => r.type === 'pr').map((r) => r.pr),
       cards: records.filter((r) => r.type === 'card').map((r) => r.card),
+      usage: ([...records].reverse().find((r) => r.type === 'usage')?.usage as import('./types').ContextUsage | undefined) ?? null,
+      thinkingAt: ([...records].reverse().find((r) => r.type === 'thinking')?.at as string | undefined) ?? null,
     }),
   }
 })
@@ -43,13 +45,13 @@ vi.mock('react-virtuoso', async () => {
 
 import { ConversationView } from './ConversationView'
 import ConversationFace, { paneStatus, waitingKind } from './Face'
+import { ChatInputContext } from './chat-input'
 import { RuleActionsContext, type RuleActions } from './cards/context'
-import { DIFF_FOLD, diffRows } from './cards/diff'
-import { CMD_FOLD } from './cards/tool'
+import { diffRows } from './cards/diff'
 import { tauriConversation, type ConversationClient } from './client'
 import { applyEarlier, applyEvent, clockText, firstIndex, newSegment, pendingCard, streamItems, TAIL, workingSince, STATUS_LAG_MS, type Item } from './stream'
 import { startUsage, BEAT_MS, type UsageDeps } from './usage'
-import type { Card, Chunk, FollowEvent, SessionStatus, StatusMarker, ToolOutcome } from './types'
+import type { Card, Chunk, Conversation, FollowEvent, SessionStatus, StatusMarker, ToolOutcome } from './types'
 import PaneBar from '../chrome/PaneBar'
 import { store } from '../layout/app-store'
 import { createStore } from '../layout/store'
@@ -82,6 +84,7 @@ const tool = (id: string, s: number, name: string, outcome: ToolOutcome | null, 
   ...over,
 })
 
+const conv = (sessionId: string, cards: Card[]): Conversation => ({ sessionId, title: null, prs: [], cards, usage: null, thinkingAt: null })
 const line = (card: Card, sessionId = 's1') => JSON.stringify({ type: 'card', uuid: card.id, sessionId, card })
 const lines = (start: number, cards: Card[], sessionId = 's1'): FollowEvent => ({ kind: 'lines', start, end: start + 100 * cards.length, lines: cards.map((c) => line(c, sessionId)) })
 
@@ -138,6 +141,13 @@ const text = () => host.textContent ?? ''
 const q = <E extends Element = HTMLElement>(sel: string) => host.querySelector<E & HTMLElement>(sel)
 const qa = (sel: string) => [...host.querySelectorAll<HTMLElement>(sel)]
 const click = (el: Element | null) => act(async () => (el as HTMLElement).click())
+/** A row's words, without the time it shows on hover. */
+const words = (el: Element) => {
+  const c = el.cloneNode(true) as Element
+  c.querySelectorAll('time').forEach((t) => t.remove())
+  return c.textContent ?? ''
+}
+const rowTexts = () => qa('.fake-list > [data-index]').map(words)
 const button = (label: string | RegExp) => qa('button').find((b) => (typeof label === 'string' ? b.textContent === label : label.test(b.textContent ?? ''))) ?? null
 
 type ViewProps = Partial<Parameters<typeof ConversationView>[0]>
@@ -157,16 +167,16 @@ test('follows the last 200 lines of the session under its cwd, draws every card,
   expect(follows).toHaveLength(1)
   expect(follows[0]).toMatchObject({ sessionId: 's1', cwd: '/repo', tail: TAIL })
   expect(TAIL).toBe(200)
-  expect(text()).toContain('loading…')
+  expect(text()).toContain('Loading the conversation…')
 
   await follows[0].emit(lines(500, [user('u1', 0, 'fix the **bug**'), said('a1', 1, 'on it')]))
   expect(qa('.cv-user')).toHaveLength(1)
   expect(q('.cv-user strong')?.textContent).toBe('bug')
-  expect(q('.cv-assistant')?.textContent).toBe('on it')
+  expect(q('.cv-assistant .cv-md')?.textContent).toBe('on it')
   expect(virt.props!.initialTopMostItemIndex).toBe(1)
 
   await follows[0].emit(lines(700, [said('a2', 2, 'done')]))
-  expect(qa('.cv-assistant').map((e) => e.textContent)).toEqual(['on it', 'done'])
+  expect(qa('.cv-assistant .cv-md').map((e) => e.textContent)).toEqual(['on it', 'done'])
 
   act(() => root.unmount())
   expect(follows[0].stopped).toBe(true)
@@ -187,7 +197,7 @@ test('a transcript not written yet says so until its first lines', async () => {
   expect(text()).toContain('waiting for the transcript…')
   await follows[0].emit(lines(0, [user('u1', 0, 'hello')]))
   expect(text()).not.toContain('waiting for the transcript')
-  expect(q('.cv-user')?.textContent).toBe('hello')
+  expect(q('.cv-bubble')?.textContent).toBe('hello')
 })
 
 test('a reset drops everything shown and draws what follows from the top', async () => {
@@ -197,7 +207,7 @@ test('a reset drops everything shown and draws what follows from the top', async
   await follows[0].emit({ kind: 'reset' })
   await follows[0].emit(lines(0, [user('u9', 5, 'new one')]))
   expect(text()).not.toContain('old')
-  expect(q('.cv-user')?.textContent).toBe('new one')
+  expect(q('.cv-bubble')?.textContent).toBe('new one')
 })
 
 test('a new session id (a /clear) keeps the old cards above a divider and follows the new one below', async () => {
@@ -209,8 +219,7 @@ test('a new session id (a /clear) keeps the old cards above a divider and follow
   expect(follows[1]).toMatchObject({ sessionId: 's2', tail: TAIL })
   await follows[1].emit(lines(0, [user('u1', 10, 'after clear')], 's2'))
 
-  const rows = qa('.fake-list > [data-index]').map((r) => r.textContent)
-  expect(rows).toEqual(['before clear', '── /clear ──', 'after clear'])
+  expect(rowTexts()).toEqual(['before clear', '/clear', 'after clear'])
   // The same card id in both files is two rows, not one.
   expect(new Set(virt.props!.data.map((it: Item) => it.key)).size).toBe(3)
 })
@@ -228,27 +237,27 @@ test('with no session at all it says so', async () => {
   const { client, follows } = fakeClient()
   await render(view(client, { sessionId: null }))
   expect(follows).toHaveLength(0)
-  expect(text()).toContain('no Claude session yet')
+  expect(text()).toContain('No Claude session yet')
 })
 
 test('reaching the top reads the lines before the first one, puts them above without moving the rows on screen, and stops at the top of the file', async () => {
   const { client, follows, chunks, earlier } = fakeClient()
   await render(view(client))
   await follows[0].emit(lines(4000, [user('u3', 30, 'third')]))
-  expect(text()).toContain('scroll up for earlier')
+  expect(text()).toContain('Scroll up for earlier')
   const first = virt.props!.firstItemIndex as number
 
   chunks.push({ start: 1200, end: 4000, lines: [line(user('u2', 20, 'second')), line(said('a2', 21, 'second answer'))] })
   await act(async () => virt.props!.startReached())
   expect(earlier).toHaveBeenCalledWith('s1', '/repo', 4000, TAIL)
-  expect(qa('.fake-list > [data-index]').map((r) => r.textContent)).toEqual(['second', 'second answer', 'third'])
+  expect(rowTexts()).toEqual(['second', 'second answer', 'third'])
   expect(virt.props!.firstItemIndex).toBe(first - 2)
 
   chunks.push({ start: 0, end: 1200, lines: [line(user('u1', 10, 'first'))] })
   await act(async () => virt.props!.startReached())
   expect(earlier).toHaveBeenLastCalledWith('s1', '/repo', 1200, TAIL)
   expect(virt.props!.firstItemIndex).toBe(first - 3)
-  expect(text()).toContain('start of the session')
+  expect(text()).toContain('Start of the session')
 
   await act(async () => virt.props!.startReached())
   expect(earlier).toHaveBeenCalledTimes(2)
@@ -272,14 +281,14 @@ test('a failed earlier read says so, and retry reads again', async () => {
   await follows[0].emit(lines(4000, [user('u3', 30, 'third')]))
   earlier.mockRejectedValueOnce('gone')
   await act(async () => virt.props!.startReached())
-  expect(text()).toContain('could not load earlier lines: gone')
-  await click(button('retry'))
+  expect(text()).toContain('Could not load earlier lines: gone')
+  await click(button('Retry'))
   expect(earlier).toHaveBeenCalledTimes(2)
 })
 
 // ---- the bottom -------------------------------------------------------------------------------
 
-test('lines arriving while you read above show a ↓ new pill that scrolls down, and none while you are at the bottom', async () => {
+test('lines arriving while you read above show a jump-to-latest pill that scrolls down, and none while you are at the bottom', async () => {
   const { client, follows } = fakeClient()
   await render(view(client))
   await follows[0].emit(lines(0, [user('u1', 0, 'one')]))
@@ -287,17 +296,17 @@ test('lines arriving while you read above show a ↓ new pill that scrolls down,
   expect(virt.props!.followOutput(false)).toBe(false)
 
   await follows[0].emit(lines(100, [said('a1', 1, 'two')]))
-  expect(button('↓ new')).toBeNull()
+  expect(button('Jump to latest')).toBeNull()
 
   await act(async () => virt.props!.atBottomStateChange(false))
-  expect(button('↓ new')).toBeNull()
+  expect(button('Jump to latest')).toBeNull()
   await follows[0].emit(lines(200, [said('a2', 2, 'three')]))
-  expect(button('↓ new')).not.toBeNull()
-  await click(button('↓ new'))
+  expect(button('Jump to latest')).not.toBeNull()
+  await click(button('Jump to latest'))
   expect(virt.scrolls).toEqual([{ index: 'LAST', behavior: 'smooth' }])
 
   await act(async () => virt.props!.atBottomStateChange(true))
-  expect(button('↓ new')).toBeNull()
+  expect(button('Jump to latest')).toBeNull()
 })
 
 // ---- status -----------------------------------------------------------------------------------
@@ -307,7 +316,7 @@ test('busy shows a working row counting from the prompt', async () => {
   const since = Date.now() - 42_000
   await render(view(client, { status: { busy: true, waiting: null } }))
   await follows[0].emit({ kind: 'lines', start: 0, end: 10, lines: [JSON.stringify({ type: 'card', card: { ...user('u1', 0, 'go'), at: new Date(since).toISOString() } })] })
-  expect(q('.cv-working')?.textContent).toMatch(/^working… 0:4[23]$/)
+  expect(q('.cv-working')?.textContent).toMatch(/^Working…0:4[23]$/)
   await render(view(client, { status: { busy: false, waiting: null } }))
   expect(q('.cv-working')).toBeNull()
 })
@@ -328,9 +337,12 @@ test('while waiting, the first unresolved tool call since the last prompt become
   )
   const pending = qa('.cv-pending')
   expect(pending).toHaveLength(1)
+  // The run it is in opens by itself, and the call opens to what it asks to run.
   expect(pending[0].textContent).toContain('$ rm -rf build')
   expect(pending[0].textContent).toContain('waiting for approval')
-  await click(button('open terminal'))
+  expect(q('.cv-pending-bar')?.textContent).toContain('Waiting for approval')
+  expect(q('.cv-pending-bar')?.textContent).toContain('rm -rf build')
+  await click(button('Open terminal'))
   expect(onOpenTerminal).toHaveBeenCalledTimes(1)
 
   await render(view(client, { status: { busy: true, waiting: null }, onOpenTerminal }))
@@ -341,8 +353,8 @@ test('an AskUserQuestion waits for your answer; with no terminal to open there i
   const { client, follows } = fakeClient()
   await render(view(client, { status: { busy: false, waiting: 'permission' } }))
   await follows[0].emit(lines(0, [user('u1', 0, 'ask me'), tool('q1', 1, 'AskUserQuestion', null)]))
-  expect(q('.cv-pending')?.textContent).toContain('waiting for your answer')
-  expect(button('open terminal')).toBeNull()
+  expect(q('.cv-pending-bar')?.textContent).toContain('Waiting for your answer')
+  expect(button('Open terminal')).toBeNull()
 })
 
 test('markers are merged into the stream by time, and the footer is pinned under it', async () => {
@@ -353,7 +365,7 @@ test('markers are merged into the stream by time, and the footer is pinned under
   ]
   await render(view(client, { markers, footer: <div className="reply">reply box</div> }))
   await follows[0].emit(lines(0, [user('u1', 0, 'start'), said('a1', 10, 'middle'), said('a2', 20, 'end')]))
-  expect(qa('.fake-list > [data-index]').map((r) => r.textContent)).toEqual(['start', 'blocked · needs approval', 'middle', 'end', 'done'])
+  expect(rowTexts()).toEqual(['start', 'blocked · needs approval', 'middle', 'end', 'done'])
   expect(q('.cv-footer .reply')?.textContent).toBe('reply box')
   expect(q('.cv-stream .reply')).toBeNull()
 })
@@ -372,9 +384,9 @@ test('markers older than a partial window keep only the newest, until earlier re
   ]
   await render(view(client, { markers }))
   await follows[0].emit(lines(4000, [user('u5', 10, 'in window'), said('a5', 20, 'answer')]))
-  const rows = () => qa('.fake-list > [data-index]').map((r) => r.textContent)
-  expect(rows()).toEqual(['working (since earlier)', 'in window', 'blocked · needs input', 'answer', 'done'])
-  expect(qa('.cv-marker .cv-muted')).toHaveLength(1)
+  const rows = rowTexts
+  expect(rows()).toEqual(['working(since earlier)', 'in window', 'blocked · needs input', 'answer', 'done'])
+  expect(qa('.cv-marker .cv-carried')).toHaveLength(1)
 
   // Loading the older records puts their markers back beside them, and the rows that were on
   // screen keep their indexes though the carried marker above them is gone.
@@ -382,16 +394,16 @@ test('markers older than a partial window keep only the newest, until earlier re
   chunks.push({ start: 0, end: 4000, lines: [line(user('u1', 0, 'first')), line(said('a1', 2, 'early answer')), line(said('a2', 5, 'later'))] })
   await act(async () => virt.props!.startReached())
   expect(rows()).toEqual(['first', 'working', 'early answer', 'blocked · awaiting approval', 'later', 'working', 'in window', 'blocked · needs input', 'answer', 'done'])
-  expect(qa('.cv-marker .cv-muted')).toHaveLength(0)
+  expect(qa('.cv-marker .cv-carried')).toHaveLength(0)
   const index = (key: string) => (virt.props!.data as Item[]).findIndex((it) => it.key === key) + virt.props!.firstItemIndex
   expect(index('0:u5')).toBe(first + 1)
 })
 
 test('a window at the start of its file keeps every marker before its first card', () => {
   const seg = { ...applyEvent(newSegment(0, 's1'), lines(0, [said('a1', 10, 'x')])) }
-  const conv = { sessionId: 's1', title: null, prs: [], cards: [said('a1', 10, 'x')] }
+  const c1 = conv('s1', [said('a1', 10, 'x')])
   const markers = [{ at: at(1), label: 'starting' }, { at: at(2), label: 'working' }]
-  const shown = (s: typeof seg) => streamItems([s], [conv], markers, undefined).map((i) => (i.kind === 'marker' ? `${i.marker.label}${i.carried ? '*' : ''}` : i.kind))
+  const shown = (s: typeof seg) => streamItems([s], [c1], markers, undefined).map((i) => (i.kind === 'marker' ? `${i.marker.label}${i.carried ? '*' : ''}` : i.kind))
   expect(shown(seg)).toEqual(['starting', 'working', 'card'])
   expect(shown({ ...seg, start: 900 })).toEqual(['working*', 'card'])
 })
@@ -400,8 +412,8 @@ test('after a /clear, markers before a partial later window collapse too, not th
   const a = applyEvent(newSegment(0, 's1'), lines(0, [said('a1', 0, 'old session')]))
   const b = applyEvent(newSegment(1, 's2'), lines(700, [said('b1', 20, 'new session')], 's2'))
   const convs = [
-    { sessionId: 's1', title: null, prs: [], cards: [said('a1', 0, 'old session')] },
-    { sessionId: 's2', title: null, prs: [], cards: [said('b1', 20, 'new session')] },
+    conv('s1', [said('a1', 0, 'old session')]),
+    conv('s2', [said('b1', 20, 'new session')]),
   ]
   const markers = [{ at: at(5), label: 'done' }, { at: at(12), label: 'working' }, { at: at(15), label: 'blocked' }]
   const shown = streamItems([a, b], convs, markers, undefined).map((i) => (i.kind === 'marker' ? `${i.marker.label}${i.carried ? '*' : ''}` : i.kind))
@@ -429,7 +441,7 @@ test('a rule chip opens its rule; its veto arms on the first click and disables 
   await render(view(client, {}, r.rules))
   await follows[0].emit(lines(0, [user('u1', 0, 'hi', { rules: [{ slug: 'no-force-push', channel: 'reflex' }] }), tool('t1', 1, 'Edit', null, { rules: [{ slug: 'edit-small', channel: 'enrichment' }] })]))
   expect(q('.cv-user .cv-rule-reflex')?.textContent).toContain('no-force-push')
-  expect(q('.cv-tool .cv-rule-enrichment')?.textContent).toContain('edit-small')
+  expect(q('.cv-run .cv-rule-enrichment')?.textContent).toContain('edit-small')
 
   await click(q('.cv-user .cv-rule-open'))
   expect(r.opened).toEqual(['no-force-push'])
@@ -470,9 +482,9 @@ test('the session block folds its briefing and carries the briefing and learned 
     ],
   }
   await follows[0].emit(lines(0, [session]))
-  expect(q('.cv-session-head')?.textContent).toContain('session clear')
+  expect(q('.cv-session-head')?.textContent).toContain('Session clear')
   expect(q('.cv-briefing')).toBeNull()
-  await click(button(/briefing/))
+  await click(button(/Briefing/))
   expect(q('.cv-briefing strong')?.textContent).toBe('setup')
   expect(q('.cv-rule-learned')?.textContent).toContain('l-rule')
   expect(q('.cv-rule-briefing')?.textContent).toContain('b-rule')
@@ -481,20 +493,122 @@ test('the session block folds its briefing and carries the briefing and learned 
 // ---- cards ------------------------------------------------------------------------------------
 
 const hunk = (n: number) => ({ oldStart: 10, oldLines: n, newStart: 10, newLines: n, lines: Array.from({ length: n }, (_, i) => (i % 2 ? `+new ${i}` : `-old ${i}`)) })
+const runHead = (i = 0) => qa('.cv-run')[i].querySelector<HTMLButtonElement>('button[aria-expanded]')!
+const sentence = (i = 0) => qa('.cv-run-sentence')[i]?.textContent
 
-test('an Edit draws its diff inline, folded past 20 lines', async () => {
+test('calls one after another fold to one sentence, and open to a line per call', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(
+    lines(0, [
+      user('u1', 0, 'look around'),
+      tool('r1', 1, 'Read', { kind: 'text', text: 'body' }, { summary: 'src/a.ts' }),
+      tool('g1', 2, 'Grep', { kind: 'text', text: 'hits' }),
+      tool('b1', 3, 'Bash', { kind: 'bash', stdout: 'ok', stderr: '', interrupted: false }, { input: { command: 'ls' } }),
+      said('a1', 4, 'found it'),
+      tool('r2', 5, 'Read', { kind: 'text', text: 'more' }, { summary: 'src/b.ts' }),
+    ]),
+  )
+  expect(qa('.cv-run')).toHaveLength(2)
+  expect(sentence(0)).toBe('Read 1 file, searched 1 time, and ran 1 command')
+  expect(qa('.cv-run')[0].querySelector('[aria-label="done"]')).not.toBeNull()
+  expect(qa('.cv-run')[0].querySelectorAll('.cv-tool')).toHaveLength(0)
+  // A lone call that is not a command keeps what it touched beside its sentence.
+  expect(sentence(1)).toBe('Read 1 file')
+  expect(qa('.cv-run')[1].textContent).toContain('src/b.ts')
+
+  await click(runHead(0))
+  expect(runHead(0).getAttribute('aria-expanded')).toBe('true')
+  expect([...qa('.cv-run')[0].querySelectorAll('.cv-tool')].map((l) => l.getAttribute('data-tool'))).toEqual(['Read', 'Grep', 'Bash'])
+  await click(runHead(0))
+  expect(qa('.cv-run')[0].querySelectorAll('.cv-tool')).toHaveLength(0)
+})
+
+test('a lone command, settled, is its own header', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(lines(0, [tool('b1', 0, 'Bash', { kind: 'bash', stdout: '', stderr: '', interrupted: false }, { input: { command: 'git push\necho done' } })]))
+  expect(sentence()).toBe('git push')
+})
+
+test('the live run speaks in the present, with its latest call beside it; the working line leaves the call to it', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client, { status: { busy: true, waiting: null } }))
+  await follows[0].emit(
+    lines(0, [
+      user('u1', 0, 'test it'),
+      tool('r1', 1, 'Read', { kind: 'text', text: '' }, { summary: 'package.json' }),
+      tool('b1', 2, 'Bash', null, { summary: 'pnpm test', input: { command: 'pnpm test' } }),
+    ]),
+  )
+  expect(q('.cv-run')?.getAttribute('data-run-state')).toBe('live')
+  expect(sentence()).toBe('Reading 1 file and running 1 command')
+  expect(q('.cv-run')?.textContent).toContain('Running pnpm test')
+  expect(q('.cv-working')?.textContent).toMatch(/^Working…/)
+
+  // Said something after it: the run is settled though the session still works.
+  await follows[0].emit(lines(100, [said('a1', 3, 'waiting on the tests')]))
+  expect(q('.cv-run')?.getAttribute('data-run-state')).toBe('settled')
+  expect(sentence()).toBe('Read 1 file and ran 1 command')
+  expect(q('.cv-working')?.textContent).toMatch(/^Working…/)
+})
+
+test('thinking is the working line while it is the last thing the session did', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client, { status: { busy: true, waiting: null } }))
+  await follows[0].emit({ kind: 'lines', start: 0, end: 10, lines: [line(user('u1', 0, 'think')), JSON.stringify({ type: 'thinking', at: at(1) })] })
+  expect(q('.cv-working')?.textContent).toContain('Thinking…')
+})
+
+test('failed calls are counted on the header, and the line says how each ended', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(
+    lines(0, [
+      tool('r1', 0, 'Read', { kind: 'text', text: 'file body' }, { summary: 'src/a.ts', input: { file_path: 'src/a.ts' } }),
+      tool('d1', 1, 'Write', { kind: 'denied', reason: 'user-rejected', feedback: 'not that file' }),
+      tool('m1', 2, 'mcp__mnemo__read_mnemo_rule', { kind: 'error', text: 'boom' }),
+    ]),
+  )
+  expect(q('.cv-run')?.textContent).toContain('2 failed')
+  expect(q('.cv-run [aria-label="done"]')).toBeNull()
+  await click(runHead())
+  const [read, denied, mcp] = qa('.cv-tool')
+  expect(read.textContent).toContain('src/a.ts')
+  expect(read.textContent).not.toContain('file body')
+  // A denial is short and matters: it shows with the line folded.
+  expect(denied.textContent).toContain('Denied · user-rejected')
+  expect(denied.querySelector('blockquote')?.textContent).toBe('not that file')
+  expect(mcp.querySelector('code')?.textContent).toBe('mnemo · read_mnemo_rule')
+  expect(mcp.querySelector('[data-mark]')?.textContent).toBe('failed')
+
+  await click(read.querySelector('button'))
+  expect(qa('.cv-tool')[0].textContent).toContain('file body')
+  expect(qa('.cv-tool')[0].querySelector('.cv-input')?.textContent).toContain('"file_path": "src/a.ts"')
+})
+
+test('an edit opens to its diff card: verb, file, counts, and the rows, which fold', async () => {
+  const written: string[] = []
+  stubClipboard(async (t) => void written.push(t))
   const { client, follows } = fakeClient()
   await render(view(client))
   await follows[0].emit(lines(0, [tool('e1', 0, 'Edit', { kind: 'diff', filePath: 'src/a.ts', created: false, hunks: [hunk(30)] }), tool('w1', 1, 'Write', { kind: 'diff', filePath: 'src/b.ts', created: true, hunks: [hunk(4)] })]))
-  const [edit, write] = qa('.cv-tool')
-  expect(edit.textContent).toContain('src/a.ts')
-  expect(edit.querySelector('.rv-plus')?.textContent).toBe('+15')
-  expect(edit.querySelectorAll('.rv-line')).toHaveLength(DIFF_FOLD)
-  await click([...edit.querySelectorAll('button')].find((b) => b.textContent === 'show all 30 lines')!)
-  expect(qa('.cv-tool')[0].querySelectorAll('.rv-line')).toHaveLength(30)
-  expect(write.textContent).toContain('created')
-  expect(write.querySelectorAll('.rv-line')).toHaveLength(4)
-  expect(write.textContent).not.toContain('show all')
+  expect(sentence()).toBe('Edited 2 files')
+  expect(q('.cv-diff')).toBeNull()
+  await click(runHead())
+  const [edit, write] = qa('.cv-diff')
+  expect(edit.getAttribute('data-verb')).toBe('edited')
+  expect(edit.textContent).toContain('Edited file')
+  expect(edit.textContent).toContain('a.ts')
+  expect(edit.querySelector('[aria-label="15 added, 15 removed"]')?.textContent).toBe('+15 -15')
+  expect(edit.querySelectorAll('.cv-diff-row')).toHaveLength(30)
+  expect(write.textContent).toContain('Added file')
+  expect(write.querySelectorAll('.cv-diff-add, .cv-diff-del')).toHaveLength(4)
+
+  await click(edit.querySelector('button[aria-expanded]'))
+  expect(qa('.cv-diff')[0].querySelectorAll('.cv-diff-row')).toHaveLength(0)
+  await click(qa('.cv-diff')[1].querySelector('button[aria-label="Copy diff"]'))
+  expect(written).toEqual([hunk(4).lines.join('\n')])
 })
 
 test('diff rows are numbered from each hunk start on both sides', () => {
@@ -507,17 +621,6 @@ test('diff rows are numbered from each hunk start on both sides', () => {
     ['ctx', 7, 9, 'same'],
     ['note', null, null, '\\ No newline at end of file'],
   ])
-})
-
-test('a Bash card shows its command with the output folded under it', async () => {
-  const { client, follows } = fakeClient()
-  await render(view(client))
-  await follows[0].emit(lines(0, [tool('b1', 0, 'Bash', { kind: 'bash', stdout: 'a\nb\n', stderr: 'warn', interrupted: false }, { input: { command: 'pnpm test' } })]))
-  expect(q('.cv-bash-cmd')?.textContent).toBe('$ pnpm test')
-  expect(q('.cv-out')).toBeNull()
-  await click(button(/output · 3 lines/))
-  expect(qa('.cv-out').map((e) => e.textContent)).toEqual(['a\nb\n', 'warn'])
-  expect(q('.cv-out.cv-err')?.textContent).toBe('warn')
 })
 
 /** A commit made through a heredoc, as Claude Code writes one. Written for this test, not
@@ -540,86 +643,68 @@ function stubClipboard(writeText: (t: string) => Promise<void>) {
   onTestFinished(() => void delete (navigator as { clipboard?: unknown }).clipboard)
 }
 
-test('a heredoc command folds to its first lines, opens in place, folds again, and copies whole', async () => {
+test('a command opens to the whole of itself and its output, and copies whole', async () => {
   const written: string[] = []
   stubClipboard(async (t) => void written.push(t))
   const { client, follows } = fakeClient()
   await render(view(client))
-  await follows[0].emit(lines(0, [tool('h1', 0, 'Bash', { kind: 'bash', stdout: '[main 1a2b3c4] fix\n', stderr: '', interrupted: false }, { input: { command: HEREDOC } })]))
-  const all = HEREDOC.split('\n')
-  expect(CMD_FOLD).toBe(4)
-  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${all.slice(0, CMD_FOLD).join('\n')}`)
-  expect(q('.cv-bash-cmd')?.textContent?.split('\n')[0]).toBe(`$ ${all[0]}`)
-  const more = button(`▸ ${all.length - CMD_FOLD} more lines of command`)
-  expect(more?.getAttribute('aria-expanded')).toBe('false')
+  await follows[0].emit(lines(0, [tool('h1', 0, 'Bash', { kind: 'bash', stdout: '[main 1a2b3c4] fix\n', stderr: 'warn', interrupted: false }, { summary: 'git commit …', input: { command: HEREDOC } })]))
+  // The header is its first line; the rest is one click in.
+  expect(sentence()).toBe(HEREDOC.split('\n')[0])
+  await click(runHead())
+  expect(q('.cv-cmd')).toBeNull()
+  await click(q('.cv-tool button'))
+  expect(q('.cv-cmd')?.textContent).toBe(`$ ${HEREDOC}`)
+  expect(qa('.cv-out').map((e) => e.textContent)).toEqual(['[main 1a2b3c4] fix\n', 'warn'])
+  expect(q('.cv-out.cv-err')?.textContent).toBe('warn')
 
-  await click(more)
-  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${HEREDOC}`)
-  expect(button('▾ fold command')?.getAttribute('aria-expanded')).toBe('true')
-  expect(q('.cv-out')).toBeNull() // the output stays folded on its own
-
-  await click(button('▾ fold command'))
-  expect(q('.cv-bash-cmd')?.textContent).toBe(`$ ${all.slice(0, CMD_FOLD).join('\n')}`)
-
-  await click(button('copy'))
+  await click(q('button[aria-label="Copy command"]'))
   expect(written).toEqual([HEREDOC])
-  expect(button('copied')).not.toBeNull()
-})
-
-test('a command folds only when it would hide two lines or more', async () => {
-  const { client, follows } = fakeClient()
-  await render(view(client))
-  const five = ['a', 'b', 'c', 'd', 'e'].join('\n')
-  const six = ['a', 'b', 'c', 'd', 'e', 'f'].join('\n')
-  await follows[0].emit(lines(0, [tool('c5', 0, 'Bash', null, { input: { command: five } }), tool('c6', 1, 'Bash', null, { input: { command: six } })]))
-  const [c5, c6] = qa('.cv-bash-cmd')
-  expect(c5.textContent).toBe(`$ ${five}`)
-  expect(c6.textContent).toBe('$ a\nb\nc\nd')
-  expect(qa('.cv-cmd-more').map((b) => b.textContent)).toEqual(['▸ 2 more lines of command'])
+  expect(q('button[aria-label="Copied"]')).not.toBeNull()
 })
 
 test('a failed copy says so', async () => {
   stubClipboard(async () => Promise.reject(new Error('denied')))
   const { client, follows } = fakeClient()
   await render(view(client))
-  await follows[0].emit(lines(0, [tool('b1', 0, 'Bash', null, { input: { command: 'ls' } })]))
-  await click(button('copy'))
-  expect(button('copy failed')).not.toBeNull()
+  await follows[0].emit(lines(0, [said('a1', 0, 'copy me')]))
+  await click(q('button[aria-label="Copy message"]'))
+  expect(q('button[aria-label="Copy failed"]')).not.toBeNull()
 })
 
-test('other tools are one line that opens to their input and result; a denial shows folded', async () => {
+test('an edit waiting on approval opens to the change it asks to make', async () => {
   const { client, follows } = fakeClient()
-  await render(view(client))
-  await follows[0].emit(
-    lines(0, [
-      tool('r1', 0, 'Read', { kind: 'text', text: 'file body' }, { summary: 'src/a.ts', input: { file_path: 'src/a.ts' } }),
-      tool('d1', 1, 'Write', { kind: 'denied', reason: 'user-rejected', feedback: 'not that file' }),
-      tool('m1', 2, 'mcp__mnemo__read_mnemo_rule', { kind: 'error', text: 'boom' }),
-    ]),
-  )
-  const [read, denied, mcp] = qa('.cv-tool')
-  expect(read.textContent).toContain('src/a.ts')
-  expect(read.textContent).not.toContain('file body')
-  expect(denied.textContent).toContain('denied · user-rejected')
-  expect(denied.querySelector('blockquote')?.textContent).toBe('not that file')
-  expect(mcp.querySelector('.cv-tool-name')?.textContent).toBe('mnemo · read_mnemo_rule')
-  expect(mcp.querySelector('.cv-tool-mark')?.textContent).toBe('✗')
-
-  await click(read.querySelector('.cv-chip-head'))
-  expect(qa('.cv-tool')[0].textContent).toContain('file body')
-  expect(qa('.cv-tool')[0].querySelector('.cv-input')?.textContent).toContain('"file_path": "src/a.ts"')
+  await render(view(client, { status: { busy: false, waiting: 'permission' } }))
+  await follows[0].emit(lines(0, [user('u1', 0, 'go'), tool('e1', 1, 'Edit', null, { summary: 'src/a.ts', input: { file_path: 'src/a.ts', old_string: 'one\ntwo', new_string: 'three' } })]))
+  const diff = q('.cv-pending .cv-diff')
+  expect(diff?.getAttribute('data-verb')).toBe('proposed')
+  expect(diff?.textContent).toContain('Wants to edit')
+  expect([...diff!.querySelectorAll('.cv-diff-row')].map((r) => r.textContent)).toEqual(['-one', '-two', '+three'])
 })
 
 test('what is unfolded stays unfolded as new lines arrive', async () => {
   const { client, follows } = fakeClient()
   await render(view(client))
   await follows[0].emit(lines(0, [tool('r1', 0, 'Read', { kind: 'text', text: 'file body' })]))
-  await click(q('.cv-chip-head'))
+  await click(runHead())
+  await click(q('.cv-tool button'))
   await follows[0].emit(lines(100, [said('a1', 1, 'more')]))
   expect(text()).toContain('file body')
 })
 
-test('agent, peer, notification, command, queued and unknown cards', async () => {
+test('the rules that reached a folded run stay in sight under it', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(
+    lines(0, [
+      tool('e1', 0, 'Edit', null, { rules: [{ slug: 'edit-small', channel: 'enrichment' }] }),
+      tool('e2', 1, 'Edit', null, { rules: [{ slug: 'edit-small', channel: 'enrichment' }, { slug: 'no-any', channel: 'enrichment' }] }),
+    ]),
+  )
+  expect(qa('.cv-run .cv-rule').map((r) => r.querySelector('.cv-rule-open')?.textContent)).toEqual(['⟡ edit-small', '⟡ no-any'])
+})
+
+test('agent, peer, notification, compaction, command, queued, thinking and unknown cards', async () => {
   const { client, follows } = fakeClient()
   await render(view(client))
   await follows[0].emit(
@@ -628,23 +713,48 @@ test('agent, peer, notification, command, queued and unknown cards', async () =>
       { kind: 'agent', id: 'g2', at: at(1), toolUseId: 'tu2', description: 'still going', agentType: null, report: null },
       { kind: 'peer', id: 'p1', at: at(2), from: 'round20-parser', text: 'fixtures are in' },
       { kind: 'notification', id: 'n1', at: at(3), text: 'task 4 finished' },
+      { kind: 'notification', id: 'n2', at: at(3), text: 'conversation compacted' },
       { kind: 'command', id: 'c1', at: at(4), name: 'model', args: 'opus' },
       user('q1', 5, 'next thing', { queued: true }),
-      { kind: 'unknown', id: 'x1', at: at(6), type: 'atis-latch-v2' },
+      { kind: 'thinking', id: 'th', at: at(6), text: 'The tailer\nreads\nlines\nfrom\nthe end.' },
+      { kind: 'unknown', id: 'x1', at: at(7), type: 'atis-latch-v2' },
     ]),
   )
   const agent = qa('.cv-agent')[0]
-  expect(agent.textContent).toContain('agent · Explore')
+  expect(agent.textContent).toContain('Agent · Explore')
   expect(agent.textContent).toContain('find the tailer')
-  expect(agent.querySelector('.vt-md')).toBeNull()
-  await click(agent.querySelector('.cv-chip-head'))
+  expect(agent.querySelector('.cv-md')).toBeNull()
+  await click(agent.querySelector('button'))
   expect(qa('.cv-agent')[0].querySelector('strong')?.textContent).toBe('conversation.rs')
-  expect(qa('.cv-agent')[1].querySelector('.cv-tool-mark')?.textContent).toBe('…')
-  expect(q('.cv-peer-from')?.textContent).toBe('from round20-parser')
-  expect(q('.cv-notification')?.textContent).toBe('task 4 finished')
+  expect(qa('.cv-agent')[1].querySelector('[aria-label="running"]')).not.toBeNull()
+  expect(q('.cv-peer-from')?.textContent).toBe('From round20-parser')
+  expect(qa('.cv-notification').map((n) => n.textContent)).toEqual(['task 4 finished', 'Context compacted'])
   expect(q('.cv-command')?.textContent).toBe('/model opus')
-  expect(q('.cv-queued .cv-badge')?.textContent).toBe('queued')
+  expect(q('.cv-queued .cv-badge')?.textContent).toBe('Queued')
+  const thinking = q('.cv-thinking')!
+  expect(thinking.textContent).toBe('The tailer\nreads\nlines\nfrom\nthe end.')
+  expect(thinking.getAttribute('aria-expanded')).toBe('false')
+  await click(thinking)
+  expect(q('.cv-thinking')?.getAttribute('aria-expanded')).toBe('true')
   expect(q('.cv-unknown')?.textContent).toBe('unknown atis-latch-v2')
+})
+
+test('a question is asked in words, and its answers show once given', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  const questions = [{ question: 'Which port?', options: [{ label: '3000' }, { label: '8080' }] }]
+  await follows[0].emit(lines(0, [tool('q1', 0, 'AskUserQuestion', { kind: 'answers', answers: { 'Which port?': '8080' } }, { input: { questions } })]))
+  expect(q('.cv-ask')?.textContent).toContain('Asked')
+  expect(q('.cv-ask')?.textContent).toContain('Which port?')
+  expect(q('.cv-ask dd')?.textContent).toBe('8080')
+})
+
+test('a plan is a card to read', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  await follows[0].emit(lines(0, [tool('p1', 0, 'ExitPlanMode', { kind: 'text', text: 'ok' }, { input: { plan: '1. Read **it**\n2. Fix it' } })]))
+  expect(q('.cv-plan strong')?.textContent).toBe('it')
+  expect(q('.cv-plan')?.textContent).toContain('Approved')
 })
 
 test('an image is decoded only once it is near the screen, and a click enlarges it until Esc', async () => {
@@ -713,7 +823,7 @@ test('rows prepended above the first lower the first index by as many; a replace
 
 test('markers with the same time and label still get distinct keys', () => {
   const seg = { ...newSegment(0, 's1'), state: 'live' as const }
-  const items = streamItems([seg], [{ sessionId: 's1', title: null, prs: [], cards: [] }], [{ at: at(1), label: 'blocked' }, { at: at(1), label: 'blocked' }], undefined)
+  const items = streamItems([seg], [conv('s1', [])], [{ at: at(1), label: 'blocked' }, { at: at(1), label: 'blocked' }], undefined)
   const keys = items.filter((i) => i.kind === 'marker').map((i) => i.key)
   expect(new Set(keys).size).toBe(2)
 })
@@ -732,6 +842,13 @@ test('an earlier chunk that crossed a reset is dropped', () => {
 // ---- the face ---------------------------------------------------------------------------------
 
 const PANE = 5
+/** The face without chat-input's parts, whether or not they have landed: what the stream says
+ *  must not hang on them (chat.test.tsx drives the foot with its own). */
+const Face = () => (
+  <ChatInputContext.Provider value={{}}>
+    <ConversationFace paneId={PANE} />
+  </ChatInputContext.Provider>
+)
 function paneIn(over: Partial<import('../layout/store').Pane> = {}) {
   store.setState({
     tabs: [{ id: 't', root: leaf(PANE), focused: PANE }],
@@ -755,16 +872,16 @@ test('the face follows the pane session under its cwd, with its status from the 
     on(lines(0, [user('u1', 0, 'hello')]))
     return () => {}
   })
-  await render(<ConversationFace paneId={PANE} />)
+  await render(<Face />)
   expect(follow).toHaveBeenCalledWith('s1', '/repo', TAIL, expect.any(Function))
-  expect(q('.conversation-face .cv-user')?.textContent).toBe('hello')
+  expect(q('.conversation-face .cv-bubble')?.textContent).toBe('hello')
   expect(q('.cv-working')).not.toBeNull()
 })
 
 test('with no session the face says so and how to go back', async () => {
   paneIn({ sessionId: undefined })
-  await render(<ConversationFace paneId={PANE} />)
-  expect(text()).toContain('no Claude session in this pane')
+  await render(<Face />)
+  expect(text()).toContain('No Claude session in this pane')
   expect(text()).toContain('⌘⇧C')
 })
 
@@ -783,9 +900,9 @@ test('open terminal flips the pane to its terminal face and gives the xterm the 
   body.append(xterm)
   host.append(body)
   const inner = createRoot(body.appendChild(document.createElement('div')))
-  await act(async () => inner.render(<ConversationFace paneId={PANE} />))
-  expect(body.textContent).toContain('waiting for approval')
-  await act(async () => [...body.querySelectorAll('button')].find((b) => b.textContent === 'open terminal')!.click())
+  await act(async () => inner.render(<Face />))
+  expect(body.textContent).toContain('Waiting for approval')
+  await act(async () => [...body.querySelectorAll('button')].find((b) => b.textContent === 'Open terminal')!.click())
   expect(store.getState().panes[PANE].face).toBe('terminal')
   expect(document.activeElement).toBe(xterm)
   act(() => inner.unmount())
@@ -793,11 +910,13 @@ test('open terminal flips the pane to its terminal face and gives the xterm the 
 
 test('the pane status reads busy and waiting off the parent of that session only', () => {
   const snap = snapWith('busy')
-  expect(paneStatus(snap, 's1')).toEqual({ busy: true, waiting: null })
+  expect(paneStatus(snap, 's1')).toEqual({ busy: true, waiting: null, parked: false })
   expect(paneStatus(snap, 'other')).toBeUndefined()
   expect(paneStatus(snap, undefined)).toBeUndefined()
-  expect(paneStatus(snapWith('idle'), 's1')).toEqual({ busy: false, waiting: null })
-  expect(paneStatus(snapWith(asking.status, asking.waitingFor), 's1')).toEqual({ busy: false, waiting: 'question' })
+  expect(paneStatus(snapWith('idle'), 's1')).toEqual({ busy: false, waiting: null, parked: false })
+  expect(paneStatus(snapWith(asking.status, asking.waitingFor), 's1')).toEqual({ busy: false, waiting: 'question', parked: false })
+  // `/config` parks the session on nothing a card can answer.
+  expect(paneStatus(snapWith(configuring.status, configuring.waitingFor), 's1')).toEqual({ busy: false, waiting: null, parked: true })
 })
 
 test('what the pane waits for is what claude agents says it waits for', () => {
@@ -829,8 +948,10 @@ const pendingIn = async (row: { status: string; waitingFor: string }, name: stri
     on(lines(0, [user('u1', 0, 'go'), tool('t1', 1, name, null)]))
     return () => {}
   })
-  await render(<ConversationFace paneId={PANE} />)
-  return q('.cv-pending-bar')?.textContent ?? null
+  await render(<Face />)
+  // The face's foot answers it, so the stream only marks the call (a question and a plan are
+  // rows of their own that say it).
+  return (q('.cv-pending [data-mark="pending"]') ?? q('.cv-pending-bar'))?.textContent?.toLowerCase() ?? null
 }
 
 test.each([

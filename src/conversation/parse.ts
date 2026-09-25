@@ -1,4 +1,4 @@
-import type { Card, Conversation, DiffHunk, ImageRef, PrLink, RuleChannel, RuleChip, ToolOutcome, TranscriptRecord } from './types'
+import type { Card, ContextUsage, Conversation, DiffHunk, ImageRef, PrLink, RuleChannel, RuleChip, ToolOutcome, TranscriptRecord } from './types'
 
 /** One transcript line as a record; `null` for a line that is not a JSON object with a `type`. */
 export function parseRecord(line: string): TranscriptRecord | null {
@@ -201,6 +201,9 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
   /** A title the user set (`/rename`) beats the one Claude Code generated. */
   let customTitle: string | null = null
   const prs: PrLink[] = []
+  let usage: ContextUsage | null = null
+  /** The last thought, and how many cards there were once it was in. */
+  const thought = { at: null as string | null, after: 0 }
 
   const tools = new Map<string, ToolCard | AgentCard>()
   /** Cards a prompt-answering hook can belong to, by record uuid. */
@@ -299,6 +302,14 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
     }
     for (const b of blocks(content)) {
       if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
+      if (b.type === 'thinking') {
+        flush()
+        const text = str(b.thinking) ?? ''
+        if (text.trim()) push({ kind: 'thinking', id: recordId(r), at, text })
+        thought.at = at
+        thought.after = cards.length
+        continue
+      }
       if (b.type !== 'tool_use') continue
       flush()
       const toolUseId = str(b.id) ?? ''
@@ -389,6 +400,7 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
         break
       case 'assistant':
         assistantRecord(r)
+        usage = usageOf(r) ?? usage
         break
       case 'attachment':
         attachmentRecord(r)
@@ -414,5 +426,19 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
       }
     }
   }
-  return { sessionId, title: customTitle ?? title, prs, cards }
+  const thinkingAt = thought.after === cards.length ? thought.at : null
+  return { sessionId, title: customTitle ?? title, prs, cards, usage, thinkingAt }
+}
+
+/** The context an assistant record's response filled: everything its prompt carried (fresh,
+ *  cached, read from cache) and what it wrote. An API error Claude Code wrote itself (model
+ *  `<synthetic>`) used nothing. */
+function usageOf(r: Rec): ContextUsage | null {
+  const message = obj(r.message)
+  const u = obj(message?.usage)
+  const model = str(message?.model)
+  if (!u || model === '<synthetic>') return null
+  const n = (k: string) => (typeof u[k] === 'number' && Number.isFinite(u[k]) ? (u[k] as number) : 0)
+  const tokens = n('input_tokens') + n('cache_creation_input_tokens') + n('cache_read_input_tokens') + n('output_tokens')
+  return tokens > 0 ? { tokens, model, at: str(r.timestamp) ?? '' } : null
 }

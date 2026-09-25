@@ -4,7 +4,8 @@ import { store, useApp } from '../layout/app-store'
 import { useMission } from '../mission/app-store'
 import type { Snapshot } from '../mission/types'
 import type { SessionStatus } from './types'
-import { ConversationView } from './ConversationView'
+import { ConversationView, EmptyState } from './ConversationView'
+import { paneAgent, tauriPaneSinks, type PaneSinks } from './agent'
 import './usage'
 
 /** A `claude agents` session's `status` and `waitingFor` as the view's waiting kinds. Claude Code
@@ -26,12 +27,14 @@ export function paneStatus(snap: Snapshot, sessionId: string | undefined): Sessi
   if (!sessionId) return undefined
   const p = snap.repos.flatMap((r) => r.parents).find((x) => x.session_id === sessionId)
   if (!p) return undefined
-  return { busy: p.status === 'busy', waiting: waitingKind(p.status, p.waiting_for) }
+  const waiting = waitingKind(p.status, p.waiting_for)
+  return { busy: p.status === 'busy', waiting, parked: p.status === 'waiting' && waiting === null }
 }
 
 /** The conversation face of terminal pane `paneId`: laid over the xterm, which stays mounted and
- *  sized underneath so the PTY and the TUI never notice the face changed. */
-export default function ConversationFace({ paneId }: { paneId: PaneId }) {
+ *  sized underneath so the PTY and the TUI never notice the face changed. What the chat's foot
+ *  sends is typed into that PTY, and only while it still runs Claude (`paneAgent`). */
+export default function ConversationFace({ paneId, sinks = tauriPaneSinks }: { paneId: PaneId; sinks?: PaneSinks }) {
   const ref = useRef<HTMLDivElement>(null)
   const sessionId = useApp((s) => s.panes[paneId]?.sessionId)
   const cwd = useApp((s) => s.panes[paneId]?.cwd) ?? ''
@@ -41,7 +44,9 @@ export default function ConversationFace({ paneId }: { paneId: PaneId }) {
   const known = found !== undefined
   const busy = !!found?.busy
   const waiting = found?.waiting ?? null
-  const status = useMemo(() => (known ? { busy, waiting } : undefined), [known, busy, waiting])
+  const parked = !!found?.parked
+  const status = useMemo(() => (known ? { busy, waiting, parked } : undefined), [known, busy, waiting, parked])
+  const agent = useMemo(() => paneAgent(paneId, sinks), [paneId, sinks])
 
   const openTerminal = useCallback(() => {
     // Read before the flip unmounts this face; the xterm under it is what takes the keys.
@@ -52,16 +57,22 @@ export default function ConversationFace({ paneId }: { paneId: PaneId }) {
   }, [paneId])
 
   return (
-    <div ref={ref} className="conversation-face" data-pane={paneId}>
+    <div ref={ref} className="conversation-face" data-ui data-pane={paneId}>
       {sessionId ? (
-        <ConversationView sessionId={sessionId} cwd={cwd} status={status} onOpenTerminal={openTerminal} />
+        <ConversationView sessionId={sessionId} cwd={cwd} status={status} onOpenTerminal={openTerminal} agent={agent} />
       ) : (
-        <div className="cv-empty">
-          <div>no Claude session in this pane</div>
-          <div className="cv-muted">
-            start <code>claude</code> in it, or press <kbd>⌘⇧C</kbd> to go back to the terminal
-          </div>
-        </div>
+        <EmptyState
+          title="No Claude session in this pane"
+          subtitle={
+            <>
+              Start <code className="font-mono text-foreground">claude</code> in it, or press <kbd className="font-mono text-foreground">⌘⇧C</kbd> to go back to the terminal.
+            </>
+          }
+        >
+          <button type="button" className="rounded-md border border-border px-3 py-1 text-xs text-foreground hover:bg-accent" onClick={openTerminal}>
+            Back to the terminal
+          </button>
+        </EmptyState>
       )}
     </div>
   )

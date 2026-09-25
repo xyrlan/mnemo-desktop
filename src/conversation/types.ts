@@ -43,6 +43,9 @@ export type ToolOutcome =
 export type Card =
   | { kind: 'user'; id: string; at: string; text: string; images: ImageRef[]; rules: RuleChip[]; queued: boolean }
   | { kind: 'assistant'; id: string; at: string; text: string }
+  /** What the model thought aloud, when the transcript kept it: Claude Code writes most
+   *  thinking redacted (an empty `thinking` and a signature), which makes no card. */
+  | { kind: 'thinking'; id: string; at: string; text: string }
   | {
       kind: 'tool'
       id: string
@@ -71,12 +74,31 @@ export type Card =
 
 export type PrLink = { number: number; url: string }
 
-/** Everything a transcript says, derived from its records alone. */
-export type Conversation = { sessionId: string | null; title: string | null; prs: PrLink[]; cards: Card[] }
+/** How full the context window was after the last response: its prompt (input, cache written,
+ *  cache read) and what it wrote. `model` is the response's own (`claude-opus-5`…). */
+export type ContextUsage = { tokens: number; model: string | null; at: string }
+
+/** Everything a transcript says, derived from its records alone. `usage`: the last response's,
+ *  null before one. `thinkingAt`: when the model last started thinking, while nothing came after
+ *  it — the transcript's last word is a thought, redacted or not. */
+export type Conversation = {
+  sessionId: string | null
+  title: string | null
+  prs: PrLink[]
+  cards: Card[]
+  usage: ContextUsage | null
+  thinkingAt: string | null
+}
 
 /** What the transcript cannot say and the caller knows from `claude agents` / the mission
  *  snapshot: whether the session is generating, and what it is parked on. */
-export type SessionStatus = { busy: boolean; waiting: 'permission' | 'question' | null }
+export type SessionStatus = {
+  busy: boolean
+  waiting: 'permission' | 'question' | null
+  /** Waiting on something the transcript has no card for (`/config`, a goal proposal): typed
+   *  keys would answer it, so the chat does not type. */
+  parked?: boolean
+}
 
 /** A thin line in the stream at `at` (a child's `blocked 12:03`, `done`). */
 export type StatusMarker = { at: string; label: string }
