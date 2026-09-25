@@ -1,6 +1,6 @@
-// The quick-commands menu open at the titlebar's right end: the shown worktree's repo has three
-// saved commands, and a terminal is focused to run them in. `quick-commands.open` opens the menu,
-// as the palette would.
+// The quick-commands menu open at the right end of the window's top band, which is the end of the
+// top-right group's tab row: the shown worktree's repo has three saved commands, and a terminal is
+// focused to run them in. `quick-commands.open` opens the menu, as the palette would.
 import { scenario } from '../scenario.mjs'
 import { appIpc, HOME, REPO } from '../fixtures/app.mjs'
 import { TERMINAL_OUTPUT } from '../fixtures/terminal-output.mjs'

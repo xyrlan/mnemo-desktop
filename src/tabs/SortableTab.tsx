@@ -1,10 +1,27 @@
-// adapted from stablyai/orca src/renderer/src/components/tab-bar/SortableTab.tsx
+// adapted from stablyai/orca src/renderer/src/components/tab-bar/SortableTab.tsx, EditorFileTab.tsx
+// (the preview tab in italics, kept by a double click) and TabWorkspaceLayoutMenuSection.tsx
+// ("Move Tab to Split") (MIT, 122b8c25)
 import { useEffect, useRef, useState } from 'react'
-import { useSortable } from '@dnd-kit/sortable'
-import { FileText, Globe, PanelsTopLeft, SquareTerminal, X } from 'lucide-react'
-import { Input, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
+import { useDraggable } from '@dnd-kit/core'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns2, FileText, Globe, PanelsTopLeft, SquareTerminal, X } from 'lucide-react'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  Input,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/ui'
 import { cn } from '@/ui/cn'
 import type { AgentState } from '../fleet/types'
+import type { Side } from '../layout/tree'
 import { AgentStateDot } from './AgentStateDot'
 import type { DropIndicator } from './model'
 import { usePointerActivation } from './pointer-activation'
@@ -70,24 +87,64 @@ function LeadingIcon({ state, unread, view, active }: { state: AgentState | null
   )
 }
 
+/** "Move Tab to Split": the sides a tab can open a new group on, in Orca's order. */
+export const SPLIT_SIDES: readonly { side: Side; label: string; Icon: typeof ArrowRight }[] = [
+  { side: 'right', label: 'Right', Icon: ArrowRight },
+  { side: 'left', label: 'Left', Icon: ArrowLeft },
+  { side: 'down', label: 'Down', Icon: ArrowDown },
+  { side: 'up', label: 'Up', Icon: ArrowUp },
+]
+
+/** What a drag of a tab carries: the group it leaves. */
+export type TabDragData = { kind: 'tab'; group: string }
+
 export type SortableTabProps = {
   id: string
+  /** The group whose row it is in. */
+  group: string
   title: string
   view: string
   panes: number
+  /** The tab its group shows. */
   active: boolean
+  /** A file looked at, not kept: the next one opened in its group replaces it. */
+  preview?: boolean
   state: AgentState | null
   unread: boolean
   hasTabsToRight: boolean
   dropIndicator: DropIndicator
+  /** Whether "Move Tab to Split" is offered: its group has another tab to keep. */
+  canSplit?: boolean
   onActivate(id: string): void
   onClose(id: string): void
   onRename(id: string, name: string | undefined): void
+  onKeep?(id: string): void
+  onMoveToSplit?(id: string, side: Side): void
 }
 
-export default function SortableTab({ id, title, view, panes, active, state, unread, hasTabsToRight, dropIndicator, onActivate, onClose, onRename }: SortableTabProps) {
-  // No transform or transition: tabs stay anchored while one is dragged, only the insertion bar moves.
-  const { attributes, listeners, setNodeRef } = useSortable({ id })
+export default function SortableTab({
+  id,
+  group,
+  title,
+  view,
+  panes,
+  active,
+  preview = false,
+  state,
+  unread,
+  hasTabsToRight,
+  dropIndicator,
+  canSplit = false,
+  onActivate,
+  onClose,
+  onRename,
+  onKeep,
+  onMoveToSplit,
+}: SortableTabProps) {
+  // No transform or transition: tabs stay anchored while one is dragged, only the insertion bar
+  // moves. Where it lands is worked out from where the pointer is (TabGroups), not from dnd-kit's
+  // droppables, so a tab needs only to be draggable.
+  const { attributes, listeners, setNodeRef } = useDraggable({ id, data: { kind: 'tab', group } satisfies TabDragData })
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(title)
   const input = useRef<HTMLInputElement>(null)
@@ -109,112 +166,144 @@ export default function SortableTab({ id, title, view, panes, active, state, unr
 
   return (
     <div className={TAB_CONTAINER_WIDTH_CLASSES}>
-      <div
-        ref={setNodeRef}
-        data-testid="sortable-tab"
-        data-tab-id={id}
-        data-active={active ? 'true' : 'false'}
-        data-agent-state={state ?? undefined}
-        {...attributes}
-        {...dragListeners}
-        role="tab"
-        aria-selected={active}
-        className={cn(
-          'group relative flex h-full cursor-pointer items-center px-1.5 text-xs outline-none select-none focus:outline-none focus-visible:outline-none',
-          hasTabsToRight && 'border-r',
-          'border-border',
-          dropIndicatorClasses(dropIndicator),
-          stateClasses(active),
-        )}
-        onDoubleClick={(e) => {
-          if (editing) return
-          e.stopPropagation()
-          setValue(title)
-          setEditing(true)
-        }}
-        onPointerDown={(e) => onPointerDown(e, dragListeners?.onPointerDown as ((e: React.PointerEvent) => void) | undefined)}
-        onMouseDown={(e) => {
-          // Blocks middle-click autoscroll; the close waits for auxclick.
-          if (e.button === 1) e.preventDefault()
-        }}
-        onAuxClick={(e) => {
-          if (editing || e.button !== 1) return
-          e.preventDefault()
-          e.stopPropagation()
-          onClose(id)
-        }}
-      >
-        {active && <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />}
-        {/* A subtle amber wash flags unread news, over the active lift so the tab still reads selected. */}
-        {showUnread && <span aria-hidden data-testid="tab-unread-wash" className="pointer-events-none absolute inset-0 bg-amber-500/10" />}
-        <LeadingIcon state={state} unread={showUnread} view={view} active={active} />
-        {editing ? (
-          <Input
-            ref={input}
-            data-tab-rename-input="true"
-            value={value}
-            aria-label={`Rename tab ${title}`}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              // An Enter that confirms an IME candidate is not the rename's.
-              if (e.nativeEvent.isComposing) return
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                commit()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                setEditing(false)
-              }
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            className="mr-1 h-5 min-w-[72px] flex-1 px-1 py-0 text-xs"
-            spellCheck={false}
-          />
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className={cn(TAB_LABEL_WIDTH_CLASSES, 'mr-1')} data-testid="tab-title">
-                {title}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6} className="max-w-80 text-left break-words whitespace-normal">
-              {title}
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {panes > 1 && !editing && (
-          <span className="mr-1 shrink-0 text-[10px] text-muted-foreground tabular-nums" aria-label={`${panes} panes`} data-testid="tab-pane-count">
-            {panes}
-          </span>
-        )}
-        {!editing && (
-          <button
-            type="button"
+      <ContextMenu modal={false}>
+        <ContextMenuTrigger asChild disabled={editing}>
+          <div
+            ref={setNodeRef}
+            data-testid="sortable-tab"
+            data-tab-id={id}
+            data-active={active ? 'true' : 'false'}
+            data-agent-state={state ?? undefined}
+            {...attributes}
+            {...dragListeners}
+            role="tab"
+            aria-selected={active}
             className={cn(
-              'relative z-10 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm',
-              active
-                ? 'text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground'
-                : 'text-transparent group-hover:text-muted-foreground hover:!bg-muted hover:!text-foreground focus-visible:!bg-muted focus-visible:!text-foreground',
+              'group relative flex h-full cursor-pointer items-center px-1.5 text-xs outline-none select-none focus:outline-none focus-visible:outline-none',
+              hasTabsToRight && 'border-r',
+              'border-border',
+              dropIndicatorClasses(dropIndicator),
+              stateClasses(active),
             )}
-            aria-label={`Close tab ${title}`}
-            title="Close tab (⌘⇧W)"
-            data-tab-close-button="true"
-            onPointerDown={(e) => e.button === 0 && e.stopPropagation()}
-            onMouseDown={(e) => e.button === 0 && e.stopPropagation()}
-            onClick={(e) => {
+            onDoubleClick={(e) => {
+              if (editing) return
+              e.stopPropagation()
+              // A preview is kept by a double click (Orca); a kept tab is renamed by one.
+              if (preview && onKeep) return onKeep(id)
+              setValue(title)
+              setEditing(true)
+            }}
+            onPointerDown={(e) => onPointerDown(e, dragListeners?.onPointerDown as ((e: React.PointerEvent) => void) | undefined)}
+            onMouseDown={(e) => {
+              // Blocks middle-click autoscroll; the close waits for auxclick.
+              if (e.button === 1) e.preventDefault()
+            }}
+            onAuxClick={(e) => {
+              if (editing || e.button !== 1) return
               e.preventDefault()
               e.stopPropagation()
               onClose(id)
             }}
           >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
+            {active && <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />}
+            {/* A subtle amber wash flags unread news, over the active lift so the tab still reads selected. */}
+            {showUnread && <span aria-hidden data-testid="tab-unread-wash" className="pointer-events-none absolute inset-0 bg-amber-500/10" />}
+            <LeadingIcon state={state} unread={showUnread} view={view} active={active} />
+            {editing ? (
+              <Input
+                ref={input}
+                data-tab-rename-input="true"
+                value={value}
+                aria-label={`Rename tab ${title}`}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                  // An Enter that confirms an IME candidate is not the rename's.
+                  if (e.nativeEvent.isComposing) return
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commit()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setEditing(false)
+                  }
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                className="mr-1 h-5 min-w-[72px] flex-1 px-1 py-0 text-xs"
+                spellCheck={false}
+              />
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={cn(TAB_LABEL_WIDTH_CLASSES, 'mr-1', preview && 'italic')} data-testid="tab-title" data-preview={preview || undefined}>
+                    {title}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6} className="max-w-80 text-left break-words whitespace-normal">
+                  {title}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {panes > 1 && !editing && (
+              <span className="mr-1 shrink-0 text-[10px] text-muted-foreground tabular-nums" aria-label={`${panes} panes`} data-testid="tab-pane-count">
+                {panes}
+              </span>
+            )}
+            {!editing && (
+              <button
+                type="button"
+                className={cn(
+                  'relative z-10 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm',
+                  active
+                    ? 'text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground'
+                    : 'text-transparent group-hover:text-muted-foreground hover:!bg-muted hover:!text-foreground focus-visible:!bg-muted focus-visible:!text-foreground',
+                )}
+                aria-label={`Close tab ${title}`}
+                title="Close tab (⌘⇧W)"
+                data-tab-close-button="true"
+                onPointerDown={(e) => e.button === 0 && e.stopPropagation()}
+                onMouseDown={(e) => e.button === 0 && e.stopPropagation()}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onClose(id)
+                }}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
+          {canSplit && onMoveToSplit && (
+            <>
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <Columns2 className="size-3.5 shrink-0" />
+                  Move Tab to Split
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent>
+                  {SPLIT_SIDES.map(({ side, label, Icon }) => (
+                    <ContextMenuItem key={side} data-move-to-split={side} onSelect={() => onMoveToSplit(id, side)}>
+                      <Icon className="size-3.5 shrink-0" />
+                      {label}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+              <ContextMenuSeparator />
+            </>
+          )}
+          <ContextMenuItem onSelect={() => onClose(id)}>
+            <X className="size-3.5" />
+            Close Tab
+            <ContextMenuShortcut>⌘⇧W</ContextMenuShortcut>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   )
 }

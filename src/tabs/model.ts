@@ -35,27 +35,5 @@ export function tabUnread(tab: Tab, agents: AgentNode[], active: boolean, seen: 
   return agents.some((a) => a.paneId !== null && ids.has(a.paneId) && (a.state === 'done' || a.state === 'needs-you') && a.since > seen)
 }
 
-/** `tabs` with the tab `from` moved to where `to` is, the others keeping their order. The same
- *  array when either is missing or they are one tab. */
-export function reorderTabs(tabs: Tab[], from: string, to: string): Tab[] {
-  const a = tabs.findIndex((t) => t.id === from)
-  const b = tabs.findIndex((t) => t.id === to)
-  if (a < 0 || b < 0 || a === b) return tabs
-  const next = tabs.slice()
-  const [moved] = next.splice(a, 1)
-  next.splice(b, 0, moved)
-  return next
-}
-
+/** Which edge of a tab carries the insertion bar of a drop pending there. */
 export type DropIndicator = 'left' | 'right' | null
-
-/** Where the insertion bar shows while tab `from` is dragged over tab `over`: on the side of
- *  `over` it will land — its left when coming from the right, its right when coming from the
- *  left. Nothing over itself or outside the strip. */
-export function dropIndicatorFor(ids: string[], from: string | null, over: string | null, id: string): DropIndicator {
-  if (from === null || over === null || from === over || id !== over) return null
-  const a = ids.indexOf(from)
-  const b = ids.indexOf(over)
-  if (a < 0 || b < 0) return null
-  return a > b ? 'left' : 'right'
-}

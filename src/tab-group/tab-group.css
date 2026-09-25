@@ -1,0 +1,69 @@
+/* adapted from stablyai/orca src/renderer/src/components/tab-group/TabGroupPanel.tsx (the panel, its
+   32px row, the focus dimming and accent) and src/renderer/src/assets/terminal.css
+   (`.tab-drop-overlay`) (MIT, 122b8c25). The row is 36px here, the height of the sidebars'
+   headers, so the top groups' rows are the window's top band. The seams between groups are
+   chrome.css's `.divider`. Colour is state or `--brand` only. */
+
+.tab-groups { position: absolute; inset: 0; }
+
+.tab-group {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity 150ms ease;
+}
+/* No tab yet: the row alone, over the empty state. */
+.tab-group.is-bare { inset: 0 0 auto 0; }
+
+.tab-group-row {
+  position: relative;
+  flex: 0 0 36px;
+  height: 36px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+/* What shows through where no tab is laid over it: nothing, briefly, as a group collapses. */
+.tab-group-body { flex: 1 1 0; min-height: 0; background: var(--background); }
+
+/* While split, the group you are in carries an accent under its row, and the others dim a little
+   (their panes too: chrome.css's `.pane.is-dim`). A lone group has nothing to contrast with. */
+.tab-groups.is-split > .tab-group.is-active > .tab-group-row { border-bottom-color: color-mix(in srgb, var(--brand) 70%, var(--border)); }
+.tab-groups.is-split > .tab-group:not(.is-active) { opacity: 0.95; }
+
+/* Where a dragged tab lands in a body: the half a new group takes, or the whole body it joins. */
+.tab-drop-overlay {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--brand) 20%, transparent);
+  border: 2px solid color-mix(in srgb, var(--brand) 50%, transparent);
+  border-radius: 4px;
+  animation: tab-drop-overlay-in 120ms ease-out;
+}
+.tab-drop-overlay-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: calc(var(--radius) * 0.6);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--brand-foreground);
+  background: color-mix(in srgb, var(--brand) 85%, transparent);
+}
+@keyframes tab-drop-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-group { transition: none; }
+  .tab-drop-overlay { animation: none; }
+}

@@ -5,8 +5,13 @@
 /* ── Panes ──────────────────────────────────────────── */
 
 /* A tab's panes and the dividers between them, each placed absolutely in the split root by
-   geometry.ts. No box around each pane: the seams between them are the resize handles' lines. */
+   geometry.ts. No box around each pane: the seams between them are the resize handles' lines.
+   The workbench lays every tab's panes out in one split root over all of it (`.pane-layer`),
+   letting presses through to the groups' rows between them. */
 .split-root { position: relative; width: 100%; height: 100%; }
+.split-root.pane-layer { position: absolute; inset: 0; width: auto; height: auto; pointer-events: none; }
+.split-root.pane-layer > .pane,
+.split-root.pane-layer > .divider { pointer-events: auto; }
 .pane { position: absolute; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--background); outline: none; }
 /* A terminal is its own colour to the pane's edges: xterm paints `--bg` (src/theme.ts). */
 .pane:has(.xterm) { background: var(--bg); }
@@ -14,34 +19,36 @@
 .pane-body { position: relative; height: 100%; outline: none; }
 .pane .xterm { height: 100%; }
 
-/* With more than one pane, the ones without focus dim a little, so the focused one reads as
-   selected; a lone pane has nothing to contrast with. */
-.split-root.is-split > .pane { transition: opacity 150ms ease; }
-.split-root.is-split > .pane:not(.focused) { opacity: 0.95; }
+/* With more than one pane in a tab, the ones without focus dim a little, so the focused one reads
+   as selected; a lone pane has nothing to contrast with. So does every pane of a group you are
+   not in, while the workbench is split (tab-group.css). */
+.split-root > .pane { transition: opacity 150ms ease; }
+.split-root > .pane.in-split:not(.focused),
+.split-root > .pane.is-dim { opacity: 0.95; }
 .split-root > .pane.drag-source,
-.split-root.is-split > .pane.drag-source { opacity: 0.4; }
+.split-root > .pane.in-split.drag-source { opacity: 0.4; }
 
 /* ── Resize handle ──────────────────────────────────── */
 
-/* A 6px transparent grab strip (geometry.ts GAP) drawing a 3px line in its middle. The line is
-   the ::after, so a background on the strip never hides it. While one is dragged, the whole
-   window keeps its cursor. */
+/* A 6px transparent grab strip (geometry.ts GAP) drawing a 3px line in its middle, between a
+   tab's panes and between groups alike. The line is the ::after, so a background on the strip
+   never hides it. While one is dragged, the whole window keeps its cursor. */
 .divider { position: absolute; z-index: 3; }
 .divider.row { cursor: col-resize; }
 .divider.col { cursor: row-resize; }
 body.resizing-row, body.resizing-row * { cursor: col-resize !important; user-select: none; }
 body.resizing-col, body.resizing-col * { cursor: row-resize !important; user-select: none; }
-.split-root > .divider::after {
+.divider::after {
   content: '';
   position: absolute;
   border-radius: 1px;
   background: var(--tab-group-split-divider);
   transition: background 100ms ease;
 }
-.split-root > .divider.is-vertical::after { top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); }
-.split-root > .divider.is-horizontal::after { left: 0; right: 0; top: 50%; height: 3px; transform: translateY(-50%); }
-.split-root > .divider:hover::after,
-.split-root > .divider.is-dragging::after { background: var(--tab-group-split-divider-strong); }
+.divider.is-vertical::after { top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); }
+.divider.is-horizontal::after { left: 0; right: 0; top: 50%; height: 3px; transform: translateY(-50%); }
+.divider:hover::after,
+.divider.is-dragging::after { background: var(--tab-group-split-divider-strong); }
 
 /* ── Pane title bar ─────────────────────────────────── */
 
@@ -178,7 +185,7 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; user-sel
 
 @media (prefers-reduced-motion: reduce) {
   .pane-drop-zone { animation: none; transition: none; }
-  .split-root.is-split > .pane { transition: none; }
+  .split-root > .pane { transition: none; }
 }
 
 /* ── A pane's message ───────────────────────────────── */

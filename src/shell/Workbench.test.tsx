@@ -11,20 +11,23 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-// The pane frames are another piece's (workbench-tabs): a probe per pane, counting mounts.
+// The pane frames have their own tests (SplitView, remount): a probe per pane, flat and keyed by
+// pane as the real layer is, placed where its tab is and counting mounts.
 vi.mock('../layout/SplitView', async () => {
   const { createElement, Fragment, useEffect } = await import('react')
   const { leaves } = await import('../layout/tree')
-  function Probe({ id }: { id: number }) {
+  const { boxStyle } = await import('../chrome/geometry')
+  type Placed = { tab: { id: string; root: Parameters<typeof leaves>[0] }; place: Parameters<typeof boxStyle>[0] | null; dim?: boolean }
+  function Probe({ id, tab, place, dim }: { id: number; tab: string; place: Placed['place']; dim?: boolean }) {
     useEffect(() => {
       h.mounts.push(id)
       return () => void h.unmounts.push(id)
     }, [id])
-    return createElement('div', { 'data-probe': id })
+    return createElement('div', { 'data-probe': id, 'data-tab': tab, className: dim ? 'is-dim' : '', style: place ? boxStyle(place) : { display: 'none' } })
   }
   return {
-    default: ({ node }: { node: Parameters<typeof leaves>[0] }) =>
-      createElement(Fragment, null, ...leaves(node).map((id) => createElement(Probe, { key: id, id }))),
+    PaneLayer: ({ tabs }: { tabs: Placed[] }) =>
+      createElement(Fragment, null, ...tabs.flatMap(({ tab, place, dim }) => leaves(tab.root).map((id) => createElement(Probe, { key: id, id, tab: tab.id, place, dim })))),
   }
 })
 vi.mock('../fleet/store', async () => {
@@ -33,7 +36,10 @@ vi.mock('../fleet/store', async () => {
   const fleetStore = createStore(() => ({ repos: [] as unknown[], markRead() {}, async refresh() {} }))
   return { fleetStore, useFleet: (sel: (f: unknown) => unknown) => useStore(fleetStore, sel) }
 })
-vi.mock('../home/app-store', () => ({ homeStore: { getState: () => ({ openFolder: h.openFolder }) } }))
+vi.mock('../home/app-store', () => {
+  const home = { openFolder: h.openFolder, snapshot: { repos: [], clone_base: '', errors: [], protected: 0 } }
+  return { homeStore: { getState: () => home }, useHome: (sel: (s: typeof home) => unknown) => sel(home) }
+})
 vi.mock('../settings/app-store', () => ({ settingsStore: { getState: () => h.settings } }))
 
 import Workbench, { agentCommand, describeWorktree, workbenchLayers } from './Workbench'
@@ -97,8 +103,21 @@ afterEach(() => {
 })
 
 async function render(props: { ready?: boolean; notice?: string | null; onDismissNotice?: () => void } = {}) {
-  await act(async () => root.render(<Workbench ready={props.ready ?? true} notice={props.notice ?? null} onDismissNotice={props.onDismissNotice ?? (() => {})} layout={s} />))
+  await act(async () =>
+    root.render(
+      <Workbench
+        ready={props.ready ?? true}
+        notice={props.notice ?? null}
+        onDismissNotice={props.onDismissNotice ?? (() => {})}
+        lead={<i data-lead />}
+        trail={<i data-trail />}
+        layout={s}
+      />,
+    ),
+  )
 }
+const layer = (id: string) => host.querySelector<HTMLElement>(`[data-tab="${id}"]`)!
+const rowOf = (group: string) => host.querySelector<HTMLElement>(`[data-tab-group-strip-id="${group}"]`)!
 const shown = () => [...host.querySelectorAll<HTMLElement>('[data-tab]')].filter((el) => el.style.display !== 'none').map((el) => el.dataset.tab)
 const layers = () => [...host.querySelectorAll<HTMLElement>('[data-tab]')].map((el) => el.dataset.tab)
 const button = (name: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.includes(name))!
@@ -132,7 +151,8 @@ test('a tab moved into another group, or to a group of its own, is never remount
   await render()
   await act(async () => s.getState().moveTab('tab-1', { group: s.getState().activeGroup, side: 'right' }))
   expect(Object.keys(s.getState().groups)).toHaveLength(2)
-  expect(shown()).toEqual(['tab-1'])
+  // Each group shows its own tab, both on screen.
+  expect(shown().sort()).toEqual(['tab-1', 'tab-2'])
   const [first] = Object.keys(s.getState().groups)
   await act(async () => s.getState().moveTab('tab-2', { group: s.getState().activeGroup }))
   expect(Object.keys(s.getState().groups)).not.toContain(first)
@@ -141,10 +161,70 @@ test('a tab moved into another group, or to a group of its own, is never remount
   expect(h.unmounts).toEqual([])
 })
 
+test("each group's shown tab is laid over that group's body, under its row; the others stay mounted, hidden", async () => {
+  await s.getState().switchWorktree(A)
+  await s.getState().newTab()
+  await s.getState().newTab()
+  await s.getState().newTab()
+  await render()
+  // One group: its shown tab fills the workbench under the 36px row.
+  expect(shown()).toEqual(['tab-3'])
+  expect(layer('tab-3').style).toMatchObject({ left: '0px', top: '36px', width: '100%', height: 'calc(100% - 36px)' })
+  const [left] = Object.keys(s.getState().groups)
+  await act(async () => s.getState().moveTab('tab-3', { group: left, side: 'right' }))
+  const [, right] = Object.keys(s.getState().groups)
+  // Split: both groups' shown tabs are on screen, each over its own body, a seam between them.
+  expect(shown().sort()).toEqual(['tab-2', 'tab-3'])
+  expect(layer('tab-2').style).toMatchObject({ left: '0px', top: '36px', width: 'calc(50% - 3px)' })
+  expect(layer('tab-3').style).toMatchObject({ left: 'calc(50% + 3px)', top: '36px', width: 'calc(50% - 3px)' })
+  expect(rowOf(left)).not.toBeNull()
+  expect(rowOf(right)).not.toBeNull()
+  // The group you are not in dims a little.
+  expect(layer('tab-2').classList.contains('is-dim')).toBe(true)
+  expect(layer('tab-3').classList.contains('is-dim')).toBe(false)
+  expect(layer('tab-1').style.display).toBe('none')
+  expect(h.unmounts).toEqual([])
+})
+
+test("the window's left controls start the top-left group's row; the right cluster ends the top-right one's", async () => {
+  await s.getState().switchWorktree(A)
+  await render()
+  // No tab yet: one row holds both, and the "+".
+  expect(host.querySelector('.tab-group-row [data-lead]')).not.toBeNull()
+  expect(host.querySelector('.tab-group-row [data-trail]')).not.toBeNull()
+  expect(host.querySelector('.tab-group-row [aria-label="New tab"]')).not.toBeNull()
+  for (let i = 0; i < 3; i++) await act(async () => s.getState().newTab())
+  const g = (tab: string) => Object.values(s.getState().groups).find((x) => x.tabs.includes(tab))!.id
+  await act(async () => s.getState().moveTab('tab-2', { group: g('tab-1'), side: 'right' }))
+  await act(async () => s.getState().moveTab('tab-3', { group: g('tab-2'), side: 'down' }))
+  // tab-1 on the left, full height; tab-2 top-right; tab-3 below it, touching no top corner.
+  expect(rowOf(g('tab-1')).querySelector('[data-lead]')).not.toBeNull()
+  expect(rowOf(g('tab-2')).querySelector('[data-trail]')).not.toBeNull()
+  expect(rowOf(g('tab-3')).querySelector('[data-lead], [data-trail]')).toBeNull()
+  expect(host.querySelectorAll('[data-lead]')).toHaveLength(1)
+  expect(host.querySelectorAll('[data-trail]')).toHaveLength(1)
+})
+
+test("while Home shows, the active group's body shows the empty state; the other group's tab stays on screen", async () => {
+  await s.getState().switchWorktree(B)
+  await s.getState().newTab()
+  await s.getState().newTab()
+  await render()
+  await act(async () => s.getState().moveTab('tab-2', { group: s.getState().activeGroup, side: 'right' }))
+  await act(async () => s.getState().showHome())
+  expect(shown()).toEqual(['tab-1'])
+  const empty = host.querySelector<HTMLElement>('[data-shell-empty="worktree"]')!
+  expect(empty.parentElement!.style).toMatchObject({ left: 'calc(50% + 3px)', top: '36px' })
+  // Any tab shown again leaves Home.
+  await act(async () => s.getState().activateTab('tab-2'))
+  expect(shown().sort()).toEqual(['tab-1', 'tab-2'])
+  expect(host.querySelector('[data-shell-empty]')).toBeNull()
+})
+
 test('the pane views render with no old stylesheet scope around them', async () => {
   await s.getState().newTab(A)
   await render()
-  expect(host.querySelector('[data-tab] [data-probe]')).not.toBeNull()
+  expect(host.querySelector('[data-probe]')).not.toBeNull()
   // theme.css kept the pre-redesign look alive inside `.app` until orca-redesign-f.
   expect(host.querySelector('.app')).toBeNull()
 })

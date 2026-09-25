@@ -149,9 +149,10 @@ test('a file dragged from Finder over a pane highlights it whole, as no pane dro
 
 test('only a tab of several panes is a split, whose unfocused panes dim', async () => {
   await render()
-  expect(host.querySelector('.split-root')!.classList.contains('is-split')).toBe(true)
+  expect([A, B, C].map((id) => pane(id).classList.contains('in-split'))).toEqual([true, true, true])
+  expect(pane(C).classList.contains('focused')).toBe(true)
   await act(async () => root.render(<SplitView node={{ kind: 'leaf', pane: A }} />))
-  expect(host.querySelector('.split-root')!.classList.contains('is-split')).toBe(false)
+  expect(pane(A).classList.contains('in-split')).toBe(false)
 })
 
 describe('the resize handle', () => {

@@ -1,42 +1,23 @@
 // adapted from stablyai/orca src/renderer/src/components/tab-bar/tab-bar-surface.tsx
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core'
-import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
+import { useStore } from 'zustand'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Button, TooltipProvider } from '@/ui'
+import { Button } from '@/ui'
 import { cn } from '@/ui/cn'
-import { store, useApp } from '../layout/app-store'
-import { ELSEWHERE, type Pane, type Tab } from '../layout/store'
+import { store as appStore } from '../layout/app-store'
+import { ELSEWHERE, type Pane, type Store, type Tab } from '../layout/store'
 import { leaves } from '../layout/tree'
 import { paneName } from '../layout/tabs'
 import { useMission } from '../mission/app-store'
 import { useHome } from '../home/app-store'
 import { useFleet } from '../fleet/store'
-import { dropIndicatorFor, fleetAgents, tabAgent, tabUnread } from './model'
-import { seenAt, seenStore, useSeen } from './seen'
+import { useDrag } from '../chrome/drag'
+import { fleetAgents, tabAgent, tabUnread, type DropIndicator } from './model'
+import { seenAt, useSeen } from './seen'
 import SortableTab, { ViewIcon } from './SortableTab'
 import Elsewhere, { strayTab } from './Elsewhere'
 import NewTabMenu, { newTab, type NewTabKind } from './NewTabMenu'
-import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 import './tabs.css'
-
-/** Moves tab `from` to where `to` is in the worktree shown: into `to`'s group, at its place. */
-export function moveTab(from: string, to: string) {
-  const s = store.getState()
-  const group = Object.values(s.groups).find((g) => g.tabs.includes(to))
-  if (from === to || !group) return
-  s.moveTab(from, { group: group.id, index: group.tabs.indexOf(to) })
-}
-
-/** Marks the tab left and the tab shown as seen whenever the shown tab changes: what happened in
- *  a tab while it was on screen is not news once you leave it. */
-function useMarkSeen(activeTab: string) {
-  const prev = useRef(activeTab)
-  useEffect(() => {
-    seenStore.getState().mark([prev.current, activeTab])
-    prev.current = activeTab
-  }, [activeTab])
-}
 
 type Overflow = { hasOverflow: boolean; canScrollStart: boolean; canScrollEnd: boolean }
 const NO_OVERFLOW: Overflow = { hasOverflow: false, canScrollStart: false, canScrollEnd: false }
@@ -68,134 +49,146 @@ function useOverflow(ref: React.RefObject<HTMLDivElement | null>, count: number)
 }
 
 /** A tab named by its own name, else by what runs in its focused pane. */
-function titleOf(tab: Tab, panes: Record<number, Pane>, snap: Parameters<typeof paneName>[1], home: Parameters<typeof paneName>[2]): string {
+export function titleOf(tab: Tab, panes: Record<number, Pane>, snap: Parameters<typeof paneName>[1], home: Parameters<typeof paneName>[2]): string {
   return tab.name || paneName(panes[tab.focused], snap, home)
 }
 
-// adapted from stablyai/orca src/renderer/src/components/tab-bar/TabDragPreview.tsx
-function TabDragPreview({ title, view }: { title: string; view: string }) {
-  return (
-    <div className="pointer-events-none flex h-full w-full items-center gap-1.5 rounded-sm border border-border bg-accent px-2 text-xs text-foreground shadow-md">
-      <span className="inline-flex shrink-0">
-        <ViewIcon view={view} className="h-3.5 w-3.5" />
-      </span>
-      <span className="truncate">{title}</span>
-    </div>
-  )
+/** The insertion bar of a row with a drop pending before its tab at `slot`: on that tab's left,
+ *  or on the last tab's right when the slot is past them all. */
+export function slotIndicator(ids: readonly string[], slot: number | null, id: string): DropIndicator {
+  if (slot === null || ids.length === 0) return null
+  if (slot < ids.length) return ids[slot] === id ? 'left' : null
+  return ids[ids.length - 1] === id ? 'right' : null
 }
 
-const NONE: Tab[] = []
+const NONE: string[] = []
+const NO_TABS: Tab[] = []
 
-/** The shown worktree's tabs, for the titlebar: every group's, in their order, the active one
- *  barred, unread ones washed, each led by its agent's state, closed on hover, dragged to reorder
- *  (onto a tab of another group: into it); "+" opens a terminal or a browser. The tabs of no
- *  worktree are never among them: a menu at the end lists them, to bring one here. */
-export default function TabStrip({ onNew = newTab }: { onNew?: (kind: NewTabKind) => void }) {
-  const tabs = useApp((s) => s.tabs)
-  const away = useApp((s) => s.parked[ELSEWHERE]?.tabs ?? NONE)
-  const activeTab = useApp((s) => s.activeTab)
-  const panes = useApp((s) => s.panes)
+type Props = {
+  layout?: Store
+  /** The group whose row this is; null while the worktree has no tab (the row holds "+" alone). */
+  group: string | null
+  /** A tab dragged over this row would land before its tab at this slot (TabGroups). */
+  slot?: number | null
+  /** Draw the menu of tabs of no open worktree (one row does: the active group's). */
+  elsewhere?: boolean
+  onNew?: (kind: NewTabKind) => void
+}
+
+/** One group's tab row: its tabs in their order, the one it shows barred, unread ones washed,
+ *  each led by its agent's state, closed on hover or by a middle click, a preview in italics
+ *  (a double click keeps it), dragged to reorder or to another group (TabGroups); "+" opens a
+ *  terminal or a browser in this group. The tabs of no worktree are never among them: a menu at
+ *  the end of the active group's row lists them, to bring one here. */
+export default function TabStrip({ layout = appStore, group, slot = null, elsewhere = false, onNew = newTab }: Props) {
+  const ids = useStore(layout, (s) => (group !== null ? s.groups[group]?.tabs : undefined) ?? NONE)
+  const all = useStore(layout, (s) => s.tabs)
+  const tabs = useMemo(() => {
+    const byId = new Map(all.map((t) => [t.id, t]))
+    return ids.flatMap((id) => byId.get(id) ?? [])
+  }, [ids, all])
+  // The tab this group shows; none in the active group while Home shows.
+  const shown = useStore(layout, (s) => (group === null || (s.activeTab === '' && s.activeGroup === group) ? '' : (s.groups[group]?.activeTab ?? '')))
+  const away = useStore(layout, (s) => (elsewhere ? (s.parked[ELSEWHERE]?.tabs ?? NO_TABS) : NO_TABS))
+  const panes = useStore(layout, (s) => s.panes)
   const snap = useMission((s) => s.snapshot)
   const home = useHome((s) => s.snapshot)
   const repos = useFleet((f) => f.repos)
   const agents = useMemo(() => fleetAgents(repos), [repos])
   const seen = useSeen((s) => s)
-  useMarkSeen(activeTab)
+  // A pane bar dragged over this row: the slot it would become a tab at.
+  const paneSlot = useDrag((s) => (s.row !== null && s.row.group === group ? s.row.slot : null))
+  const at = slot ?? paneSlot
 
-  const [dragging, setDragging] = useState<string | null>(null)
-  const [over, setOver] = useState<string | null>(null)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: TAB_DRAG_ACTIVATION_DISTANCE_PX } }))
-  const ids = useMemo(() => tabs.map((t) => t.id), [tabs])
   const stripRef = useRef<HTMLDivElement>(null)
   const overflow = useOverflow(stripRef, tabs.length)
 
   // Keeps the tab being shown in view when it changes (a new tab lands at the end).
   useEffect(() => {
     const all = stripRef.current?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? []
-    const el = [...all].find((e) => e.dataset.tabId === activeTab)
+    const el = [...all].find((e) => e.dataset.tabId === shown)
     el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-  }, [activeTab, tabs.length])
-
-  const onDragStart = (e: DragStartEvent) => setDragging(String(e.active.id))
-  const onDragOver = (e: DragOverEvent) => setOver(e.over ? String(e.over.id) : null)
-  const onDragEnd = (e: DragEndEvent) => {
-    if (e.over) moveTab(String(e.active.id), String(e.over.id))
-    setDragging(null)
-    setOver(null)
-  }
-  const onDragCancel = () => {
-    setDragging(null)
-    setOver(null)
-  }
+  }, [shown, tabs.length])
 
   const scroll = (dir: 'start' | 'end') => {
     const el = stripRef.current
     if (!el) return
     el.scrollBy({ left: (dir === 'start' ? -1 : 1) * Math.max(120, el.clientWidth * 0.6), behavior: 'smooth' })
   }
+  // The "+" of a group's own row opens in that group.
+  const create = (kind: NewTabKind) => {
+    if (group !== null) layout.getState().focusGroup(group)
+    onNew(kind)
+  }
 
-  const draggedTab = dragging ? tabs.find((t) => t.id === dragging) : undefined
   const chevron = 'mx-0.5 my-auto h-6 w-5 text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-35'
+  const act = () => layout.getState()
 
   return (
-    <TooltipProvider delayDuration={400}>
-      <div className="flex h-full min-w-0 flex-1 items-stretch overflow-hidden" data-ui data-testid="workbench-tabs" role="tablist" aria-label="Tabs">
-        {overflow.hasOverflow && (
-          <Button variant="ghost" size="icon-xs" className={chevron} aria-label="Scroll tabs left" disabled={!dragging && !overflow.canScrollStart} onClick={() => scroll('start')}>
-            <ChevronLeft className="size-3.5" />
-          </Button>
-        )}
-        <DndContext sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={onDragCancel} autoScroll={false}>
-          {/* No sorting animation: tabs stay anchored during a drag, only the insertion bar moves. */}
-          <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
-            <div className="group/tab-strip relative flex min-h-0 max-w-full min-w-0 flex-[0_1_auto]">
-              <div
-                ref={stripRef}
-                className={cn(
-                  'workbench-tab-strip flex h-full max-w-full min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
-                  tabs.length > 0 && 'border-r border-border/70',
-                  overflow.canScrollStart && 'workbench-tab-strip--fade-start',
-                  overflow.canScrollEnd && 'workbench-tab-strip--fade-end',
-                )}
-              >
-                {tabs.map((t, i) => {
-                  const agent = tabAgent(t, agents)
-                  const isActive = t.id === activeTab
-                  return (
-                    <SortableTab
-                      key={t.id}
-                      id={t.id}
-                      title={titleOf(t, panes, snap, home)}
-                      view={panes[t.focused]?.view ?? 'terminal'}
-                      panes={leaves(t.root).length}
-                      active={isActive}
-                      state={agent?.state ?? null}
-                      unread={tabUnread(t, agents, isActive, seenAt(seen, t.id))}
-                      hasTabsToRight={i < tabs.length - 1}
-                      dropIndicator={dropIndicatorFor(ids, dragging, over, t.id)}
-                      onActivate={(id) => store.getState().activateTab(id)}
-                      onClose={(id) => void store.getState().closeTab(id)}
-                      onRename={(id, name) => store.getState().renameTab(id, name)}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          </SortableContext>
-          {/* The source tab stays in place and the strip clips it; the ghost follows the cursor
-              across the whole window from a document-level portal. */}
-          <DragOverlay dropAnimation={null}>
-            {draggedTab ? <TabDragPreview title={titleOf(draggedTab, panes, snap, home)} view={panes[draggedTab.focused]?.view ?? 'terminal'} /> : null}
-          </DragOverlay>
-        </DndContext>
-        {overflow.hasOverflow && (
-          <Button variant="ghost" size="icon-xs" className={chevron} aria-label="Scroll tabs right" disabled={!dragging && !overflow.canScrollEnd} onClick={() => scroll('end')}>
-            <ChevronRight className="size-3.5" />
-          </Button>
-        )}
-        <NewTabMenu onNew={onNew} />
-        <Elsewhere tabs={away.map((t) => strayTab(t, titleOf(t, panes, snap, home), panes[t.focused]))} onBring={(id) => store.getState().bringTab(id)} />
+    <div className="flex h-full min-w-0 flex-1 items-stretch overflow-hidden" data-ui data-testid="workbench-tabs" role="tablist" aria-label="Tabs">
+      {overflow.hasOverflow && (
+        <Button variant="ghost" size="icon-xs" className={chevron} aria-label="Scroll tabs left" disabled={!overflow.canScrollStart} onClick={() => scroll('start')}>
+          <ChevronLeft className="size-3.5" />
+        </Button>
+      )}
+      <div className="group/tab-strip relative flex min-h-0 max-w-full min-w-0 flex-[0_1_auto]">
+        <div
+          ref={stripRef}
+          className={cn(
+            'workbench-tab-strip flex h-full max-w-full min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
+            tabs.length > 0 && 'border-r border-border/70',
+            overflow.canScrollStart && 'workbench-tab-strip--fade-start',
+            overflow.canScrollEnd && 'workbench-tab-strip--fade-end',
+          )}
+        >
+          {tabs.map((t, i) => {
+            const agent = tabAgent(t, agents)
+            const isShown = t.id === shown
+            return (
+              <SortableTab
+                key={t.id}
+                id={t.id}
+                group={group!}
+                title={titleOf(t, panes, snap, home)}
+                view={panes[t.focused]?.view ?? 'terminal'}
+                panes={leaves(t.root).length}
+                active={isShown}
+                preview={t.preview}
+                state={agent?.state ?? null}
+                unread={tabUnread(t, agents, isShown, seenAt(seen, t.id))}
+                hasTabsToRight={i < tabs.length - 1}
+                dropIndicator={slotIndicator(ids, at, t.id)}
+                canSplit={tabs.length > 1}
+                onActivate={(id) => act().activateTab(id)}
+                onClose={(id) => void act().closeTab(id)}
+                onRename={(id, name) => act().renameTab(id, name)}
+                onKeep={(id) => act().keepTab(id)}
+                onMoveToSplit={(id, side) => act().moveTab(id, { group: group!, side })}
+              />
+            )
+          })}
+        </div>
       </div>
-    </TooltipProvider>
+      {overflow.hasOverflow && (
+        <Button variant="ghost" size="icon-xs" className={chevron} aria-label="Scroll tabs right" disabled={!overflow.canScrollEnd} onClick={() => scroll('end')}>
+          <ChevronRight className="size-3.5" />
+        </Button>
+      )}
+      <NewTabMenu onNew={create} />
+      {elsewhere && <Elsewhere tabs={away.map((t) => strayTab(t, titleOf(t, panes, snap, home), panes[t.focused]))} onBring={(id) => act().bringTab(id)} />}
+    </div>
+  )
+}
+
+// adapted from stablyai/orca src/renderer/src/components/tab-bar/TabDragPreview.tsx
+/** The ghost that follows the pointer while a tab is dragged. */
+export function TabDragPreview({ title, view, preview }: { title: string; view: string; preview?: boolean }) {
+  return (
+    <div className="pointer-events-none flex h-full w-full items-center gap-1.5 rounded-sm border border-border bg-accent px-2 text-xs text-foreground shadow-md">
+      <span className="inline-flex shrink-0">
+        <ViewIcon view={view} className="h-3.5 w-3.5" />
+      </span>
+      <span className={cn('truncate', preview && 'italic')}>{title}</span>
+    </div>
   )
 }
