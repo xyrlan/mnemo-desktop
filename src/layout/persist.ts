@@ -54,7 +54,8 @@ export function startWorkspace(store: Store, client: WorkspaceClient = tauriWork
     last = JSON.stringify(store.getState().snapshotForSave())
     unsubscribe = store.subscribe((s, prev) => {
       const same = s.tabs === prev.tabs && s.panes === prev.panes && s.activeTab === prev.activeTab
-      if (same && s.activeWorktree === prev.activeWorktree && s.worktrees === prev.worktrees && s.parked === prev.parked) return
+      const groups = s.groups === prev.groups && s.groupRoot === prev.groupRoot && s.activeGroup === prev.activeGroup
+      if (same && groups && s.activeWorktree === prev.activeWorktree && s.worktrees === prev.worktrees && s.parked === prev.parked) return
       if (timer !== undefined) clearTimeout(timer)
       timer = setTimeout(save, debounceMs)
     })

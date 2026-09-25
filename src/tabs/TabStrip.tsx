@@ -12,7 +12,7 @@ import { paneName } from '../layout/tabs'
 import { useMission } from '../mission/app-store'
 import { useHome } from '../home/app-store'
 import { useFleet } from '../fleet/store'
-import { dropIndicatorFor, fleetAgents, reorderTabs, tabAgent, tabUnread } from './model'
+import { dropIndicatorFor, fleetAgents, tabAgent, tabUnread } from './model'
 import { seenAt, seenStore, useSeen } from './seen'
 import SortableTab, { ViewIcon } from './SortableTab'
 import Elsewhere, { strayTab } from './Elsewhere'
@@ -20,13 +20,12 @@ import NewTabMenu, { newTab, type NewTabKind } from './NewTabMenu'
 import { TAB_DRAG_ACTIVATION_DISTANCE_PX } from './pointer-activation'
 import './tabs.css'
 
-/** Moves tab `from` to where `to` is in the worktree shown. The layout store has no reorder of
- *  its own; `tabs` is the shown worktree's, so writing it is the whole move. */
+/** Moves tab `from` to where `to` is in the worktree shown: into `to`'s group, at its place. */
 export function moveTab(from: string, to: string) {
-  store.setState((s) => {
-    const tabs = reorderTabs(s.tabs, from, to)
-    return tabs === s.tabs ? {} : { tabs }
-  })
+  const s = store.getState()
+  const group = Object.values(s.groups).find((g) => g.tabs.includes(to))
+  if (from === to || !group) return
+  s.moveTab(from, { group: group.id, index: group.tabs.indexOf(to) })
 }
 
 /** Marks the tab left and the tab shown as seen whenever the shown tab changes: what happened in
@@ -87,9 +86,10 @@ function TabDragPreview({ title, view }: { title: string; view: string }) {
 
 const NONE: Tab[] = []
 
-/** The shown worktree's tabs, for the titlebar: the active one barred, unread ones washed, each
- *  led by its agent's state, closed on hover, dragged to reorder; "+" opens a terminal or a browser. The tabs
- *  of no worktree are never among them: a menu at the end lists them, to bring one here. */
+/** The shown worktree's tabs, for the titlebar: every group's, in their order, the active one
+ *  barred, unread ones washed, each led by its agent's state, closed on hover, dragged to reorder
+ *  (onto a tab of another group: into it); "+" opens a terminal or a browser. The tabs of no
+ *  worktree are never among them: a menu at the end lists them, to bring one here. */
 export default function TabStrip({ onNew = newTab }: { onNew?: (kind: NewTabKind) => void }) {
   const tabs = useApp((s) => s.tabs)
   const away = useApp((s) => s.parked[ELSEWHERE]?.tabs ?? NONE)
@@ -173,7 +173,7 @@ export default function TabStrip({ onNew = newTab }: { onNew?: (kind: NewTabKind
                       unread={tabUnread(t, agents, isActive, seenAt(seen, t.id))}
                       hasTabsToRight={i < tabs.length - 1}
                       dropIndicator={dropIndicatorFor(ids, dragging, over, t.id)}
-                      onActivate={(id) => store.getState().goToTab(store.getState().tabs.findIndex((x) => x.id === id))}
+                      onActivate={(id) => store.getState().activateTab(id)}
                       onClose={(id) => void store.getState().closeTab(id)}
                       onRename={(id, name) => store.getState().renameTab(id, name)}
                     />

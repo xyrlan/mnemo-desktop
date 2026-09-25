@@ -25,7 +25,7 @@ function setup(answer: PromptResult | null) {
   return { app, sessions, actions, asked }
 }
 
-test('editor.open resolves relative to the focused terminal cwd and splits beside it', async () => {
+test('editor.open resolves relative to the focused terminal cwd and opens it as a tab', async () => {
   const { app, actions, asked } = setup({ value: 'src/main.ts', place: 'split-row' })
   await app.getState().newTab()
   app.getState().setCwd(1, '/Users/me/proj')
@@ -36,8 +36,9 @@ test('editor.open resolves relative to the focused terminal cwd and splits besid
   const editor = Object.values(st.panes).find((p) => p.view === 'editor')!
   expect(editor.props).toEqual({ path: '/Users/me/proj/src/main.ts', root: '/Users/me/proj' })
   expect(editor.title).toBe('main.ts')
-  // 'split-row' from the prompt becomes 'auto'; with no pane sizes (jsdom) auto opens a tab.
-  expect(st.tabs.some((t) => JSON.stringify(t.root).includes(`"pane":${editor.id}`))).toBe(true)
+  // 'split-row' from the prompt becomes 'auto', which never splits: a tab of its own, beside
+  // the terminal's in the active group.
+  expect(st.tabs.map((t) => t.root)).toEqual([{ kind: 'leaf', pane: 1 }, { kind: 'leaf', pane: editor.id }])
   expect(st.tabs.find((t) => t.id === st.activeTab)!.focused).toBe(editor.id)
 })
 

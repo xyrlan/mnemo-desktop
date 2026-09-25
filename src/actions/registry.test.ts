@@ -66,3 +66,63 @@ test('pane.toggle-face flips the focused terminal between its faces', async () =
   await latest('pane.toggle-face')
   expect(store.getState().panes[1].face).toBe('terminal')
 })
+
+describe('in a workbench of groups', () => {
+  let next: number
+  let store: ReturnType<typeof createStore>
+  const latest = (id: string) => all().filter((a) => a.id === id).at(-1)!.run()
+  beforeEach(() => {
+    next = 1
+    store = createStore({ ...fake, spawn: async () => next++ })
+    registerBuiltins(store)
+  })
+
+  test('⌘D outside a terminal tab opens a terminal tab in the group to its right', async () => {
+    store.getState().openView('vault', {}, 'tab')
+    await latest('pane.split.row')
+    const [a, b] = Object.values(store.getState().groups)
+    expect([a.tabs, b.tabs]).toEqual([['tab--1'], ['tab-1']])
+    expect(store.getState().panes[1].view).toBe('terminal')
+    expect(store.getState().activeTab).toBe('tab-1')
+  })
+
+  test('⌃N and ⌘⇧] count the tabs of the active group', async () => {
+    await store.getState().newTab()
+    store.getState().openView('vault', {}, 'split-row')
+    store.getState().openView('mission', {}, 'tab')
+    await latest('tab.go.1')
+    expect(store.getState().activeTab).toBe('tab--1')
+    await latest('tab.next')
+    expect(store.getState().activeTab).toBe('tab--2')
+    await latest('tab.next')
+    expect(store.getState().activeTab).toBe('tab--1')
+  })
+
+  test('⌘⌥→ moves focus to the nearest pane on screen, in another group too, never to one of a hidden tab', async () => {
+    await store.getState().newTab()
+    await store.getState().newTab()
+    store.getState().openView('vault', {}, 'split-row')
+    store.getState().focusPane(2)
+    // Pane 1's tab is hidden behind pane 2's, and laid out at nothing; the vault is on the right.
+    const boxes: Record<number, [number, number, number, number]> = { 1: [0, 0, 0, 0], 2: [0, 0, 500, 400], [-1]: [500, 0, 500, 400] }
+    const els = Object.entries(boxes).map(([id, [x, y, w, h]]) => {
+      const el = document.createElement('div')
+      el.className = 'pane'
+      el.dataset.pane = id
+      el.getBoundingClientRect = () => DOMRect.fromRect({ x, y, width: w, height: h })
+      document.body.appendChild(el)
+      return el
+    })
+    try {
+      await latest('focus.right')
+      expect([store.getState().activeTab, store.getState().activeGroup]).toEqual(['tab--1', Object.keys(store.getState().groups)[1]])
+      await latest('focus.left')
+      expect(store.getState().activeTab).toBe('tab-2')
+      // Above pane 2 there is only the hidden one, which is nowhere to go.
+      await latest('focus.up')
+      expect(store.getState().activeTab).toBe('tab-2')
+    } finally {
+      for (const el of els) el.remove()
+    }
+  })
+})

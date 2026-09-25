@@ -119,8 +119,9 @@ test('a setup pane already open anywhere is brought forward rather than opened t
   })
   showSetup(s, 'tab')
   expect(setupPanes(s)).toHaveLength(1)
-  expect(s.getState().tabs).toHaveLength(2)
   expect(activeView(s)).toBe('setup')
-  const tab = s.getState().tabs.find((t) => t.id === s.getState().activeTab)!
-  expect(leaves(tab.root)).toHaveLength(2)
+  // A file from before groups: the setup pane beside a terminal comes back as a tab of its own,
+  // right after the terminal's, and that tab is what shows.
+  expect(s.getState().tabs.map((t) => leaves(t.root).map((p) => s.getState().panes[p].view))).toEqual([['terminal'], ['terminal'], ['setup']])
+  expect(s.getState().activeTab).toBe(s.getState().tabs[2].id)
 })

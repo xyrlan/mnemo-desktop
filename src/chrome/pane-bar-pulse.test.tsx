@@ -107,8 +107,9 @@ test('a pulse from another repo plays no overlay', async () => {
 
 test('two panes on one repo: each flashes and counts its own session, a sessionless pulse lands in one', async () => {
   const first = store.getState().tabs[0].focused
+  // Beside it, in a group of its own, and focused.
   store.getState().openView('editor', { root: '/Users/me/github/mnemo-desktop-wt-c-pulse' }, 'split-row', 'other.md')
-  const second = store.getState().tabs[0].focused
+  const second = store.getState().tabs.find((t) => t.id === store.getState().activeTab)!.focused
   expect(second).not.toBe(first)
   store.getState().setSessionId(first, 'sa')
   store.getState().setSessionId(second, 'sb')

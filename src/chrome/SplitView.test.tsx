@@ -41,9 +41,17 @@ beforeEach(async () => {
   missionStore.setState({ snapshot })
   store.setState({ tabs: [], activeTab: '', panes: {} })
   store.getState().openView('probe', {}, 'tab', 'left')
-  store.getState().openView('editor', { root: '/Users/me/github/mnemo-desktop' }, 'split-row', 'notes.md')
-  store.getState().openView('probe', {}, 'split-col', 'bottom')
-  ;[A, B, C] = leaves(tab().root)
+  store.getState().openView('editor', { root: '/Users/me/github/mnemo-desktop' }, 'tab', 'notes.md')
+  store.getState().openView('probe', {}, 'tab', 'bottom')
+  ;[A, B, C] = store.getState().tabs.map((t) => t.focused)
+  // SplitView draws whatever tree a tab holds. The store splits terminal tabs alone, but a terminal
+  // cannot draw in jsdom: probes stand in for two, and an editor for a pane with a cwd.
+  const leaf = (pane: number) => ({ kind: 'leaf' as const, pane })
+  store.setState({
+    tabs: [{ id: 'split', root: { kind: 'split', dir: 'row', ratio: 0.5, children: [leaf(A), { kind: 'split', dir: 'col', ratio: 0.5, children: [leaf(B), leaf(C)] }] }, focused: C }],
+    activeTab: 'split',
+  })
+  expect(leaves(tab().root)).toEqual([A, B, C])
 })
 
 afterEach(() => {

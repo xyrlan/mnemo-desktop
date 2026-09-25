@@ -1,7 +1,8 @@
 import { vi } from 'vitest'
-import { createStore, ELSEWHERE, PROMPT_DELAY_MS } from './store'
+import { createStore, ELSEWHERE, PROMPT_DELAY_MS, type Place } from './store'
 import { registerReuse } from './reuse'
 import { leaves } from './tree'
+import { groupIds } from './groups'
 import { startWorkspace } from './persist'
 import type { PtyClient } from '../pty/client'
 import { provideSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
@@ -44,6 +45,11 @@ function fakePty(opts: { failSpawn?: boolean; promptBeforeResolve?: boolean; fir
     },
   }
 }
+
+/** Each group's tabs, in the order the groups are laid out. */
+const groupTabs = (s: ReturnType<typeof createStore>) => groupIds(s.getState().groupRoot).map((g) => s.getState().groups[g].tabs)
+/** The group of the shown worktree holding tab `id`. */
+const groupOf = (s: ReturnType<typeof createStore>, id: string) => Object.values(s.getState().groups).find((g) => g.tabs.includes(id))?.id
 
 test('boot creates one tab with one pane', async () => {
   const s = createStore(fakePty())
@@ -192,18 +198,27 @@ test('output before the pane attaches is buffered, including bytes sent before s
   expect(got).toEqual([36, 32, 104, 105, 33])
 })
 
-test('openView adds a negative-id pane as a split and never touches the PTY', async () => {
+test('openView to the side opens a negative-id pane as a tab in a group of its own, and never touches the PTY', async () => {
   const pty = fakePty()
   const s = createStore(pty)
   await s.getState().newTab()
   s.getState().openView('editor', { path: '/a.ts' }, 'split-row', 'a.ts')
-  const t = s.getState().tabs[0]
-  expect(t.root.kind).toBe('split')
-  expect(t.focused).toBeLessThan(0)
-  expect(s.getState().panes[t.focused]).toEqual({ id: t.focused, view: 'editor', props: { path: '/a.ts' }, title: 'a.ts' })
+  const st = s.getState()
+  // The terminal keeps its tab whole: the file is a tab beside it, not a pane squeezed into it.
+  expect(st.tabs.map((t) => leaves(t.root).length)).toEqual([1, 1])
+  const file = st.tabs[1]
+  expect(file.focused).toBeLessThan(0)
+  expect(st.panes[file.focused]).toEqual({ id: file.focused, view: 'editor', props: { path: '/a.ts' }, title: 'a.ts' })
+  expect(st.groupRoot).toMatchObject({ kind: 'split', dir: 'row', ratio: 0.5 })
+  expect(groupTabs(s)).toEqual([['tab-1'], [file.id]])
+  expect(st.activeTab).toBe(file.id)
+  expect(st.activeGroup).toBe(groupOf(s, file.id))
+  // Closing it closes its tab, and the group left empty collapses into the terminal's.
   await s.getState().closePane()
   expect(pty.killed).toEqual([])
-  expect(s.getState().tabs[0].root).toEqual({ kind: 'leaf', pane: 1 })
+  expect(s.getState().tabs.map((t) => t.root)).toEqual([{ kind: 'leaf', pane: 1 }])
+  expect(s.getState().groupRoot).toEqual({ kind: 'group', group: groupOf(s, 'tab-1') })
+  expect(s.getState().activeTab).toBe('tab-1')
 })
 
 test('openView as a tab works on an empty store', () => {
@@ -227,50 +242,68 @@ test('closeTab kills every pane of the tab and activates a neighbour', async () 
   expect(s.getState().panes[1]).toBeUndefined()
 })
 
-describe('openView auto placement', () => {
+describe('openView placement', () => {
   const box = (w: number, h: number) => () => ({ x: 0, y: 0, w, h })
 
-  test('a wide focused pane splits right, a tall one splits down, a small one opens a tab', async () => {
-    const s = createStore(fakePty(), { workspace: box(1280, 800) })
-    await s.getState().newTab()
-    s.getState().openView('editor', { path: '/a' }, 'auto')
-    let t = s.getState().tabs[0]
-    expect(t.root).toMatchObject({ kind: 'split', dir: 'row' })
-    s.getState().openView('browser', { url: 'x' }, 'auto')
-    t = s.getState().tabs[0]
-    expect(t.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ kind: 'leaf' }, { kind: 'split', dir: 'col' }] })
-    s.getState().openView('mission', { id: 'c1' }, 'auto')
-    expect(s.getState().tabs).toHaveLength(2)
-    expect(s.getState().activeTab).toBe(s.getState().tabs[1].id)
-  })
-
-  test('four successive opens in a 1280x800 window make at most two columns', async () => {
+  test('auto never splits: however wide the focused pane, a view is a tab of its own in the active group', async () => {
     const s = createStore(fakePty(), { workspace: box(1280, 800) })
     await s.getState().newTab()
     for (const v of ['editor', 'browser', 'mission', 'other']) s.getState().openView(v, {}, 'auto')
-    const columns = (n: import('./tree').Node): number =>
-      n.kind === 'leaf' ? 1 : n.dir === 'row' ? columns(n.children[0]) + columns(n.children[1]) : Math.max(columns(n.children[0]), columns(n.children[1]))
-    for (const t of s.getState().tabs) expect(columns(t.root)).toBeLessThanOrEqual(2)
+    expect(s.getState().tabs.map((t) => t.root.kind)).toEqual(['leaf', 'leaf', 'leaf', 'leaf', 'leaf'])
+    expect(groupTabs(s)).toHaveLength(1)
+    expect(s.getState().activeTab).toBe(s.getState().tabs[4].id)
   })
 
-  test('unknown workspace size or no tab opens a tab', async () => {
-    const s = createStore(fakePty(), { workspace: () => null })
-    s.getState().openView('editor', {}, 'auto')
-    expect(s.getState().tabs).toHaveLength(1)
-    s.getState().openView('browser', {}, 'auto')
-    expect(s.getState().tabs).toHaveLength(2)
+  test('on an empty store every place opens the first tab, in the first group', () => {
+    for (const place of ['auto', 'tab', 'split-row', 'split-col'] as const) {
+      const s = createStore(fakePty(), { workspace: () => null })
+      s.getState().openView('mission', {}, place)
+      expect(groupTabs(s)).toEqual([[s.getState().tabs[0].id]])
+      expect(s.getState().activeTab).toBe(s.getState().tabs[0].id)
+    }
   })
 
-  test('mission: a same-view pane in the active tab takes the new props and focus', async () => {
-    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+  test('split-row and split-col open to the side: into the group there, made when there is none', async () => {
+    const s = createStore(fakePty())
     await s.getState().newTab()
-    s.getState().openView('mission', { id: 'a' }, 'auto', 'a')
-    const mission = s.getState().tabs[0].focused
+    const left = groupOf(s, 'tab-1')!
+    s.getState().openView('editor', { path: '/a' }, 'split-row')
+    const right = s.getState().activeGroup
+    expect(right).not.toBe(left)
+    // From the terminal's group again: there is a group to its right now, and it takes the tab.
+    s.getState().focusGroup(left)
+    s.getState().openView('editor', { path: '/b' }, 'split-row')
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--1', 'tab--2']])
+    expect(s.getState().activeGroup).toBe(right)
+    expect(s.getState().activeTab).toBe('tab--2')
+    // Below the terminal there is nothing yet: a group is made there, under it alone.
+    s.getState().focusGroup(left)
+    s.getState().openView('browser', {}, 'split-col')
+    const below = s.getState().activeGroup
+    expect(s.getState().groupRoot).toEqual({
+      kind: 'split',
+      dir: 'row',
+      ratio: 0.5,
+      children: [
+        { kind: 'split', dir: 'col', ratio: 0.5, children: [{ kind: 'group', group: left }, { kind: 'group', group: below }] },
+        { kind: 'group', group: right },
+      ],
+    })
+    // Nothing was squeezed into the terminal's tab.
+    expect(s.getState().tabs.every((t) => leaves(t.root).length === 1)).toBe(true)
+  })
+
+  test('mission: a tab of the view anywhere in the worktree takes the new props and shows', async () => {
+    const s = createStore(fakePty())
+    await s.getState().newTab()
+    s.getState().openView('mission', { id: 'a' }, 'split-row', 'a')
+    const mission = s.getState().tabs[1]
     s.getState().focusPane(1)
+    expect(s.getState().activeTab).toBe('tab-1')
     s.getState().openView('mission', { id: 'b' }, 'auto', 'b')
-    const t = s.getState().tabs[0]
-    expect(t.focused).toBe(mission)
-    expect(s.getState().panes[mission]).toMatchObject({ view: 'mission', props: { id: 'b' }, title: 'b' })
+    expect(s.getState().activeTab).toBe(mission.id)
+    expect(s.getState().activeGroup).toBe(groupOf(s, mission.id))
+    expect(s.getState().panes[mission.focused]).toMatchObject({ view: 'mission', props: { id: 'b' }, title: 'b' })
     expect(Object.keys(s.getState().panes)).toHaveLength(2)
   })
 
@@ -278,50 +311,57 @@ describe('openView auto placement', () => {
     const got: [number, Record<string, unknown>][] = []
     const off = registerReuse('browser', (id, props) => (got.push([id, props]), true))
     try {
-      const s = createStore(fakePty(), { workspace: box(1280, 800) })
+      const s = createStore(fakePty())
       await s.getState().newTab()
       s.getState().openView('browser', { url: 'one' }, 'auto')
-      const pane = s.getState().tabs[0].focused
+      const tab = s.getState().tabs[1]
       s.getState().focusPane(1)
       s.getState().openView('browser', { url: 'two' }, 'auto')
-      expect(got).toEqual([[pane, { url: 'two' }]])
-      expect(s.getState().tabs[0].focused).toBe(pane)
-      expect(s.getState().panes[pane].props).toEqual({ url: 'one' })
+      expect(got).toEqual([[tab.focused, { url: 'two' }]])
+      expect(s.getState().activeTab).toBe(tab.id)
+      expect(s.getState().panes[tab.focused].props).toEqual({ url: 'one' })
     } finally {
       off()
     }
   })
 
-  test('editor: a declined reuse (unsaved edits) places a fresh pane by size', async () => {
+  test('editor: a declined reuse (unsaved edits) opens a new tab, never a split', async () => {
     let dirty = false
     const off = registerReuse('editor', () => !dirty)
     try {
       const s = createStore(fakePty(), { workspace: box(1280, 800) })
       await s.getState().newTab()
       s.getState().openView('editor', { path: '/a' }, 'auto')
-      const first = s.getState().tabs[0].focused
+      const first = s.getState().tabs[1]
       s.getState().openView('editor', { path: '/b' }, 'auto')
-      expect(s.getState().tabs[0].focused).toBe(first)
+      expect(s.getState().tabs).toHaveLength(2)
+      expect(s.getState().activeTab).toBe(first.id)
       dirty = true
       s.getState().openView('editor', { path: '/c' }, 'auto')
-      const t = s.getState().tabs[0]
-      expect(t.focused).not.toBe(first)
-      expect(s.getState().panes[t.focused].props).toEqual({ path: '/c' })
-      // the 640px-wide editor was focused, so the fresh pane splits it downward
-      expect(t.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ kind: 'leaf' }, { kind: 'split', dir: 'col' }] })
+      const st = s.getState()
+      expect(st.tabs).toHaveLength(3)
+      expect(st.panes[st.tabs[2].focused].props).toEqual({ path: '/c' })
+      expect(st.activeTab).toBe(st.tabs[2].id)
+      expect(st.tabs.every((t) => t.root.kind === 'leaf')).toBe(true)
     } finally {
       off()
     }
   })
 
-  test('reuse only looks at the active tab', async () => {
-    const s = createStore(fakePty(), { workspace: box(1280, 800) })
+  test('reuse looks through the whole worktree shown, and never into another', async () => {
+    const s = createStore(fakePty())
+    const missions = () => Object.values(s.getState().panes).filter((p) => p.view === 'mission')
+    await s.getState().switchWorktree('/a')
     await s.getState().newTab()
     s.getState().openView('mission', { id: 'a' }, 'tab')
     await s.getState().newTab()
+    // Another tab shows, and the mission tab is still the one that takes it.
     s.getState().openView('mission', { id: 'b' }, 'auto')
-    const missions = Object.values(s.getState().panes).filter((p) => p.view === 'mission')
-    expect(missions).toHaveLength(2)
+    expect(missions()).toHaveLength(1)
+    expect(s.getState().activeTab).toBe('tab--1')
+    await s.getState().switchWorktree('/b')
+    s.getState().openView('mission', { id: 'c' }, 'auto')
+    expect(missions()).toHaveLength(2)
   })
 
   test('explicit places ignore reuse', async () => {
@@ -329,7 +369,134 @@ describe('openView auto placement', () => {
     await s.getState().newTab()
     s.getState().openView('mission', { id: 'a' }, 'split-row')
     s.getState().openView('mission', { id: 'b' }, 'split-col')
-    expect(Object.values(s.getState().panes).filter((p) => p.view === 'mission')).toHaveLength(2)
+    s.getState().openView('mission', { id: 'c' }, 'tab')
+    expect(Object.values(s.getState().panes).filter((p) => p.view === 'mission')).toHaveLength(3)
+  })
+
+  describe('a document view (one that registers `shows`)', () => {
+    /** A fake file view: each pane shows the path its handler last took, else the one it opened
+     *  with; the handler refuses a pane with unsaved edits (`dirty`). */
+    function files() {
+      const s = createStore(fakePty())
+      const at = new Map<number, string>()
+      const dirty = new Set<number>()
+      const path = (id: number) => at.get(id) ?? s.getState().panes[id]?.props?.path
+      const off = registerReuse(
+        'doc',
+        (id, p) => {
+          if (dirty.has(id)) return false
+          at.set(id, String(p.path))
+          return true
+        },
+        (id, p) => path(id) === p.path,
+      )
+      const open = (file: string, place: Place = 'auto', preview = false) => s.getState().openView('doc', { path: file }, place, file, { preview })
+      /** What each group holds: a file by its path (`*` a preview), a terminal as `$`. */
+      const layout = () =>
+        groupTabs(s).map((ids) =>
+          ids.map((id) => {
+            const t = s.getState().tabs.find((x) => x.id === id)!
+            const p = s.getState().panes[t.focused]
+            return p.view === 'terminal' ? '$' : `${path(t.focused)}${t.preview ? '*' : ''}`
+          }),
+        )
+      const shown = () => {
+        const st = s.getState()
+        const t = st.tabs.find((x) => x.id === st.activeTab)!
+        return st.panes[t.focused].view === 'terminal' ? '$' : path(t.focused)
+      }
+      return { s, dirty, off, open, layout, shown }
+    }
+    let f: ReturnType<typeof files>
+    beforeEach(async () => {
+      f = files()
+      await f.s.getState().newTab()
+    })
+    afterEach(() => f.off())
+
+    test('it opens in the active group, unless that group shows a terminal; then in a group showing a file', () => {
+      // Only a terminal anywhere: the active group it is.
+      f.open('/a')
+      expect(f.layout()).toEqual([['$', '/a']])
+      f.open('/b', 'split-row')
+      expect(f.layout()).toEqual([['$', '/a'], ['/b']])
+      // Back on the terminal: the file goes where a file shows, not over the terminal.
+      f.s.getState().focusPane(1)
+      f.open('/c')
+      expect(f.layout()).toEqual([['$', '/a'], ['/b', '/c']])
+      expect(f.shown()).toBe('/c')
+      // The first group showing a file is where it goes, and the active one is when it shows one.
+      f.s.getState().activateTab(f.s.getState().tabs[1].id)
+      f.open('/d')
+      expect(f.layout()).toEqual([['$', '/a', '/d'], ['/b', '/c']])
+    })
+
+    test('a file already open shows instead of opening again: in the target group first, then anywhere', () => {
+      f.open('/a', 'split-row')
+      const right = f.s.getState().activeGroup
+      f.s.getState().focusPane(1)
+      f.open('/a')
+      expect(f.layout()).toEqual([['$'], ['/a']])
+      expect(f.s.getState().activeGroup).toBe(right)
+      // The terminal's group shows a file of its own now, so it is the target; /a is found elsewhere.
+      f.s.getState().focusPane(1)
+      f.open('/b', 'tab')
+      f.open('/a')
+      expect(f.layout()).toEqual([['$', '/b'], ['/a']])
+      expect(f.s.getState().activeGroup).toBe(right)
+    })
+
+    test('a preview replaces the one its group has, through the view, in its place', () => {
+      f.open('/a', 'auto', true)
+      expect(f.layout()).toEqual([['$', '/a*']])
+      const preview = f.s.getState().tabs[1]
+      f.open('/b', 'auto', true)
+      // The same tab, navigated: nothing opened, nothing closed.
+      expect(f.layout()).toEqual([['$', '/b*']])
+      expect(f.s.getState().tabs[1].id).toBe(preview.id)
+      expect(f.shown()).toBe('/b')
+      // A preview that will not take it (unsaved edits) gives its place to a new one.
+      f.dirty.add(preview.focused)
+      f.open('/c', 'auto', true)
+      expect(f.layout()).toEqual([['$', '/c*']])
+      expect(f.s.getState().tabs[1].id).not.toBe(preview.id)
+      expect(f.s.getState().panes[preview.focused]).toBeUndefined()
+    })
+
+    test('a preview is replaced only in its own group, and a kept tab never is', () => {
+      f.open('/a', 'auto', true)
+      f.open('/b', 'split-row')
+      f.open('/c', 'auto', true)
+      expect(f.layout()).toEqual([['$', '/a*'], ['/b', '/c*']])
+      f.s.getState().keepTab(f.s.getState().activeTab)
+      f.open('/d', 'auto', true)
+      expect(f.layout()).toEqual([['$', '/a*'], ['/b', '/c', '/d*']])
+      // Explicitly placed, a preview still replaces the preview of the group it lands in.
+      f.s.getState().focusPane(1)
+      f.open('/e', 'tab', true)
+      expect(f.layout()).toEqual([['$', '/e*'], ['/b', '/c', '/d*']])
+    })
+
+    test('opened without preview on a preview tab, that tab is kept; asked as a preview, a kept tab stays kept', () => {
+      f.open('/a', 'auto', true)
+      f.open('/a')
+      expect(f.layout()).toEqual([['$', '/a']])
+      f.open('/a', 'auto', true)
+      expect(f.layout()).toEqual([['$', '/a']])
+    })
+
+    test('explicit places never open a file twice in the group they land in', () => {
+      f.open('/a', 'tab')
+      f.open('/a', 'tab')
+      expect(f.layout()).toEqual([['$', '/a']])
+      // Another group may hold it too.
+      f.open('/a', 'split-row')
+      expect(f.layout()).toEqual([['$', '/a'], ['/a']])
+      f.s.getState().focusPane(1)
+      f.open('/a', 'split-row')
+      expect(f.layout()).toEqual([['$', '/a'], ['/a']])
+      expect(f.s.getState().activeGroup).toBe(groupIds(f.s.getState().groupRoot)[1])
+    })
   })
 })
 
@@ -338,13 +505,13 @@ test('closeOthers keeps the focused leaf and kills the rest', async () => {
   const s = createStore(pty)
   await s.getState().newTab()
   await s.getState().split('row')
-  s.getState().openView('editor', {}, 'split-col')
+  await s.getState().split('col')
   s.getState().focusPane(2)
   await s.getState().closeOthers()
   const t = s.getState().tabs[0]
   expect(t.root).toEqual({ kind: 'leaf', pane: 2 })
   expect(t.focused).toBe(2)
-  expect(pty.killed).toEqual([1])
+  expect(pty.killed).toEqual([1, 3])
   expect(Object.keys(s.getState().panes).map(Number)).toEqual([2])
 })
 
@@ -924,6 +1091,8 @@ describe('terminals that outlived the page', () => {
     const { s } = await strays()
     s.getState().bringTab('tab-7')
     expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-5', 'tab-7'])
+    // It joins the active group.
+    expect(Object.values(s.getState().groups).map((g) => g.tabs)).toEqual([['tab-5', 'tab-7']])
     expect(s.getState().activeTab).toBe('tab-7')
     expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-6'])
     s.getState().bringTab('tab-5')
@@ -1017,5 +1186,288 @@ describe('terminals that outlived the page', () => {
     } finally {
       provideSessions(null)
     }
+  })
+})
+
+describe('groups', () => {
+  /** A terminal (tab-1) in the left group, and on its right a vault and a mission tab, the mission shown. */
+  async function sideBySide() {
+    const pty = fakePty()
+    const s = createStore(pty)
+    await s.getState().newTab('/a')
+    s.getState().openView('vault', {}, 'split-row', 'vault')
+    s.getState().openView('mission', {}, 'tab', 'mission')
+    const [left, right] = groupIds(s.getState().groupRoot)
+    return { s, pty, left, right }
+  }
+
+  test('a tab closed shows its left neighbour; a group left with no tab collapses, and its sibling becomes active', async () => {
+    const { s, left, right } = await sideBySide()
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--1', 'tab--2']])
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--2'])
+    await s.getState().closeTab('tab--2')
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--1'])
+    await s.getState().closePane()
+    expect(s.getState().groupRoot).toEqual({ kind: 'group', group: left })
+    expect(Object.keys(s.getState().groups)).toEqual([left])
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([left, 'tab-1'])
+  })
+
+  test('closing a tab of a group that is not active leaves the active group as it is', async () => {
+    const { s, left, right } = await sideBySide()
+    s.getState().focusGroup(left)
+    await s.getState().newTab('/b')
+    s.getState().focusGroup(right)
+    await s.getState().closeTab('tab-2')
+    expect(s.getState().groups[left]).toEqual({ id: left, tabs: ['tab-1'], activeTab: 'tab-1' })
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--2'])
+    await s.getState().closeTab('tab-1')
+    expect(groupTabs(s)).toEqual([['tab--1', 'tab--2']])
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--2'])
+    // The worktree's last tab leaves no group, and Home shows.
+    await s.getState().closeTab('tab--1')
+    await s.getState().closeTab('tab--2')
+    const st = s.getState()
+    expect([st.tabs, st.groups, st.groupRoot, st.activeGroup, st.activeTab]).toEqual([[], {}, null, '', ''])
+  })
+
+  test('⌃N, ⌘⇧[ and ⌘⇧] count the tabs of the active group alone', async () => {
+    const { s, left } = await sideBySide()
+    s.getState().goToTab(0)
+    expect(s.getState().activeTab).toBe('tab--1')
+    s.getState().goToTab(2)
+    expect(s.getState().activeTab).toBe('tab--1')
+    s.getState().cycleTab(-1)
+    expect(s.getState().activeTab).toBe('tab--2')
+    s.getState().cycleTab(1)
+    expect(s.getState().activeTab).toBe('tab--1')
+    s.getState().focusGroup(left)
+    expect(s.getState().activeTab).toBe('tab-1')
+    s.getState().cycleTab(1)
+    expect(s.getState().activeTab).toBe('tab-1')
+  })
+
+  test('focusing a pane in another group makes that group active, and shows its tab there', async () => {
+    const { s, left, right } = await sideBySide()
+    s.getState().focusPane(1)
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([left, 'tab-1'])
+    // A pane of a tab its group does not show: that tab shows.
+    s.getState().focusPane(-1)
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--1'])
+    expect(s.getState().groups[right].activeTab).toBe('tab--1')
+    // Nothing changes for a pane already focused, nor for one no tab holds.
+    const before = s.getState()
+    s.getState().focusPane(-1)
+    s.getState().focusPane(99)
+    expect(s.getState()).toBe(before)
+  })
+
+  test('⌘D splits a terminal tab; in any other tab it opens a terminal tab to that side', async () => {
+    const s = createStore(fakePty())
+    await s.getState().newTab('/a')
+    await s.getState().split('row')
+    expect(leaves(s.getState().tabs[0].root)).toEqual([1, 2])
+    s.getState().openView('vault', {}, 'tab')
+    const left = s.getState().activeGroup
+    await s.getState().split('row', '/x')
+    // The vault stays whole; the shell is a tab of the group made on its right.
+    expect(groupTabs(s)).toEqual([['tab-1', 'tab--1'], ['tab-3']])
+    expect(s.getState().activeTab).toBe('tab-3')
+    expect(s.getState().panes[3]).toMatchObject({ view: 'terminal', cwd: '/x' })
+    // In that terminal tab, ⌘⇧D splits the terminal itself.
+    await s.getState().split('col')
+    expect(leaves(s.getState().tabs.find((t) => t.id === 'tab-3')!.root)).toEqual([3, 4])
+    // From the vault, ⌘⇧D: below it there is no group yet, so one is made.
+    s.getState().focusGroup(left)
+    expect(s.getState().activeTab).toBe('tab--1')
+    await s.getState().split('col')
+    expect(s.getState().groupRoot).toMatchObject({ kind: 'split', dir: 'row', children: [{ kind: 'split', dir: 'col' }, { kind: 'group' }] })
+    expect(s.getState().activeTab).toBe('tab-5')
+  })
+
+  test('a new terminal lands in the active group, and one asked from a group that went lands in the active one', async () => {
+    const { s, right } = await sideBySide()
+    await s.getState().newTab()
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--1', 'tab--2', 'tab-2']])
+    expect(s.getState().activeGroup).toBe(right)
+    // A placeholder's group closes while its shell spawns (`terminal-cmd` does this).
+    s.getState().openView('terminal-cmd', { cmd: 'x' }, 'split-col')
+    const opening = s.getState().openCommandTab('/a', 'claude attach x')
+    await s.getState().closePane()
+    await opening
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--1', 'tab--2', 'tab-2', 'tab-3']])
+  })
+
+  test('moveTab reorders a row without showing the tab, and a dragged preview is kept', async () => {
+    const { s, right } = await sideBySide()
+    s.setState((st) => ({ tabs: st.tabs.map((t) => (t.id === 'tab--1' ? { ...t, preview: true } : t)) }))
+    s.getState().moveTab('tab--1', { group: right, index: 1 })
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--2', 'tab--1']])
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1', 'tab--2', 'tab--1'])
+    expect(s.getState().activeTab).toBe('tab--2')
+    expect(s.getState().tabs[2].preview).toBeUndefined()
+    // To where it already is: nothing at all.
+    const before = s.getState().tabs
+    s.getState().moveTab('tab--1', { group: right })
+    expect(s.getState().tabs).toBe(before)
+  })
+
+  test('moveTab into another group shows it there and makes that group active; a group it leaves empty collapses', async () => {
+    const { s, left, right } = await sideBySide()
+    s.getState().moveTab('tab--2', { group: left, index: 0 })
+    expect(groupTabs(s)).toEqual([['tab--2', 'tab-1'], ['tab--1']])
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([left, 'tab--2'])
+    expect(s.getState().groups[right].activeTab).toBe('tab--1')
+    s.getState().moveTab('tab--1', { group: left })
+    expect(s.getState().groupRoot).toEqual({ kind: 'group', group: left })
+    expect(groupTabs(s)).toEqual([['tab--2', 'tab-1', 'tab--1']])
+    expect(s.getState().activeTab).toBe('tab--1')
+    // Nothing was closed on the way.
+    expect(Object.keys(s.getState().panes).map(Number).sort((a, b) => a - b)).toEqual([-2, -1, 1])
+  })
+
+  test('moveTab to a side makes a group there; where that would change nothing, nothing happens', async () => {
+    const { s, left, right } = await sideBySide()
+    s.getState().moveTab('tab--1', { group: left, side: 'down' })
+    const below = s.getState().activeGroup
+    expect(s.getState().groupRoot).toEqual({
+      kind: 'split',
+      dir: 'row',
+      ratio: 0.5,
+      children: [{ kind: 'split', dir: 'col', ratio: 0.5, children: [{ kind: 'group', group: left }, { kind: 'group', group: below }] }, { kind: 'group', group: right }],
+    })
+    expect(s.getState().activeTab).toBe('tab--1')
+    const before = s.getState()
+    // A group's only tab onto its own edge, or onto the facing edge of the group beside it.
+    s.getState().moveTab('tab--1', { group: below, side: 'left' })
+    s.getState().moveTab('tab-1', { group: below, side: 'up' })
+    s.getState().moveTab('tab--1', { group: left, side: 'down' })
+    expect(s.getState().groupRoot).toBe(before.groupRoot)
+    expect(s.getState().groups).toBe(before.groups)
+    // One of two tabs onto its own group's edge splits that group.
+    s.getState().focusGroup(right)
+    s.getState().openView('marketplace', {}, 'tab')
+    s.getState().moveTab('tab--2', { group: right, side: 'right' })
+    expect(groupIds(s.getState().groupRoot)).toHaveLength(4)
+    expect(s.getState().groups[right].tabs).toEqual(['tab--3'])
+    expect(s.getState().activeTab).toBe('tab--2')
+  })
+
+  test('detachPane makes a pane of a split terminal tab a tab of its own in the group asked for', async () => {
+    const { s, left, right } = await sideBySide()
+    s.getState().focusPane(1)
+    await s.getState().split('row')
+    expect(leaves(s.getState().tabs[0].root)).toEqual([1, 2])
+    s.getState().detachPane(2, { group: right, index: 1 })
+    expect(groupTabs(s)).toEqual([['tab-1'], ['tab--1', 'tab-2', 'tab--2']])
+    expect(s.getState().tabs[0]).toMatchObject({ root: { kind: 'leaf', pane: 1 }, focused: 1 })
+    expect(s.getState().tabs.find((t) => t.id === 'tab-2')).toEqual({ id: 'tab-2', root: { kind: 'leaf', pane: 2 }, focused: 2 })
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab-2'])
+    // A tab's only pane is the tab already; nor is a pane put in a group that is not there.
+    const before = s.getState().tabs
+    s.getState().detachPane(1, { group: right })
+    s.getState().detachPane(2, { group: left })
+    s.getState().detachPane(99, { group: left })
+    expect(s.getState().tabs).toBe(before)
+    // Its first pane leaving a tab named after it, the new tab gets a name of its own.
+    s.getState().focusPane(1)
+    await s.getState().split('row')
+    s.getState().detachPane(1, { group: left })
+    expect(groupTabs(s)[0]).toEqual(['tab-1', 'tab-1-2'])
+  })
+
+  test('keepTab, activateTab and focusGroup', async () => {
+    const { s, left, right } = await sideBySide()
+    s.setState((st) => ({ tabs: st.tabs.map((t) => (t.id === 'tab--1' ? { ...t, preview: true } : t)) }))
+    s.getState().keepTab('tab--1')
+    expect(s.getState().tabs[1]).not.toHaveProperty('preview')
+    s.getState().activateTab('tab-1')
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([left, 'tab-1'])
+    s.getState().activateTab('tab--1')
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([right, 'tab--1'])
+    s.getState().focusGroup(left)
+    expect([s.getState().activeGroup, s.getState().activeTab]).toEqual([left, 'tab-1'])
+    // From Home, focusing a group shows its tab again.
+    s.getState().showHome()
+    expect(s.getState().activeGroup).toBe(left)
+    s.getState().focusGroup(right)
+    expect(s.getState().activeTab).toBe('tab--1')
+    const before = s.getState()
+    s.getState().focusGroup('no-such-group')
+    s.getState().focusGroup(right)
+    expect(s.getState()).toBe(before)
+  })
+
+  test('setGroupRatio resizes the seam at a path, held between 15% and 85%', async () => {
+    const { s } = await sideBySide()
+    s.getState().setGroupRatio([], 0.3)
+    expect(s.getState().groupRoot).toMatchObject({ ratio: 0.3 })
+    s.getState().setGroupRatio([], 0.01)
+    expect(s.getState().groupRoot).toMatchObject({ ratio: 0.15 })
+    s.getState().setGroupRatio([], 2)
+    expect(s.getState().groupRoot).toMatchObject({ ratio: 0.85 })
+    const root = s.getState().groupRoot
+    s.getState().setGroupRatio([1], 0.5)
+    expect(s.getState().groupRoot).toBe(root)
+  })
+
+  test('only terminals move across tabs, and only into a tab of terminals', async () => {
+    const { s } = await sideBySide()
+    await s.getState().newTab('/b')
+    const before = s.getState().tabs
+    // The vault is no terminal, and the mission's tab is no tab of terminals.
+    s.getState().movePane(-1, 2, 'left', 'tab-2')
+    s.getState().movePane(2, -2, 'left', 'tab--2')
+    expect(s.getState().tabs).toBe(before)
+    s.getState().movePane(2, 1, 'right', 'tab-1')
+    expect(leaves(s.getState().tabs[0].root)).toEqual([1, 2])
+    expect(s.getState().tabs.map((t) => t.id)).not.toContain('tab-2')
+    expect(s.getState().activeTab).toBe('tab-1')
+  })
+
+  test('a layout set with its tabs alone works as one group holding them all, in their order', () => {
+    const s = createStore(fakePty())
+    const tab = (id: number) => ({ id: `t${id}`, root: { kind: 'leaf' as const, pane: id }, focused: id })
+    s.setState({ tabs: [tab(1), tab(2)], activeTab: 't2' })
+    expect(groupTabs(s)).toEqual([['t1', 't2']])
+    expect(s.getState().groups[s.getState().activeGroup].activeTab).toBe('t2')
+    // A tab added the same way joins the active group; one taken away leaves its group.
+    s.setState((st) => ({ tabs: [...st.tabs, tab(3)], activeTab: 't3' }))
+    expect(groupTabs(s)).toEqual([['t1', 't2', 't3']])
+    s.setState((st) => ({ tabs: st.tabs.filter((t) => t.id !== 't1') }))
+    expect(groupTabs(s)).toEqual([['t2', 't3']])
+    // Groups left over from another layout name none of these: they go.
+    s.setState({ tabs: [tab(7)], activeTab: '' })
+    expect(groupTabs(s)).toEqual([['t7']])
+    expect(s.getState().activeTab).toBe('')
+    s.getState().goToTab(0)
+    expect(s.getState().activeTab).toBe('t7')
+    s.setState({ tabs: [], activeTab: '' })
+    expect([s.getState().groups, s.getState().groupRoot, s.getState().activeGroup]).toEqual([{}, null, ''])
+  })
+
+  test('worktreeLayout reads every open worktree and the tabs of none, the same object until it changes', async () => {
+    const s = createStore(fakePty())
+    await s.getState().switchWorktree('/a')
+    await s.getState().newTab()
+    const a = s.getState().worktreeLayout('/a')!
+    expect(a).toMatchObject({ tabs: s.getState().tabs, activeTab: 'tab-1', groupRoot: { kind: 'group' } })
+    expect(s.getState().worktreeLayout('/a')).toBe(a)
+    await s.getState().switchWorktree('/b')
+    // Parked as it was: the same object.
+    expect(s.getState().worktreeLayout('/a')).toBe(a)
+    const b = s.getState().worktreeLayout('/b')!
+    expect(b.tabs).toEqual([])
+    s.getState().setPalette(true)
+    expect(s.getState().worktreeLayout('/b')).toBe(b)
+    await s.getState().newTab()
+    expect(s.getState().worktreeLayout('/b')).not.toBe(b)
+    expect(s.getState().worktreeLayout('/a')).toBe(a)
+    await s.getState().switchWorktree('/a')
+    expect(s.getState().worktreeLayout('/a')).toBe(a)
+    expect(s.getState().worktreeLayout('/nowhere')).toBeUndefined()
+    expect(s.getState().worktreeLayout(ELSEWHERE)).toBeUndefined()
+    s.setState((st) => ({ parked: { ...st.parked, [ELSEWHERE]: { tabs: [{ id: 'tab-9', root: { kind: 'leaf', pane: 9 }, focused: 9 }], activeTab: '' } as never } }))
+    expect(s.getState().worktreeLayout(ELSEWHERE)?.groupRoot).toMatchObject({ kind: 'group' })
   })
 })
