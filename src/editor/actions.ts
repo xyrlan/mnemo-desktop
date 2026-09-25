@@ -1,7 +1,6 @@
 import type { Store, Place } from '../layout/store'
 import type { Action } from '../actions/registry'
 import type { FsClient } from './client'
-import type { Sessions } from './sessions'
 import { basename, defaultRoot, resolvePath } from './paths'
 
 export type PromptResult = { value: string; place: Place }
@@ -9,7 +8,6 @@ export type PromptFn = (opts: { initial: string; hint: string }) => Promise<Prom
 
 export type Deps = {
   app: Store
-  sessions: Sessions
   fs: Pick<FsClient, 'home'>
   prompt: PromptFn
   register: (a: Action) => void
@@ -22,7 +20,7 @@ export function openEditor(app: Store, path: string, root: string | undefined, p
   app.getState().openView('editor', root === undefined ? { path } : { path, root }, where, basename(path))
 }
 
-export function registerEditorActions({ app, sessions, fs, prompt, register }: Deps) {
+export function registerEditorActions({ app, fs, prompt, register }: Deps) {
   register({
     id: 'editor.open',
     title: 'Open file…',

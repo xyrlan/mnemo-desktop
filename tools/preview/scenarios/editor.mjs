@@ -10,7 +10,7 @@ const f = (name) => ({ name, is_dir: false })
 const DISK = {
   [REPO]: [d('docs'), d('src'), d('tools'), f('CLAUDE.md'), f('package.json'), f('README.md')],
   [`${REPO}/src`]: [d('browser'), d('editor'), f('App.tsx'), f('main.tsx'), f('theme.css')],
-  [`${REPO}/src/editor`]: [f('Prompt.tsx'), f('view.tsx'), f('actions.ts'), f('editor.css'), f('view.tsx')],
+  [`${REPO}/src/editor`]: [f('Prompt.tsx'), f('actions.ts'), f('editor.css'), f('view.tsx')],
 }
 
 const SOURCE = `import { useEffect, useRef, useState } from 'react'

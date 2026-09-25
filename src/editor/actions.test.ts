@@ -21,7 +21,7 @@ function setup(answer: PromptResult | null) {
     asked.push(initial)
     return answer
   }
-  registerEditorActions({ app, sessions, fs: { home: async () => '/Users/me' }, prompt, register: (a) => (actions[a.id] = a) })
+  registerEditorActions({ app, fs: { home: async () => '/Users/me' }, prompt, register: (a) => (actions[a.id] = a) })
   return { app, sessions, actions, asked }
 }
 

@@ -204,7 +204,7 @@ function EditorPane({ id, props }: PaneViewProps) {
 }
 
 registerPaneView('editor', EditorPane)
-registerEditorActions({ app: store, sessions, fs, prompt: promptPath, register })
+registerEditorActions({ app: store, fs, prompt: promptPath, register })
 
 // `openView('editor', …, 'auto')` reuses an open editor only when its buffer is clean.
 registerReuse('editor', (id, p) => {
