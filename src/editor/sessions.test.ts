@@ -3,9 +3,8 @@ import { createSessions } from './sessions'
 test('open is idempotent so a remounted pane keeps its state', () => {
   const s = createSessions()
   s.getState().open(-1, '/a.ts', '/w')
-  s.getState().toggleTree(-1)
   s.getState().open(-1, '/b.ts', '/other')
-  expect(s.getState().sessions[-1]).toMatchObject({ path: '/a.ts', root: '/w', treeOpen: false })
+  expect(s.getState().sessions[-1]).toMatchObject({ path: '/a.ts', root: '/w' })
 })
 
 test('navigate replaces a clean buffer, parks the path while dirty', () => {
@@ -36,15 +35,6 @@ test('navigating to the open file is a no-op that clears pending', () => {
   expect(s.getState().sessions[-1]).toMatchObject({ path: '/a.ts', pending: undefined, dirty: true })
 })
 
-test('toggleDir expands and collapses', () => {
-  const s = createSessions()
-  s.getState().open(-1, '/w/a.ts', '/w')
-  s.getState().toggleDir(-1, '/w/src')
-  s.getState().toggleDir(-1, '/w/lib')
-  s.getState().toggleDir(-1, '/w/src')
-  expect(s.getState().sessions[-1].expanded).toEqual(['/w/lib'])
-})
-
 test('prune forgets closed panes and disposes their buffers', () => {
   const s = createSessions()
   const disposed: number[] = []
@@ -60,7 +50,6 @@ test('prune forgets closed panes and disposes their buffers', () => {
 
 test('actions on unknown panes do nothing', () => {
   const s = createSessions()
-  s.getState().toggleTree(-9)
   s.getState().navigate(-9, '/x')
   s.getState().setDirty(-9, true)
   expect(s.getState().sessions).toEqual({})

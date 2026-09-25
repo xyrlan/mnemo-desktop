@@ -4,11 +4,8 @@
 .editor-head { flex: 0 0 32px; display: flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--muted-foreground); border-bottom: 1px solid var(--border); user-select: none; min-width: 0; }
 .editor-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 0 1 auto; }
 .editor-dirty { color: var(--foreground); font-size: 10px; }
-.editor-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: transparent; border: 0; border-radius: var(--radius-md); color: var(--muted-foreground); font: inherit; padding: 0; cursor: default; }
-.editor-icon:hover { color: var(--foreground); background: var(--accent); }
-.editor-icon.on { color: var(--foreground); }
-.editor-icon:focus-visible, .editor-banner button:focus-visible, .editor-tree-head button:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 
+.editor-banner button:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .editor-banner { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--muted); border-bottom: 1px solid var(--border); color: var(--foreground); }
 .editor-banner.error { color: var(--destructive); }
 .editor-banner span { flex: 1; overflow-wrap: anywhere; }
@@ -16,17 +13,6 @@
 .editor-banner button:hover { background: var(--accent); }
 
 .editor-main { flex: 1; display: flex; min-height: 0; }
-.editor-tree { flex: 0 0 220px; overflow: auto; border-right: 1px solid var(--border); padding: 0 4px 8px; user-select: none; }
-.editor-tree-head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: var(--background); color: var(--muted-foreground); text-transform: uppercase; font-size: 11px; font-weight: 500; letter-spacing: .04em; }
-.editor-tree-head button { background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--muted-foreground); font: inherit; cursor: default; }
-.editor-tree-head button:hover { color: var(--foreground); background: var(--accent); }
-.editor-tree-row { padding: 2px 8px; border-radius: var(--radius-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); cursor: default; }
-.editor-tree-row:hover { background: var(--accent); }
-.editor-tree-row.file { padding-left: 20px; }
-.editor-tree-row.current { color: var(--accent-foreground); background: color-mix(in srgb, var(--foreground) 8%, var(--accent)); box-shadow: inset 0 0 0 1px var(--border); }
-.editor-tree-chevron { display: inline-block; width: 12px; color: var(--muted-foreground); }
-.editor-tree-note { padding: 2px 8px; color: var(--muted-foreground); white-space: nowrap; }
-.editor-tree-note.error { color: var(--destructive); white-space: normal; }
 
 .editor-code { flex: 1; position: relative; min-width: 0; }
 .editor-monaco { position: absolute; inset: 0; }

@@ -15,7 +15,7 @@ async function open() {
   return { done }
 }
 
-test('the field starts at the tree root, focused, with its hint under it', async () => {
+test('the field starts at the root, focused, with its hint under it', async () => {
   const { done } = await open()
   expect(field()?.value).toBe('/code/app/')
   expect(document.activeElement).toBe(field())

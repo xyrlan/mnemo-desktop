@@ -1,24 +1,23 @@
-// The editor pane in the new look: its file tree open beside the buffer, the path and the
-// unsaved-changes banner above it. Monaco keeps its own theme.
+// The editor pane in the new look: just the path above the buffer, no file tree of its own. Monaco keeps its own theme.
 import { scenario } from '../scenario.mjs'
 import { appIpc, REPO } from '../fixtures/app.mjs'
 
 const at = Date.parse('2026-09-24T12:00:00Z')
-const OPEN = `${REPO}/src/editor/Tree.tsx`
+const OPEN = `${REPO}/src/editor/view.tsx`
 const d = (name) => ({ name, is_dir: true })
 const f = (name) => ({ name, is_dir: false })
 
 const DISK = {
   [REPO]: [d('docs'), d('src'), d('tools'), f('CLAUDE.md'), f('package.json'), f('README.md')],
   [`${REPO}/src`]: [d('browser'), d('editor'), f('App.tsx'), f('main.tsx'), f('theme.css')],
-  [`${REPO}/src/editor`]: [f('Prompt.tsx'), f('Tree.tsx'), f('actions.ts'), f('editor.css'), f('view.tsx')],
+  [`${REPO}/src/editor`]: [f('Prompt.tsx'), f('actions.ts'), f('editor.css'), f('view.tsx')],
 }
 
-const SOURCE = `import { useCallback, useEffect, useState } from 'react'
+const SOURCE = `import { useEffect, useRef, useState } from 'react'
 
-export default function Tree({ fs, root, current }) {
-  const [listings, setListings] = useState({})
-  return <div className="editor-tree" role="tree" />
+function EditorPane({ id, props }) {
+  const [loading, setLoading] = useState(false)
+  return <div className="editor-pane" />
 }
 `
 
@@ -38,7 +37,7 @@ scenario('editor', {
         {
           path: REPO,
           tabs: [{ id: 'tab-1', root: { kind: 'leaf', pane: 1 }, focused: 1 }],
-          panes: { 1: { view: 'editor', props: { path: OPEN, root: REPO }, title: 'Tree.tsx' } },
+          panes: { 1: { view: 'editor', props: { path: OPEN, root: REPO }, title: 'view.tsx' } },
           activeTab: 'tab-1',
         },
       ],
