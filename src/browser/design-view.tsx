@@ -16,7 +16,7 @@ export function designPane(s: Pick<State, 'tabs' | 'activeTab' | 'panes'>): numb
   return leaves(tab.root).find((id) => s.panes[id]?.view === 'browser') ?? null
 }
 
-/** ⌘K "Design Mode": toggles it on the tab's browser pane. With none open it opens one, whose
+/** ⌘K "Design Mode": toggles it on the tab's browser pane. With none open it opens one to the side of the agent's terminal, whose
  *  blank page says what to do, and Design Mode waits there for a page to arm; so does a pane
  *  still on a blank page. `url` is what a pane's page has loaded, if anything. */
 export function runDesignMode(
@@ -29,7 +29,7 @@ export function runDesignMode(
     const page = url(id)
     return design.toggle(id, !!page && page !== BLANK)
   }
-  layout.getState().openView('browser', { url: '' }, 'auto', 'browser')
+  layout.getState().openView('browser', { url: '' }, 'split-row', 'browser')
   const opened = designPane(layout.getState())
   if (opened !== null) design.wait(opened)
 }

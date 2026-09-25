@@ -128,11 +128,19 @@ describe('the explorer', () => {
     expect(labels(m.host)).toEqual(['.github', 'dist', 'src•', '.env', 'README.md'])
   })
 
-  it('opens a clicked file in the editor pane', async () => {
+  it('opens a clicked file as a preview, a double-clicked one kept, a Shift-clicked one to the side', async () => {
     const m = await mount()
     await click(row(m.host, `${R}/README.md`))
-    expect(m.props.onOpenFile).toHaveBeenCalledWith(`${R}/README.md`, 'auto')
-    expect(row(m.host, `${R}/README.md`).dataset.selected).toBe('true')
+    expect(m.props.onOpenFile).toHaveBeenCalledWith(`${R}/README.md`, 'preview')
+    await act(async () => void row(m.host, `${R}/README.md`).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/README.md`, 'keep')
+    await act(async () => void row(m.host, `${R}/.env`).dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })))
+    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/.env`, 'side')
+    // A double click on a folder only toggles it.
+    const calls = (m.props.onOpenFile as ReturnType<typeof vi.fn>).mock.calls.length
+    await act(async () => void row(m.host, `${R}/dist`).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+    expect((m.props.onOpenFile as ReturnType<typeof vi.fn>).mock.calls.length).toBe(calls)
+    expect(row(m.host, `${R}/.env`).dataset.selected).toBe('true')
   })
 
   it('moves with the arrow keys, opens folders with Right, and opens a file with Enter', async () => {
@@ -154,9 +162,9 @@ describe('the explorer', () => {
     await key(tree, 'ArrowDown')
     expect(row(m.host, `${R}/src/main.ts`).dataset.selected).toBe('true')
     await key(tree, 'Enter')
-    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/src/main.ts`, 'auto')
+    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/src/main.ts`, 'preview')
     await key(tree, 'Enter', { shiftKey: true })
-    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/src/main.ts`, 'split-row')
+    expect(m.props.onOpenFile).toHaveBeenLastCalledWith(`${R}/src/main.ts`, 'side')
     await key(tree, 'ArrowLeft')
     expect(row(m.host, `${R}/src`).dataset.selected).toBe('true')
     await key(tree, 'ArrowLeft')

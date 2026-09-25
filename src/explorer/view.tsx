@@ -6,13 +6,19 @@ import { useFleet } from '../fleet/store'
 import { registerRightbarPanel } from '../rightbar/panels'
 import { toast } from '@/ui'
 import { tauriExplorer } from './client'
-import { FileExplorer } from './FileExplorer'
+import { FileExplorer, type OpenHow } from './FileExplorer'
 import { basename } from './paths'
 import { repoNameOf, rootOf } from './target'
 import { createExplorerStore } from './store'
 
 /** One store for the app: what was read and opened survives the tab closing and coming back. */
 const explorer = createExplorerStore(tauriExplorer)
+
+/** Where each way of opening a file lands (the tab-groups spec's *Opening* table). */
+export function openFile(path: string, root: string | null, how: OpenHow) {
+  const props = root ? { path, root } : { path }
+  layout.getState().openView('editor', props, how === 'side' ? 'split-row' : 'auto', basename(path), how === 'preview' ? { preview: true } : undefined)
+}
 
 type LayoutView = { activeWorktree: string | null; activeFile: string | null }
 
@@ -38,7 +44,7 @@ function LiveExplorer(): React.JSX.Element {
       repoName={root ? repoNameOf(root, repos) : ''}
       activeFile={view.activeFile}
       stamp={stamp}
-      onOpenFile={(path, place) => layout.getState().openView('editor', root ? { path, root } : { path }, place, basename(path))}
+      onOpenFile={(path, how) => openFile(path, root, how)}
       onOpenInTerminal={(dir) => void layout.getState().newTab(dir)}
       onCopy={(text) =>
         void navigator.clipboard.writeText(text).then(

@@ -25,7 +25,7 @@ function setup(answer: PromptResult | null) {
   return { app, sessions, actions, asked }
 }
 
-test('editor.open resolves relative to the focused terminal cwd and opens it as a tab', async () => {
+test('editor.open resolves relative to the focused terminal cwd and opens it to the side', async () => {
   const { app, actions, asked } = setup({ value: 'src/main.ts', place: 'split-row' })
   await app.getState().newTab()
   app.getState().setCwd(1, '/Users/me/proj')
@@ -36,8 +36,9 @@ test('editor.open resolves relative to the focused terminal cwd and opens it as 
   const editor = Object.values(st.panes).find((p) => p.view === 'editor')!
   expect(editor.props).toEqual({ path: '/Users/me/proj/src/main.ts', root: '/Users/me/proj' })
   expect(editor.title).toBe('main.ts')
-  // 'split-row' from the prompt becomes 'auto', which never splits: a tab of its own, beside
-  // the terminal's in the active group.
+  // Enter opens to the side: a group to the right of the terminal's.
+  expect(st.groupRoot).toMatchObject({ kind: 'split', dir: 'row' })
+  expect(st.groups[st.activeGroup].tabs).toHaveLength(1)
   expect(st.tabs.map((t) => t.root)).toEqual([{ kind: 'leaf', pane: 1 }, { kind: 'leaf', pane: editor.id }])
   expect(st.tabs.find((t) => t.id === st.activeTab)!.focused).toBe(editor.id)
 })
@@ -49,6 +50,7 @@ test('editor.open without a terminal cwd roots at home and honours the tab place
   expect(asked).toEqual(['/Users/me/'])
   const st = app.getState()
   expect(st.tabs).toHaveLength(2)
+  expect(st.groupRoot).toEqual({ kind: 'group', group: st.activeGroup })
   expect(st.panes[st.tabs[1].focused].props).toEqual({ path: '/Users/me/notes.md', root: '/Users/me' })
 })
 

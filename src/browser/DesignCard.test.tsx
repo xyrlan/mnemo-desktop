@@ -256,10 +256,10 @@ function layoutOf(panes: Record<number, { id: number; view: string }>, focused: 
   return { layout: { getState: () => state as never }, opened }
 }
 
-test('⌘K Design Mode with no browser pane opens one and waits there for a page', () => {
+test('⌘K Design Mode with no browser pane opens one to the side of the terminal and waits there for a page', () => {
   const { layout, opened } = layoutOf({ 1: { id: 1, view: 'terminal' } }, 1)
   runDesignMode(layout, live.design, () => undefined)
-  expect(opened).toEqual([['browser', { url: '' }, 'auto']])
+  expect(opened).toEqual([['browser', { url: '' }, 'split-row']])
   expect(live.design.store.getState().panes[-8]).toEqual({ mode: 'waiting' })
 })
 

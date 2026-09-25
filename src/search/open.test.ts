@@ -50,13 +50,13 @@ describe('opening a match', () => {
     expect(p.ed.calls).toEqual([])
   })
 
-  it('opens the file in an editor rooted at the searched worktree', async () => {
+  it('opens the file as a preview in an editor rooted at the searched worktree', async () => {
     const opened: unknown[] = []
     const app = { getState: () => ({ openView: (...a: unknown[]) => void opened.push(a) }) } as unknown as Store
     const p = pane('/r/src/a.ts')
     const file = { filePath: '/r/src/a.ts', relativePath: 'src/a.ts', matches: [] }
     expect(await openMatch(app, '/r', file, { line: 3, column: 2, matchLength: 4, lineContent: '' }, async () => [p.ed])).toBe(true)
-    expect(opened).toEqual([['editor', { path: '/r/src/a.ts', root: '/r' }, 'auto', 'a.ts']])
+    expect(opened).toEqual([['editor', { path: '/r/src/a.ts', root: '/r' }, 'auto', 'a.ts', { preview: true }]])
     expect(p.ed.calls[0]).toBe('select 3:2-3:6')
   })
 })
