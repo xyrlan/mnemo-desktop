@@ -362,6 +362,13 @@ mod tests {
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     }
 
+    /// `p` for git's command line: Windows' canonical `\\?\C:\…` form is one git cannot create a
+    /// tree under ("could not create leading directories"), so the prefix goes.
+    fn plain(p: &Path) -> String {
+        let s = at(p);
+        s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
+    }
+
     fn at(p: &Path) -> String {
         p.to_string_lossy().into_owned()
     }
@@ -413,7 +420,7 @@ mod tests {
         git(&proj, &["add", "a.txt"]);
         git(&proj, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a"]);
         let wt = s.outside.join("repo-wt-one");
-        git(&proj, &["worktree", "add", "-q", "-b", "one", &at(&wt)]);
+        git(&proj, &["worktree", "add", "-q", "-b", "one", &plain(&wt)]);
         let scope = s.with(&[&proj]);
         assert_eq!(read_in(&at(&wt.join("a.txt")), &scope).unwrap(), "a");
         write_in(&at(&wt.join("b.txt")), "b", &scope).unwrap();
