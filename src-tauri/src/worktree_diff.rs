@@ -638,6 +638,9 @@ mod tests {
     /// left an uncommitted edit and an untracked file.
     fn child_repo(tag: &str) -> PathBuf {
         let root = repo(tag);
+        // Windows runners check files out with CRLF (`core.autocrlf=true`): switching back to the
+        // child's branch below would rewrite its files as `…\r\n`.
+        sh_git(&["config", "core.autocrlf", "false"], &root);
         sh_git(&["checkout", "-q", "-b", "feat/x/child"], &root);
         std::fs::write(root.join("edit.txt"), "one\ntwo\nthree\n").unwrap();
         std::fs::write(root.join("added.txt"), "a\n").unwrap();
