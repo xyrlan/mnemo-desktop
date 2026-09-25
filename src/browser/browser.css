@@ -12,7 +12,7 @@
 .browser-bar button:disabled { color: var(--muted-foreground); background: transparent; opacity: 0.4; }
 .browser-bar .browser-external { margin-left: 2px; }
 .browser-store { flex: none; margin-left: 4px; padding: 0 6px; height: 20px; line-height: 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
-.browser-bar .browser-design { display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
+.browser-bar .browser-design { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: auto; padding: 0 8px 0 6px; margin-left: 4px; }
 .browser-bar .browser-design.on { color: var(--foreground); border-color: var(--ring); background: var(--accent); }
 /* Design Mode's strip sits in the column, above the page: the webview would cover it otherwise. */
 .browser .design-strip, .browser .design-card { flex: none; }

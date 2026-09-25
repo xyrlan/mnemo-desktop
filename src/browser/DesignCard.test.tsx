@@ -16,7 +16,8 @@ vi.mock('./design-live', () => ({
   },
   useAgentTarget: () => live.target.current,
 }))
-const { DesignStrip, DesignToggle, designPane } = await import('./design-view')
+const { DesignStrip, DesignToggle, designPane, runDesignMode } = await import('./design-view')
+const { BlankPage } = await import('./BlankPage')
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -215,4 +216,60 @@ test('the action works on the focused browser pane, else the tab’s first one',
   expect(designPane({ ...two, panes: { [-3]: { id: -3, view: 'browser' }, [-5]: { id: -5, view: 'browser' } } as never })).toBe(-5)
   expect(designPane({ ...tab(1), panes: { 1: { id: 1, view: 'terminal' } } as never })).toBeNull()
   expect(designPane({ tabs: [], activeTab: '', panes })).toBeNull()
+})
+
+test('the toggle says "Design" in words; on a pane with no page it waits, and the strip says so', async () => {
+  await act(() => root.render(createElement('div', null, createElement(DesignToggle, { id: ID, ready: false }), createElement(DesignStrip, { id: ID }))))
+  const toggle = () => host.querySelector<HTMLButtonElement>('.browser-design')!
+  expect(toggle().textContent).toBe('Design')
+  await act(async () => toggle().click())
+  expect(live.design.store.getState().panes[ID]).toEqual({ mode: 'waiting' })
+  expect(toggle().getAttribute('aria-pressed')).toBe('true')
+  expect(text()).toContain('turns on once the page loads')
+  await act(async () => button('Stop').click())
+  expect(live.design.store.getState().panes[ID]).toBeUndefined()
+})
+
+test('a blank page explains the pane, Design Mode first, and its button turns it on', async () => {
+  const onDesign = vi.fn()
+  await act(() => root.render(createElement(BlankPage, { waiting: false, onDesign })))
+  expect(text()).toContain('Type a URL or a search')
+  expect(text()).toContain('Design Mode')
+  await act(async () => button('Turn on Design Mode').click())
+  expect(onDesign).toHaveBeenCalledTimes(1)
+  await act(() => root.render(createElement(BlankPage, { waiting: true, onDesign })))
+  expect(button('Waiting for a page').getAttribute('aria-pressed')).toBe('true')
+})
+
+/** A layout of one tab holding `panes`, whose `openView` adds a browser pane and focuses it. */
+function layoutOf(panes: Record<number, { id: number; view: string }>, focused: number) {
+  const opened: Array<[string, unknown, string]> = []
+  let state = {
+    tabs: [{ id: 't', root: { kind: 'leaf', pane: focused }, focused }],
+    activeTab: 't',
+    panes,
+    openView(view: string, props: unknown, place: string) {
+      opened.push([view, props, place])
+      state = { ...state, tabs: [{ id: 't', root: { kind: 'split', dir: 'row', ratio: 0.5, children: [{ kind: 'leaf', pane: focused }, { kind: 'leaf', pane: -8 }] }, focused: -8 }] as never, panes: { ...state.panes, [-8]: { id: -8, view } } }
+    },
+  }
+  return { layout: { getState: () => state as never }, opened }
+}
+
+test('⌘K Design Mode with no browser pane opens one and waits there for a page', () => {
+  const { layout, opened } = layoutOf({ 1: { id: 1, view: 'terminal' } }, 1)
+  runDesignMode(layout, live.design, () => undefined)
+  expect(opened).toEqual([['browser', { url: '' }, 'auto']])
+  expect(live.design.store.getState().panes[-8]).toEqual({ mode: 'waiting' })
+})
+
+test('⌘K Design Mode on a browser pane arms a loaded page, and waits on a blank one', () => {
+  const { layout, opened } = layoutOf({ [-5]: { id: -5, view: 'browser' } }, -5)
+  runDesignMode(layout, live.design, () => 'http://localhost:3000/')
+  expect(live.design.store.getState().panes[-5]).toEqual({ mode: 'picking', error: null })
+  runDesignMode(layout, live.design, () => 'http://localhost:3000/')
+  expect(live.design.store.getState().panes[-5]).toBeUndefined()
+  runDesignMode(layout, live.design, () => 'about:blank')
+  expect(live.design.store.getState().panes[-5]).toEqual({ mode: 'waiting' })
+  expect(opened).toEqual([])
 })

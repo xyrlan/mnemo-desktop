@@ -37,6 +37,21 @@ export function DesignCard({ id, design, target, copy }: DesignCardProps) {
     )
   }
 
+  if (d.mode === 'waiting') {
+    return (
+      <div data-ui className="design-strip flex h-8 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground" role="status">
+        <Crosshair className="size-3.5 text-foreground" />
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium text-foreground">Design Mode</span> — open a page above; it turns on once the page loads
+        </span>
+        <Button size="xs" variant="ghost" onClick={() => design.stop(id)} title="Leave Design Mode">
+          <X />
+          Stop
+        </Button>
+      </div>
+    )
+  }
+
   if (d.mode === 'picking') {
     return (
       <div data-ui className="design-strip flex h-8 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground" role="status">

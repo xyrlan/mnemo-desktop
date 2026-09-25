@@ -20,7 +20,9 @@ test('mac bindings', () => {
   expect(actionForKey(ev('k', { metaKey: true }), 'mac')).toBe('palette.open')
   expect(actionForKey(ev('b', { metaKey: true }), 'mac')).toBe('sidebar.toggle-left')
   expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBeNull()
-  expect(actionForKey(ev('B', { metaKey: true, shiftKey: true }), 'mac')).toBeNull()
+  // Orca's new-browser chord.
+  expect(actionForKey(ev('B', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.new-browser')
+  expect(actionForKey(ev('B', { ctrlKey: true, shiftKey: true }), 'other')).toBe('tab.new-browser')
   expect(actionForKey(ev('e', { metaKey: true }), 'mac')).toBe('dictation.toggle')
   expect(actionForKey(ev('G', { metaKey: true, shiftKey: true }), 'mac')).toBe('diff.open')
   expect(actionForKey(ev('a', { metaKey: true, altKey: true }), 'mac')).toBe('floating-terminal.toggle')
@@ -182,7 +184,7 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(new Set(ids).size).toBe(ids.length)
   expect(ids.sort()).toEqual(
     [
-      'tab.new', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
+      'tab.new', 'tab.new-browser', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
       'sidebar.toggle-left', 'sidebar.toggle-right', 'worktree.jump', 'workspace.new', 'pane.toggle-face', 'dictation.toggle', 'floating-terminal.toggle', 'diff.open', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((n) => [`tab.go.${n}`, `worktree.go.${n}`]),
     ].sort(),

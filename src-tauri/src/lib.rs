@@ -356,6 +356,7 @@ pub fn run() {
 
                 const TAB: &[(&str, &str, &str)] = &[
                     ("tab.new", "New Tab", "CmdOrCtrl+T"),
+                    ("tab.new-browser", "New Browser Tab", "CmdOrCtrl+Shift+B"),
                     ("tab.prev", "Previous Tab", "CmdOrCtrl+Shift+["),
                     ("tab.next", "Next Tab", "CmdOrCtrl+Shift+]"),
                     ("tab.go.1", "Tab 1", "Ctrl+1"),
