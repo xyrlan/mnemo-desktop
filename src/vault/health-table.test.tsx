@@ -350,7 +350,7 @@ test('a health error and a neighbourhood error can each be dismissed, and come b
     expect(healthErr()?.textContent).toContain('mnemo: not found')
     await click(healthErr()!.querySelector('button'))
     expect(healthErr()).toBeNull()
-    await click(byText(host, '.vr-strip button', '↻'))
+    await click(host.querySelector('.vr-strip button[title="Re-run status and stale"]'))
     await flush()
     expect(healthErr()?.textContent).toContain('mnemo: not found')
     await click(healthErr()!.querySelector('button'))

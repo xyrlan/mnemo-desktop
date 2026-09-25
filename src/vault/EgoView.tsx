@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { cn } from '@/ui/cn'
 import { Graph } from '../graph'
 import { useVault, vault } from './app-store'
 import { countLabel, egoFlow, firedIds, GHOST, withGlow } from './ego'
 import { pulseStore } from '../pulse/app-store'
 import type { PulseStore } from '../pulse/store'
+import { ErrorLine } from './ErrorLine'
+import { Dot, EMPTY, Loading } from './ui'
 import type { VaultGraph } from './types'
 
 /** How long a node a pulse names glows. */
@@ -53,7 +56,7 @@ const LEGEND = [
   ['muted', 'inferred or never fired'],
 ] as const
 
-const EMPTY = { nodes: [], edges: [] }
+const NO_FLOW = { nodes: [], edges: [] }
 
 /** The rule at `path` in the centre, the pages it links to and from, and the pages sharing its
  *  topics. A neighbour's click selects it; a pulse naming a node makes it glow. */
@@ -64,7 +67,7 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
   }, [path])
 
   const shown = ego?.center === path ? ego : null
-  const laidOut = useMemo(() => (shown ? egoFlow(shown) : EMPTY), [shown])
+  const laidOut = useMemo(() => (shown ? egoFlow(shown) : NO_FLOW), [shown])
   const glow = useGlow(shown, pulses)
   const flow = useMemo(() => withGlow(laidOut, glow), [laidOut, glow])
   const neighbours = Math.max(0, (shown?.nodes.length ?? 0) - 1)
@@ -72,36 +75,23 @@ export function EgoView({ path, pulses = pulseStore }: { path: string; pulses?: 
   const [dismissed, setDismissed] = useState<VaultGraph | null>(null)
 
   return (
-    <section className="ve">
-      <div className="ve-bar">
-        {shown && !shown.error && (
-          <span className="vt-count">{countLabel(shown)}</span>
-        )}
-        <span className="vg-legend" title="Card colour is confidence; solid edges are links, dashed ones shared topics">
+    <section className="ve flex min-h-[200px] flex-1 basis-1/2 flex-col">
+      <div className="ve-bar flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+        {shown && !shown.error && <span className="vt-count text-[11px] text-muted-foreground tabular-nums">{countLabel(shown)}</span>}
+        <span className="vg-legend ml-auto flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground" title="Card colour is confidence; solid edges are links, dashed ones shared topics">
           {LEGEND.map(([tone, text]) => (
-            <span key={tone}>
-              <i className={`vg-dot gr-${tone}`} />
+            <span key={tone} className="inline-flex items-center gap-1.5">
+              <Dot tone={tone} className="vg-dot" />
               {text}
             </span>
           ))}
         </span>
       </div>
-      <div className="ve-canvas">
-        {shown?.error && dismissed !== shown && (
-          <div className="vt-error-line ve-msg">
-            <pre className="vt-error">{shown.error}</pre>
-            <button className="vt-x" title="Dismiss" aria-label="Dismiss" onClick={() => setDismissed(shown)}>
-              ×
-            </button>
-          </div>
-        )}
+      <div className="ve-canvas relative mx-3 mb-3 min-h-[320px] flex-1 overflow-hidden rounded-lg border border-border bg-card/40">
+        {shown?.error && dismissed !== shown && <ErrorLine text={shown.error} onDismiss={() => setDismissed(shown)} className="ve-msg absolute top-2 right-2 left-2 z-[5]" />}
         {/* Not yet read is always a read in flight: the mount starts one before the first paint. */}
-        {!shown && (
-          <div className="vt-empty vt-loading ve-msg" role="status">
-            reading the neighbourhood…
-          </div>
-        )}
-        {shown && !shown.error && neighbours === 0 && <div className="vt-empty ve-msg">No links and no shared topics.</div>}
+        {!shown && <Loading className="ve-msg absolute top-0 left-0 z-[5]">reading the neighbourhood…</Loading>}
+        {shown && !shown.error && neighbours === 0 && <div className={cn('vt-empty ve-msg absolute top-0 left-0 z-[5]', EMPTY, 'px-3')}>No links and no shared topics.</div>}
         {flow.nodes.length > 0 && <Graph nodes={flow.nodes} edges={flow.edges} fitKey={path} fitMinZoom={0.85} onNodeClick={(id) => id !== path && !id.startsWith(GHOST) && void vault.getState().select(id)} />}
       </div>
     </section>
