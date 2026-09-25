@@ -1,7 +1,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import LeftSidebar from './Sidebar'
-import { agent, fleetStore, homeStore, layoutStore, repo, resetFakes, run, shellStore, tree } from './testing'
+import { DispatchContext, type DispatchRoutes, type WaveLine } from './dispatch'
+import { agent, fleetStore, homeStore, layoutStore, missionStore, repo, resetFakes, run, shellStore, tree } from './testing'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('./upstream', () => import('./testing'))
@@ -9,11 +10,19 @@ vi.mock('./upstream', () => import('./testing'))
 // Tooltips are rendered closed here: opening a popper-positioned layer in jsdom never settles
 // (see src/ui/primitives.test.tsx). What they say is checked through the accessible text.
 
+// Without a Dispatch tab (no provider, as before `src/dispatch/` lands) children are cards of their
+// own; the tests at the end give it one.
 let root: Root | null = null
-async function mount(): Promise<HTMLElement> {
+async function mount(routes: DispatchRoutes | null = null): Promise<HTMLElement> {
   const host = document.body.appendChild(document.createElement('div'))
   root = createRoot(host)
-  await act(async () => root!.render(<LeftSidebar />))
+  await act(async () =>
+    root!.render(
+      <DispatchContext.Provider value={routes}>
+        <LeftSidebar />
+      </DispatchContext.Provider>,
+    ),
+  )
   return host
 }
 beforeEach(() => resetFakes())
@@ -273,4 +282,106 @@ test('while the shell has the sidebar collapsed it draws nothing', async () => {
   shellStore.setState({ leftOpen: false })
   const host = await mount()
   expect(host.innerHTML).toBe('')
+})
+
+/** The Dispatch tab as a recorder: `/r/app` dispatched two waves, and child c1 belongs to it. */
+function dispatchTab(lines: Record<string, WaveLine[]> = { '/r/app': [{ feature: 'tab-groups-core', needsYou: 0, working: 1, done: 0 }, { feature: 'cavebot', needsYou: 2, working: 0, done: 1 }] }) {
+  const opened: Array<[string, string | undefined]> = []
+  const asked: string[] = []
+  const routes: DispatchRoutes = {
+    openDispatch: (parent, child) => void opened.push([parent, child]),
+    parentWorktree: (id) => (id === 'c1' || id === 'c2' ? '/r/app' : null),
+    useWaveLines: (parent) => (asked.push(parent), lines[parent] ?? []),
+  }
+  return { routes, opened, asked }
+}
+
+const child = (id: string, more: Record<string, unknown> = {}) => ({
+  id,
+  session_id: `${id}-session`,
+  name: null,
+  state: 'running',
+  tempo: 'steady',
+  needs: null,
+  detail: '',
+  suggested_reply: null,
+  cwd: `/r/app-wt-${id}`,
+  tokens: 0,
+  live: true,
+  updated_at: null,
+  intent: null,
+  branch: null,
+  timeline_len: 0,
+  ...more,
+})
+
+test('with the Dispatch tab, dispatched children leave the list; workspaces made by hand stay cards', async () => {
+  fleet()
+  const host = await mount(dispatchTab().routes)
+  const options = [...host.querySelectorAll('[role="option"]')].map((o) => o.getAttribute('data-worktree-path'))
+  expect(options).toEqual(['/r/app', '/r/app-wt-fix', '/r/web'])
+})
+
+test('a folded repo counts only its cards, and still warns of a child that needs you', async () => {
+  fleet()
+  const repos = fleetStore.getState().repos
+  repos[0].worktrees[2] = { ...repos[0].worktrees[2], agents: [agent('s2', 'needs-you')] }
+  repos[0].worktrees[1] = { ...repos[0].worktrees[1], agents: [] }
+  fleetStore.setState({ repos: [...repos] })
+  const host = await mount(dispatchTab().routes)
+  await click(host.querySelector('[data-repo-root="/r/app"] [data-repo-header]'))
+  const folded = host.querySelector('[data-repo-root="/r/app"] [data-repo-folded]')!
+  expect(folded.textContent).toContain('2')
+  expect(folded.querySelector('[data-status]')!.getAttribute('data-status')).toBe('permission')
+})
+
+test('the parent’s card has one line per wave, with its most urgent count; other cards have none', async () => {
+  fleet()
+  const tab = dispatchTab()
+  const host = await mount(tab.routes)
+  const lines = [...card(host, '/r/app').querySelectorAll('[data-wave-line]')]
+  expect(lines.map((l) => l.textContent)).toEqual(['tab-groups-core · 1 working', 'cavebot · 2 need you'])
+  expect(lines.map((l) => l.querySelector('[data-agent-dot]')!.getAttribute('data-agent-dot'))).toEqual(['working', 'permission'])
+  expect(lines[1].getAttribute('aria-label')).toBe('Wave cavebot: 2 need you. Open in Dispatch')
+  expect(card(host, '/r/app-wt-fix').querySelector('[data-wave-lines]')).toBeNull()
+  expect(tab.asked).not.toContain('/r/app-wt-child')
+})
+
+test('a wave line opens the parent’s Dispatch tab on that wave’s child that needs you, not the card’s worktree', async () => {
+  fleet()
+  missionStore.setState({
+    snapshot: {
+      repos: [
+        {
+          root: '/r/app',
+          name: 'app',
+          parents: [],
+          missions: [
+            {
+              feature: 'cavebot',
+              contract_path: '',
+              landable: false,
+              pieces: [
+                { name: 'a', branch: 'feat/cavebot/a', pr: null, child: child('c1') },
+                { name: 'b', branch: 'feat/cavebot/b', pr: null, child: child('c2', { tempo: 'blocked', needs: 'may I?' }) },
+              ],
+            },
+          ],
+          children: [],
+        },
+      ],
+      errors: [],
+      at: '',
+    },
+  })
+  const tab = dispatchTab()
+  const host = await mount(tab.routes)
+  click(card(host, '/r/app').querySelector('[data-wave-line="cavebot"]'))
+  expect(tab.opened).toEqual([['/r/app', 'c2']])
+  expect(layoutStore.getState().switchWorktree).not.toHaveBeenCalled()
+
+  // Enter on a focused line does the same; the list does not take it as the card's Enter.
+  await key(card(host, '/r/app').querySelector('[data-wave-line="tab-groups-core"]')!, 'Enter')
+  expect(tab.opened[1]).toEqual(['/r/app', 'tab-groups-core'])
+  expect(layoutStore.getState().switchWorktree).not.toHaveBeenCalled()
 })

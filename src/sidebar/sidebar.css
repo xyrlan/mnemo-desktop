@@ -64,7 +64,8 @@
 }
 
 /* Compact agents hang half a step into the card's gutter. */
-[data-left-sidebar] [data-compact-agent-list='true'] {
+[data-left-sidebar] [data-compact-agent-list='true'],
+[data-left-sidebar] [data-wave-lines] {
   margin-inline-start: -0.5rem;
   width: calc(100% + 0.5rem);
 }

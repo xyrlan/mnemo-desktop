@@ -193,6 +193,19 @@ test('clicking a card switches to its worktree and pane, and the card goes', () 
   expect(switched).toHaveLength(2)
 })
 
+test('a dispatched child’s card opens its parent’s Dispatch tab instead of its worktree', () => {
+  const routed: Array<[string, string | null]> = []
+  const n = make({ openChild: (sid, w) => (sid === 's-feat' ? (routed.push([sid, w]), true) : false) })
+  emit(stop('s-feat', FEAT))
+  emit(stop('s-x', '/code/lib'))
+  const [feat, lib] = n.cards.getState().cards
+  n.open(feat.id)
+  n.open(lib.id)
+  expect(routed).toEqual([['s-feat', FEAT]])
+  expect(switched).toEqual([['/code/lib', null]])
+  expect(n.cards.getState().cards).toEqual([])
+})
+
 test('dismiss drops only that card', () => {
   const n = make()
   emit(stop('s-feat', FEAT))

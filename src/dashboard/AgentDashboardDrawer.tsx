@@ -41,7 +41,7 @@ function DrawerBody({ fleet, onReveal, onClose }: { fleet: StoreApi<Fleet>; onRe
   return <AgentKanbanBoard cards={cards} onReveal={onReveal} onClose={onClose} className="h-full w-full bg-transparent" />
 }
 
-export type DrawerProps = Pick<RevealDeps, 'layout'> & {
+export type DrawerProps = Pick<RevealDeps, 'layout' | 'openChild'> & {
   fleet: StoreApi<Fleet>
   /** Where the left sidebar ends, in px: the drawer opens from there. */
   leftEdge: number
@@ -49,7 +49,7 @@ export type DrawerProps = Pick<RevealDeps, 'layout'> & {
 
 /** The agent dashboard: a non-modal sheet that expands from the left sidebar's edge and leaves
  *  the rest of the app working — the sidebar stays clickable beside it. */
-export function AgentDashboardDrawer({ fleet, layout, leftEdge }: DrawerProps) {
+export function AgentDashboardDrawer({ fleet, layout, openChild, leftEdge }: DrawerProps) {
   const open = useDashboard((s) => s.open)
   const setOpen = useDashboard((s) => s.setOpen)
   const boardRef = useRef<HTMLDivElement | null>(null)
@@ -57,10 +57,10 @@ export function AgentDashboardDrawer({ fleet, layout, leftEdge }: DrawerProps) {
 
   const reveal = useCallback(
     (card: DashboardCard) => {
-      revealCard(card, { layout, fleet: () => fleet.getState() })
+      revealCard(card, { layout, fleet: () => fleet.getState(), openChild })
       close()
     },
-    [layout, fleet, close],
+    [layout, fleet, openChild, close],
   )
 
   useEffect(() => {

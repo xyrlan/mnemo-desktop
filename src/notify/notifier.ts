@@ -22,6 +22,9 @@ export type NotifierDeps = {
   native(title: string, body: string): Promise<void>
   sound(): void
   switchTo(worktree: string | null, pane: number | null): void
+  /** Shows the dispatched child session `sessionId` is (working in `worktree`) in its parent's
+   *  Dispatch tab; false when it is no child, or the tab cannot take it. */
+  openChild?(sessionId: string, worktree: string | null): boolean
   now(): number
 }
 
@@ -34,7 +37,8 @@ export const SOUND_GAP_MS = 1_500
 
 export type Notifier = {
   cards: StoreApi<Cards>
-  /** The card was clicked: show its worktree (and pane), and the card goes. */
+  /** The card was clicked: show its worktree (and pane), or a dispatched child's Dispatch tab,
+   *  and the card goes. */
   open(id: number): void
   dismiss(id: number): void
   stop(): void
@@ -104,6 +108,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       const card = cards.getState().cards.find((c) => c.id === id)
       if (!card) return
       dismiss(id)
+      if (deps.openChild?.(card.sessionId, card.worktree)) return
       if (card.worktree !== null || card.pane !== null) deps.switchTo(card.worktree, card.pane)
     },
     stop() {

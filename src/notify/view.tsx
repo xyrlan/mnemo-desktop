@@ -3,6 +3,8 @@ import { notifyAgent } from '../agents/notify'
 import { fleetStore } from '../fleet/store'
 import { store as layout } from '../layout/app-store'
 import { leaves } from '../layout/tree'
+import { missionStore } from '../mission/app-store'
+import { dispatchRoutes, openChildSession } from '../sidebar/dispatch'
 import { mountInSlot } from '../shell/slots'
 import { NotificationStack } from './NotificationStack'
 import { createNotifier } from './notifier'
@@ -43,6 +45,13 @@ export const notifier = createNotifier({
       }
       if (pane !== null) layout.getState().goToPane(pane)
     })()
+  },
+  // A dispatched child's card opens its parent's Dispatch tab, where its question is; the child's
+  // own worktree has nothing on screen. What it said is seen, as `switchTo` counts it.
+  openChild(sessionId, worktree) {
+    if (!openChildSession(dispatchRoutes, missionStore.getState().snapshot, sessionId)) return false
+    if (worktree !== null) fleetStore.getState().markRead(worktree)
+    return true
   },
   now: () => Date.now(),
 })

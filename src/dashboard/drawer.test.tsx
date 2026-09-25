@@ -68,11 +68,11 @@ function setup(repos: RepoNode[]) {
   return { fleet, layout: () => layout }
 }
 
-async function mount(repos: RepoNode[], leftEdge = 220) {
+async function mount(repos: RepoNode[], leftEdge = 220, openChild?: (sessionId: string) => boolean) {
   const deps = setup(repos)
   const host = document.body.appendChild(document.createElement('div'))
   root = createRoot(host)
-  await act(async () => root!.render(<AgentDashboardDrawer {...deps} leftEdge={leftEdge} />))
+  await act(async () => root!.render(<AgentDashboardDrawer {...deps} openChild={openChild} leftEdge={leftEdge} />))
 }
 
 const open = () => act(async () => dashboardStore.getState().setOpen(true))
@@ -159,6 +159,21 @@ test('a card click goes to its worktree, focuses its pane, marks it read and clo
 
 test('an agent with no pane on screen shows its worktree only', async () => {
   await mount(fleetOf({ a: 'working' }))
+  await open()
+  await act(async () => column('working').querySelector<HTMLButtonElement>('[data-agent-card] button')!.click())
+  expect(calls).toEqual(['switchWorktree /code/app', 'markRead /code/app'])
+})
+
+test('a dispatched child’s card opens its parent’s Dispatch tab and marks its news seen; the others go where they did', async () => {
+  // The Dispatch tab takes session `child` only.
+  const openChild = (sessionId: string) => (sessionId === 'child' ? (calls.push(`openChild ${sessionId}`), true) : false)
+  await mount(fleetOf({ a: 'working' }), 220, openChild)
+  await open()
+  await act(async () => column('done').querySelector<HTMLButtonElement>('[data-agent-card] button')!.click())
+  expect(calls).toEqual(['openChild child', 'markRead /code/lib-wt-fix'])
+  expect(dashboardStore.getState().open).toBe(false)
+
+  calls.length = 0
   await open()
   await act(async () => column('working').querySelector<HTMLButtonElement>('[data-agent-card] button')!.click())
   expect(calls).toEqual(['switchWorktree /code/app', 'markRead /code/app'])

@@ -1,6 +1,9 @@
 // The left sidebar with a working fleet: two repos, their worktrees, and agents in every state —
-// one asking permission, a card with several agents, a dispatched child with an open PR, and
-// one finishing (a `stop` hook) after launch, which leaves its card unread.
+// one asking permission, a card with several agents, dispatched children, and one finishing (a
+// `stop` hook) after launch, which leaves its card unread. The main checkout's session dispatched
+// the wave `dispatch-b` (one child waiting on you, one working): with the Dispatch tab
+// (`src/dispatch/`) in, those children leave the list and the main checkout's card carries a line
+// for the wave, and one for the child that belongs to no wave. Without it, they are cards.
 import { scenario } from '../scenario.mjs'
 import { appIpc, HOME, REPO } from '../fixtures/app.mjs'
 
@@ -14,6 +17,8 @@ const WORKTREES = {
     tree(REPO, 'main', { isMain: true }),
     tree(`${REPO}-wt-login`, 'fix/login-redirect'),
     tree(`${REPO}-wt-left-sidebar`, 'feat/orca-redesign-b/left-sidebar', { dispatched: true }),
+    tree(`${REPO}-wt-c-dispatch-tab`, 'feat/dispatch-b/dispatch-tab', { dispatched: true }),
+    tree(`${REPO}-wt-c-child-routing`, 'feat/dispatch-b/child-routing', { dispatched: true }),
     tree(`${REPO}-wt-flaky-tests`, 'chore/flaky-tests'),
     tree(`${REPO}-wt-release`, 'release/0.2.1'),
   ],
@@ -77,7 +82,33 @@ scenario('left-sidebar', {
             parent('s-flaky-3', `${REPO}-wt-flaky-tests`, 'waiting', 'input needed'),
             parent('s-main', REPO, 'idle'),
           ],
-          missions: [],
+          missions: [
+            {
+              feature: 'dispatch-b',
+              contract_path: `${REPO}/docs/superpowers/contracts/2026-09-25-dispatch-b.md`,
+              landable: false,
+              pieces: [
+                {
+                  name: 'dispatch-tab',
+                  branch: 'feat/dispatch-b/dispatch-tab',
+                  pr: null,
+                  child: child('d7a1', `${REPO}-wt-c-dispatch-tab`, 'feat/dispatch-b/dispatch-tab', { parent_session: 's-main', intent: 'The Dispatch tab' }),
+                },
+                {
+                  name: 'child-routing',
+                  branch: 'feat/dispatch-b/child-routing',
+                  pr: null,
+                  child: child('e3b9', `${REPO}-wt-c-child-routing`, 'feat/dispatch-b/child-routing', {
+                    parent_session: 's-main',
+                    intent: 'Route every click on a child to its parent',
+                    tempo: 'blocked',
+                    needs: 'May I add a test fixture?',
+                    waiting_for: 'input needed',
+                  }),
+                },
+              ],
+            },
+          ],
           children: [
             child('c9f2', `${REPO}-wt-left-sidebar`, 'feat/orca-redesign-b/left-sidebar', { pr: pr(204, 'feat/orca-redesign-b/left-sidebar', 'OPEN', 'pending') }),
             child('b1e0', `${REPO}-wt-release`, 'release/0.2.1', { state: 'done', live: false, intent: 'Cut 0.2.1', pr: pr(198, 'release/0.2.1', 'MERGED', 'pass') }),

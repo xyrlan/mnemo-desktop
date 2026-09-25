@@ -1,4 +1,4 @@
-import { activePath, agentDot, countByState, prLabel, shortAgo, sidebarOrder, summarize, summaryGroups, worktreeStatus } from './model'
+import { activePath, agentDot, countByState, prLabel, shortAgo, sidebarOrder, summarize, summaryGroups, waveSummary, worktreeStatus } from './model'
 import { agent, repo, tree } from './testing'
 
 test('a worktree’s status is its most urgent agent’s: waiting on you, then working, then done', () => {
@@ -39,6 +39,20 @@ test('sidebar order is the cards top to bottom, without the folded repos', () =>
   const repos = [repo('/r/a', [tree('/r/a'), tree('/r/a-wt-x')]), repo('/r/b', [tree('/r/b')]), repo('/r/c', [tree('/r/c')])]
   expect(sidebarOrder(repos, new Set()).map((w) => w.path)).toEqual(['/r/a', '/r/a-wt-x', '/r/b', '/r/c'])
   expect(sidebarOrder(repos, new Set(['/r/b'])).map((w) => w.path)).toEqual(['/r/a', '/r/a-wt-x', '/r/c'])
+})
+
+test('with the Dispatch tab there, dispatched children leave the order; workspaces made by hand stay', () => {
+  const repos = [repo('/r/a', [tree('/r/a', { kind: 'main' }), tree('/r/a-wt-child', { kind: 'dispatched' }), tree('/r/a-wt-x')])]
+  expect(sidebarOrder(repos, new Set()).map((w) => w.path)).toEqual(['/r/a', '/r/a-wt-child', '/r/a-wt-x'])
+  expect(sidebarOrder(repos, new Set(), true).map((w) => w.path)).toEqual(['/r/a', '/r/a-wt-x'])
+})
+
+test('a wave line says its most urgent count, with the glyph a card would use for it', () => {
+  expect(waveSummary({ needsYou: 2, working: 1, done: 3 })).toEqual({ state: 'permission', text: '2 need you' })
+  expect(waveSummary({ needsYou: 1, working: 0, done: 0 })).toEqual({ state: 'permission', text: '1 needs you' })
+  expect(waveSummary({ needsYou: 0, working: 1, done: 3 })).toEqual({ state: 'working', text: '1 working' })
+  expect(waveSummary({ needsYou: 0, working: 0, done: 3 })).toEqual({ state: 'done', text: '3 done' })
+  expect(waveSummary({ needsYou: 0, working: 0, done: 0 })).toEqual({ state: 'idle', text: 'idle' })
 })
 
 test('the active card is the worktree on screen, else the first repo’s main checkout', () => {

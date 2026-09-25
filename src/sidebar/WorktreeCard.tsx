@@ -4,7 +4,7 @@
 // components/sidebar/WorktreeCardMetadataControls.tsx [1-17],
 // components/sidebar/WorktreeCardStatusSlot.tsx and
 // components/sidebar/WorktreeTitleInlineRename.tsx [336-385] (MIT, 122b8c25)
-import React from 'react'
+import React, { useContext } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { Badge, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -12,9 +12,11 @@ import type { PrNode, WorktreeNode } from '../fleet/types'
 import { StatusIndicator } from './agent-glyphs'
 import { activateWorktree } from './actions'
 import { useArchive } from './archive'
+import { DispatchContext } from './dispatch'
 import { prLabel, STATUS_LABEL, worktreeStatus, type WorktreeStatus } from './model'
 import { ReviewIcon } from './review-icon'
 import { TruncatedSidebarLabel } from './truncated-label'
+import { WaveLines } from './WaveLines'
 import { WorktreeCardAgents } from './WorktreeCardAgents'
 
 /** Orca's flush card inside a repo group (`worktree-list/rows/indentation.ts`): content indent
@@ -84,8 +86,9 @@ function PrBadge({ pr }: { pr: PrNode }): React.JSX.Element {
   )
 }
 
-/** One worktree: status lane, name, branch, PR and its agents. A click shows it and marks it read.
- *  While it is being removed it is greyed out under "Removing…" and takes no clicks. */
+/** One worktree: status lane, name, branch, PR, its agents and the waves it dispatched. A click
+ *  shows it and marks it read. While it is being removed it is greyed out under "Removing…" and
+ *  takes no clicks. */
 export const WorktreeCard = React.memo(function WorktreeCard({
   worktree,
   active,
@@ -98,6 +101,7 @@ export const WorktreeCard = React.memo(function WorktreeCard({
   const showAgents = worktree.agents.length > 0
   const titleOnlyCard = !hasMetaRow && !showAgents
   const removing = useArchive((s) => s.removing.has(worktree.path))
+  const routes = useContext(DispatchContext)
   return (
     <div
       className={cn(
@@ -164,6 +168,10 @@ export const WorktreeCard = React.memo(function WorktreeCard({
 
           {/* Why: counterbalance the stack gap (-mt-1) so agents right after the title read as one group. */}
           {showAgents && <WorktreeCardAgents worktree={worktree} className={hasMetaRow ? 'mt-0' : '-mt-1'} />}
+          {routes && worktree.kind !== 'dispatched' && (
+            // Why: right after the agents, the waves continue their list (the row gap, not the stack's).
+            <WaveLines parent={worktree.path} routes={routes} className={hasMetaRow && !showAgents ? 'mt-0' : '-mt-1'} />
+          )}
         </div>
       </div>
     </div>

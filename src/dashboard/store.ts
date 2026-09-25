@@ -18,15 +18,19 @@ export const dashboardStore: StoreApi<DashboardState> = createStore<DashboardSta
 
 export const useDashboard = <T,>(sel: (s: DashboardState) => T): T => useStore(dashboardStore, sel)
 
-/** What a card click needs from the layout and the fleet. */
+/** What a card click needs from the layout and the fleet. `openChild` shows a dispatched child in
+ *  its parent's Dispatch tab, and says false when the card is no child or the tab cannot take it. */
 export type RevealDeps = {
   layout: () => Pick<Actions, 'switchWorktree' | 'goToPane'>
   fleet: () => Pick<Fleet, 'markRead'>
+  openChild?: (sessionId: string) => boolean
 }
 
-/** Show the card's worktree with its agent's pane focused, and count its news as seen. An agent
- *  with no pane on screen (a dispatched child running headless) shows its worktree only. */
-export function revealCard(card: Pick<DashboardCard, 'worktreePath' | 'paneId'>, deps: RevealDeps): void {
+/** Show the card's worktree with its agent's pane focused, and count its news as seen. A
+ *  dispatched child goes to its parent's Dispatch tab, selected there; without the tab, it shows
+ *  its worktree only. */
+export function revealCard(card: Pick<DashboardCard, 'sessionId' | 'worktreePath' | 'paneId'>, deps: RevealDeps): void {
+  if (deps.openChild?.(card.sessionId)) return deps.fleet().markRead(card.worktreePath)
   // `switchWorktree` swaps the layout before its first await, so the pane is in `tabs` after it.
   void deps.layout().switchWorktree(card.worktreePath)
   if (card.paneId !== null) deps.layout().goToPane(card.paneId)

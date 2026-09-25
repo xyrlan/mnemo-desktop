@@ -1,5 +1,6 @@
 import type { AgentNode, AgentState, PrNode, RepoNode, WorktreeNode } from '../fleet/types'
 import { accentHue } from '../home/repo-color'
+import type { WaveLine } from './dispatch'
 
 /** A path as the fleet spells it: no trailing slash. */
 export const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
@@ -64,10 +65,25 @@ export function countByState(repos: readonly RepoNode[]): Record<AgentState, num
   return counts
 }
 
+/** A repo's cards. With the Dispatch tab there to take them (`routed`), dispatched children leave
+ *  the list: each belongs to the workspace that dispatched it, whose card carries its wave. */
+export function shownWorktrees(repo: RepoNode, routed: boolean): WorktreeNode[] {
+  return routed ? repo.worktrees.filter((w) => w.kind !== 'dispatched') : repo.worktrees
+}
+
 /** The cards as the sidebar shows them, top to bottom, leaving out folded repos: what
  *  `worktree.go.1` … `worktree.go.9` count. */
-export function sidebarOrder(repos: readonly RepoNode[], collapsed: ReadonlySet<string>): WorktreeNode[] {
-  return repos.flatMap((r) => (collapsed.has(r.root) ? [] : r.worktrees))
+export function sidebarOrder(repos: readonly RepoNode[], collapsed: ReadonlySet<string>, routed = false): WorktreeNode[] {
+  return repos.flatMap((r) => (collapsed.has(r.root) ? [] : shownWorktrees(r, routed)))
+}
+
+/** A wave line's glyph and count: the most urgent of its children, as a card's status lane
+ *  ranks its agents. "cavebot-lure-saida · 2 need you", "tab-groups-core · 1 working". */
+export function waveSummary(line: Pick<WaveLine, 'needsYou' | 'working' | 'done'>): { state: AgentDotState; text: string } {
+  if (line.needsYou > 0) return { state: 'permission', text: `${line.needsYou} ${line.needsYou === 1 ? 'needs' : 'need'} you` }
+  if (line.working > 0) return { state: 'working', text: `${line.working} working` }
+  if (line.done > 0) return { state: 'done', text: `${line.done} done` }
+  return { state: 'idle', text: 'idle' }
 }
 
 /** The card shown as active: the worktree on screen, or, before one is chosen, the main checkout

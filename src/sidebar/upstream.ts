@@ -1,10 +1,12 @@
 /** Everything the left sidebar reads from the rest of the app, in one seam so its tests mock a
- *  single module: the fleet (repos, worktrees, agents), the layout (which worktree is shown),
+ *  single module: the fleet (repos, worktrees, agents), the mission snapshot (which child is in
+ *  which wave), the layout (which worktree is shown),
  *  Home (adding and forgetting a project), the worktrees' backend, the action registry, the
  *  shell and its toasts. */
 import { homeStore } from '../home/app-store'
 
 export { fleetStore, useFleet } from '../fleet/store'
+export { missionStore } from '../mission/app-store'
 export { store as layoutStore } from '../layout/app-store'
 export { homeStore }
 export { register, run } from '../actions/registry'
