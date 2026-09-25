@@ -1,18 +1,18 @@
 .browser { display: flex; flex-direction: column; }
-.browser-bar { display: flex; align-items: center; gap: 2px; padding-bottom: 4px; }
-.browser-bar button { width: 26px; height: 26px; flex: none; background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--fg-muted); font: inherit; cursor: default; }
-.browser-bar button:hover { color: var(--fg); background: var(--bg-elev); }
-.browser-bar input { flex: 1; min-width: 0; height: 26px; margin-left: 4px; padding: 0 8px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; color: var(--fg); font: inherit; outline: none; }
-.browser-bar input:focus { border-color: var(--accent); }
-.browser-bar input::placeholder { color: var(--fg-muted); }
-.browser.loading .browser-bar input { background-image: linear-gradient(var(--accent), var(--accent)); background-size: 30% 2px; background-repeat: no-repeat; background-position: -30% 100%; animation: browser-loading 1.2s ease-in-out infinite; }
+.browser-bar { font-family: var(--font-sans); font-size: 12px; display: flex; align-items: center; gap: 2px; padding-bottom: 4px; }
+.browser-bar button { width: 26px; height: 26px; flex: none; background: transparent; border: 1px solid transparent; border-radius: var(--radius-md); color: var(--muted-foreground); font: inherit; cursor: default; }
+.browser-bar button:hover { color: var(--foreground); background: var(--accent); }
+.browser-bar input { flex: 1; min-width: 0; height: 26px; margin-left: 4px; padding: 0 8px; background: var(--muted); border: 1px solid var(--input); border-radius: var(--radius-md); color: var(--foreground); font: inherit; outline: none; }
+.browser-bar input:focus { border-color: var(--ring); }
+.browser-bar input::placeholder { color: var(--muted-foreground); }
+.browser.loading .browser-bar input { background-image: linear-gradient(var(--ring), var(--ring)); background-size: 30% 2px; background-repeat: no-repeat; background-position: -30% 100%; animation: browser-loading 1.2s ease-in-out infinite; }
 @keyframes browser-loading { to { background-position: 130% 100%; } }
 /* The native webview covers this box; what shows here is the gap while it loads or hides. */
-.browser-page { flex: 1; min-height: 0; position: relative; background: var(--bg-elev); }
-.browser-bar button:disabled { color: var(--fg-muted); background: transparent; opacity: 0.4; }
+.browser-page { flex: 1; min-height: 0; position: relative; background: var(--muted); }
+.browser-bar button:disabled { color: var(--muted-foreground); background: transparent; opacity: 0.4; }
 .browser-bar .browser-external { margin-left: 2px; }
-.browser-store { flex: none; margin-left: 4px; padding: 0 6px; height: 20px; line-height: 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.browser-store { flex: none; margin-left: 4px; padding: 0 6px; height: 20px; line-height: 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
 .browser-bar .browser-design { display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
-.browser-bar .browser-design.on { color: var(--accent); border-color: var(--accent); background: var(--bg-elev); }
+.browser-bar .browser-design.on { color: var(--foreground); border-color: var(--ring); background: var(--accent); }
 /* Design Mode's strip sits in the column, above the page: the webview would cover it otherwise. */
 .browser .design-strip, .browser .design-card { flex: none; }

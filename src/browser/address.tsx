@@ -81,7 +81,7 @@ export function AddressBar({ id, bar, dispatch, client, input, onSubmit, onError
   const external = externalUrl(bar.url)
 
   return (
-    <form className="browser-bar" onSubmit={onSubmit}>
+    <form className="browser-bar" data-ui onSubmit={onSubmit}>
       <button type="button" title="Back" onClick={() => client.back(id).catch(onError)}>
         ←
       </button>

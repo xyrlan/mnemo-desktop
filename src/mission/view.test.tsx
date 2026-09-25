@@ -22,11 +22,42 @@ vi.mock('../conversation/ConversationView', () => ({
     )
   },
 }))
+// A plain recorder, not vi.fn(): what the pane asked the core for, in order.
+const ipc = vi.hoisted(() => ({ calls: [] as [string, Record<string, unknown> | undefined][] }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string) => {
+  invoke: async (cmd: string, args?: Record<string, unknown>) => {
+    ipc.calls.push([cmd, args])
     if (cmd === 'child_memory') return memory.value ?? { briefing: null, injected: [], friction: [], mcp_reads: null }
+    if (cmd === 'mission_reply') return null
+    if (cmd === 'settings_read') return {}
     return { lines: timeline.lines, total: timeline.lines.length }
-  }),
+  },
+}))
+// The composer and approval card are the chat-input piece's: stand-ins that keep the props the
+// pane handed them. `parts: null` is the pane before that piece lands.
+type Props = Record<string, unknown>
+const chat = vi.hoisted(() => ({ parts: null as unknown, composer: null as null | Props, approval: null as null | Props }))
+vi.mock('./chat', () => ({ chatParts: () => chat.parts }))
+const stubs = {
+  ChatComposer: (props: Props) => {
+    chat.composer = props
+    return <div className="composer-stub" data-placeholder={String(props.placeholder)} data-disabled={String(props.disabled)} />
+  },
+  ApprovalCard: (props: Props) => {
+    chat.approval = props
+    return <div className="approval-stub">{`${props.tool} | ${props.summary}`}</div>
+  },
+}
+// Answering a prompt types into `claude attach`: recorded here, its outcome set per test.
+const answers = vi.hoisted(() => ({ calls: [] as [string, string][], phase: 'sent' as 'sent' | 'error' }))
+vi.mock('../cockpit/approve', async (orig) => ({
+  ...(await orig<typeof import('../cockpit/approve')>()),
+  answerPrompt: async (c: { id: string }, choice: string) => {
+    answers.calls.push([c.id, choice])
+    return answers.phase === 'error'
+      ? { choice, phase: 'error', pane: null, error: 'the prompt did not appear in the attach', at: Date.now() }
+      : { choice, phase: 'sent', pane: 3, at: Date.now() }
+  },
 }))
 
 import { missionStore } from './app-store'
@@ -35,6 +66,7 @@ import { snapshot } from './fixtures'
 import { allChildren, type ChildSession } from './types'
 import { store as appStore } from '../layout/app-store'
 import type { SessionStatus } from '../conversation/types'
+import { settingsStore } from '../settings/app-store'
 import './view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -61,11 +93,29 @@ beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  missionStore.setState({ snapshot, lastError: null, looked: {}, drafts: {}, sent: {} })
+  missionStore.setState({ snapshot, lastError: null, looked: {}, drafts: {}, sent: {}, replyErrors: {}, sending: {}, typing: {} })
+  // Sent as typed: the English rewrite would ask the core for a translation first.
+  settingsStore.setState({ outgoing: 'as-typed', replyLanguage: 'unchanged' })
   timeline.lines = []
   memory.value = null
   conversation.props = null
+  ipc.calls = []
+  chat.parts = stubs
+  chat.composer = null
+  chat.approval = null
+  answers.calls = []
+  answers.phase = 'sent'
 })
+
+async function mount(id: string) {
+  const Pane = paneView('mission')!
+  await act(async () => {
+    root.render(<Pane id={1} props={{ id }} />)
+  })
+}
+
+/** The footer the pane handed the conversation, rendered by the stand-in. */
+const footer = () => host.querySelector('.stub-footer')!
 
 afterEach(() => {
   act(() => root.unmount())
@@ -89,7 +139,7 @@ test('mission pane survives a store notification for a child with no replies', a
     missionStore.setState({ snapshot: { ...snapshot, at: '2026-09-15T12:00:03Z' } })
     missionStore.setState({ polling: false })
   })
-  expect(host.querySelector('.mission-pane')).not.toBeNull()
+  expect(host.querySelector('.ms-pane')).not.toBeNull()
   expect(host.textContent).toContain(child.id)
 })
 
@@ -129,12 +179,12 @@ test('the pane shows the child model and prices it at that model, and says defau
   await act(async () => {
     root.render(<Pane id={1} props={{ id: haiku.id }} />)
   })
-  expect(host.querySelector('.m-model')?.textContent).toBe('haiku · high effort')
+  expect(host.querySelector('.ms-model')?.textContent).toBe('haiku · high effort')
   expect(host.textContent).toContain('~$2.50')
   await act(async () => {
     root.render(<Pane id={2} props={{ id: lean.id }} />)
   })
-  expect(host.querySelector('.m-model')?.textContent).toBe('default model · default effort')
+  expect(host.querySelector('.ms-model')?.textContent).toBe('default model · default effort')
   expect(host.textContent).toContain('~$30.00')
 })
 
@@ -166,7 +216,7 @@ test('the pane shows the child conversation, with one marker per status change a
   expect(host.textContent).not.toContain('go ahead')
   expect(host.textContent).not.toContain('the final report')
   // The head stays.
-  expect(host.querySelector('.mission-head')?.textContent).toContain(c.id)
+  expect(host.querySelector('.ms-head')?.textContent).toContain(c.id)
 })
 
 test('the status handed to the conversation follows the child: working, parked on a permission, a question', async () => {
@@ -186,7 +236,8 @@ test('the status handed to the conversation follows the child: working, parked o
   expect(await statusOf({ state: 'done' })).toEqual({ busy: false, waiting: null })
 })
 
-test('a blocked child keeps its reply box, pinned under the conversation as its footer', async () => {
+test('before the chat-input piece lands, a blocked child keeps its reply box as the footer', async () => {
+  chat.parts = null
   const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
   const Pane = paneView('mission')!
   await act(async () => {
@@ -221,7 +272,7 @@ test('a child with no session yet shows the mission pane says so, and fetches no
   await act(async () => {
     root.render(<Pane id={1} props={{ id: child.id }} />)
   })
-  expect(host.querySelector('.cmem')?.textContent).toBe('memory: no session yet')
+  expect(host.querySelector('.cmem')?.textContent).toBe('Memory: no session yet')
   // It still gets the conversation (its empty state) and its markers.
   expect(conversation.props).toMatchObject({ sessionId: null, markers: [{ at: '2026-09-15T17:10:00Z', label: 'working' }] })
 })
@@ -255,4 +306,117 @@ test('a child with a session_id shows what the vault gave it and what it pushed 
   expect(host.querySelector('.cmem-briefing')?.textContent).toContain('aa11.md')
   expect(host.querySelector('.cmem-slug')?.textContent).toBe('run-the-tests')
   expect(host.querySelector('.cmem-rule-text')?.textContent).toBe('Ask before rewriting a whole file.')
+})
+
+test('a child parked on a permission gets the approval card, answered through claude attach', async () => {
+  const [first] = allChildren(snapshot)
+  const c = { ...first, tempo: 'blocked', needs: 'approve Bash: cargo test \\\n  --workspace' }
+  withChild(c)
+  await mount(c.id)
+  expect(footer().querySelector('.composer-stub')).toBeNull()
+  expect(chat.approval).toMatchObject({ tool: 'Bash', summary: 'cargo test \\', detail: 'cargo test \\\n  --workspace' })
+  await act(async () => (chat.approval!.onAllow as () => Promise<void>)())
+  await act(async () => (chat.approval!.onDeny as () => Promise<void>)())
+  expect(answers.calls).toEqual([
+    [c.id, 'yes'],
+    [c.id, 'no'],
+  ])
+  // "Don't ask again" is not on the card: it stays one click away under it.
+  await act(async () => footer().querySelector<HTMLButtonElement>('.ms-always')!.click())
+  expect(answers.calls.at(-1)).toEqual([c.id, 'always'])
+})
+
+test('a one-line ask has no detail, and a failed answer rejects so the card can say so', async () => {
+  const [first] = allChildren(snapshot)
+  withChild({ ...first, tempo: 'blocked', needs: null, waiting_for: 'permission prompt' })
+  await mount(first.id)
+  expect(chat.approval).toMatchObject({ tool: 'Permission', summary: 'permission prompt', detail: undefined })
+  answers.phase = 'error'
+  await expect((chat.approval!.onAllow as () => Promise<void>)()).rejects.toThrow('the prompt did not appear in the attach')
+})
+
+test('a child asking a question shows it over the composer, which sends through the mission reply', async () => {
+  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
+  await mount(blocked.id)
+  expect(chat.approval).toBeNull()
+  expect(footer().querySelector('.ms-needs')?.textContent).toBe('may I add a crate?')
+  expect(footer().querySelector('.ms-suggested')?.textContent).toBe('Suggested: yes')
+  expect(chat.composer).toMatchObject({ cwd: blocked.cwd, disabled: false, placeholder: 'Answer the child…' })
+  await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('use serde'))
+  expect(ipc.calls).toContainEqual(['mission_reply', { id: blocked.id, text: 'use serde' }])
+  expect(footer().querySelector('.ms-sent')?.textContent).toContain('use serde')
+})
+
+test('send it sends the suggested reply as a message', async () => {
+  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
+  await mount(blocked.id)
+  await act(async () => footer().querySelector<HTMLButtonElement>('.ms-send-suggested')!.click())
+  expect(ipc.calls).toContainEqual(['mission_reply', { id: blocked.id, text: 'yes' }])
+})
+
+test('as me types the composer text into the child terminal, and a refusal rejects the send', async () => {
+  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
+  const asMe: [string, string | null | undefined, string][] = []
+  const real = missionStore.getState().replyAsMe
+  let ok = true
+  missionStore.setState({
+    replyAsMe: async (id, suggested) => {
+      asMe.push([id, suggested, missionStore.getState().drafts[id]])
+      if (!ok) missionStore.setState({ replyErrors: { [id]: "this is the child's suggested reply, not yours" } })
+      return ok
+    },
+  })
+  try {
+    await mount(blocked.id)
+    await act(async () => footer().querySelector<HTMLButtonElement>('[data-route="as-me"]')!.click())
+    expect(footer().querySelector('[data-route="as-me"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(chat.composer?.placeholder).toBe(`Type into claude attach ${blocked.id}, as you…`)
+    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('push it'))
+    expect(asMe).toEqual([[blocked.id, 'yes', 'push it']])
+    expect(ipc.calls.some(([cmd]) => cmd === 'mission_reply')).toBe(false)
+    ok = false
+    await expect((chat.composer!.onSend as (t: string) => Promise<void>)('yes')).rejects.toThrow("this is the child's suggested reply")
+  } finally {
+    missionStore.setState({ replyAsMe: real })
+  }
+})
+
+test('a working child still takes a message; a child that is not running gets a disabled composer', async () => {
+  const [first] = allChildren(snapshot)
+  await mount(first.id)
+  expect(footer().querySelector('.ms-question')).toBeNull()
+  expect(chat.composer).toMatchObject({ disabled: false, placeholder: 'Message the child…' })
+  withChild({ ...first, live: false })
+  await mount(first.id)
+  expect(chat.composer).toMatchObject({ disabled: true, placeholder: 'The child is not running: nothing reaches it' })
+})
+
+test('the head is new UI: take over attaches beside the pane, stop asks once more before claude stop', async () => {
+  const [first] = allChildren(snapshot)
+  const openView = vi.fn()
+  const real = appStore.getState().openView
+  appStore.setState({ openView })
+  try {
+    await mount(first.id)
+    const head = host.querySelector('.ms-head')!
+    expect(head.hasAttribute('data-ui')).toBe(true)
+    expect(head.querySelector('[data-state-dot]')?.getAttribute('data-state-dot')).toBe('working')
+    await act(async () => head.querySelector<HTMLButtonElement>('.ms-take-over')!.click())
+    expect(openView).toHaveBeenLastCalledWith('terminal-cmd', { cmd: `claude attach ${first.id}` }, 'split-col', `attach ${first.id}`)
+    const stop = head.querySelector<HTMLButtonElement>('.ms-stop')!
+    await act(async () => stop.click())
+    expect(openView).toHaveBeenCalledTimes(1)
+    expect(stop.textContent).toBe('Really stop?')
+    await act(async () => stop.click())
+    expect(openView).toHaveBeenLastCalledWith('terminal-cmd', { cmd: `claude stop ${first.id}` }, 'split-col', `stop ${first.id}`)
+  } finally {
+    appStore.setState({ openView: real })
+  }
+})
+
+test('a blocked child reads as needing you in the head', async () => {
+  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
+  await mount(blocked.id)
+  expect(host.querySelector('.ms-head [data-state-dot]')?.getAttribute('data-state-dot')).toBe('needs-you')
+  expect(host.querySelector('.ms-word')?.textContent).toBe('needs you')
 })

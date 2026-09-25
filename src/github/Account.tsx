@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Button } from '@/ui'
 import { githubStore, useGithub } from './app-store'
 import { ghInstall, ghLogin, installGh } from './actions'
 import './github.css'
@@ -17,9 +18,9 @@ export default function Account() {
     const route = ghInstall()
     return (
       <span className="gh-account">
-        <button className="hm-btn" onClick={installGh} title={`opens a terminal with ${route.shows}`}>
+        <Button type="button" variant="outline" size="xs" onClick={installGh} title={`opens a terminal with ${route.shows}`}>
           install gh
-        </button>
+        </Button>
         <code className="gh-quiet">{route.shows}</code>
       </span>
     )
@@ -27,9 +28,9 @@ export default function Account() {
   if (!auth.logged)
     return (
       <span className="gh-account">
-        <button className="hm-btn" onClick={ghLogin} title="opens a terminal with gh auth login --web">
+        <Button type="button" variant="outline" size="xs" onClick={ghLogin} title="opens a terminal with gh auth login --web">
           Log in to GitHub
-        </button>
+        </Button>
       </span>
     )
   return (
