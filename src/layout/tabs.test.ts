@@ -1,5 +1,4 @@
-import { dropOnGroup, groupLabel, paneAccent, paneClaude, paneForSession, paneLabel, tabLabel } from './tabs'
-import { accentHue, repoAccent } from '../home/repo-color'
+import { dropOnGroup, groupLabel, paneClaude, paneForSession, paneLabel, tabLabel } from './tabs'
 import { leaves, type Node, type PaneId, type Side } from './tree'
 import type { Pane, Tab } from './store'
 import { desktop, mnemo, notes, parent, snapshot } from '../mission/fixtures'
@@ -54,19 +53,6 @@ test('a group carries the dot of the loudest thing running in it', () => {
   expect(of(S('row', L(1), L(2)))).toBe('blocked')
   expect(of(S('row', L(2), L(1)))).toBe('blocked')
   expect(of(S('row', L(3), L(3)))).toBeUndefined()
-})
-
-test("a pane's accent is its repo's, the lens's own colour, and a worktree of it counts as that repo", () => {
-  expect(paneAccent(term(1, DESKTOP), snapshot)).toBe(repoAccent(DESKTOP))
-  expect(paneAccent(term(2, '/Users/me/github/mnemo-desktop-wt-c-vault/src'), snapshot)).toBe(repoAccent(DESKTOP))
-  expect(paneAccent(term(3, '/Users/me/github/mnemo'), snapshot)).not.toBe(repoAccent(DESKTOP))
-  // Outside every repo the snapshot knows, the folder itself keys the colour.
-  expect(paneAccent(term(4, '/Users/me/scratch'), snapshot)).toBe(repoAccent('/Users/me/scratch'))
-  // A view in no directory has no accent at all.
-  expect(paneAccent({ id: -1, view: 'vault', props: {} }, snapshot)).toBeUndefined()
-  expect(paneAccent(undefined, snapshot)).toBeUndefined()
-  // The hue is one of the lens's, so the two surfaces cannot drift apart.
-  expect(accentHue(DESKTOP) % 36).toBe(15 % 36)
 })
 
 /** A store stub that records what a drop asked for. */

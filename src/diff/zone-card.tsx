@@ -28,8 +28,7 @@ export function renderDiffCommentZoneCard(
   { resizeZone, onDeleteCommentRef, onUpdateCommentRef, onSendCommentRef }: DiffCommentZoneCardContext
 ): void {
   root.render(
-    // View zones are separate React roots outside the app root; `data-ui` gives them Orca's base
-    // styles inside `.app`, where a raw button otherwise draws as a white box.
+    // View zones are separate React roots outside the app root; `data-ui` marks them as Orca UI.
     <div data-ui>
       <DiffCommentCard
         lineNumber={comment.lineNumber}

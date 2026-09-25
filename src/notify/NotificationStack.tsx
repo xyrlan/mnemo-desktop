@@ -16,8 +16,7 @@ export function NotificationStack({ notifier }: { notifier: Pick<Notifier, 'card
   const cards = useStore(notifier.cards, (s) => s.cards)
   if (!cards.length) return null
   return (
-    // `data-ui`: should the shell's overlay slot sit inside the old `.app` scope, the stack still
-    // gets the new look (theme.css reverts everything else there).
+    // `data-ui` marks Orca UI.
     <div
       data-ui
       data-notification-stack
