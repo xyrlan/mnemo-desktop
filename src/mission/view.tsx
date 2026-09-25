@@ -7,13 +7,13 @@ import { register, registerProvider } from '../actions/registry'
 import { missionStore, useMission } from './app-store'
 import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
-import { allChildren, childWord, isRecent, needKind, type TimelineLine } from './types'
-import { attachChild, MissionFooter, openMissionPane } from './rows'
+import { allChildren, childWord, isRecent, type TimelineLine } from './types'
+import { attachChild, openMissionPane } from './rows'
+import { ChildConversation } from './conversation'
 import { AgentStateDot, type DotState } from '../dashboard/AgentStateDot'
 import { estimateUsd, fmtUsd } from './cost'
 import { statusMarkers } from './timeline'
 import { ConversationView } from '../conversation/ConversationView'
-import type { SessionStatus } from '../conversation/types'
 import { settingsStore } from '../settings/app-store'
 import { MemoryPanel } from './memory/MemoryPanel'
 import { memoryClient } from './memory/client'
@@ -80,9 +80,6 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   }
 
   const word = child ? childWord(child) : 'stopped'
-  // What the transcript cannot say: the snapshot knows whether the child is working or parked.
-  const status: SessionStatus = { busy: word === 'active', waiting: word === 'BLOCKED' && child ? needKind(child) : null }
-  const footer = child && <MissionFooter c={child} />
   const folder = child?.cwd.split('/').pop()
   return (
     <div className="ms-pane" data-pane={paneId}>
@@ -137,7 +134,11 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
       </div>
       <MemoryPanel memory={memory} hasSession={!!sessionId} />
       <div className="ms-conversation">
-        <ConversationView sessionId={sessionId} cwd={child?.cwd ?? ''} status={status} markers={markers} footer={footer} onOpenTerminal={attach} />
+        {child ? (
+          <ChildConversation child={child} markers={markers} onOpenTerminal={attach} />
+        ) : (
+          <ConversationView sessionId={null} cwd="" markers={markers} onOpenTerminal={attach} />
+        )}
       </div>
     </div>
   )

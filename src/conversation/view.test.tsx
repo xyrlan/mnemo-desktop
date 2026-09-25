@@ -370,6 +370,23 @@ test('markers are merged into the stream by time, and the footer is pinned under
   expect(q('.cv-stream .reply')).toBeNull()
 })
 
+test('a footer given as a function is handed the call the session is parked on, or null', async () => {
+  const { client, follows } = fakeClient()
+  const seen: (string | null)[] = []
+  const footer = (parked: { tool: { id: string }; kind: string } | null) => {
+    seen.push(parked && `${parked.tool.id}:${parked.kind}`)
+    return parked ? <div className="reply">{parked.kind}</div> : null
+  }
+  await render(view(client, { status: { busy: false, waiting: 'permission' }, footer }))
+  await follows[0].emit(lines(0, [user('u1', 0, 'go'), tool('t1', 1, 'Bash', null)]))
+  expect(seen.at(-1)).toBe('t1:permission')
+  expect(q('.cv-footer .reply')?.textContent).toBe('permission')
+  await render(view(client, { status: { busy: true, waiting: null }, footer }))
+  expect(seen.at(-1)).toBeNull()
+  // Nothing to say: no empty footer strip.
+  expect(q('.cv-footer')).toBeNull()
+})
+
 // A window that starts partway into the file has records not loaded above it, and the markers
 // of their time with them: those would all stack atop the first card. Only the newest is kept,
 // as the state the window opens in; the rest come back in place with their records.

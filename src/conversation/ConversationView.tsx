@@ -33,9 +33,10 @@ export type ConversationViewProps = {
   status?: SessionStatus
   /** Thin lines merged into the stream by time (a child's status transitions). */
   markers?: StatusMarker[]
-  /** Pinned under the stream (a child's Approve / Deny / reply box), under the foot when there
-   *  is one. */
-  footer?: ReactNode
+  /** Pinned under the stream, under the foot when there is one. A function is given what the
+   *  session is parked on as the transcript says, so it can say what the foot's card cannot
+   *  (a child's "don't ask again"), or answer what the foot has no card for. */
+  footer?: ReactNode | ((parked: Parked) => ReactNode)
   /** The pending card's button: a pane flips to its terminal face, a child opens `claude attach`. */
   onOpenTerminal?: () => void
   /** How to answer the session from the chat. Given, the foot shows the approval or question
@@ -355,6 +356,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
       />
     )
 
+  const below = typeof footer === 'function' ? footer(parked) : footer
   const usage = current?.usage ?? null
   const terminal = agent && onOpenTerminal
   const head = current && (current.title || current.prs.length > 0 || usage)
@@ -405,7 +407,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
           )}
         </div>
         {sender && sessionId && <Foot agent={sender} cwd={cwd || null} status={status} parked={parked} onOpenTerminal={onOpenTerminal} />}
-        {footer && <div className="cv-footer shrink-0 border-t border-border">{footer}</div>}
+        {below && <div className="cv-footer shrink-0 border-t border-border">{below}</div>}
         {image && <Lightbox img={image} onClose={closeImage} />}
       </div>
     </CardsContext.Provider>
