@@ -343,6 +343,10 @@ pub fn run() {
             // Claude Code's hooks tell the app where each session is (src/agent_hooks.rs).
             agent_hooks::start(app.handle())?;
 
+            // -- voice --
+            // Loads the dictation model in the background if it is on disk (src/voice.rs).
+            voice::warm(app.handle());
+
             // -- menu --
             // App chords as native menu accelerators, so they reach the app while a browser
             // pane's child webview has keyboard focus. Each item emits `app://action` with

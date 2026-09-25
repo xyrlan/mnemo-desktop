@@ -1,7 +1,8 @@
 //! Push-to-talk dictation (issue #10). `voice_start` opens the default input device;
 //! `voice_stop` closes it and transcribes the take locally with whisper.cpp. The model
 //! downloads once, on first use, into `~/.mnemo-desktop/models/`; nothing else leaves the
-//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call.
+//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. On macOS the
+//! model runs on the GPU (Metal); `warm` loads it at launch so the first take does not wait.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -22,6 +23,9 @@ const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 const MODEL_BYTES: u64 = 59_707_625;
 /// Points at any ggml whisper model and skips the download (tests, or a bigger model).
 const MODEL_ENV: &str = "MNEMO_WHISPER_MODEL";
+/// Keeps whisper on the CPU where it would use the GPU (Metal, on macOS): a bench, or a GPU
+/// that misbehaves.
+const CPU_ENV: &str = "MNEMO_WHISPER_CPU";
 
 /// whisper.cpp only accepts 16 kHz mono.
 pub const WHISPER_RATE: u32 = 16_000;
@@ -192,23 +196,70 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
     let ratio = to as f64 / from as f64;
     let cutoff = ratio.min(1.0);
     let reach = HALF / cutoff;
-    let last = input.len() - 1;
     let out_len = (input.len() as f64 * ratio).round() as usize;
+    // Output i sits at input position i·from/to, whose fraction takes only `phases` values:
+    // one table of weights per phase, instead of a sine and a cosine per tap (a 25 s take at
+    // 44.1 kHz: 150 ms to 10 ms). A rate no microphone has could need millions of phases;
+    // those weigh each output as it comes.
+    let g = gcd(from, to);
+    let phases = (to / g) as usize;
+    let taps = |frac: f64| -> Taps {
+        let first = (frac - reach).ceil() as i64;
+        let last = (frac + reach).floor() as i64;
+        let weights: Vec<f64> = (first..=last)
+            .map(|j| {
+                let x = (j as f64 - frac) * cutoff;
+                sinc(x) * 0.5 * (1.0 + (std::f64::consts::PI * x / HALF).cos())
+            })
+            .collect();
+        let norm = weights.iter().sum();
+        Taps { first, weights, norm }
+    };
+    let table: Option<Vec<Taps>> =
+        (phases <= 4096).then(|| (0..phases).map(|p| taps(p as f64 / phases as f64)).collect());
     (0..out_len)
         .map(|i| {
-            let t = i as f64 / ratio;
-            let lo = (t - reach).ceil().max(0.0) as usize;
-            let hi = ((t + reach).floor() as usize).min(last);
+            let pos = i as u64 * from as u64;
+            let whole = (pos / to as u64) as i64;
+            let phase = ((pos % to as u64) / g as u64) as usize;
+            let own;
+            let t = match &table {
+                Some(table) => &table[phase],
+                None => {
+                    own = taps(phase as f64 / phases as f64);
+                    &own
+                }
+            };
+            let start = whole + t.first;
+            if start >= 0 && start as usize + t.weights.len() <= input.len() {
+                let window = &input[start as usize..start as usize + t.weights.len()];
+                let acc: f64 = window.iter().zip(&t.weights).map(|(&s, &w)| s as f64 * w).sum();
+                return (acc / t.norm) as f32;
+            }
+            // Near either end the kernel is cut short: weigh by the taps that remain.
             let (mut acc, mut norm) = (0.0f64, 0.0f64);
-            for (k, &s) in input[lo..=hi.max(lo)].iter().enumerate() {
-                let x = ((lo + k) as f64 - t) * cutoff;
-                let w = sinc(x) * 0.5 * (1.0 + (std::f64::consts::PI * x / HALF).cos());
-                acc += s as f64 * w;
-                norm += w;
+            for (k, &w) in t.weights.iter().enumerate() {
+                let at = start + k as i64;
+                if at >= 0 && (at as usize) < input.len() {
+                    acc += input[at as usize] as f64 * w;
+                    norm += w;
+                }
             }
             if norm.abs() > 1e-9 { (acc / norm) as f32 } else { 0.0 }
         })
         .collect()
+}
+
+/// The kernel for one phase: weights for inputs `first..` relative to the output's whole
+/// input position, and their sum.
+struct Taps {
+    first: i64,
+    weights: Vec<f64>,
+    norm: f64,
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 fn sinc(x: f64) -> f64 {
@@ -258,11 +309,16 @@ pub fn models_dir() -> PathBuf {
     crate::app_dir::shared_dir_in(&home.map(PathBuf::from).unwrap_or_default()).join("models")
 }
 
+/// A whole model at `path`, not a missing or truncated one.
+fn model_on_disk(path: &Path) -> bool {
+    std::fs::metadata(path).map(|m| m.len() == MODEL_BYTES).unwrap_or(false)
+}
+
 /// Returns the model in `dir`, downloading it first if it is missing or truncated.
 /// `progress(downloaded, total)` fires as bytes arrive.
 pub fn ensure_model(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<PathBuf, String> {
     let path = dir.join(MODEL_FILE);
-    if std::fs::metadata(&path).map(|m| m.len() == MODEL_BYTES).unwrap_or(false) {
+    if model_on_disk(&path) {
         return Ok(path);
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -307,7 +363,44 @@ pub fn ensure_model(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<Pa
 pub fn load_context(path: &Path) -> Result<WhisperContext, String> {
     whisper_rs::install_logging_hooks();
     let p = path.to_str().ok_or("model path is not UTF-8")?;
-    WhisperContext::new_with_params(p, WhisperContextParameters::default()).map_err(|e| format!("model {p}: {e}"))
+    // Flash attention takes a third or more off the GPU's time on a take and makes the CPU 1.6
+    // times slower (measured on an M5), so it goes with the GPU.
+    let gpu = cfg!(target_os = "macos") && std::env::var_os(CPU_ENV).is_none();
+    let mut params = WhisperContextParameters::default();
+    params.use_gpu(gpu).flash_attn(gpu);
+    WhisperContext::new_with_params(p, params).map_err(|e| format!("model {p}: {e}"))
+}
+
+/// Tokens one decoding pass may spend on `samples` of audio. A pass covers up to 30 s; speech,
+/// timestamps included, runs well under 8 tokens a second in English and Portuguese. Without a
+/// budget a pass that loops on a repeated phrase runs to whisper's 220-token cap, once per
+/// fallback temperature, and an 8 s take took up to 33 s on the CPU. A pass that does reach the
+/// budget loses nothing: whisper ends the segment at its last timestamp and decodes the rest in
+/// the next pass.
+pub fn token_budget(samples: usize) -> i32 {
+    let seconds = (samples as f32 / WHISPER_RATE as f32).min(30.0);
+    16 + (seconds * 8.0) as i32
+}
+
+/// Fallback temperatures step by this: a pass that fails is retried at 0.4 and 0.8, not at
+/// whisper's five steps of 0.2.
+const TEMPERATURE_STEP: f32 = 0.4;
+
+fn decode_params(language: Language, samples: usize) -> FullParams<'static, 'static> {
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    params.set_language(Some(language.code()));
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    params.set_n_threads(threads as _);
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    params.set_no_context(true);
+    params.set_suppress_blank(true);
+    params.set_suppress_nst(true);
+    params.set_max_tokens(token_budget(samples));
+    params.set_temperature_inc(TEMPERATURE_STEP);
+    params
 }
 
 /// Transcribes 16 kHz mono audio. Silence yields an empty string without running the model.
@@ -322,18 +415,7 @@ pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Re
     padded.resize(padded.len().max(min) + WHISPER_RATE as usize / 4, 0.0);
 
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(language.code()));
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
-    params.set_n_threads(threads as _);
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_no_context(true);
-    params.set_suppress_blank(true);
-    params.set_suppress_nst(true);
-    state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
+    state.full(decode_params(language, audio.len()), &padded).map_err(|e| format!("whisper: {e}"))?;
 
     let mut raw = String::new();
     for segment in state.as_iter() {
@@ -341,6 +423,21 @@ pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Re
         raw.push(' ');
     }
     Ok(clean_transcript(&raw))
+}
+
+/// Runs the model once on a made-up take, so the process has built its GPU pipelines before a
+/// real take needs them. With `load_context` it is the whole cost of a cold start: on a machine
+/// that has never run them, loading compiles Metal's shaders (measured: 10.4 s, then 0.2 s once
+/// macOS has cached them).
+pub fn warm_up(ctx: &WhisperContext) -> Result<(), String> {
+    let take: Vec<f32> = (0..WHISPER_RATE as usize * 3 / 2)
+        .map(|i| 0.1 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / WHISPER_RATE as f32).sin())
+        .collect();
+    let mut params = decode_params(Language::En, take.len());
+    params.set_max_tokens(8);
+    let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
+    state.full(params, &take).map_err(|e| format!("whisper: {e}"))?;
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -362,8 +459,30 @@ fn model(app: &AppHandle) -> Result<Arc<WhisperContext>, String> {
         })?,
     };
     let ctx = Arc::new(load_context(&path)?);
+    if let Err(e) = warm_up(&ctx) {
+        log::warn!("voice: warming the model: {e}");
+    }
     *slot = Some(ctx.clone());
     Ok(ctx)
+}
+
+/// At launch: loads and warms the model in the background when it is already on disk, so the
+/// first take waits for neither. Never downloads; that waits for the first ⌘E.
+pub fn warm(app: &AppHandle) {
+    if std::env::var_os(MODEL_ENV).is_none() && !model_on_disk(&models_dir().join(MODEL_FILE)) {
+        return;
+    }
+    let app = app.clone();
+    let spawned = std::thread::Builder::new().name("voice-warm".into()).spawn(move || {
+        let started = std::time::Instant::now();
+        match model(&app) {
+            Ok(_) => log::info!("voice: model ready in {:.1}s", started.elapsed().as_secs_f32()),
+            Err(e) => log::warn!("voice: preparing model: {e}"),
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("voice: {e}");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -479,6 +598,62 @@ mod tests {
         assert!((rms(&odd[400..15_600]) - 0.5 / 2f32.sqrt()).abs() < 0.01);
     }
 
+    /// The resampler before its phase tables: a sine and a cosine per tap.
+    fn resample_direct(input: &[f32], from: u32, to: u32) -> Vec<f32> {
+        const HALF: f64 = 12.0;
+        let ratio = to as f64 / from as f64;
+        let cutoff = ratio.min(1.0);
+        let reach = HALF / cutoff;
+        let last = input.len() - 1;
+        let out_len = (input.len() as f64 * ratio).round() as usize;
+        (0..out_len)
+            .map(|i| {
+                let t = i as f64 / ratio;
+                let lo = (t - reach).ceil().max(0.0) as usize;
+                let hi = ((t + reach).floor() as usize).min(last);
+                let (mut acc, mut norm) = (0.0f64, 0.0f64);
+                for (k, &s) in input[lo..=hi.max(lo)].iter().enumerate() {
+                    let x = ((lo + k) as f64 - t) * cutoff;
+                    let w = sinc(x) * 0.5 * (1.0 + (std::f64::consts::PI * x / HALF).cos());
+                    acc += s as f64 * w;
+                    norm += w;
+                }
+                if norm.abs() > 1e-9 { (acc / norm) as f32 } else { 0.0 }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resample_matches_the_direct_kernel_at_every_rate() {
+        let mut seed = 0x9e37_79b9u32;
+        let noise: Vec<f32> = (0..30_000)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as f32 / u32::MAX as f32 - 0.5
+            })
+            .collect();
+        // 44_101 has 16 000 phases, past the table: each output weighs its own taps.
+        for from in [48_000, 44_100, 22_050, 8_000, 96_000, 44_101] {
+            let fast = resample(&noise, from, WHISPER_RATE);
+            let slow = resample_direct(&noise, from, WHISPER_RATE);
+            assert_eq!(fast.len(), slow.len(), "{from}");
+            let worst = fast.iter().zip(&slow).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+            assert!(worst < 1e-5, "{from}: off by {worst}");
+        }
+        assert_eq!(resample(&[0.5], 48_000, WHISPER_RATE).len(), 0);
+        assert_eq!(resample(&[0.5, 0.5], 8_000, WHISPER_RATE), vec![0.5; 4]);
+    }
+
+    #[test]
+    fn token_budget_grows_with_the_take_up_to_one_window() {
+        assert_eq!(token_budget(0), 16);
+        assert_eq!(token_budget(8 * WHISPER_RATE as usize), 80);
+        assert_eq!(token_budget(30 * WHISPER_RATE as usize), 256);
+        assert_eq!(token_budget(300 * WHISPER_RATE as usize), 256);
+    }
+
     #[test]
     fn silence_is_detected_and_speech_level_is_not() {
         assert!(is_silent(&vec![0.0; 16_000]));
@@ -513,6 +688,50 @@ mod tests {
         resample(&mono, spec.sample_rate, WHISPER_RATE)
     }
 
+    /// Timings for the WAVs in `$MNEMO_VOICE_BENCH` (a directory), for a PR's before/after:
+    /// `MNEMO_VOICE_BENCH=dir cargo test --lib voice::tests::bench -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench() {
+        let dir = PathBuf::from(std::env::var_os("MNEMO_VOICE_BENCH").expect("MNEMO_VOICE_BENCH"));
+        let path = match std::env::var_os(MODEL_ENV) {
+            Some(p) => PathBuf::from(p),
+            None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
+        };
+        let t = std::time::Instant::now();
+        let ctx = load_context(&path).expect("load");
+        let loaded = t.elapsed().as_secs_f32();
+        warm_up(&ctx).expect("warm up");
+        eprintln!("load {loaded:.2}s, warm up {:.2}s", t.elapsed().as_secs_f32() - loaded);
+        let mut names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "wav"))
+            .collect();
+        names.sort();
+        for wav in names {
+            let mut reader = hound::WavReader::open(&wav).expect("wav");
+            let spec = reader.spec();
+            let ints: Vec<i16> = reader.samples::<i16>().map(|s| s.unwrap()).collect();
+            let mut mono = vec![];
+            mix_to_mono(&ints, spec.channels as usize, &mut mono);
+            let t = std::time::Instant::now();
+            let audio = resample(&mono, spec.sample_rate, WHISPER_RATE);
+            let rs = t.elapsed().as_secs_f32();
+            for _ in 0..3 {
+                let t = std::time::Instant::now();
+                let text = transcribe(&ctx, &audio, Language::Auto).unwrap();
+                eprintln!(
+                    "{} {:.1}s audio: resample {rs:.2}s, transcribe {:.2}s: {text}",
+                    wav.file_name().unwrap().to_string_lossy(),
+                    audio.len() as f32 / WHISPER_RATE as f32,
+                    t.elapsed().as_secs_f32()
+                );
+            }
+        }
+    }
+
     /// Audio → transcript on two 2 s synthesized takes, English at 44.1 kHz and Portuguese
     /// at 48 kHz. Downloads the model on first run into the system temp dir, not `$HOME`,
     /// which other tests repoint.
@@ -523,6 +742,7 @@ mod tests {
             None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
         };
         let ctx = load_context(&path).expect("load");
+        warm_up(&ctx).expect("warm up");
         let cases = [
             ("hello.wav", Language::Auto, &["hello", "world"]),
             ("hello.wav", Language::En, &["hello", "world"]),
