@@ -8,7 +8,10 @@ import { attachDefaults, attached, SETTLE_MS, type Deps, type Until } from './as
  *  dialog is read off its screen, the option's number is pressed, and the attach is left once the
  *  dialog moved on. The keys are the ones the chat-input piece measured for a pane's Claude
  *  (`src/chat-input/pty.ts`): an option's digit answers it outright; in words, the digit of the
- *  "Type something." row, the words, then Enter.
+ *  "Type something." row, the words, then Enter. Seen live through `claude attach` on 2.1.282
+ *  (#266): the dialog numbers "Type something." and "Chat about this" after the options, and the
+ *  option's bare digit answered it. The words row and a dialog of several questions are not seen
+ *  live yet.
  *
  *  A digit pressed on a permission prompt would allow a tool, so nothing is typed unless the child
  *  says it waits for input right before the attach, and the screen shows a question: a numbered

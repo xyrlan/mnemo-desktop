@@ -13,7 +13,8 @@ import { DETACH_KEY, promptOptions } from '../cockpit/approve'
  *  - on a permission prompt typed letters are dropped and Enter picks the highlighted
  *    "1. Yes": the reply never lands and the tool runs, so a dialog is refused before
  *    attaching and again on screen right before each key;
- *  - ← does not detach, it opens the agent view with a new-session field focused; Ctrl+Z does;
+ *  - ← does not detach, it opens the agent view with a new-session field focused; Ctrl+Z lets go
+ *    of the session (on 2.1.282 it suspends the attach rather than ending it: see `attached`);
  *  - a bracketed paste keeps a multi-line reply as one turn (a bare newline would be Enter);
  *  - typed while the child works, the turn is queued and still `human`. */
 
@@ -116,8 +117,9 @@ const defaults: Deps = {
 /** How long `until` waits for what it looks for; what it looks for returns null until then. */
 export type Until = <T>(what: string, ms: number, probe: () => T | null) => Promise<T>
 
-/** Runs `body` inside a hidden `claude attach <id>`, then leaves it with Ctrl+Z, whatever
- *  happened, and closes the PTY. */
+/** Runs `body` inside a hidden `claude attach <id>`, then, whatever happened, presses Ctrl+Z and
+ *  closes the PTY. On Claude Code 2.1.282 Ctrl+Z does not end the attach (seen live in #266:
+ *  the process was still there 3 s later), so nothing waits for it to: closing the PTY ends it. */
 export async function attached<R>(id: string, d: Deps, body: (s: AttachSession, until: Until) => Promise<R>): Promise<R> {
   const s = await d.open()
   try {
@@ -135,11 +137,7 @@ export async function attached<R>(id: string, d: Deps, body: (s: AttachSession, 
     }
     return await body(s, until)
   } finally {
-    if (!s.exited()) {
-      await s.write(DETACH_KEY).catch(() => {})
-      const left = Date.now()
-      while (!s.exited() && Date.now() - left < 3_000) await d.sleep(POLL_MS)
-    }
+    if (!s.exited()) await s.write(DETACH_KEY).catch(() => {})
     await s.close()
   }
 }

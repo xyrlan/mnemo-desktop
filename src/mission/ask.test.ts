@@ -82,6 +82,26 @@ test('questionOnScreen reads the options, skipping their descriptions, and the r
   expect(q.sig).toContain('Which colour do you prefer?')
 })
 
+// The rows of a real child's dialog, as `claude logs` drew them (Claude Code 2.1.282, #266).
+const LIVE = [
+  '1. I\'ll install them (Recommended)',
+  '2. Stop, don\'t publish',
+  '3. Type something.',
+  '4. Chat about this',
+  'Enter to select · ↑/↓ to navigate · Esc to cancel',
+]
+
+test('questionOnScreen reads a live dialog: its two options, the words row, and not "Chat about this"', () => {
+  expect(questionOnScreen(LIVE)).toMatchObject({
+    kind: 'question',
+    options: [
+      { n: 1, text: "I'll install them (Recommended)" },
+      { n: 2, text: "Stop, don't publish" },
+    ],
+    other: 3,
+  })
+})
+
 test('questionOnScreen tells a question from a permission prompt, the input box, and a review', () => {
   expect(questionOnScreen(PROMPT)).toBeNull()
   expect(questionOnScreen(IDLE)).toBeNull()
