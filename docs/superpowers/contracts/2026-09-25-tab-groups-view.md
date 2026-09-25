@@ -15,7 +15,15 @@ written against the layout store API that wave 1 exposes, as it landed:
 - `openView(…, opts: { preview })`;
 - `registerReuse(view, fn, shows)`.
 
-Read wave 1's PR for anything its contract did not pin down.
+Read wave 1's PR for anything its contract did not pin down. It landed as #267 (`0a7f295`),
+and its section "Details the contract left open" covers:
+
+- `tabs` order;
+- the no-groups fallback;
+- `activeTab === ''` as Home;
+- `moveTab` indices;
+- `detachPane` ids;
+- how "+" reaches a group.
 
 Orca's code is at `122b8c25`. Clone it as the spec says, or look for one under
 `~/.claude/jobs/*/tmp/orca`. The maintainer authorized porting it with attribution
@@ -79,11 +87,15 @@ Files, search matches and Design Mode open where the spec's *Opening* table says
 - **Search:** a match opens as a preview.
 - **Design Mode:** opens its browser to the side of the agent's terminal.
 
+Since wave 1, the `design-mode` preview scenario restores a terminal beside a browser from
+a version 2 layout, and its shot shows the browser as a tab of its own. Redo it with Design
+Mode opening to the side. `DesignCard.test.tsx` drives `runDesignMode` with a fake layout.
+
 This piece never touches the store: every placement goes through `openView`, `keepTab`
 and the reuse registry that wave 1 exposes. If one of them cannot express what the spec
 asks for, stop and say so rather than widen the boundary.
 
-- **files:** src/explorer/, src/editor/, src/search/open.ts, src/search/open.test.ts, src/browser/design-view.tsx, src/browser/design-view.test.ts, tools/preview/scenarios/explorer.mjs, tools/preview/scenarios/editor.mjs
+- **files:** src/explorer/, src/editor/, src/search/open.ts, src/search/open.test.ts, src/browser/design-view.tsx, src/browser/design-view.test.ts, src/browser/DesignCard.test.tsx, tools/preview/scenarios/explorer.mjs, tools/preview/scenarios/editor.mjs, tools/preview/scenarios/design-mode.mjs
 - **exposes:** nothing
 - **consumes:** nothing
 - **model:** sonnet
