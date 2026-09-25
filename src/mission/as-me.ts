@@ -13,7 +13,8 @@ import { DETACH_KEY, promptOptions } from '../cockpit/approve'
  *  - on a permission prompt typed letters are dropped and Enter picks the highlighted
  *    "1. Yes": the reply never lands and the tool runs, so a dialog is refused before
  *    attaching and again on screen right before each key;
- *  - ← does not detach, it opens the agent view with a new-session field focused; Ctrl+Z does;
+ *  - ← does not detach, it opens the agent view with a new-session field focused; Ctrl+Z lets go
+ *    of the session (on 2.1.282 it suspends the attach rather than ending it: see `attached`);
  *  - a bracketed paste keeps a multi-line reply as one turn (a bare newline would be Enter);
  *  - typed while the child works, the turn is queued and still `human`. */
 
@@ -40,7 +41,8 @@ export type Deps = {
 const COLS = 120
 const ROWS = 40
 const POLL_MS = 150
-const SETTLE_MS = 400
+/** The attach draws the screen twice while it connects; read it once this has passed. */
+export const SETTLE_MS = 400
 /** Lines at the bottom of the screen the input box has to be in, status lines included. */
 const BOX_BOTTOM = 8
 
@@ -112,19 +114,18 @@ const defaults: Deps = {
   stepMs: 5_000,
 }
 
-/** Types `text` into child `id`'s terminal as the maintainer and presses Enter. Resolves once
- *  the input box took it; rejects with what to do by hand when a guard stops it. */
-export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {}): Promise<void> {
-  const d = { ...defaults, ...deps }
-  if (!text.trim()) throw new Error('nothing to type')
-  const waiting = await d.waitingFor(id)
-  if (waiting) throw new Error(`${id} is on a ${waiting}: answer it first, keys typed now would go to the dialog`)
+/** How long `until` waits for what it looks for; what it looks for returns null until then. */
+export type Until = <T>(what: string, ms: number, probe: () => T | null) => Promise<T>
 
+/** Runs `body` inside a hidden `claude attach <id>`, then, whatever happened, presses Ctrl+Z and
+ *  closes the PTY. On Claude Code 2.1.282 Ctrl+Z does not end the attach (seen live in #266:
+ *  the process was still there 3 s later), so nothing waits for it to: closing the PTY ends it. */
+export async function attached<R>(id: string, d: Deps, body: (s: AttachSession, until: Until) => Promise<R>): Promise<R> {
   const s = await d.open()
   try {
     // `exec`: when the attach ends, the PTY ends, and no shell is left to type into.
     await s.write(`exec claude attach ${id}\r`)
-    const until = async <T>(what: string, ms: number, probe: () => T | null): Promise<T> => {
+    const until: Until = async (what, ms, probe) => {
       const end = Date.now() + ms
       for (;;) {
         const got = probe()
@@ -134,6 +135,27 @@ export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {
         await d.sleep(POLL_MS)
       }
     }
+    return await body(s, until)
+  } finally {
+    if (!s.exited()) await s.write(DETACH_KEY).catch(() => {})
+    await s.close()
+  }
+}
+
+/** What a hidden attach runs on in the app. */
+export const attachDefaults: Deps = defaults
+
+/** Types `text` into child `id`'s terminal as the maintainer and presses Enter. Resolves once
+ *  the input box took it; rejects with what to do by hand when a guard stops it. */
+export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {}): Promise<void> {
+  const d = { ...defaults, ...deps }
+  if (!text.trim()) throw new Error('nothing to type')
+  // Typed first, a `!` puts Claude Code's input in shell mode: the reply would run as a command.
+  if (text.trimStart().startsWith('!')) throw new Error("a reply that starts with ! would run as a shell command in the child's terminal: reword it, nothing was typed")
+  const waiting = await d.waitingFor(id)
+  if (waiting) throw new Error(`${id} is on a ${waiting}: answer it first, keys typed now would go to the dialog`)
+
+  await attached(id, d, async (s, until) => {
     const dialog = () => {
       if (promptOptions(s.lines())) throw new Error(`${id} is showing a prompt: answer it first, nothing more was typed`)
     }
@@ -143,7 +165,6 @@ export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {
     }
 
     await until('its input box showed', d.timeoutMs, box)
-    // The attach draws the screen twice while it connects; read the box once it has settled.
     await d.sleep(SETTLE_MS)
     const before = await until('its input box showed', d.timeoutMs, box)
     if (before.text) throw new Error(`${id}'s input already holds "${before.text.slice(0, 60)}", typed in another attach: send or clear it there, nothing was typed`)
@@ -163,12 +184,5 @@ export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {
       if (b === null) return promptOptions(s.lines()) ? true : null
       return b.text === '' ? true : null
     })
-  } finally {
-    if (!s.exited()) {
-      await s.write(DETACH_KEY).catch(() => {})
-      const left = Date.now()
-      while (!s.exited() && Date.now() - left < 3_000) await d.sleep(POLL_MS)
-    }
-    await s.close()
-  }
+  })
 }

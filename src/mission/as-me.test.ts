@@ -162,3 +162,9 @@ test('typeAsMe takes a prompt right after Enter as the turn having gone through'
   await typeAsMe('5a824ae5', 'yes, push', { ...quick, open: async () => a.session })
   expect(a.writes).toContain('\r')
 })
+
+test('typeAsMe refuses a reply starting with !, which would put the input in shell mode', async () => {
+  const open = vi.fn()
+  await expect(typeAsMe('5a824ae5', '  !git push', { ...quick, open })).rejects.toThrow('shell command')
+  expect(open).not.toHaveBeenCalled()
+})

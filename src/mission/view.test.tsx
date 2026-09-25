@@ -8,20 +8,41 @@ const memory = vi.hoisted(
 )
 // The conversation view is another piece's (round 20 · view): the pane is tested on what it
 // hands it, read back from this stand-in, never on how it draws a transcript.
-const conversation = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }))
-vi.mock('../conversation/ConversationView', () => ({
-  ConversationView: (props: { sessionId: string | null; markers?: { at: string; label: string }[]; footer?: unknown }) => {
-    conversation.props = props
-    return (
-      <div className="conversation-stub">
-        {(props.markers ?? []).map((m) => (
-          <div key={m.at + m.label} className="stub-marker">{m.label}</div>
-        ))}
-        <div className="stub-footer">{props.footer as never}</div>
-      </div>
-    )
-  },
-}))
+const conversation = vi.hoisted(() => ({ props: null as null | Record<string, unknown>, parked: null as unknown }))
+// Like the real view, the stand-in draws the foot's composer from the chat-input context when it
+// is given an agent and the session waits on no dialog, and hands the footer what it is parked on.
+vi.mock('../conversation/ConversationView', async () => {
+  const { useContext } = await import('react')
+  const { ChatInputContext } = await import('../conversation/chat-input')
+  return {
+    ConversationView: (props: {
+      sessionId: string | null
+      cwd: string
+      markers?: { at: string; label: string }[]
+      footer?: unknown
+      status?: { waiting: string | null; parked?: boolean }
+      agent?: { send(text: string): Promise<void> }
+    }) => {
+      conversation.props = props
+      const { Composer } = useContext(ChatInputContext)
+      const footer = typeof props.footer === 'function' ? (props.footer as (p: unknown) => unknown)(conversation.parked) : props.footer
+      const foot = props.agent && props.sessionId && !props.status?.waiting && !props.status?.parked && Composer
+      return (
+        <div className="conversation-stub">
+          {(props.markers ?? []).map((m) => (
+            <div key={m.at + m.label} className="stub-marker">{m.label}</div>
+          ))}
+          {foot && (
+            <div className="stub-foot">
+              <Composer cwd={props.cwd} placeholder="Message Claude…" onSend={props.agent!.send} />
+            </div>
+          )}
+          <div className="stub-footer">{footer as never}</div>
+        </div>
+      )
+    },
+  }
+})
 // A plain recorder, not vi.fn(): what the pane asked the core for, in order.
 const ipc = vi.hoisted(() => ({ calls: [] as [string, Record<string, unknown> | undefined][] }))
 vi.mock('@tauri-apps/api/core', () => ({
@@ -68,6 +89,7 @@ import { allChildren, type ChildSession } from './types'
 import { store as appStore } from '../layout/app-store'
 import type { SessionStatus } from '../conversation/types'
 import { settingsStore } from '../settings/app-store'
+import { routeStore } from './agent'
 import './view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -100,6 +122,8 @@ beforeEach(() => {
   timeline.lines = []
   memory.value = null
   conversation.props = null
+  conversation.parked = null
+  routeStore.setState({ routes: {} })
   ipc.calls = []
   chat.composer = null
   chat.approval = null
@@ -116,6 +140,8 @@ async function mount(id: string) {
 
 /** The footer the pane handed the conversation, rendered by the stand-in. */
 const footer = () => host.querySelector('.stub-footer')!
+/** The foot's composer, as the conversation draws it from the pane's chat-input parts. */
+const foot = () => host.querySelector('.stub-foot')
 
 afterEach(() => {
   act(() => root.unmount())
@@ -219,7 +245,7 @@ test('the pane shows the child conversation, with one marker per status change a
   expect(host.querySelector('.ms-head')?.textContent).toContain(c.id)
 })
 
-test('the status handed to the conversation follows the child: working, parked on a permission, a question', async () => {
+test('the status handed to the conversation follows the child: only a dialog the chat answers is waiting', async () => {
   const [first] = allChildren(snapshot)
   const Pane = paneView('mission')!
   const statusOf = async (over: Partial<ChildSession>) => {
@@ -232,8 +258,26 @@ test('the status handed to the conversation follows the child: working, parked o
   expect(await statusOf({ tempo: 'active', needs: null })).toEqual({ busy: true, waiting: null })
   expect(await statusOf({ tempo: 'blocked', needs: 'approve Bash: rm -rf build' })).toEqual({ busy: false, waiting: 'permission' })
   expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: 'permission prompt' })).toEqual({ busy: false, waiting: 'permission' })
-  expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: null })).toEqual({ busy: false, waiting: 'question' })
+  // Asked as it ended its turn: nothing but a reply answers it, so the composer shows.
+  expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: null })).toEqual({ busy: false, waiting: null })
+  // The multiple-choice dialog: the foot's question card.
+  expect(await statusOf({ tempo: 'blocked', needs: 'which crate?', waiting_for: 'input needed' })).toEqual({ busy: false, waiting: 'question' })
+  // `claude agents` is fresher than the tempo.
+  expect(await statusOf({ tempo: 'active', needs: null, waiting_for: 'input needed' })).toEqual({ busy: false, waiting: 'question' })
+  // A dialog no card answers: the terminal does.
+  expect(await statusOf({ tempo: 'blocked', needs: null, waiting_for: 'dialog open' })).toEqual({ busy: false, waiting: null, parked: true })
   expect(await statusOf({ state: 'done' })).toEqual({ busy: false, waiting: null })
+})
+
+test('the conversation is given the child agent: every answer, and no shell mode', async () => {
+  const [first] = allChildren(snapshot)
+  withChild({ ...first, session_id: 'sess-a43d' })
+  await mount(first.id)
+  const agent = conversation.props?.agent as Record<string, unknown>
+  expect(Object.keys(agent).sort()).toEqual(['allow', 'answer', 'deny', 'other', 'send'])
+  // A poll hands the pane a new child object; the agent stays, so the foot keeps its state.
+  await act(async () => missionStore.setState({ snapshot: JSON.parse(JSON.stringify(missionStore.getState().snapshot)) }))
+  expect(conversation.props?.agent).toBe(agent)
 })
 
 test('open terminal on the pending card attaches to the child beside the pane', async () => {
@@ -296,12 +340,12 @@ test('a child with a session_id shows what the vault gave it and what it pushed 
   expect(host.querySelector('.cmem-rule-text')?.textContent).toBe('Ask before rewriting a whole file.')
 })
 
-test('a child parked on a permission gets the approval card, answered through claude attach', async () => {
+test('on a permission the foot has no card for yet, the footer answers it through claude attach', async () => {
   const [first] = allChildren(snapshot)
   const c = { ...first, tempo: 'blocked', needs: 'approve Bash: cargo test \\\n  --workspace' }
   withChild(c)
   await mount(c.id)
-  expect(footer().querySelector('.composer-stub')).toBeNull()
+  expect(foot()).toBeNull()
   expect(chat.approval).toMatchObject({ tool: 'Bash', summary: 'cargo test \\', detail: 'cargo test \\\n  --workspace' })
   await act(async () => (chat.approval!.onAllow as () => Promise<void>)())
   await act(async () => (chat.approval!.onDeny as () => Promise<void>)())
@@ -314,6 +358,26 @@ test('a child parked on a permission gets the approval card, answered through cl
   expect(answers.calls.at(-1)).toEqual([c.id, 'always'])
 })
 
+test('once the transcript shows the call, the foot card answers it and the footer only offers "don\'t ask again"', async () => {
+  const [first] = allChildren(snapshot)
+  const c = { ...first, tempo: 'blocked', needs: 'approve Bash: cargo test' }
+  withChild(c)
+  conversation.parked = { tool: { id: 'toolu_1', kind: 'tool', name: 'Bash' }, kind: 'permission' }
+  await mount(c.id)
+  expect(chat.approval).toBeNull()
+  expect(footer().querySelector('.ms-always')).not.toBeNull()
+  // The foot's Approve / Deny go through the agent, to the same attach.
+  const agent = conversation.props?.agent as { allow(): Promise<void>; deny(): Promise<void> }
+  await act(async () => agent.allow())
+  await act(async () => agent.deny())
+  expect(answers.calls).toEqual([
+    [c.id, 'yes'],
+    [c.id, 'no'],
+  ])
+  answers.phase = 'error'
+  await expect(agent.allow()).rejects.toThrow('the prompt did not appear in the attach')
+})
+
 test('a one-line ask has no detail, and a failed answer rejects so the card can say so', async () => {
   const [first] = allChildren(snapshot)
   withChild({ ...first, tempo: 'blocked', needs: null, waiting_for: 'permission prompt' })
@@ -323,60 +387,96 @@ test('a one-line ask has no detail, and a failed answer rejects so the card can 
   await expect((chat.approval!.onAllow as () => Promise<void>)()).rejects.toThrow('the prompt did not appear in the attach')
 })
 
-test('a child asking a question shows it over the composer, which sends through the mission reply', async () => {
-  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
-  await mount(blocked.id)
-  expect(chat.approval).toBeNull()
-  expect(footer().querySelector('.ms-needs')?.textContent).toBe('may I add a crate?')
-  expect(footer().querySelector('.ms-suggested')?.textContent).toBe('Suggested: yes')
-  expect(chat.composer).toMatchObject({ cwd: blocked.cwd, disabled: false, placeholder: 'Answer the child…' })
-  await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('use serde'))
-  expect(ipc.calls).toContainEqual(['mission_reply', { id: blocked.id, text: 'use serde' }])
-  expect(footer().querySelector('.ms-sent')?.textContent).toContain('use serde')
+test('a child parked on the multiple-choice dialog gets no composer and no footer: the foot asks it', async () => {
+  const [first] = allChildren(snapshot)
+  withChild({ ...first, session_id: 'sess-a43d', tempo: 'blocked', needs: 'which colour?', waiting_for: 'input needed' })
+  await mount(first.id)
+  expect(foot()).toBeNull()
+  expect(chat.composer).toBeNull()
+  expect(footer().textContent).toBe('')
 })
 
-test('send it sends the suggested reply as a message', async () => {
-  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
-  await mount(blocked.id)
-  await act(async () => footer().querySelector<HTMLButtonElement>('.ms-send-suggested')!.click())
-  expect(ipc.calls).toContainEqual(['mission_reply', { id: blocked.id, text: 'yes' }])
-})
-
-test('as me types the composer text into the child terminal, and a refusal rejects the send', async () => {
-  const blocked = allChildren(snapshot).find((c) => c.tempo === 'blocked')!
-  const asMe: [string, string | null | undefined, string][] = []
-  const real = missionStore.getState().replyAsMe
-  let ok = true
+/** Swaps the store's reply routes for recorders; the real ones need the core. */
+function recordReplies() {
+  const calls: [string, string, string | null | undefined][] = []
+  const real = { replyAsMe: missionStore.getState().replyAsMe, sendReply: missionStore.getState().sendReply }
+  let refuse: string | null = null
   missionStore.setState({
     replyAsMe: async (id, suggested) => {
-      asMe.push([id, suggested, missionStore.getState().drafts[id]])
-      if (!ok) missionStore.setState({ replyErrors: { [id]: "this is the child's suggested reply, not yours" } })
-      return ok
+      calls.push(['as-me', missionStore.getState().drafts[id], suggested])
+      if (refuse) missionStore.setState({ replyErrors: { [id]: refuse } })
+      return !refuse
+    },
+    sendReply: async (id) => {
+      calls.push(['message', missionStore.getState().drafts[id], undefined])
+      return true
     },
   })
+  return { calls, refuse: (why: string) => (refuse = why), restore: () => missionStore.setState(real) }
+}
+
+test('a child that asked as it ended its turn gets the composer under its question, sending as me by default', async () => {
+  const blocked = { ...allChildren(snapshot).find((c) => c.tempo === 'blocked')!, session_id: 'sess-b' }
+  withChild(blocked)
+  const r = recordReplies()
   try {
     await mount(blocked.id)
-    await act(async () => footer().querySelector<HTMLButtonElement>('[data-route="as-me"]')!.click())
-    expect(footer().querySelector('[data-route="as-me"]')?.getAttribute('aria-checked')).toBe('true')
-    expect(chat.composer?.placeholder).toBe(`Type into claude attach ${blocked.id}, as you…`)
-    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('push it'))
-    expect(asMe).toEqual([[blocked.id, 'yes', 'push it']])
+    expect(chat.approval).toBeNull()
+    expect(foot()?.querySelector('.ms-needs')?.textContent).toBe('may I add a crate?')
+    expect(foot()?.querySelector('.ms-suggested')?.textContent).toBe('Suggested: yes')
+    expect(foot()?.querySelector('[data-route="as-me"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(chat.composer).toMatchObject({ cwd: blocked.cwd, disabled: false, placeholder: 'Answer the child, as you…' })
+    // No `!`: a child has no shell mode.
+    expect(chat.composer?.onBash).toBeUndefined()
+    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('use serde'))
+    expect(r.calls).toEqual([['as-me', 'use serde', 'yes']])
     expect(ipc.calls.some(([cmd]) => cmd === 'mission_reply')).toBe(false)
-    ok = false
+    // A refusal rejects the send, so the composer keeps the text and says why.
+    r.refuse("this is the child's suggested reply, not yours")
     await expect((chat.composer!.onSend as (t: string) => Promise<void>)('yes')).rejects.toThrow("this is the child's suggested reply")
   } finally {
-    missionStore.setState({ replyAsMe: real })
+    r.restore()
   }
 })
 
-test('a working child still takes a message; a child that is not running gets a disabled composer', async () => {
+test('message is the second choice, and it holds for the next send', async () => {
+  const blocked = { ...allChildren(snapshot).find((c) => c.tempo === 'blocked')!, session_id: 'sess-b' }
+  withChild(blocked)
+  const r = recordReplies()
+  try {
+    await mount(blocked.id)
+    await act(async () => foot()!.querySelector<HTMLButtonElement>('[data-route="message"]')!.click())
+    expect(foot()?.querySelector('[data-route="message"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(chat.composer?.placeholder).toBe('Answer the child…')
+    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('use serde'))
+    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('and toml'))
+    expect(r.calls.map(([route, text]) => [route, text])).toEqual([
+      ['message', 'use serde'],
+      ['message', 'and toml'],
+    ])
+  } finally {
+    r.restore()
+  }
+})
+
+test('send it sends the suggested reply as a message', async () => {
+  const blocked = { ...allChildren(snapshot).find((c) => c.tempo === 'blocked')!, session_id: 'sess-b' }
+  withChild(blocked)
+  await mount(blocked.id)
+  await act(async () => foot()!.querySelector<HTMLButtonElement>('.ms-send-suggested')!.click())
+  expect(ipc.calls).toContainEqual(['mission_reply', { id: blocked.id, text: 'yes' }])
+})
+
+test('a working child still takes a reply; a child that is not running gets a disabled composer and refuses', async () => {
   const [first] = allChildren(snapshot)
+  withChild({ ...first, session_id: 'sess-a43d' })
   await mount(first.id)
-  expect(footer().querySelector('.ms-question')).toBeNull()
-  expect(chat.composer).toMatchObject({ disabled: false, placeholder: 'Message the child…' })
-  withChild({ ...first, live: false })
+  expect(foot()?.querySelector('.ms-question')).toBeNull()
+  expect(chat.composer).toMatchObject({ disabled: false, placeholder: `Type into claude attach ${first.id}, as you…` })
+  withChild({ ...first, session_id: 'sess-a43d', live: false })
   await mount(first.id)
   expect(chat.composer).toMatchObject({ disabled: true, placeholder: 'The child is not running: nothing reaches it' })
+  await expect((conversation.props?.agent as { send(t: string): Promise<void> }).send('hello')).rejects.toThrow('not running')
 })
 
 test('the head is new UI: take over attaches beside the pane, stop asks once more before claude stop', async () => {
