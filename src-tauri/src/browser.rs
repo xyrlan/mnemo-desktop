@@ -81,6 +81,21 @@ pub fn visible(w: f64, h: f64) -> bool {
     w > 0.0 && h > 0.0
 }
 
+/// Where a hidden webview's frame is parked: off the window, covering nothing.
+const PARKED: (f64, f64, f64, f64) = (-10_000.0, -10_000.0, 1.0, 1.0);
+
+/// The frame a webview takes for the bounds `(x, y, w, h)` asked for, and whether it shows.
+/// Hiding alone is not enough: a hidden WKWebView keeps its frame, and on macOS it still takes
+/// the native file drags over it, so a terminal under a browser tab that is not shown never saw
+/// a file dropped from Finder (2026-09-26). A hidden one is parked off the window instead.
+fn frame(x: f64, y: f64, w: f64, h: f64) -> ((f64, f64, f64, f64), bool) {
+    if visible(w, h) {
+        ((x, y, w, h), true)
+    } else {
+        (PARKED, false)
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct StatePayload {
     url: String,
@@ -155,14 +170,12 @@ fn viewport_origin<R: Runtime>(_window: &Window<R>) -> (f64, f64) {
 }
 
 fn place<R: Runtime>(webview: &Webview<R>, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
-    if !visible(w, h) {
-        return webview.hide().map_err(|e| e.to_string());
-    }
-    let (dx, dy) = viewport_origin(&webview.window());
+    let ((x, y, w, h), shown) = frame(x, y, w, h);
+    let (dx, dy) = if shown { viewport_origin(&webview.window()) } else { (0.0, 0.0) };
     webview
         .set_bounds(Rect { position: LogicalPosition::new(x + dx, y + dy).into(), size: LogicalSize::new(w, h).into() })
         .map_err(|e| e.to_string())?;
-    webview.show().map_err(|e| e.to_string())
+    if shown { webview.show() } else { webview.hide() }.map_err(|e| e.to_string())
 }
 
 // Commands that build or look up webviews are `async` so they run off the main thread:
@@ -479,6 +492,14 @@ mod tests {
         assert!(visible(10.0, 10.0));
         assert!(!visible(0.0, 10.0));
         assert!(!visible(10.0, 0.0));
+    }
+
+    #[test]
+    fn a_hidden_webview_leaves_the_area_it_covered() {
+        assert_eq!(frame(10.0, 20.0, 300.0, 200.0), ((10.0, 20.0, 300.0, 200.0), true));
+        let ((x, y, w, h), shown) = frame(10.0, 20.0, 0.0, 200.0);
+        assert!(!shown);
+        assert!(x + w < 0.0 && y + h < 0.0, "parked at {x},{y} {w}x{h}: still over the window");
     }
 
     #[test]
