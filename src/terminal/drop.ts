@@ -27,6 +27,26 @@ export function dropText(paths: string[]): string {
   return words.length ? `${words.join(' ')} ` : ''
 }
 
-/** The terminal pane files are being dragged over, for the pane highlight. */
+/** The pane files are being dragged over, for the pane highlight. */
 export const fileDropStore = createStore<{ over: PaneId | null }>(() => ({ over: null }))
 export const useFileDrop = <T,>(sel: (s: { over: PaneId | null }) => T) => useStore(fileDropStore, sel)
+
+/** A chat composer that takes dropped files: the element it is drawn in, and how it puts text
+ *  into its draft. */
+export type DropTarget = { el: HTMLElement; insert(text: string): void }
+
+const targets = new Set<DropTarget>()
+
+/** Offers a mounted composer to file drops; returns its removal. */
+export function registerDropTarget(t: DropTarget): () => void {
+  targets.add(t)
+  return () => void targets.delete(t)
+}
+
+/** The composer inside pane element `pane`, if one is mounted there. A chat mounts only while it
+ *  shows (a terminal's conversation face, a child's chat), so being inside a pane on screen is
+ *  being on screen. */
+export function dropTargetIn(pane: Element): DropTarget | null {
+  for (const t of targets) if (pane.contains(t.el)) return t
+  return null
+}

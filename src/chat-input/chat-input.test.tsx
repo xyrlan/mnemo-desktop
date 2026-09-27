@@ -23,6 +23,7 @@ vi.mock('./catalog', async (importOriginal) => {
 })
 
 const { ChatComposer } = await import('./Composer')
+const { dropTargetIn } = await import('../terminal/drop')
 const { ApprovalCard } = await import('./ApprovalCard')
 const { QuestionCard } = await import('./QuestionCard')
 
@@ -119,6 +120,23 @@ describe('ChatComposer', () => {
     await act(async () => gate.resolve())
     await flush()
     expect(textarea().value).toBe('')
+  })
+
+  it('takes dropped files into the draft at the caret, and lets go of drops once unmounted', async () => {
+    const sent: string[] = []
+    await render(<ChatComposer cwd="/wt" onSend={async (t) => void sent.push(t)} />)
+    await type('look at  please', 8)
+    const target = dropTargetIn(host)
+    expect(target).not.toBeNull()
+    await act(async () => target!.insert('/tmp/Screen\\ Shot.png '))
+    await flush()
+    expect(textarea().value).toBe('look at /tmp/Screen\\ Shot.png  please')
+    expect(document.activeElement).toBe(textarea())
+    await key('Enter')
+    expect(sent).toEqual(['look at /tmp/Screen\\ Shot.png  please'])
+    act(() => root.unmount())
+    expect(dropTargetIn(host)).toBeNull()
+    root = createRoot(host)
   })
 
   it('breaks the line on Shift+Enter and sends on ⌘↵', async () => {
