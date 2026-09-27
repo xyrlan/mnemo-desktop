@@ -7,6 +7,7 @@ import { cn } from '@/ui/cn'
 import { catalog, filterCommands, filterFiles, type SlashCommand } from './catalog'
 import { complete, EMPTY_HISTORY, pushHistory, recallNext, recallPrevious, triggerAt, type History, type Trigger } from './draft'
 import { ComposerMenu, optionId, type MenuItem, type MenuState } from './Menus'
+import { registerDropTarget } from '../terminal/drop'
 
 export type ChatComposerProps = {
   /** Delivers the prompt. The draft empties the moment it is sent; a rejection is shown and the
@@ -76,8 +77,8 @@ export function ChatComposer({ onSend, onBash, cwd, placeholder = 'Message Claud
     }
   }, [])
   // What is on screen now, for a send that fails after the draft moved on.
-  const now = useRef({ draft, shell })
-  now.current = { draft, shell }
+  const now = useRef({ draft, shell, caret })
+  now.current = { draft, shell, caret }
 
   const found = useMemo(() => (shell ? null : triggerAt(draft, caret)), [shell, draft, caret])
   const trigger: Trigger | null = found && found.key !== dismissed ? found : null
@@ -128,6 +129,24 @@ export function ChatComposer({ onSend, onBash, cwd, placeholder = 'Message Claud
     setCaret(at)
     setActive(0)
   }, [])
+
+  // Files dropped from Finder on the pane this chat is in land in the draft, at the caret
+  // (`src/terminal/file-drop.ts`), instead of in the terminal's input hidden under the chat.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    return registerDropTarget({
+      el,
+      insert: (text) => {
+        const { draft: d, caret: c } = now.current
+        const at = Math.min(c, d.length)
+        place(d.slice(0, at) + text + d.slice(at), at + text.length)
+        setError(null)
+        textareaRef.current?.focus()
+      },
+    })
+  }, [place])
 
   /** A history entry (a shell command kept with its `!`) as the draft and the mode it was in. */
   const recall = useCallback(
@@ -248,7 +267,7 @@ export function ChatComposer({ onSend, onBash, cwd, placeholder = 'Message Claud
 
   const sendDisabled = disabled || !draft.trim()
   return (
-    <div data-ui data-chat-composer className="shrink-0 bg-background">
+    <div ref={rootRef} data-ui data-chat-composer className="shrink-0 bg-background">
       <div className="px-3 pt-2 pb-3">
         <div className="relative mx-auto w-full max-w-4xl">
           {trigger && menu ? <ComposerMenu kind={trigger.kind} state={menu} activeIndex={activeIndex} listboxId={listboxId} onChoose={(item) => choose(item)} /> : null}

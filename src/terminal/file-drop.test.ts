@@ -8,7 +8,7 @@ const onDragDropEvent = vi.fn(async (_h: unknown) => unlisten)
 vi.mock('@tauri-apps/api/webview', () => ({ getCurrentWebview: () => ({ onDragDropEvent }) }))
 
 import { store } from '../layout/app-store'
-import { fileDropStore } from './drop'
+import { fileDropStore, registerDropTarget } from './drop'
 import { dropScale, holdFileDrop, onFileDrag, terminalAt } from './file-drop'
 
 /** Three panes side by side at 100px each: two terminals (7, 8) split by an editor (-3) — an
@@ -108,6 +108,50 @@ test('dropping outside a live terminal writes nothing', () => {
   onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 150, y: 5 } }, 1)
   onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 350, y: 5 } }, 1)
   expect(invoke).not.toHaveBeenCalled()
+})
+
+/** A chat composer mounted inside pane `id`, recording what it is handed. */
+function composerIn(id: number) {
+  const el = document.createElement('div')
+  document.querySelector(`.pane[data-pane="${id}"]`)!.appendChild(el)
+  const got: string[] = []
+  const off = registerDropTarget({ el, insert: (text) => got.push(text) })
+  return { got, off }
+}
+
+test('on a terminal showing its conversation, the paths go into the chat, not the PTY', () => {
+  const chat = composerIn(7)
+  const focus = vi.spyOn(store.getState(), 'focusPane').mockImplementation(() => {})
+  onFileDrag({ type: 'over', position: { x: 20, y: 5 } }, 1)
+  expect(fileDropStore.getState().over).toBe(7)
+  onFileDrag({ type: 'drop', paths: ['/tmp/Screen Shot.png'], position: { x: 20, y: 5 } }, 1)
+  expect(chat.got).toEqual(['/tmp/Screen\\ Shot.png '])
+  expect(invoke).not.toHaveBeenCalled()
+  expect(focus).toHaveBeenCalledWith(7)
+  // The terminal beside it, with no chat, still types.
+  onFileDrag({ type: 'drop', paths: ['/tmp/b.png'], position: { x: 250, y: 5 } }, 1)
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 8, data: '/tmp/b.png ' })
+  expect(chat.got).toHaveLength(1)
+  focus.mockRestore()
+  chat.off()
+})
+
+test("a chat in a pane that is not a terminal (a child's) takes the drop too", () => {
+  const chat = composerIn(-3)
+  onFileDrag({ type: 'over', position: { x: 150, y: 5 } }, 1)
+  expect(fileDropStore.getState().over).toBe(-3)
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 150, y: 5 } }, 1)
+  expect(chat.got).toEqual(['/tmp/a.png '])
+  expect(invoke).not.toHaveBeenCalled()
+  chat.off()
+})
+
+test('a chat that unmounted takes nothing', () => {
+  const chat = composerIn(7)
+  chat.off()
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 20, y: 5 } }, 1)
+  expect(chat.got).toEqual([])
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 7, data: '/tmp/a.png ' })
 })
 
 test('every terminal shares one webview listener, removed with the last', async () => {
