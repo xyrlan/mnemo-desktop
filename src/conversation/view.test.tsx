@@ -507,6 +507,15 @@ test('the session block folds its briefing and carries the briefing and learned 
   expect(q('.cv-rule-briefing')?.textContent).toContain('b-rule')
 })
 
+test('the recent-briefings index folds under a label that counts them', async () => {
+  const { client, follows } = fakeClient()
+  await render(view(client))
+  const session: Card = { kind: 'session', id: 'ss', at: at(0), source: 'startup', briefing: '### 2026-09-29\nShipped **it**.', briefings: 10, rules: [] }
+  await follows[0].emit(lines(0, [session]))
+  await click(button(/Recent briefings \(10\)/))
+  expect(q('.cv-briefing strong')?.textContent).toBe('it')
+})
+
 // ---- cards ------------------------------------------------------------------------------------
 
 const hunk = (n: number) => ({ oldStart: 10, oldLines: n, newStart: 10, newLines: n, lines: Array.from({ length: n }, (_, i) => (i % 2 ? `+new ${i}` : `-old ${i}`)) })

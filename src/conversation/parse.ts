@@ -48,9 +48,13 @@ export function unpaste(text: string): string {
 }
 
 const REFLEX = 'mnemo reflex context:'
+/** A rule the reflex injected: an entry line, `• [[slug]]:`, whether a one-line preview or a
+ *  full body follows. A body's own `[[links]]` are pages it names, not rules injected; no body
+ *  line opens with `• [[` (xyrlan/mnemo#546). */
+const REFLEX_ENTRY = /^• \[\[([^\]\s]+)\]\]:/gm
 const SLUG = /\[\[([^\]\s]+)\]\]/g
 const ENRICHMENT = /• mnemo rule \[\[([^\]\s]+)\]\]/g
-const MNEMO_SESSION = /mnemo:\/\/v1|\[last-briefing|\[mnemo learned since your last session\]/
+const MNEMO_SESSION = /mnemo:\/\/v1|\[last-briefing|\[recent-briefings|\[mnemo learned since your last session\]/
 
 type Rec = TranscriptRecord & Record<string, unknown>
 type ToolCard = Extract<Card, { kind: 'tool' }>
@@ -177,17 +181,20 @@ function addRules(to: RuleChip[], slugs: Iterable<string>, channel: RuleChannel)
 const contexts = (a: Record<string, unknown>): string[] =>
   Array.isArray(a.content) ? a.content.filter((c): c is string => typeof c === 'string') : typeof a.content === 'string' ? [a.content] : []
 
-/** The SessionStart block's briefing body and learned slugs. */
-function sessionBlock(text: string): { briefing: string | null; learned: string[]; mentioned: string[] } {
-  let briefing: string | null = null
-  const open = text.indexOf('[last-briefing')
-  const close = text.indexOf('[/last-briefing]')
-  if (open >= 0 && close > open) {
-    // The body starts on the line after `[last-briefing session=… date=…]`.
-    const eol = text.indexOf('\n', open)
-    const body = text.slice(eol >= 0 && eol < close ? eol + 1 : open + '[last-briefing'.length, close).trim()
-    briefing = body || null
-  }
+/** The body of the first `[name …]…[/name]` section in `text`: from the line after its header. */
+function section(text: string, name: string): string | null {
+  const open = text.indexOf(`[${name}`)
+  const close = text.indexOf(`[/${name}]`)
+  if (open < 0 || close <= open) return null
+  const eol = text.indexOf('\n', open)
+  return text.slice(eol >= 0 && eol < close ? eol + 1 : open + name.length + 1, close).trim() || null
+}
+
+/** The SessionStart block's briefing body and learned slugs. mnemo sends one of two briefings:
+ *  `[last-briefing session=… date=…]`, the last session's whole briefing, whose `[[links]]` are
+ *  chips; or (xyrlan/mnemo#552) `[recent-briefings count=N …]`, the TL;DRs of the newest N,
+ *  shown as the briefing with no chips: a link in ten old summaries is no rule of this session. */
+function sessionBlock(text: string): { briefing: string | null; briefings?: number; learned: string[]; mentioned: string[] } {
   const learned: string[] = []
   const at = text.indexOf('[mnemo learned since your last session]')
   if (at >= 0) {
@@ -195,8 +202,12 @@ function sessionBlock(text: string): { briefing: string | null; learned: string[
     const block = text.slice(at, end >= 0 ? end : undefined)
     for (const m of block.matchAll(/^• (\S+) —/gm)) learned.push(m[1])
   }
-  const mentioned = briefing ? [...briefing.matchAll(SLUG)].map((m) => m[1]) : []
-  return { briefing, learned, mentioned }
+  const last = section(text, 'last-briefing')
+  if (last) return { briefing: last, learned, mentioned: [...last.matchAll(SLUG)].map((m) => m[1]) }
+  const recent = section(text, 'recent-briefings')
+  if (!recent) return { briefing: null, learned, mentioned: [] }
+  const count = Number(/\[recent-briefings count=(\d+)/.exec(text)?.[1])
+  return { briefing: recent, briefings: Number.isInteger(count) && count > 0 ? count : undefined, learned, mentioned: [] }
 }
 
 /** The conversation `records` (in file order) describe. Pure: the same records always give the
@@ -380,7 +391,7 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
     if (a.hookEvent === 'UserPromptSubmit') {
       const slugs = texts.flatMap((t) => {
         const i = t.indexOf(REFLEX)
-        return i < 0 ? [] : [...t.slice(i).matchAll(SLUG)].map((m) => m[1])
+        return i < 0 ? [] : [...t.slice(i).matchAll(REFLEX_ENTRY)].map((m) => m[1])
       })
       const card = slugs.length ? answered(r) : null
       if (card?.kind === 'user') addRules(card.rules, slugs, 'reflex')
@@ -394,11 +405,11 @@ export function deriveConversation(records: TranscriptRecord[]): Conversation {
     } else if (a.hookEvent === 'SessionStart') {
       const text = texts.filter((t) => MNEMO_SESSION.test(t)).join('\n')
       if (!text) return
-      const { briefing, learned, mentioned } = sessionBlock(text)
+      const { briefing, briefings, learned, mentioned } = sessionBlock(text)
       const rules: RuleChip[] = []
       addRules(rules, mentioned, 'briefing')
       addRules(rules, learned, 'learned')
-      push({ kind: 'session', id: recordId(r), at, source: startSource, briefing, rules })
+      push({ kind: 'session', id: recordId(r), at, source: startSource, briefing, ...(briefings ? { briefings } : {}), rules })
     }
   }
 

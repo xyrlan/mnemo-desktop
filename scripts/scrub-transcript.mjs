@@ -44,12 +44,13 @@ export const PHRASES = [
   '• mnemo rule ',
   '[last-briefing',
   '[/last-briefing]',
+  '[/recent-briefings]',
   '[mnemo learned since your last session]',
   '[/mnemo learned]',
   'the user said:',
   '[Request interrupted by user',
 ]
-const MNEMO = /mnemo:\/\/v1|mnemo reflex context:|• mnemo rule \[\[|\[last-briefing|\[mnemo learned since/
+const MNEMO = /mnemo:\/\/v1|mnemo reflex context:|• mnemo rule \[\[|\[last-briefing|\[recent-briefings|\[mnemo learned since/
 
 const CLIP_LINES = 8
 
@@ -106,8 +107,10 @@ function text(s, fake, clip) {
     `</?(?:${TAGS.join('|')})>`,
     // The briefing's header line, whole, so a clip never cuts the `]` that ends it.
     '\\[last-briefing[^\\]\\n]*\\]',
+    '\\[recent-briefings[^\\]\\n]*\\]',
     ...PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-    ...(mnemo ? ['\\[\\[[^\\]\\s]+\\]\\]', '(?<=^|\\n)• [^\\s\\[]+(?= —)'] : []),
+    // A reflex entry's `• ` with its slug, so a clipped body before it never cuts the bullet.
+    ...(mnemo ? ['(?<=^|\\n)• \\[\\[[^\\]\\s]+\\]\\]', '\\[\\[[^\\]\\s]+\\]\\]', '(?<=^|\\n)• [^\\s\\[]+(?= —)'] : []),
   ]
   const re = new RegExp(pieces.join('|'), 'g')
   let at = 0
@@ -115,6 +118,11 @@ function text(s, fake, clip) {
     parts.push(gap(s.slice(at, m.index)))
     const t = m[0]
     if (t.startsWith('[last-briefing')) parts.push(`[last-briefing${lorem(t.slice('[last-briefing'.length, -1))}]`)
+    else if (t.startsWith('[recent-briefings')) {
+      // Its count is structure; the rest of the header is text.
+      const head = /^\[recent-briefings( count=\d+)?/.exec(t)[0]
+      parts.push(`${head}${lorem(t.slice(head.length, -1))}]`)
+    } else if (t.startsWith('• [[')) parts.push(`• [[${fake(t.slice(4, -2))}]]`)
     else if (t.startsWith('[[') && t.endsWith(']]')) parts.push(`[[${fake(t.slice(2, -2))}]]`)
     else if (t.startsWith('• ') && !PHRASES.includes(t)) parts.push(`• ${fake(t.slice(2))}`)
     else parts.push(t)

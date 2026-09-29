@@ -14,6 +14,7 @@ plugin's tag) outside the keys kept as structure and the envelopes the parser re
 | `clear.jsonl` | a pane session started by `/clear` | 1–156 | the `/clear` command, reflex chips, two subagents, a peer message, queued peers |
 | `denial.jsonl` | a pane session started by `/clear` | 1–83 | an interrupt, a subagent, a user-rejected AskUserQuestion with the user's feedback, a slug in the briefing |
 | `bg-child.jsonl` | a `--bg` child (`sessionKind: bg`) | 1–41 | reflex chips and a `mcp__mnemo__read_mnemo_rule` call |
+| `full-body-reflex.jsonl` | a session after xyrlan/mnemo#543 and #552 (2026-09-29) | 1–31 | a full-body reflex of three rules whose bodies link seven other pages, and the SessionStart `[recent-briefings count=10 …]` index with a link in a TL;DR |
 | `peer-queued.jsonl` | a pane session | 1–121 | a peer message, a prompt queued while busy (with its reflex chips), `!` commands |
 
 To add one: `node scripts/scrub-transcript.mjs --clip 100 <transcript.jsonl> | sed -n '<a>,<b>p'`,

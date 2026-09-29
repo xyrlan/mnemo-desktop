@@ -313,6 +313,34 @@ describe('the session block', () => {
     ])
   })
 
+  test('the recent-briefings index is the briefing, with no chips for the links in its TL;DRs', () => {
+    const index = [
+      'mnemo://v1 project=demo',
+      '',
+      '[mnemo learned since your last session]',
+      '• first-rule — does one thing',
+      '[/mnemo learned]',
+      '',
+      '[recent-briefings count=2 newest first: the TL;DR of each of this project\'s newest session briefings]',
+      '### 2026-09-29',
+      'Shipped the reranker; see [[rerank-setup]].',
+      '',
+      '### 2026-09-28',
+      'Fixed [[worktree-tests]].',
+      '[/recent-briefings]',
+    ].join('\n')
+    const session = one([hook('h1', 'SessionStart', [index])], 'session')
+    expect(session).toMatchObject({
+      briefing: '### 2026-09-29\nShipped the reranker; see [[rerank-setup]].\n\n### 2026-09-28\nFixed [[worktree-tests]].',
+      briefings: 2,
+    })
+    expect(session.rules).toEqual([{ slug: 'first-rule', channel: 'learned' }])
+  })
+
+  test('a last briefing is not an index: no count', () => {
+    expect(one([hook('h1', 'SessionStart', [START])], 'session')).not.toHaveProperty('briefings')
+  })
+
   test('a SessionStart context that is not mnemo makes no card', () => {
     expect(cards([hook('h1', 'SessionStart', ['[caveman] terse mode on'])])).toEqual([])
   })
@@ -334,6 +362,30 @@ describe('rule chips', () => {
       kind: 'user', id: 'u2',
       rules: [{ slug: 'use-pnpm', channel: 'reflex' }, { slug: 'small-prs', channel: 'reflex' }],
     })
+  })
+
+  test('a full-body reflex chips its entries, not the pages their bodies link', () => {
+    const [prompt] = only(
+      [
+        user('u1', 'hi'),
+        hook('h1', 'UserPromptSubmit', [
+          [
+            'mnemo reflex context:',
+            '• [[rerank-setup]]:',
+            'The reranker runs after the filter; see [[jev-is-a-filter]].',
+            '',
+            '**How to apply:** one per tree, [[one-session-per-tree]] and [[worktree-tests]].',
+            '• [[worktree-tests]]:',
+            '- run them with PYTHONPATH=src, as [[rerank-setup]] says',
+          ].join('\n'),
+        ], { parentUuid: 'u1' }),
+      ],
+      'user',
+    )
+    expect(prompt.rules).toEqual([
+      { slug: 'rerank-setup', channel: 'reflex' },
+      { slug: 'worktree-tests', channel: 'reflex' },
+    ])
   })
 
   test('a reflex whose chain reaches no prompt lands on the latest one', () => {
@@ -558,7 +610,7 @@ const ENVELOPES = new RegExp(
     '<(tool-use-id|task-id|status)>[\\w.:-]{0,80}</\\1>',
     '<command-name>/(?:clear|compact|model|resume|review|context|config|help|init|memory|mcp|agents|effort|fast|loop|rewind|status|usage|exit)</command-name>',
     '</?(?:command-name|command-message|command-args|bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat|task-notification|task-id|tool-use-id|output-file|status|summary|result|note|usage|event|task-type|system-reminder)>',
-    'mnemo://v1', 'mnemo reflex context:', '• mnemo rule ', '\\[/?last-briefing\\]?', '\\[/?mnemo learned( since your last session)?\\]',
+    'mnemo://v1', 'mnemo reflex context:', '• mnemo rule ', '\\[/?last-briefing\\]?', '\\[/?recent-briefings( count=\\d+)?\\]?', '\\[/?mnemo learned( since your last session)?\\]',
     'the user said:', '\\[Request interrupted by user', 'fake-rule-\\d+',
   ].join('|'),
   'g',
@@ -612,7 +664,7 @@ describe('fixtures', () => {
 
   test('hold no long base64 run and no secret shape, and every image is the tiny PNG', async () => {
     const all = await fixtures()
-    expect([...all.keys()]).toEqual(['bg-child.jsonl', 'clear.jsonl', 'denial.jsonl', 'pane-enrichment.jsonl', 'pane.jsonl', 'peer-queued.jsonl'])
+    expect([...all.keys()]).toEqual(['bg-child.jsonl', 'clear.jsonl', 'denial.jsonl', 'full-body-reflex.jsonl', 'pane-enrichment.jsonl', 'pane.jsonl', 'peer-queued.jsonl'])
     for (const [name, text] of all) {
       for (const [shape, re] of LEAKS) expect(re.test(text), `${name}: ${shape}`).toBe(false)
       for (const m of text.matchAll(/"data":"([^"]*)"/g)) expect(m[1], name).toBe(TINY_PNG)
@@ -689,6 +741,20 @@ describe('fixtures', () => {
     const read = byKind(conversation.cards, 'tool').find((t) => t.name === 'mcp__mnemo__read_mnemo_rule')!
     expect(read.rules).toEqual([{ slug: read.summary, channel: 'mcp' }])
     expect(prompt.rules.map((r) => r.slug)).toContain(read.summary)
+  })
+
+  test('full-body reflex: chips for the three rules injected, none for the seven pages their bodies link; the briefing index', async () => {
+    const { records, conversation } = derive((await fixtures()).get('full-body-reflex.jsonl')!)
+    const reflex = records.map((r) => (r as { attachment?: { hookEvent?: string; content?: string[] } }).attachment)
+      .find((a) => a?.hookEvent === 'UserPromptSubmit')!.content!.join('\n')
+    // What the old reading took: every [[link]] after the header.
+    expect(new Set([...reflex.matchAll(/\[\[([^\]\s]+)\]\]/g)].map((m) => m[1])).size).toBe(9)
+    const [prompt] = byKind(conversation.cards, 'user')
+    expect(prompt.rules).toEqual(['fake-rule-2', 'fake-rule-3', 'fake-rule-7'].map((slug) => ({ slug, channel: 'reflex' })))
+    const [session] = byKind(conversation.cards, 'session')
+    expect(session.briefings).toBe(10)
+    expect(session.briefing).toContain('[[fake-rule-1]]')
+    expect(session.rules).toEqual([])
   })
 
   test('a peer message, a queued prompt with its reflex chips, and ! commands', async () => {

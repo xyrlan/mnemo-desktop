@@ -157,3 +157,18 @@ test('--clip cuts every run of lorem to a few short lines and keeps the tags', (
   const [start] = scrub(transcript.slice(0, 1), { clip: 8 })
   expect(start.attachment.content[0]).toContain(`[last-briefing${lorem(' session=abc')}]\n`)
 })
+
+test('--clip keeps a full-body reflex entry’s bullet and the recent-briefings count, so chips still parse', () => {
+  const body = 'a long rule body\n'.repeat(12)
+  const [reflex, start] = scrub(
+    [
+      { type: 'attachment', attachment: { type: 'hook_additional_context', hookEvent: 'UserPromptSubmit', content: [`mnemo reflex context:\n• [[first]]:\n${body}see [[linked]]\n• [[second]]:\nshort`] } },
+      { type: 'attachment', attachment: { type: 'hook_additional_context', hookEvent: 'SessionStart', content: ['mnemo://v1 project=secret\n[recent-briefings count=10 newest first: the TL;DR]\n### 2026\nsee [[first]]\n[/recent-briefings]'] } },
+    ],
+    { clip: 8 },
+  )
+  expect([...reflex.attachment.content[0].matchAll(/^• \[\[(fake-rule-\d+)\]\]:/gm)].map((m) => m[1])).toEqual(['fake-rule-1', 'fake-rule-3'])
+  expect(reflex.attachment.content[0]).toContain('[[fake-rule-2]]')
+  expect(start.attachment.content[0]).toContain(`[recent-briefings count=10${lorem(' newest first: the TL;DR')}]\n`)
+  expect(start.attachment.content[0]).toContain('[[fake-rule-1]]\n[/recent-briefings]')
+})
