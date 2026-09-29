@@ -80,7 +80,7 @@ test('you are looking only with focus, at its worktree or a pane of the shown ta
   expect(looking({ worktree: null }, { ...at, shown: null, pane: 4 })).toBe(false)
 })
 
-test('quietPrompt is mnemo’s own turns and peer messages, framed or bare; not a person', () => {
+test('quietPrompt is mnemo’s own turns, peer messages and a finished background task; not a person', () => {
   for (const m of [
     'Another Claude session sent a message:\n<mnemo-child-finished id="720a903b">',
     'Another Claude session sent a message:\n🧹 removed wt-3',
@@ -90,9 +90,11 @@ test('quietPrompt is mnemo’s own turns and peer messages, framed or bare; not 
     '\n<mnemo-resume id="ab12">',
     '<mnemo-pr-follow pr="394" events="ci-red">',
     '🧹 kept wt-4: dirty',
+    '<task-notification>\n<task-id>b7fi1avmy</task-id>\n<tool-use-id>toolu_018W</tool-use-id>',
+    '\n<task-notification>\n<task-id>b1</task-id>',
   ])
     expect(quietPrompt(m), m).toBe(true)
-  for (const m of [undefined, '', 'continue', 'why does <mnemo-resume> fire twice?', '<task-notification> <task-id>b1</task-id>', '🧹clean up the tree'])
+  for (const m of [undefined, '', 'continue', 'why does <mnemo-resume> fire twice?', 'what is a <task-notification>?', '<task-notifications> are noisy', '🧹clean up the tree'])
     expect(quietPrompt(m), String(m)).toBe(false)
 })
 
