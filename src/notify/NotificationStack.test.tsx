@@ -16,6 +16,7 @@ const card = (id: number, kind: Card['kind'], over: Partial<Card> = {}): Card =>
   message: kind === 'done' ? 'Finished: Add login' : 'Claude needs your permission to use Bash',
   at: 0,
   pane: null,
+  key: `session:s${id}`,
   ...over,
 })
 

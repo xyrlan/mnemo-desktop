@@ -85,6 +85,25 @@ function agentTitle(sessionId: string, repos: readonly RepoNode[]): string | nul
   return null
 }
 
+/** What mnemo types into a session itself — a child's report card, a wake after a limit, a PR
+ *  follow-up, a tree sweep's line — and what another session sends it. Claude Code frames a peer
+ *  turn with a header (or the raw `<cross-session-message>` tag); mnemo's own come framed or bare. */
+const PEER = /^(Another Claude session sent a message:|<cross-session-message\b)/
+const MNEMO = ['<mnemo-child-finished', '<mnemo-resume', '<mnemo-pr-follow', '🧹 ']
+
+/** A prompt no person sent: the turn it starts is not one you are waiting on. */
+export function quietPrompt(message: string | undefined): boolean {
+  const m = (message ?? '').trimStart()
+  return PEER.test(m) || MNEMO.some((p) => m.startsWith(p))
+}
+
+/** Whose card an alert is: a dispatched child's worktree, so a resume that forks a new session
+ *  there reads as the same child; any other agent, its session. */
+export function cardKey(sessionId: string, worktree: string | null, repos: readonly RepoNode[]): string {
+  if (worktree !== null) for (const r of repos) for (const w of r.worktrees) if (w.kind === 'dispatched' && norm(w.path) === norm(worktree)) return `tree:${norm(w.path)}`
+  return `session:${sessionId}`
+}
+
 /** The pane running session `sessionId`, when the fleet knows one. */
 export function paneOf(sessionId: string, repos: readonly RepoNode[]): number | null {
   for (const r of repos) for (const w of r.worktrees) for (const a of w.agents) if (a.sessionId === sessionId) return a.paneId
