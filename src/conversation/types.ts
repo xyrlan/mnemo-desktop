@@ -67,8 +67,9 @@ export type Card =
   /** A slash command the user ran (`/clear` never shows: it starts a new transcript), or a
    *  shell command (`name` `!`), with what it printed once that is in. */
   | { kind: 'command'; id: string; at: string; name: string; args: string; output?: BashOutput }
-  /** The SessionStart block: mnemo's briefing and what it learned, as chips. */
-  | { kind: 'session'; id: string; at: string; source: string; briefing: string | null; rules: RuleChip[] }
+  /** The SessionStart block: mnemo's briefing and what it learned, as chips. `briefings`: set
+   *  when the briefing is mnemo's index of its newest briefings' TL;DRs, how many it holds. */
+  | { kind: 'session'; id: string; at: string; source: string; briefing: string | null; briefings?: number; rules: RuleChip[] }
   /** A record type this parser does not know: shown as a grey chip so a Claude Code format
    *  change is visible at once instead of silently dropped. */
   | { kind: 'unknown'; id: string; at: string; type: string }

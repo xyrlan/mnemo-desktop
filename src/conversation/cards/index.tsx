@@ -83,7 +83,7 @@ function SessionBlock({ card, k }: { card: Extract<Card, { kind: 'session' }>; k
         <>
           <button type="button" className="cv-more mt-1 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" aria-expanded={open} onClick={() => toggle(`${k}:briefing`)}>
             <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
-            Briefing
+            {card.briefings ? `Recent briefings (${card.briefings})` : 'Briefing'}
           </button>
           {open && (
             <div className="cv-briefing scrollbar-sleek mt-1 max-h-96 overflow-auto border-l-2 border-border/60 pl-3">
