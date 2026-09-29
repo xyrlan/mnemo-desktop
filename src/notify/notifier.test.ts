@@ -251,6 +251,22 @@ test('a turn only mnemo or a peer started tells nothing when it ends, and leaves
   expect([sounds, native.length]).toEqual([1, 1])
 })
 
+test('a turn only a finished background task started tells nothing when it ends; an ask in it still tells', () => {
+  world.focused = false
+  const n = make()
+  const done = '<task-notification>\n<task-id>b7fi1avmy</task-id>\n<tool-use-id>toolu_018W</tool-use-id>\n<status>completed</status>'
+  emit(stop('s-x', '/code/lib'))
+  const [card] = n.cards.getState().cards
+  emit(prompt('s-x', '/code/lib', done))
+  emit(stop('s-x', '/code/lib'))
+  expect(n.cards.getState().cards).toEqual([card])
+  expect([sounds, native.length]).toEqual([1, 1])
+  emit(prompt('s-x', '/code/lib', done))
+  emit(ask('s-x', '/code/lib', 'Claude has a question for you'))
+  expect(n.cards.getState().cards.map((c) => c.kind)).toEqual(['question'])
+  expect(native).toHaveLength(2)
+})
+
 test('a person’s turn with a report card queued in it still tells when it ends', () => {
   world.focused = false
   const n = make()

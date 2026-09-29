@@ -53,9 +53,10 @@ export type Notifier = {
  * it (the window has focus and shows its worktree): a card in the stack and a short sound, and
  * a native notification when the window is not focused — with focus, the card already says it.
  *
- * A turn only mnemo or another session started (`quietPrompt`: a child's report card, a wake, a
- * sweep, a peer message) tells nothing when it ends: the sidebar still marks its worktree unread.
- * Those prompts leave the card alone too, since nobody answered it.
+ * A turn no person started (`quietPrompt`: a child's report card, a wake, a sweep, a peer message,
+ * a background task of its own finishing) tells nothing when it ends: the sidebar still marks its
+ * worktree unread. Those prompts leave the card alone too, since nobody answered it. An ask in
+ * such a turn still tells you.
  */
 export function createNotifier(deps: NotifierDeps): Notifier {
   const cards = createStore<Cards>(() => ({ cards: [] }))

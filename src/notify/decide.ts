@@ -90,11 +90,14 @@ function agentTitle(sessionId: string, repos: readonly RepoNode[]): string | nul
  *  turn with a header (or the raw `<cross-session-message>` tag); mnemo's own come framed or bare. */
 const PEER = /^(Another Claude session sent a message:|<cross-session-message\b)/
 const MNEMO = ['<mnemo-child-finished', '<mnemo-resume', '<mnemo-pr-follow', '🧹 ']
+/** What Claude Code types into a session itself when one of its own background commands or agents
+ *  finishes (a `gh pr checks --watch`, a merge left running): the agent reads it on its next turn. */
+const TASK = '<task-notification>'
 
 /** A prompt no person sent: the turn it starts is not one you are waiting on. */
 export function quietPrompt(message: string | undefined): boolean {
   const m = (message ?? '').trimStart()
-  return PEER.test(m) || MNEMO.some((p) => m.startsWith(p))
+  return PEER.test(m) || m.startsWith(TASK) || MNEMO.some((p) => m.startsWith(p))
 }
 
 /** Whose card an alert is: a dispatched child's worktree, so a resume that forks a new session
