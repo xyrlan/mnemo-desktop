@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { AgentEvent } from '../agents/events'
-import { createNotifier, DONE_TTL_MS, MAX_CARDS, SOUND_GAP_MS, type NotifierDeps } from './notifier'
+import { COALESCE_MS, createNotifier, DONE_TTL_MS, MAX_CARDS, SOUND_GAP_MS, type NotifierDeps } from './notifier'
 import { REPOS } from './test-fleet'
 
 let emit: (e: AgentEvent) => void
@@ -41,6 +41,8 @@ function make(over: Partial<NotifierDeps> = {}) {
 const FEAT = '/code/app/.claude/worktrees/feat'
 const stop = (sessionId: string, cwd: string): AgentEvent => ({ sessionId, cwd, kind: 'stop', at: 1 })
 const ask = (sessionId: string, cwd: string, message = 'Claude needs your permission to use Bash'): AgentEvent => ({ sessionId, cwd, kind: 'notification', message, at: 1 })
+const prompt = (sessionId: string, cwd: string, message: string): AgentEvent => ({ sessionId, cwd, kind: 'prompt', message, at: 1 })
+const REPORT = 'Another Claude session sent a message:\n<mnemo-child-finished id="720a903b" state="ci-red">'
 
 beforeEach(() => {
   world = { active: '/code/app', shownPanes: [3], focused: true, now: 10_000 }
@@ -234,4 +236,94 @@ test('stop unsubscribes and clears', () => {
   expect(unsubscribed).toBe(2)
   expect(n.cards.getState().cards).toEqual([])
   vi.advanceTimersByTime(DONE_TTL_MS)
+})
+
+test('a turn only mnemo or a peer started tells nothing when it ends, and leaves the card alone', () => {
+  world.focused = false
+  const n = make()
+  emit(stop('s-x', '/code/lib'))
+  const [card] = n.cards.getState().cards
+  for (const m of [REPORT, '<mnemo-resume id="ab12">', '<mnemo-pr-follow pr="3">', '🧹 removed wt-3 and its branch fix/3']) {
+    emit(prompt('s-x', '/code/lib', m))
+    emit(stop('s-x', '/code/lib'))
+  }
+  expect(n.cards.getState().cards).toEqual([card])
+  expect([sounds, native.length]).toEqual([1, 1])
+})
+
+test('a person’s turn with a report card queued in it still tells when it ends', () => {
+  world.focused = false
+  const n = make()
+  emit(prompt('s-x', '/code/lib', 'merge #12 please'))
+  emit(prompt('s-x', '/code/lib', REPORT))
+  emit(stop('s-x', '/code/lib'))
+  expect(n.cards.getState().cards).toHaveLength(1)
+  expect(native).toHaveLength(1)
+})
+
+test('an ask in a turn mnemo started still tells you', () => {
+  world.focused = false
+  const n = make()
+  emit(prompt('s-x', '/code/lib', REPORT))
+  emit(ask('s-x', '/code/lib'))
+  expect(n.cards.getState().cards.map((c) => c.kind)).toEqual(['permission'])
+  expect(native).toEqual([['lib', 'Claude needs your permission to use Bash']])
+})
+
+test(`finished turns of one session within ${COALESCE_MS} ms update its card in place and chime once`, () => {
+  world.focused = false
+  const n = make()
+  emit(stop('s-x', '/code/lib'))
+  const { id } = n.cards.getState().cards[0]
+  world.now += COALESCE_MS - 1
+  emit(stop('s-x', '/code/lib'))
+  expect(n.cards.getState().cards.map((c) => c.id)).toEqual([id])
+  expect([sounds, native.length]).toEqual([1, 1])
+  world.now += 1
+  emit(stop('s-x', '/code/lib'))
+  expect([sounds, native.length]).toEqual([2, 2])
+})
+
+test('a person’s prompt makes the next finish news again, however soon', () => {
+  world.focused = false
+  make()
+  emit(stop('s-x', '/code/lib'))
+  emit(prompt('s-x', '/code/lib', 'and the tests?'))
+  world.now += SOUND_GAP_MS
+  emit(stop('s-x', '/code/lib'))
+  expect(native).toHaveLength(2)
+})
+
+test('the same ask again is quiet; a new ask, or one after a finish, still tells', () => {
+  world.focused = false
+  make()
+  emit(ask('s-x', '/code/lib'))
+  world.now += SOUND_GAP_MS
+  emit(ask('s-x', '/code/lib'))
+  expect(native).toHaveLength(1)
+  emit(ask('s-x', '/code/lib', 'Claude needs your permission to use Edit'))
+  expect(native).toHaveLength(2)
+})
+
+test('a resume that forks a new session in a dispatched tree reads as the same child', () => {
+  world.focused = false
+  const n = make()
+  emit(ask('s-feat', FEAT))
+  emit({ ...stop('s-fork', FEAT), kind: 'start' })
+  expect(n.cards.getState().cards).toEqual([])
+  emit(stop('s-feat', FEAT))
+  emit(stop('s-fork', FEAT))
+  expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-fork'])
+  // One child, told once within the window: the ask; its finishes after the fork only update the card.
+  expect(native).toHaveLength(1)
+  // The old job ending takes only its own card.
+  emit({ ...stop('s-feat', FEAT), kind: 'end' })
+  expect(n.cards.getState().cards).toHaveLength(1)
+})
+
+test('two sessions in one checkout that is not a dispatched tree keep a card each', () => {
+  const n = make()
+  emit(stop('s-a', '/code/lib'))
+  emit(stop('s-b', '/code/lib'))
+  expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-a', 's-b'])
 })

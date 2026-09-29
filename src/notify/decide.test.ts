@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { AgentEvent } from '../agents/events'
-import { alertFor, inside, looking, paneOf, placeOf, shownWorktree } from './decide'
+import { alertFor, cardKey, inside, looking, paneOf, placeOf, quietPrompt, shownWorktree } from './decide'
 import { REPOS } from './test-fleet'
 
 const ev = (kind: AgentEvent['kind'], cwd: string, message?: string, sessionId = 's-x'): AgentEvent => ({ sessionId, cwd, kind, at: 100, ...(message ? { message } : {}) })
@@ -78,4 +78,26 @@ test('you are looking only with focus, at its worktree or a pane of the shown ta
   expect(looking({ worktree: null }, at)).toBe(false)
   expect(looking({ worktree: null }, { ...at, pane: 3 })).toBe(true)
   expect(looking({ worktree: null }, { ...at, shown: null, pane: 4 })).toBe(false)
+})
+
+test('quietPrompt is mnemo’s own turns and peer messages, framed or bare; not a person', () => {
+  for (const m of [
+    'Another Claude session sent a message:\n<mnemo-child-finished id="720a903b">',
+    'Another Claude session sent a message:\n🧹 removed wt-3',
+    'Another Claude session sent a message: can you rebase?',
+    '<cross-session-message from="ab">hi</cross-session-message>',
+    '<mnemo-child-finished id="720a903b" state="ci-red">',
+    '\n<mnemo-resume id="ab12">',
+    '<mnemo-pr-follow pr="394" events="ci-red">',
+    '🧹 kept wt-4: dirty',
+  ])
+    expect(quietPrompt(m), m).toBe(true)
+  for (const m of [undefined, '', 'continue', 'why does <mnemo-resume> fire twice?', '<task-notification> <task-id>b1</task-id>', '🧹clean up the tree'])
+    expect(quietPrompt(m), String(m)).toBe(false)
+})
+
+test('cardKey is the tree for a dispatched worktree, else the session', () => {
+  expect(cardKey('s1', '/code/app/.claude/worktrees/feat/', REPOS)).toBe('tree:/code/app/.claude/worktrees/feat')
+  expect(cardKey('s1', '/code/app', REPOS)).toBe('session:s1')
+  expect(cardKey('s1', null, REPOS)).toBe('session:s1')
 })
