@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { canonicalTarget, idlePieces, lastWritten, pieceDir, pieceTargets, sizeOf, warnings } from './cargo-targets.mjs'
 
 const HOUR = 3600 * 1000
@@ -25,7 +26,8 @@ test('the canonical target is config.toml target-dir, resolved against the dir h
 test('the repo config names one target outside the checkout', () => {
   // vite rewrites a literal new URL(…, import.meta.url), so the root goes through a variable
   const here = import.meta.url
-  const root = resolve(new URL('.', here).pathname, '..')
+  // fileURLToPath, not .pathname: on Windows that is /D:/a/…, which resolve turns into D:\D:\a\…
+  const root = resolve(fileURLToPath(new URL('.', here)), '..')
   expect(canonicalTarget(root)).toBe(resolve(root, '..', '.mnemo-desktop-target'))
 })
 
