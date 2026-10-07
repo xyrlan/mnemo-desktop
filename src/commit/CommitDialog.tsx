@@ -2,7 +2,7 @@
 import React, { useEffect, useId, useState } from 'react'
 import { useStore } from 'zustand'
 import { ArrowUp, Check, CircleAlert, CircleCheck, CloudUpload, ExternalLink, GitBranch, GitPullRequestArrow, Loader2, RefreshCw, Sparkles, Square, X } from 'lucide-react'
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Switch, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Switch, Textarea, toast, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
 import type { Change, CommitClient } from './client'
 import { closeCommit, useCommitOpen } from './open'
@@ -42,6 +42,7 @@ function CommitDialog({ worktree, client, onOpenUrl, modLabel = '⌘' }: CommitC
   useEffect(() => {
     void store.getState().load()
     void store.getState().findPr()
+    return () => toastWhenDone(store)
   }, [store])
 
   const busy = committing || pushing || creating
@@ -92,13 +93,34 @@ function CommitDialog({ worktree, client, onOpenUrl, modLabel = '⌘' }: CommitC
   )
 }
 
+/** Closing the composer does not stop a commit or push under way: its outcome, which the
+ *  closed composer can no longer show, comes as a toast. */
+function toastWhenDone(store: CommitStore): void {
+  const now = store.getState()
+  if (!now.committing && !now.pushing && !now.creating) return
+  store.subscribe((s, was) => {
+    if (was.committing && !s.committing) {
+      if (s.committed) toast.success(`Committed ${s.committed.sha} ${s.committed.summary}`)
+      else if (s.errors.commit !== undefined) toast.error('Commit failed', { description: s.errors.commit })
+    }
+    if (was.pushing && !s.pushing) {
+      if (s.pushed) toast.success(s.pushed)
+      else if (s.errors.push !== undefined) toast.error('Push failed', { description: s.errors.push })
+    }
+    if (was.creating && !s.creating) {
+      if (s.errors.pr !== undefined) toast.error('Pull request', { description: s.errors.pr })
+      else if (s.pr) toast.success(`PR #${s.pr.number} ${s.pr.title}`)
+    }
+  })
+}
+
 function SyncLine({ store }: { store: CommitStore }): React.JSX.Element | null {
   const status = useStore(store, (s) => s.status)
   if (!status) return null
   const parts: string[] = []
+  if (!status.branch) parts.push('detached HEAD')
   if (!status.remote) parts.push('no remote')
-  else if (!status.branch) parts.push('detached HEAD')
-  else if (!status.published) parts.push(`not on ${status.remote} yet`)
+  else if (status.branch && !status.published) parts.push(`not on ${status.remote} yet`)
   if (status.ahead > 0) parts.push(`${status.ahead} to push`)
   if (status.behind > 0) parts.push(`${status.behind} to pull`)
   return parts.length ? <span> · {parts.join(' · ')}</span> : null
@@ -271,7 +293,7 @@ function Actions({ store, busy, onOpenUrl }: { store: CommitStore; busy: boolean
         {committing ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" aria-hidden />}
         Commit
       </Button>
-      <Button type="button" size="sm" variant="outline" disabled={!canCommit || !status.remote || !status.branch} title={commitWhy} onClick={() => void store.getState().commit({ andPush: true })}>
+      <Button type="button" size="sm" variant="outline" disabled={!canCommit || !status.remote || !status.branch} title={commitWhy ?? (!status.branch ? 'Check out a branch to push' : !status.remote ? 'This repo has no remote' : undefined)} onClick={() => void store.getState().commit({ andPush: true })}>
         Commit &amp; Push
       </Button>
       <Button type="button" size="sm" variant="outline" disabled={!canPush} title={pushWhy} onClick={() => void store.getState().push()}>
