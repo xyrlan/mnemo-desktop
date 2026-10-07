@@ -937,8 +937,12 @@ pub fn parse_tiles(status: &str) -> Vec<Tile> {
             let (value, detail) = head.split_once(' ').unwrap_or((head, ""));
             out.push(tile("briefings", "briefings", value, detail, "muted"));
         } else if let Some(rest) = line.strip_prefix("Circuit breaker: ") {
-            // `closed (ok)`
-            let (state, note) = rest.split_once(" (").map_or((rest, ""), |(s, n)| (s, n.trim_end_matches(')')));
+            // `closed (ok)`, or `OPEN — 12 errors in the last hour (top: …). Run `mnemo fix` to reset.`:
+            // the state is what comes before ` — ` or ` (`, the rest is its note.
+            let (state, note) = match rest.split_once(" — ") {
+                Some((s, n)) => (s, n),
+                None => rest.split_once(" (").map_or((rest, ""), |(s, n)| (s, n.trim_end_matches(')'))),
+            };
             let ok = note == "ok" || (note.is_empty() && state == "closed");
             out.push(tile("breaker", "circuit breaker", state, note, if ok { "ok" } else { "bad" }));
         }
@@ -1234,6 +1238,23 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
+/// Why a run did not end in exit 0, in one line: the last thing it printed to stderr (else
+/// stdout), and its exit. None when it did.
+pub fn run_failure(command: &str, run: &RunResult) -> Option<String> {
+    if run.code == Some(0) {
+        return None;
+    }
+    let said = [&run.stderr, &run.stdout].iter().find_map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).last());
+    let how = match run.code {
+        Some(c) => format!("`{command}` exited {c}"),
+        None => format!("`{command}` failed"),
+    };
+    Some(match said {
+        Some(s) => format!("{how}: {s}"),
+        None => how,
+    })
+}
+
 /// `Vault: /Users/x/mnemo  (exists)` → `/Users/x/mnemo`.
 pub fn parse_status_root(text: &str) -> Option<PathBuf> {
     let text = strip_ansi(text);
@@ -1257,6 +1278,13 @@ pub fn run_with(program: &str, path_env: &str, action: &str, args: &[String], cw
 
 /// `run_with` without the allowlist: only for fixed commands this file spells out.
 fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str) -> RunResult {
+    exec_within(program, path_env, action, args, cwd, None)
+}
+
+/// `exec`, killed once `timeout` passes. What it printed before then is dropped: a report
+/// cut off halfway reads as a whole one.
+fn exec_within(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str, timeout: Option<std::time::Duration>) -> RunResult {
+    use std::io::Read;
     let refuse = |stderr: String| RunResult { stderr, ..Default::default() };
     let dir = match cwd.trim() {
         "" => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")),
@@ -1265,22 +1293,46 @@ fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str)
     if !dir.is_dir() {
         return refuse(format!("{}: not a directory", dir.display()));
     }
-    let out = crate::proc::command(program)
+    let child = crate::proc::command(program)
         .arg(action)
         .args(args)
         .current_dir(&dir)
         .env("PATH", path_env)
         .env("NO_COLOR", "1")
         .stdin(std::process::Stdio::null())
-        .output();
-    match out {
-        Ok(o) => RunResult {
-            stdout: strip_ansi(&String::from_utf8_lossy(&o.stdout)),
-            stderr: strip_ansi(&String::from_utf8_lossy(&o.stderr)),
-            code: o.status.code(),
-        },
-        Err(e) => refuse(format!("{program}: {e}")),
-    }
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return refuse(format!("{program}: {e}")),
+    };
+    // Both pipes drain on their own threads, so a chatty child never blocks on a full one.
+    let drain = |mut r: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = r.read_to_end(&mut buf);
+            strip_ansi(&String::from_utf8_lossy(&buf))
+        })
+    };
+    let out = drain(Box::new(child.stdout.take().expect("stdout is piped")));
+    let err = drain(Box::new(child.stderr.take().expect("stderr is piped")));
+    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if deadline.is_some_and(|d| std::time::Instant::now() >= d) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                // The pipes are not joined: a grandchild may still hold them open.
+                let secs = timeout.unwrap_or_default().as_secs();
+                return refuse(format!("{program} {action} gave no answer in {secs}s and was stopped"));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+            Err(e) => return refuse(format!("{program}: {e}")),
+        }
+    };
+    RunResult { stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default(), code: status.code() }
 }
 
 /// Only a root that exists is cached, so installing mnemo later is picked up.
@@ -1407,6 +1459,13 @@ pub async fn vault_health() -> Health {
             None => Health { error: Some(NO_VAULT.into()), ..Default::default() },
         };
         health.tiles = parse_tiles(&status.stdout);
+        // A status that failed says so, before the "no vault" its silence would lead to.
+        if let Some(failed) = run_failure("mnemo status", &status) {
+            health.error = Some(match health.error {
+                Some(e) => format!("{failed}\n{e}"),
+                None => failed,
+            });
+        }
         health.status = status;
         health
     })
@@ -1414,14 +1473,20 @@ pub async fn vault_health() -> Health {
     .unwrap_or_else(|e| Health { error: Some(e.to_string()), ..Default::default() })
 }
 
-/// `mnemo doctor`, on its own command because it is slow: 4.8s against a 5783-page vault,
-/// where `status` is 0.2s. It is only ever read behind the `status / doctor` button, so the
-/// health screen no longer waits on it to paint.
+/// How long `mnemo doctor` may run before it is stopped. It walks every page, so its time grows
+/// with the vault and the machine's load: 4.8s on 5783 pages once, 26s on ~6k pages on
+/// 2026-10-07. Five minutes is ten times the slowest run seen, so only a doctor that hangs
+/// reaches it; stopping that one frees its thread and lets the panel ask again.
+pub const DOCTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// `mnemo doctor`, on its own command because it is slow (`DOCTOR_TIMEOUT`), where `status`
+/// is 0.2s. It is only ever read behind the `status / doctor` button, so the health screen
+/// no longer waits on it to paint.
 #[tauri::command]
 pub async fn vault_doctor() -> RunResult {
-    tauri::async_runtime::spawn_blocking(|| exec("mnemo", &crate::mission::login_path(), "doctor", &[], ""))
+    tauri::async_runtime::spawn_blocking(|| exec_within("mnemo", &crate::mission::login_path(), "doctor", &[], "", Some(DOCTOR_TIMEOUT)))
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| RunResult { stderr: format!("mnemo doctor: {e}"), ..Default::default() })
 }
 
 /// The square's numbers: the page walk and the fire logs (cached like the table), no `mnemo`.
@@ -1699,6 +1764,35 @@ mod tests {
         assert_eq!(missing.code, None);
         assert!(missing.stderr.starts_with("/definitely/not/mnemo:"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_past_its_timeout_is_stopped_and_says_so() {
+        let dir = crate::testutil::temp_dir("vault-timeout");
+        let bin = dir.join("mnemo");
+        crate::testutil::write_script(&bin, "#!/bin/sh\necho started\nexec sleep 30\n");
+        let bin = bin.to_string_lossy().to_string();
+        let started = std::time::Instant::now();
+        let r = exec_within(&bin, "/usr/bin:/bin", "doctor", &[], &dir.to_string_lossy(), Some(std::time::Duration::from_millis(300)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+        assert_eq!((r.code, r.stdout.as_str()), (None, ""));
+        assert!(r.stderr.ends_with("doctor gave no answer in 0s and was stopped"), "{}", r.stderr);
+        // Within its time, a run is the same as `exec`'s.
+        let fast = exec_within(&fake_mnemo(&dir), "/usr/bin:/bin", "doctor", &[], &dir.to_string_lossy(), Some(std::time::Duration::from_secs(30)));
+        assert_eq!((fast.stderr.trim(), fast.code), ("oops", Some(3)));
+        assert!(fast.stdout.starts_with("ran doctor in "), "{}", fast.stdout);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_run_is_named_with_the_last_thing_it_said() {
+        let run = |stdout: &str, stderr: &str, code: Option<i32>| RunResult { stdout: stdout.into(), stderr: stderr.into(), code };
+        assert_eq!(run_failure("mnemo status", &run("Vault: /v", "", Some(0))), None);
+        assert_eq!(run_failure("mnemo status", &run("", "Traceback:\n  ...\nKeyError: 'vault'\n\n", Some(1))).as_deref(), Some("`mnemo status` exited 1: KeyError: 'vault'"));
+        assert_eq!(run_failure("mnemo status", &run("half a report\n", "", Some(2))).as_deref(), Some("`mnemo status` exited 2: half a report"));
+        assert_eq!(run_failure("mnemo status", &run("", "mnemo: No such file or directory (os error 2)", None)).as_deref(), Some("`mnemo status` failed: mnemo: No such file or directory (os error 2)"));
+        assert_eq!(run_failure("mnemo status", &run("", "", Some(9))).as_deref(), Some("`mnemo status` exited 9"));
     }
 
     // ---- fires
@@ -2045,6 +2139,44 @@ mod tests {
         );
         assert_eq!(parse_tiles("Circuit breaker: open (3 failures)\n")[0].tone, "bad");
         assert!(parse_tiles("mnemo: command not found").is_empty());
+    }
+
+    fn tiles_of(status: &str) -> Vec<(String, String, String, String)> {
+        parse_tiles(status).into_iter().map(|t| (t.key, t.value, t.detail, t.tone)).collect()
+    }
+
+    fn t(key: &str, value: &str, detail: &str, tone: &str) -> (String, String, String, String) {
+        (key.into(), value.into(), detail.into(), tone.into())
+    }
+
+    /// What mnemo 1.7.0 prints, also what `src/vault/health-output.test.tsx` renders: every
+    /// line it adds that is not a tile (hooks, auto-brain, activation, rerank, learned) is left
+    /// for the raw panel.
+    #[test]
+    fn tiles_of_mnemo_1_7_status_skip_every_line_they_do_not_know() {
+        assert_eq!(
+            tiles_of(include_str!("../fixtures/mnemo/status.txt")),
+            [
+                t("briefings", "954", "across 19 agents (5.9 MB)", "muted"),
+                t("breaker", "closed", "ok", "ok"),
+                t("reflex", "33.0%", "747 of 2266 prompts", "muted"),
+                t("recall", "47.6%", "over 166 cases", "muted"),
+            ]
+        );
+        // A new vault: no briefings and no numbers yet, so the breaker alone.
+        assert_eq!(tiles_of(include_str!("../fixtures/mnemo/status-empty.txt")), [t("breaker", "closed", "ok", "ok")]);
+        // A line mnemo may add later, or a known one cut short, is no tile rather than a broken one.
+        assert!(tiles_of("Quota: 3 of 5 sync slots\nreflex:\nBriefings:\nCircuit breaker:\n\u{1b}[2J").is_empty());
+    }
+
+    /// mnemo 1.7.0's open breaker (`status.py`): the state is the word, the rest its note.
+    #[test]
+    fn an_open_breaker_tile_reads_open_with_why_beside_it() {
+        assert_eq!(
+            tiles_of("Circuit breaker: OPEN — 12 errors in the last hour (top: reflex.timeout ×9). Run `mnemo fix` to reset.\n"),
+            [t("breaker", "OPEN", "12 errors in the last hour (top: reflex.timeout ×9). Run `mnemo fix` to reset.", "bad")]
+        );
+        assert_eq!(tiles_of("Circuit breaker: OPEN — 3 errors in the last hour. Run `mnemo fix` to reset."), [t("breaker", "OPEN", "3 errors in the last hour. Run `mnemo fix` to reset.", "bad")]);
     }
 
     #[test]

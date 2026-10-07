@@ -14,7 +14,7 @@ export interface VaultClient {
   ego(path: string, limit: number): Promise<VaultGraph>
   /** `mnemo status`, its tiles, and what needs review. Does not run `doctor`. */
   health(): Promise<Health>
-  /** `mnemo doctor`, on demand: 4.8s against a 5783-page vault, and only read behind a button. */
+  /** `mnemo doctor`, on demand: 26s on a ~6k-page vault, stopped at five minutes, and only read behind a button. */
   doctor(): Promise<RunResult>
 }
 
