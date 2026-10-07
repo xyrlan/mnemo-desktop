@@ -1,3 +1,5 @@
+import type { AccountEnv } from './account'
+
 /** `tokens`, `cache_read`, `children_tokens` come from the tokens piece (#22); snapshots from
  *  before it lack them, so read them through `parentTokens`, never directly. */
 export type ParentSession = {
@@ -12,6 +14,8 @@ export type ParentSession = {
   /** What `claude agents` says the session is parked on while `status` is `waiting`
    *  (`permission prompt`, `input needed`, `dialog open`); absent in snapshots from before #175. */
   waiting_for?: string | null
+  /** Id of the account (`accounts.json`) whose `claude agents` lists the session. */
+  account?: string
 }
 export type ChildSession = {
   id: string
@@ -43,6 +47,12 @@ export type ChildSession = {
   /** The PR this child opened, when it belongs to no contract (a piece carries its own).
    *  Absent in snapshots from before round 18. */
   pr?: Pr | null
+  /** Id of the account (`accounts.json`) the child runs on: the one whose `jobs/` holds it.
+   *  Everything done to the child reaches it through this account (`./account.ts`). */
+  account: string
+  /** What a command typed into a pane needs to reach the child on `account`; null while there is
+   *  only the default account. Absent in snapshots from before accounts. */
+  account_env?: AccountEnv | null
 }
 /** `ci` is pass only when the PR has checks and every one of them passed (`check_verdict` in
  *  mission.rs). `draft` and `failing` are absent on a `Pr` built outside the snapshot. */

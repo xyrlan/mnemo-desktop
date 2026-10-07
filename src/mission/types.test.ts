@@ -33,7 +33,7 @@ test('missionSummary counts PRs and folds CI', () => {
 
 const child = (over: Partial<ChildSession>): ChildSession => ({
   id: 'c', session_id: null, name: null, state: 'working', tempo: 'active', needs: null, detail: '', suggested_reply: null,
-  cwd: '/x', tokens: 0, live: true, updated_at: null, intent: null, branch: null, timeline_len: 0, ...over,
+  cwd: '/x', tokens: 0, live: true, updated_at: null, intent: null, branch: null, timeline_len: 0, account: 'default', ...over,
 })
 
 test('isRecent keeps live and recently finished children only', () => {

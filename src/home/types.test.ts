@@ -132,3 +132,15 @@ test('takeOver words the child action, and says why when there is none', () => {
 test('stopCmd is what the cockpit runs', () => {
   expect(stopCmd(sess({ id: '094c6a03-1' }))).toBe('claude stop 094c6a03-1')
 })
+
+test("attach, resume and stop run on the session's own account", () => {
+  const work = { account: 'work', account_env: { config_dir: '/Users/me/.claude-work' } }
+  const home = { account: 'default', account_env: { config_dir: null } }
+  expect(whatClickDoes(sess({ id: 'b', live: 'bg', ...work }), {})).toEqual({ kind: 'command', cmd: 'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b', sessionId: 'b' })
+  expect(whatClickDoes(sess({ id: 'd', ...home }), {})).toEqual({ kind: 'command', cmd: 'env -u CLAUDE_CONFIG_DIR claude --resume d', sessionId: 'd' })
+  // A finished interactive session no account claims resumes on the active account.
+  expect(whatClickDoes(sess({ id: 'n', account: null, account_env: null }), {})).toEqual({ kind: 'command', cmd: 'claude --resume n', sessionId: 'n' })
+  expect(stopCmd(sess({ id: 'c', live: 'bg', ...work }))).toBe('env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude stop c')
+  expect(takeOver(sess({ id: 'b', live: 'bg', ...work }), {}).label).toBe('Take over')
+  expect(takeOver(sess({ id: 'd', ...home }), {}).label).toBe('Resume')
+})

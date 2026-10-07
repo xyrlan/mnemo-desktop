@@ -1,6 +1,6 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import type { MissionClient } from './client'
-import type { Snapshot } from './types'
+import { allChildren, type Snapshot } from './types'
 import type { Settings } from '../settings/store'
 import { replyLanguageFooter } from '../settings/store'
 
@@ -131,7 +131,8 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
       set((s) => ({ typing: { ...s.typing, [id]: true }, replyErrors: { ...s.replyErrors, [id]: '' } }))
       try {
         // No English rewrite and no language footer: an approval reaches the child in the words typed.
-        await client.typeAsMe(id, text)
+        // The child as the snapshot knows it, so the attach runs on its account.
+        await client.typeAsMe(allChildren(get().snapshot).find((c) => c.id === id) ?? id, text)
         set((s) => ({
           drafts: { ...s.drafts, [id]: '' },
           sent: { ...s.sent, [id]: [...(s.sent[id] ?? []), { at: Date.now(), text, original: text, asMe: true }] },

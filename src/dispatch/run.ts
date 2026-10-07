@@ -2,6 +2,7 @@ import { store as layout } from '../layout/app-store'
 import { PROMPT_DELAY_MS } from '../layout/store'
 import { tauriPty } from '../pty/client'
 import type { ChildSession } from '../mission/types'
+import { attachCmd, stopCmd } from '../mission/account'
 
 /** Runs `cmd` in a new terminal in the group below the tab you are in (made when there is none),
  *  in `cwd`: the Dispatch tab stays in view above it. A button of the tab was just clicked, so the
@@ -16,7 +17,7 @@ export async function runBelow(cmd: string, cwd: string) {
   if (pane !== undefined) setTimeout(() => void tauriPty.write(pane, `${cmd}\n`), PROMPT_DELAY_MS)
 }
 
-/** Take over: `claude attach` to the child, under the tab. */
-export const takeOver = (c: ChildSession) => runBelow(`claude attach ${c.id}`, c.cwd)
-/** Stop: `claude stop` the child, under the tab. */
-export const stopChild = (c: ChildSession) => runBelow(`claude stop ${c.id}`, c.cwd)
+/** Take over: `claude attach` to the child on its own account, under the tab. */
+export const takeOver = (c: ChildSession) => runBelow(attachCmd(c), c.cwd)
+/** Stop: `claude stop` the child on its own account, under the tab. */
+export const stopChild = (c: ChildSession) => runBelow(stopCmd(c), c.cwd)

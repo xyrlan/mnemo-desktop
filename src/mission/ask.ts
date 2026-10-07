@@ -2,6 +2,7 @@ import { tail } from '../terminal/buffer'
 import { answerText, KEY_GAP_MS, SUBMIT_GAP_MS } from '../chat-input/pty'
 import { promptOptions } from '../cockpit/approve'
 import { attachDefaults, attached, SETTLE_MS, type Deps, type Until } from './as-me'
+import { idOf, type Target } from './account'
 
 /** Answering a child parked on Claude Code's multiple-choice dialog (AskUserQuestion, `claude
  *  agents` says `input needed`). Like "as me", the keys go into a hidden `claude attach <id>`: the
@@ -131,13 +132,15 @@ async function movedOn(s: Screen & { write(data: string): Promise<void> }, until
   })
 }
 
-/** Picks option `index` (0-based) of the question child `id` is asking. Resolves once the
- *  dialog moved on; rejects with what to do by hand when a guard stops it. */
-export async function answerQuestion(id: string, index: number, deps: Partial<Deps> = {}): Promise<void> {
+/** Picks option `index` (0-based) of the question child `target` is asking, through an attach on
+ *  its own account. Resolves once the dialog moved on; rejects with what to do by hand when a
+ *  guard stops it. */
+export async function answerQuestion(target: Target, index: number, deps: Partial<Deps> = {}): Promise<void> {
   const d = { ...attachDefaults, ...deps }
+  const id = idOf(target)
   if (!Number.isInteger(index) || index < 0) throw new Error(`no option ${index + 1}`)
   await mustAsk(id, d)
-  await attached(id, d, async (s, until) => {
+  await attached(target, d, async (s, until) => {
     const q = await questionShown(id, s, until, d)
     const o = q.options[index]
     if (!o) throw new Error(`the question on screen has ${q.options.length} options, not ${index + 1}: nothing was typed`)
@@ -146,13 +149,14 @@ export async function answerQuestion(id: string, index: number, deps: Partial<De
   })
 }
 
-/** Answers the question child `id` is asking in words, through its "Type something." row. */
-export async function answerQuestionOther(id: string, text: string, deps: Partial<Deps> = {}): Promise<void> {
+/** Answers the question child `target` is asking in words, through its "Type something." row. */
+export async function answerQuestionOther(target: Target, text: string, deps: Partial<Deps> = {}): Promise<void> {
   const d = { ...attachDefaults, ...deps }
+  const id = idOf(target)
   const words = answerText(text)
   if (!words) throw new Error('nothing to send')
   await mustAsk(id, d)
-  await attached(id, d, async (s, until) => {
+  await attached(target, d, async (s, until) => {
     const q = await questionShown(id, s, until, d)
     await s.write(String(q.other))
     await d.sleep(KEY_GAP_MS)

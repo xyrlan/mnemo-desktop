@@ -118,6 +118,15 @@ test('typeAsMe attaches, pastes the draft as typed, presses Enter, then detaches
   expect(a.closed()).toBe(true)
 })
 
+test("typeAsMe attaches on the child's own account when it is given the child", async () => {
+  const a = fakeAttach()
+  const asked: string[] = []
+  const work = { id: 'b0b0b0b0', account: 'work', account_env: { config_dir: '/Users/me/.claude-work' } }
+  await typeAsMe(work, 'go', { ...quick, waitingFor: async (id) => (asked.push(id), null), open: async () => a.session })
+  expect(a.writes[0]).toBe('exec env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0\r')
+  expect(asked).toEqual(['b0b0b0b0'])
+})
+
 test('typeAsMe never attaches to a child parked on a prompt', async () => {
   const open = vi.fn()
   await expect(typeAsMe('0cf48e62', 'yes', { ...quick, waitingFor: async () => 'permission prompt', open })).rejects.toThrow('permission prompt')

@@ -5,9 +5,11 @@ import { paneForSession } from '../layout/tabs'
 import { readBuffer, tail } from '../terminal/buffer'
 import { tauriPty } from '../pty/client'
 import type { ChildSession } from '../mission/types'
+import { attachCmd } from '../mission/account'
 
 /** Answering a background child's permission prompt. Its inbox socket takes user turns only
- *  and there is no approve CLI (#81), so the answer is typed into `claude attach <id>`: open
+ *  and there is no approve CLI (#81), so the answer is typed into `claude attach <id>`, on the
+ *  child's own account (`attachCmd`): open
  *  (or reuse) that terminal, wait until the prompt's option list is on screen, press the key
  *  for the chosen option, and leave the pane open so the user sees the child go on. */
 
@@ -103,7 +105,7 @@ export async function answerPrompt(child: ChildSession, choice: Choice, deps: Pa
   if (pane !== null) appStore.getState().goToPane(pane)
   else {
     const before = new Set(Object.keys(appStore.getState().panes))
-    await appStore.getState().openCommandTab(child.cwd || undefined, `claude attach ${child.id}`, child.session_id ?? undefined)
+    await appStore.getState().openCommandTab(child.cwd || undefined, attachCmd(child), child.session_id ?? undefined)
     const s = appStore.getState()
     const fresh = Object.keys(s.panes).map(Number).filter((id) => !before.has(String(id)))
     pane = fresh.find((id) => id > 0) ?? s.tabs.find((t) => t.id === s.activeTab)?.focused ?? null

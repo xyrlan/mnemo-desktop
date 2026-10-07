@@ -4,6 +4,9 @@
 //! covers them on fixtures captured from real files. Process spawning is confined
 //! to `collect_snapshot` and the small helpers under `// -- io --`.
 
+pub mod account_dirs;
+
+use account_dirs::{Account, AccountEnv, Accounts};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -30,6 +33,13 @@ pub struct ParentSession {
     /// (`permission prompt`, `input needed`, `dialog open`); None otherwise.
     #[serde(default)]
     pub waiting_for: Option<String>,
+    /// Id of the account (`accounts.json`) whose `claude agents` lists the session.
+    #[serde(default = "default_account")]
+    pub account: String,
+}
+
+fn default_account() -> String {
+    account_dirs::DEFAULT_ID.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,6 +83,14 @@ pub struct ChildSession {
     /// is the child's branch.
     #[serde(default)]
     pub pr: Option<Pr>,
+    /// Id of the account (`accounts.json`) the child runs on: the one whose `jobs/` holds it.
+    /// Everything done to the child reaches it through this account, whichever is active.
+    #[serde(default = "default_account")]
+    pub account: String,
+    /// What a command typed into a pane needs to reach the child on `account`
+    /// (`account_dirs::Accounts::route`); None while there is only the default account.
+    #[serde(default)]
+    pub account_env: Option<AccountEnv>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -158,6 +176,7 @@ pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
                 cache_read: 0,
                 children_tokens: 0,
                 waiting_for: r.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()).map(str::to_string),
+                account: default_account(),
             })
         })
         .collect())
@@ -191,6 +210,8 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 model: s(r.get("model")),
                 effort: s(r.get("effort")),
                 pr: None,
+                account: default_account(),
+                account_env: None,
             })
         })
         .collect())
@@ -233,8 +254,18 @@ pub fn agent_waiting_for(json: &str, id: &str) -> Result<Option<String>, String>
     Ok(row.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()).map(str::to_string))
 }
 
+/// What `id` is parked on, asked of its own account's `claude agents`: the account whose `jobs/`
+/// holds it first, then the others, since an id no account's jobs hold may still be live on one.
 pub fn waiting_for(id: &str) -> Result<Option<String>, String> {
-    agent_waiting_for(&run("claude", &["agents", "--json", "--all"], None)?, id)
+    let accounts = account_dirs::accounts();
+    let mut last = None;
+    for a in accounts.looking_for(id) {
+        match run_on(&accounts, a, "claude", &["agents", "--json", "--all"], None).and_then(|j| agent_waiting_for(&j, id)) {
+            Ok(w) => return Ok(w),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| format!("{id} is not in `claude agents`")))
 }
 
 /// Marks each child with what its process waits for, matched by session id, else short id.
@@ -732,9 +763,20 @@ pub fn merge_paths(sep: char, probed: &str, inherited: &str, extra: &[String]) -
 }
 
 pub(crate) fn run(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    run_with(program, args, cwd, |_| {})
+}
+
+/// `run` on an account: `claude` there reads that account's daemon and sessions, whatever
+/// `CLAUDE_CONFIG_DIR` the app itself was started with.
+pub(crate) fn run_on(accounts: &Accounts, account: &Account, program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    run_with(program, args, cwd, |c| accounts.apply(account, c))
+}
+
+fn run_with(program: &str, args: &[&str], cwd: Option<&Path>, env: impl FnOnce(&mut std::process::Command)) -> Result<String, String> {
     let mut cmd = crate::proc::command(program);
     cmd.args(args);
     cmd.env("PATH", login_path());
+    env(&mut cmd);
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }
@@ -858,20 +900,160 @@ pub fn contracts_in(root: &str) -> Vec<(String, String, Vec<String>)> {
     out
 }
 
-fn jobs_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("jobs")
+/// The `jobs/` dir that holds `id`: its own account's, else the default account's.
+fn jobs_dir_of(accounts: &Accounts, id: &str) -> PathBuf {
+    accounts.owning_job(id).unwrap_or(accounts.default_account()).jobs_dir()
 }
 
-pub fn timeline_len(id: &str) -> usize {
-    std::fs::read_to_string(jobs_dir().join(id).join("timeline.jsonl"))
+pub fn timeline_len(jobs: &Path, id: &str) -> usize {
+    std::fs::read_to_string(jobs.join(id).join("timeline.jsonl"))
         .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count())
         .unwrap_or(0)
 }
 
 pub fn read_timeline(id: &str, from_line: usize) -> Timeline {
-    std::fs::read_to_string(jobs_dir().join(id).join("timeline.jsonl"))
+    std::fs::read_to_string(jobs_dir_of(&account_dirs::accounts(), id).join(id).join("timeline.jsonl"))
         .map(|t| parse_timeline(&t, from_line))
         .unwrap_or_default()
+}
+
+// --------------------------------------------------------- other accounts --
+
+/// The value after `name` in a job's `respawnFlags`.
+fn flag_value(v: &serde_json::Value, name: &str) -> Option<String> {
+    let flags = v.get("respawnFlags")?.as_array()?;
+    let i = flags.iter().position(|f| f.as_str() == Some(name))?;
+    flags.get(i + 1)?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// One job's `state.json` read the way `mnemo sessions` reads it (`mnemo/core/sessions/jobs.py`),
+/// for the accounts `mnemo` does not see: it reads only `~/.claude/jobs`. `live` is left false
+/// for `read_job_children`. None when it is not a JSON object.
+pub fn parse_job_child(short: &str, json: &str) -> Option<ChildSession> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v.as_object()?;
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(str::to_string);
+    Some(ChildSession {
+        id: short.to_string(),
+        session_id: s("sessionId"),
+        name: s("name"),
+        state: s("state").unwrap_or_default(),
+        tempo: s("tempo").unwrap_or_default(),
+        needs: s("needs"),
+        detail: s("detail").unwrap_or_default(),
+        suggested_reply: s("suggestedReply"),
+        cwd: s("cwd").unwrap_or_default(),
+        tokens: v.get("tokens").and_then(|t| t.as_u64()).unwrap_or(0),
+        live: false,
+        updated_at: s("updatedAt"),
+        intent: s("intent").map(|i| i.lines().next().unwrap_or("").to_string()),
+        branch: None,
+        timeline_len: 0,
+        parent_session: None,
+        waiting_for: None,
+        model: flag_value(&v, "--model"),
+        effort: flag_value(&v, "--effort"),
+        pr: None,
+        account: default_account(),
+        account_env: None,
+    })
+}
+
+/// Short id → pty host pid from a daemon's `roster.json`; None when it cannot be read, which says
+/// nothing about any session (`mnemo`'s `read_roster`). A worker without an integer pid is skipped.
+pub fn roster_pids(json: &str) -> Option<HashMap<String, u32>> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let workers = v.get("workers")?.as_object()?;
+    Some(workers.iter().filter_map(|(k, w)| Some((k.clone(), u32::try_from(w.get("pid")?.as_u64()?).ok()?))).collect())
+}
+
+/// Whether `pid` is a running process. On Windows a pid the roster lists is taken as running.
+pub fn pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = i32::try_from(pid) else { return false };
+        if pid <= 0 {
+            return false;
+        }
+        // Signal 0 asks without signalling; EPERM is a process that exists and is not ours.
+        // SAFETY: kill with signal 0 has no effect on the target.
+        unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+    }
+    #[cfg(not(unix))]
+    {
+        pid > 0
+    }
+}
+
+/// The background children in one account's `jobs/`, as `mnemo sessions --json --all` lists
+/// them: `live` when the roster lists a running pid for it, and a finished job whose worktree is
+/// gone left out (`--stale` is not passed) unless it is blocked.
+pub fn read_job_children(jobs: &Path, roster: Option<&str>, alive: &dyn Fn(u32) -> bool) -> Vec<ChildSession> {
+    let pids = roster.and_then(roster_pids);
+    let Ok(entries) = std::fs::read_dir(jobs) else { return vec![] };
+    let mut out: Vec<ChildSession> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let short = e.file_name().to_string_lossy().to_string();
+            let mut c = parse_job_child(&short, &std::fs::read_to_string(e.path().join("state.json")).ok()?)?;
+            c.live = pids.as_ref().and_then(|p| p.get(&short)).is_some_and(|pid| alive(*pid));
+            let finished = matches!(c.state.as_str(), "done" | "stopped");
+            let stale = finished && c.tempo != "blocked" && !c.cwd.is_empty() && !Path::new(&c.cwd).is_dir();
+            (!stale).then_some(c)
+        })
+        .collect();
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// Every account's background children, each carrying its account. The default account's come
+/// from `mnemo sessions`, as before accounts; a short id is listed once, by the first account.
+fn children_of(accounts: &Accounts, errors: &mut Vec<String>) -> Vec<ChildSession> {
+    let mut out: Vec<ChildSession> = Vec::new();
+    for a in accounts.iter() {
+        let mut got = if a.is_default {
+            match run("mnemo", &["sessions", "--json", "--all"], None).and_then(|j| parse_sessions(&j)) {
+                Ok(c) => c,
+                Err(e) => {
+                    errors.push(e);
+                    vec![]
+                }
+            }
+        } else {
+            let roster = std::fs::read_to_string(a.roster_path()).ok();
+            read_job_children(&a.jobs_dir(), roster.as_deref(), &pid_alive)
+        };
+        got.retain(|c| !out.iter().any(|o| o.id == c.id));
+        for c in &mut got {
+            c.account = a.id.clone();
+            c.account_env = accounts.route(a);
+        }
+        out.extend(got);
+    }
+    out
+}
+
+/// `claude agents --json --all` on every account, at once. Each answer is tagged with its account.
+/// An account whose dir is gone is not asked: `claude` would make the dir again.
+pub(crate) fn agents_of<'a>(accounts: &'a Accounts) -> Vec<(&'a Account, Result<String, String>)> {
+    std::thread::scope(|s| {
+        let asks: Vec<_> = accounts
+            .iter()
+            .filter(|a| a.is_default || a.config_dir.is_dir())
+            .map(|a| (a, s.spawn(move || run_on(accounts, a, "claude", &["agents", "--json", "--all"], None))))
+            .collect();
+        asks.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("claude agents panicked".into())))).collect()
+    })
+}
+
+/// An error line for `account`: the default account's as it always read, another's named.
+pub(crate) fn on_account_error(a: &Account, e: String) -> String {
+    if a.is_default {
+        e
+    } else {
+        format!("account {}: {e}", a.id)
+    }
 }
 
 /// One poll. Every failure is recorded in `errors` and never aborts the snapshot.
@@ -891,32 +1073,35 @@ pub fn recall_prs(root: &str) -> Option<Vec<Pr>> {
 
 pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut errors = Vec::new();
-    let agents = run("claude", &["agents", "--json", "--all"], None);
-    let agent_starts = agents.as_deref().map(parse_agent_starts).unwrap_or_default();
-    let agent_waiting = agents.as_deref().map(parse_agent_waiting).unwrap_or_default();
-    let mut parents = match agents.and_then(|j| parse_agents(&j)) {
-        Ok(p) => p,
-        Err(e) => {
-            errors.push(e);
-            vec![]
+    let accounts = account_dirs::accounts();
+    let mut agent_starts = HashMap::new();
+    let mut agent_waiting = HashMap::new();
+    let mut parents: Vec<ParentSession> = Vec::new();
+    for (a, agents) in agents_of(&accounts) {
+        agent_starts.extend(agents.as_deref().map(parse_agent_starts).unwrap_or_default());
+        agent_waiting.extend(agents.as_deref().map(parse_agent_waiting).unwrap_or_default());
+        match agents.and_then(|j| parse_agents(&j)) {
+            Ok(ps) => {
+                for p in ps {
+                    if !parents.iter().any(|o| o.session_id == p.session_id) {
+                        parents.push(ParentSession { account: a.id.clone(), ..p });
+                    }
+                }
+            }
+            Err(e) => errors.push(on_account_error(a, e)),
         }
-    };
-    let mut children = match run("mnemo", &["sessions", "--json", "--all"], None).and_then(|j| parse_sessions(&j)) {
-        Ok(c) => c,
-        Err(e) => {
-            errors.push(e);
-            vec![]
-        }
-    };
+    }
+    let mut children = children_of(&accounts, &mut errors);
     apply_waiting(&mut children, &agent_waiting);
     let mut child_starts = HashMap::new();
     for c in &mut children {
-        c.timeline_len = timeline_len(&c.id);
+        let jobs = accounts.get(&c.account).unwrap_or(accounts.default_account()).jobs_dir();
+        c.timeline_len = timeline_len(&jobs, &c.id);
         if c.parent_session.is_none() && may_probe(&c.cwd) {
             c.parent_session = declared_parent(&c.cwd);
         }
         // Creation time survives a respawn; the process start does not.
-        if let Some(t) = job_created_at(&c.id).or_else(|| c.session_id.as_ref().and_then(|s| agent_starts.get(s).copied())) {
+        if let Some(t) = job_created_at(&jobs, &c.id).or_else(|| c.session_id.as_ref().and_then(|s| agent_starts.get(s).copied())) {
             child_starts.insert(c.id.clone(), t);
         }
     }
@@ -1001,7 +1186,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         branches: &branches,
         contracts: &contracts,
         prs: &prs,
-        recorded: &recorded_prs(),
+        recorded: &recorded_prs(&accounts),
         focused_root: focused_root.as_deref(),
         parent_starts: &parent_starts,
         child_starts: &child_starts,
@@ -1009,25 +1194,35 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     Snapshot { repos, errors, at: chrono_now() }
 }
 
-/// Each background job's record of the PRs it opened, read as the lens reads it
-/// (`home/lens.rs`, which this only calls).
-fn recorded_prs() -> HashMap<String, Vec<String>> {
-    crate::home::lens::read_jobs(&crate::home::lens::jobs_dir()).into_iter().filter(|j| !j.prs.is_empty()).map(|j| (j.short, j.prs)).collect()
+/// Each background job's record of the PRs it opened, on every account, read as the lens reads
+/// it (`home/lens.rs`, which this only calls).
+fn recorded_prs(accounts: &Accounts) -> HashMap<String, Vec<String>> {
+    crate::home::lens::read_all_jobs(accounts).into_iter().filter(|j| !j.prs.is_empty()).map(|j| (j.short, j.prs)).collect()
 }
 
-fn projects_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("projects")
+/// Every account's `projects/`, once each: they are one dir through links (decision 3) unless a
+/// link was replaced by a copy.
+fn projects_dirs(accounts: &Accounts) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    accounts.iter().map(|a| a.projects_dir()).filter(|d| seen.insert(d.canonicalize().unwrap_or_else(|_| d.clone()))).collect()
 }
 
 /// `~/.claude/projects/<escaped cwd>/<session>.jsonl`, or wherever else under
-/// `projects/` that file is when the escaping guess misses (very long cwds).
+/// `projects/` that file is when the escaping guess misses (very long cwds); then the same in
+/// each other account's `projects/`.
 pub fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
+    transcript_in(&projects_dirs(&account_dirs::accounts()), cwd, session_id)
+}
+
+pub fn transcript_in(projects: &[PathBuf], cwd: &str, session_id: &str) -> Option<PathBuf> {
     let file = format!("{session_id}.jsonl");
-    let guess = projects_dir().join(project_dir_name(cwd)).join(&file);
-    if guess.is_file() {
-        return Some(guess);
-    }
-    std::fs::read_dir(projects_dir()).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+    projects.iter().find_map(|dir| {
+        let guess = dir.join(project_dir_name(cwd)).join(&file);
+        if guess.is_file() {
+            return Some(guess);
+        }
+        std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+    })
 }
 
 /// Fill each parent's `tokens` and `cache_read` from its transcript, reading only the
@@ -1067,9 +1262,9 @@ pub fn parse_declared_parent(json: &str) -> Option<String> {
     v.get("parent_session")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-/// `createdAt` of a child's `~/.claude/jobs/<id>/state.json`, in epoch ms.
-fn job_created_at(id: &str) -> Option<u64> {
-    let text = std::fs::read_to_string(jobs_dir().join(id).join("state.json")).ok()?;
+/// `createdAt` of a child's `<jobs>/<id>/state.json`, in epoch ms.
+fn job_created_at(jobs: &Path, id: &str) -> Option<u64> {
+    let text = std::fs::read_to_string(jobs.join(id).join("state.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     iso_ms(v.get("createdAt")?.as_str()?)
 }
@@ -1388,7 +1583,7 @@ mod tests {
             id: id.into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: cwd.into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
-            model: None, effort: None, pr: None,
+            model: None, effort: None, pr: None, account: default_account(), account_env: None,
         }
     }
 
@@ -1455,7 +1650,7 @@ mod tests {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
-            model: None, effort: None, pr: None,
+            model: None, effort: None, pr: None, account: default_account(), account_env: None,
         }];
         let empty = HashMap::new();
         let groups = join(JoinInput {
@@ -1489,6 +1684,7 @@ mod tests {
     fn a_declared_parent_wins_over_the_heuristic() {
         let parent = |sid: &str, cwd: &str| ParentSession {
             session_id: sid.into(), pid: None, name: None, status: "idle".into(), cwd: cwd.into(), tokens: 0, cache_read: 0, children_tokens: 0, waiting_for: None,
+            account: default_account(),
         };
         let mut parents = vec![parent("old", "/r"), parent("young", "/r")];
         let mut children = parse_sessions(SESSIONS).unwrap().into_iter().take(2).collect::<Vec<_>>();
@@ -1726,11 +1922,32 @@ fn socket_for_pid(pid: u32) -> Option<PathBuf> {
     socket_dirs().into_iter().map(|d| d.join(format!("{pid}.sock"))).find(|p| p.exists())
 }
 
+/// The pty host pid of `id` in its own account's daemon roster: the account whose `jobs/` holds
+/// it first, then the others.
+pub fn roster_host(accounts: &Accounts, id: &str) -> Result<u32, String> {
+    let mut read_any = None;
+    for a in accounts.looking_for(id) {
+        match std::fs::read_to_string(a.roster_path()) {
+            Ok(roster) => {
+                if let Some(pid) = roster_pid(&roster, id) {
+                    return Ok(pid);
+                }
+                read_any = Some(Ok(()));
+            }
+            Err(e) => {
+                read_any.get_or_insert(Err(format!("roster.json: {e}")));
+            }
+        }
+    }
+    match read_any {
+        Some(Err(e)) => Err(e),
+        _ => Err(format!("{id} is not in the daemon roster")),
+    }
+}
+
 /// Resolve a child's inbox socket: roster pid → its children → the one with a socket.
 pub fn inbox_socket(id: &str) -> Result<PathBuf, String> {
-    let roster_path = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("daemon").join("roster.json");
-    let roster = std::fs::read_to_string(&roster_path).map_err(|e| format!("roster.json: {e}"))?;
-    let host = roster_pid(&roster, id).ok_or_else(|| format!("{id} is not in the daemon roster"))?;
+    let host = roster_host(&account_dirs::accounts(), id)?;
     let mut candidates = child_pids(host);
     candidates.push(host);
     for pid in candidates {
@@ -1936,5 +2153,160 @@ mod translate_tests {
     #[test]
     fn translate_reports_a_missing_program() {
         assert!(translate_with("/nonexistent/claude", "pode seguir com o push").is_err());
+    }
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+
+    const STATE: &str = include_str!("../fixtures/state.json");
+    const ROSTER: &str = include_str!("../fixtures/roster.json");
+
+    fn job(jobs: &Path, short: &str, state: &str) {
+        std::fs::create_dir_all(jobs.join(short)).unwrap();
+        std::fs::write(jobs.join(short).join("state.json"), state).unwrap();
+    }
+
+    #[test]
+    fn a_job_reads_as_mnemo_sessions_lists_it() {
+        let c = parse_job_child("a43d3832", STATE).unwrap();
+        assert_eq!(c.id, "a43d3832");
+        assert_eq!(c.session_id.as_deref(), Some("a43d3832-e7a9-49b7-9496-2d86aeac8aad"));
+        assert_eq!(c.name.as_deref(), Some("panes editor decomposition"));
+        assert_eq!((c.state.as_str(), c.tempo.as_str()), ("working", "active"));
+        assert_eq!(c.detail, "building panes feature; reviewing decomposition");
+        assert_eq!(c.cwd, "/Users/xyrlan/github/mnemo-desktop-wt-c-editor");
+        assert_eq!(c.tokens, 37338);
+        assert_eq!(c.intent.as_deref(), Some("You are building one piece of the feature \"panes\": editor"));
+        assert_eq!(c.updated_at.as_deref(), Some("2026-09-15T00:41:37.696Z"));
+        // A lean child resolves no --model and was given no --effort.
+        assert_eq!((c.model, c.effort), (None, None));
+        assert!(parse_job_child("x", "[]").is_none());
+        assert!(parse_job_child("x", "nope").is_none());
+    }
+
+    #[test]
+    fn model_and_effort_come_from_the_respawn_flags() {
+        let c = parse_job_child("x", r#"{"respawnFlags":["--effort","high","--model","opus"],"suggestedReply":"yes","needs":"may I?"}"#).unwrap();
+        assert_eq!((c.model.as_deref(), c.effort.as_deref()), (Some("opus"), Some("high")));
+        assert_eq!((c.needs.as_deref(), c.suggested_reply.as_deref()), (Some("may I?"), Some("yes")));
+        assert_eq!(parse_job_child("x", r#"{"respawnFlags":["--model"]}"#).unwrap().model, None);
+    }
+
+    #[test]
+    fn the_roster_maps_short_ids_to_pids_and_an_unreadable_one_says_nothing() {
+        let pids = roster_pids(ROSTER).unwrap();
+        assert_eq!(pids.get("a43d3832"), Some(&20126));
+        assert_eq!(pids.get("094c6a03"), Some(&20125));
+        assert_eq!(roster_pids("not json"), None);
+        assert_eq!(roster_pids("{}"), None);
+        assert_eq!(roster_pids(r#"{"workers":{"a":{"pid":true},"b":{"pid":7}}}"#).unwrap(), HashMap::from([("b".to_string(), 7)]));
+    }
+
+    #[test]
+    fn another_accounts_children_are_live_by_its_roster_and_a_stale_one_is_left_out() {
+        let dir = crate::testutil::temp_dir("acct-children");
+        let jobs = dir.join("jobs");
+        let here = dir.to_string_lossy().to_string();
+        job(&jobs, "a43d3832", STATE);
+        job(&jobs, "094c6a03", &format!(r#"{{"state":"working","tempo":"blocked","cwd":"{here}"}}"#));
+        job(&jobs, "dead0001", r#"{"state":"done","tempo":"done","cwd":"/nonexistent/wt-1"}"#);
+        job(&jobs, "dead0002", r#"{"state":"stopped","tempo":"blocked","cwd":"/nonexistent/wt-2"}"#);
+        job(&jobs, "done0003", &format!(r#"{{"state":"done","tempo":"done","cwd":"{here}"}}"#));
+        job(&jobs, "broken04", "{");
+        std::fs::write(jobs.join("pins.json"), "{}").unwrap();
+
+        let alive = |pid: u32| pid == 20126;
+        let got = read_job_children(&jobs, Some(ROSTER), &alive);
+        let ids: Vec<(&str, bool)> = got.iter().map(|c| (c.id.as_str(), c.live)).collect();
+        // dead0001: finished and its worktree is gone. dead0002: gone too, but blocked.
+        assert_eq!(ids, [("094c6a03", false), ("a43d3832", true), ("dead0002", false), ("done0003", false)]);
+        assert!(read_job_children(&jobs, None, &alive).iter().all(|c| !c.live), "no roster, nothing proven live");
+        assert!(read_job_children(&dir.join("none"), Some(ROSTER), &alive).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_session_is_found_in_its_own_accounts_roster() {
+        let home = crate::testutil::temp_dir("acct-roster");
+        let work = home.join(".claude-work");
+        std::fs::create_dir_all(work.join("daemon")).unwrap();
+        std::fs::create_dir_all(work.join("jobs").join("b0b0b0b0")).unwrap();
+        std::fs::write(work.join("daemon").join("roster.json"), r#"{"workers":{"b0b0b0b0":{"pid":4242}}}"#).unwrap();
+        let text = format!(r#"{{"accounts":[{{"id":"work","configDir":"{}"}}]}}"#, work.display());
+        let accounts = Accounts::parse(&text, &home);
+        // The default account has no roster at all; the work account's answers.
+        assert_eq!(roster_host(&accounts, "b0b0b0b0"), Ok(4242));
+        assert_eq!(roster_host(&accounts, "nope").unwrap_err(), "nope is not in the daemon roster");
+        let alone = Accounts::single(&home);
+        assert!(roster_host(&alone, "b0b0b0b0").unwrap_err().starts_with("roster.json:"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_transcript_is_found_in_whichever_accounts_projects_hold_it() {
+        let home = crate::testutil::temp_dir("acct-transcript");
+        let a = home.join(".claude").join("projects");
+        let b = home.join(".claude-work").join("projects");
+        std::fs::create_dir_all(a.join(project_dir_name("/r/one"))).unwrap();
+        std::fs::create_dir_all(b.join("-elsewhere")).unwrap();
+        std::fs::write(a.join(project_dir_name("/r/one")).join("s1.jsonl"), "").unwrap();
+        std::fs::write(b.join("-elsewhere").join("s2.jsonl"), "").unwrap();
+        let dirs = [a.clone(), b.clone()];
+        assert_eq!(transcript_in(&dirs, "/r/one", "s1"), Some(a.join(project_dir_name("/r/one")).join("s1.jsonl")));
+        assert_eq!(transcript_in(&dirs, "/r/two", "s2"), Some(b.join("-elsewhere").join("s2.jsonl")));
+        assert_eq!(transcript_in(&dirs, "/r/one", "s3"), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Dogfood: `cargo test mission::account_tests::dump_real_accounts -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_real_accounts() {
+        let accounts = account_dirs::accounts();
+        eprintln!("{accounts:?}");
+        // The port reads the default account's jobs as `mnemo sessions` lists them.
+        let def = accounts.default_account();
+        let roster = std::fs::read_to_string(def.roster_path()).ok();
+        let key = |c: &ChildSession| (c.id.clone(), c.state.clone(), c.tempo.clone(), c.live, c.model.clone(), c.effort.clone(), c.intent.clone());
+        let mut ported: Vec<_> = read_job_children(&def.jobs_dir(), roster.as_deref(), &pid_alive).iter().map(key).collect();
+        let mut mnemo: Vec<_> = parse_sessions(&run("mnemo", &["sessions", "--json", "--all"], None).unwrap()).unwrap().iter().map(key).collect();
+        ported.sort();
+        mnemo.sort();
+        for row in ported.iter().filter(|r| !mnemo.contains(r)) {
+            eprintln!("only ported: {row:?}");
+        }
+        for row in mnemo.iter().filter(|r| !ported.contains(r)) {
+            eprintln!("only mnemo:  {row:?}");
+        }
+        eprintln!("ported {} rows, mnemo {} rows", ported.len(), mnemo.len());
+        let snap = collect_snapshot(None, false);
+        eprintln!("errors={:?}", snap.errors);
+        for g in &snap.repos {
+            let pieces = g.missions.iter().flat_map(|m| &m.pieces).filter_map(|p| p.child.as_ref());
+            for c in g.children.iter().chain(pieces) {
+                eprintln!("  {:<24} {} live={:<5} account={} env={:?} timeline={}", g.name, c.id, c.live, c.account, c.account_env, c.timeline_len);
+            }
+            for p in &g.parents {
+                eprintln!("  {:<24} parent {} account={}", g.name, p.session_id, p.account);
+            }
+        }
+    }
+
+    #[test]
+    fn a_child_serialises_its_account_and_older_snapshots_read_as_the_default() {
+        let mut c = parse_sessions(include_str!("../fixtures/sessions.json")).unwrap().remove(0);
+        assert_eq!(c.account, account_dirs::DEFAULT_ID);
+        c.account = "work".into();
+        c.account_env = Some(AccountEnv { config_dir: Some("/Users/x/.claude-work".into()) });
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["account"], "work");
+        assert_eq!(json["account_env"]["config_dir"], "/Users/x/.claude-work");
+        let mut old = json.clone();
+        old.as_object_mut().unwrap().remove("account");
+        old.as_object_mut().unwrap().remove("account_env");
+        let back: ChildSession = serde_json::from_value(old).unwrap();
+        assert_eq!((back.account.as_str(), back.account_env), (account_dirs::DEFAULT_ID, None));
     }
 }

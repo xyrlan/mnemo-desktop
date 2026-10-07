@@ -3,7 +3,8 @@
 //! `refreshGithub()`), never on the snapshot's own poll; the snapshot reads what the last
 //! refresh left. Nothing here is written to disk.
 //!
-//! A PR's child comes from `~/.claude/jobs/<short>/state.json`: first its `children`, where
+//! A PR's child comes from `<account>/jobs/<short>/state.json`, on every account (the default
+//! account's `jobs/` is `~/.claude/jobs`): first its `children`, where
 //! Claude Code records the PR a job opened; when that is empty, the branch the job's
 //! dispatch worktree implies (`<repo>-wt-288` → `fix/issue-288`, `<repo>-wt-c-parser` →
 //! `feat/<feature>/parser`), the same derivation `mnemo`'s `delivery.py` falls back to. The
@@ -17,6 +18,7 @@ use serde::Serialize;
 
 use crate::github::{parse_issues, Issue};
 use crate::home::worktree_sibling;
+use crate::mission::account_dirs::{accounts, Accounts, DEFAULT_ID};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Pr {
@@ -105,12 +107,16 @@ pub fn fold_checks(rollup: Option<&serde_json::Value>) -> &'static str {
 /// A background job as the lens needs it: where it ran and the PRs it says it opened.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
-    /// The directory name under `~/.claude/jobs/`: the id `claude attach` takes.
+    /// The directory name under its account's `jobs/`: the id `claude attach` takes.
     pub short: String,
     pub cwd: String,
     /// `href`s of `children` entries whose kind is `pr`.
     pub prs: Vec<String>,
     pub updated_at: String,
+    /// Claude Code's own id for the session, which Home lists it by.
+    pub session_id: Option<String>,
+    /// Id of the account whose `jobs/` holds it (`read_all_jobs`).
+    pub account: String,
 }
 
 /// One job's `state.json`; None when it is not JSON or names no cwd.
@@ -128,7 +134,8 @@ pub fn parse_job(short: &str, json: &str) -> Option<Job> {
         })
         .unwrap_or_default();
     let updated_at = v.get("updatedAt").and_then(|x| x.as_str()).unwrap_or_default().to_string();
-    Some(Job { short: short.to_string(), cwd, prs, updated_at })
+    let session_id = v.get("sessionId").and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(str::to_string);
+    Some(Job { short: short.to_string(), cwd, prs, updated_at, session_id, account: DEFAULT_ID.to_string() })
 }
 
 /// Every readable job under `dir`, in no particular order. A missing dir is no jobs.
@@ -142,6 +149,21 @@ pub fn read_jobs(dir: &Path) -> Vec<Job> {
             parse_job(&short, &text)
         })
         .collect()
+}
+
+/// Every account's jobs, each tagged with its account; a short id is kept once, by the first
+/// account that holds it.
+pub fn read_all_jobs(accounts: &Accounts) -> Vec<Job> {
+    let mut out: Vec<Job> = Vec::new();
+    for a in accounts.iter() {
+        for mut j in read_jobs(&a.jobs_dir()) {
+            if !out.iter().any(|o| o.short == j.short) {
+                j.account = a.id.clone();
+                out.push(j);
+            }
+        }
+    }
+    out
 }
 
 /// The dispatch target a worktree cwd encodes: `mnemo-wt-288` → `288`, `mnemo-wt-c-parser`
@@ -291,14 +313,10 @@ pub fn last_roots() -> &'static Mutex<Option<Vec<String>>> {
     R.get_or_init(Default::default)
 }
 
-pub fn jobs_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".claude").join("jobs")
-}
-
 /// Fetch `roots` for real, into the process cache.
 pub fn refresh(roots: &[String]) {
     let roots: Vec<String> = roots.iter().filter(|r| Path::new(r).is_dir()).cloned().collect();
-    refresh_into(cache(), &roots, &run_gh, &read_jobs(&jobs_dir()));
+    refresh_into(cache(), &roots, &run_gh, &read_all_jobs(&accounts()));
 }
 
 #[cfg(test)]
@@ -396,6 +414,8 @@ mod tests {
             cwd: "/gh/desk-wt-101".into(),
             prs: vec!["https://github.com/me/desk/pull/120/".into()],
             updated_at: at.into(),
+            session_id: None,
+            account: DEFAULT_ID.into(),
         };
         resolve_children(&mut prs, "/gh/desk/", &[job("old", "2026-09-01T00:00:00Z"), job("new", "2026-09-02T00:00:00Z")]);
         assert_eq!(child_of(&prs, 120), Some("new"));
@@ -490,7 +510,7 @@ mod tests {
     fn dump_real_lens() {
         let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/src-tauri").to_string();
         let main = crate::mission::git_root(&root).unwrap_or(root);
-        let (issues, prs) = fetch_repo(&main, &run_gh, &read_jobs(&jobs_dir())).unwrap();
+        let (issues, prs) = fetch_repo(&main, &run_gh, &read_all_jobs(&accounts())).unwrap();
         eprintln!("{main}: {} issues, {} prs", issues.len(), prs.len());
         for p in &prs {
             eprintln!("  #{} {:<7} {:<7} {:<10} {} ({})", p.number, p.state, p.checks, p.child.as_deref().unwrap_or("-"), p.title, p.head);

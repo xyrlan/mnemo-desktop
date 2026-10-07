@@ -6,7 +6,7 @@ import type { ChildSession, ParentSession, RepoGroup, Snapshot } from './types'
 export function child(over: Partial<ChildSession> & { id: string }): ChildSession {
   return {
     session_id: null, name: null, state: 'working', tempo: 'active', needs: null, detail: '', suggested_reply: null,
-    cwd: '', tokens: 0, live: true, updated_at: null, intent: null, branch: null, timeline_len: 0,
+    cwd: '', tokens: 0, live: true, updated_at: null, intent: null, branch: null, timeline_len: 0, account: 'default',
     ...over,
   }
 }

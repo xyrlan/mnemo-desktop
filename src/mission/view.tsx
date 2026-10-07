@@ -9,6 +9,7 @@ import { tauriMission } from './client'
 import { store as appStore } from '../layout/app-store'
 import { allChildren, childWord, isRecent, type TimelineLine } from './types'
 import { attachChild, openMissionPane } from './rows'
+import { stopCmd } from './account'
 import { ChildConversation } from './conversation'
 import { AgentStateDot, type DotState } from '../dashboard/AgentStateDot'
 import { estimateUsd, fmtUsd } from './cost'
@@ -68,14 +69,14 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
 
   const markers = useMemo(() => statusMarkers(lines), [lines])
 
-  const attach = () => attachChild(id, 'split-col')
+  const attach = () => attachChild(child ?? id, 'split-col')
   const stop = () => {
     if (!confirmStop) {
       setConfirmStop(true)
       window.setTimeout(() => setConfirmStop(false), 4000)
       return
     }
-    appStore.getState().openView('terminal-cmd', { cmd: `claude stop ${id}` }, 'split-col', `stop ${id}`)
+    appStore.getState().openView('terminal-cmd', { cmd: stopCmd(child ?? { id }) }, 'split-col', `stop ${id}`)
     setConfirmStop(false)
   }
 

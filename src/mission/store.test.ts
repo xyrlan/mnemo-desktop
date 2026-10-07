@@ -1,12 +1,14 @@
 import { createMissionStore } from './store'
 import type { MissionClient } from './client'
 import type { Snapshot } from './types'
+import type { Target } from './account'
+import { child } from './fixtures'
 
 const snap: Snapshot = { repos: [{ root: '/r', name: 'r', parents: [], missions: [], children: [] }], errors: [], at: '1' }
 
-function fake(over: Partial<MissionClient> = {}): MissionClient & { replies: [string, string][]; typed: [string, string][]; lookedMap: Record<string, number> } {
+function fake(over: Partial<MissionClient> = {}): MissionClient & { replies: [string, string][]; typed: [Target, string][]; lookedMap: Record<string, number> } {
   const replies: [string, string][] = []
-  const typed: [string, string][] = []
+  const typed: [Target, string][] = []
   const lookedMap: Record<string, number> = { a: 2 }
   return {
     replies,
@@ -20,7 +22,7 @@ function fake(over: Partial<MissionClient> = {}): MissionClient & { replies: [st
     markLooked: async (id, n) => { lookedMap[id] = n },
     translate: async (t) => `EN(${t})`,
     ...over,
-  } as MissionClient & { replies: [string, string][]; typed: [string, string][]; lookedMap: Record<string, number> }
+  } as MissionClient & { replies: [string, string][]; typed: [Target, string][]; lookedMap: Record<string, number> }
 }
 
 test('refresh stores the snapshot and clears the error', async () => {
@@ -114,6 +116,16 @@ test('replyAsMe types the draft exactly as written: no English rewrite, no langu
   expect(s.getState().drafts.x).toBe('')
   expect(s.getState().sent.x[0]).toMatchObject({ text: 'pode dar push e abrir o PR', original: 'pode dar push e abrir o PR', asMe: true })
   expect(s.getState().typing.x).toBe(false)
+})
+
+test('replyAsMe types into the child as the snapshot has it, so the attach runs on its account', async () => {
+  const c = fake()
+  const s = createMissionStore(c)
+  const work = child({ id: 'w1', account: 'work', account_env: { config_dir: '/Users/me/.claude-work' } })
+  s.setState({ snapshot: { repos: [{ root: '/r', name: 'r', parents: [], missions: [], children: [work] }], errors: [], at: '' } })
+  s.getState().setDraft('w1', 'go ahead')
+  expect(await s.getState().replyAsMe('w1', null)).toBe(true)
+  expect(c.typed).toEqual([[work, 'go ahead']])
 })
 
 test("replyAsMe refuses the child's own suggested reply, unedited: that would be the child approving itself", async () => {

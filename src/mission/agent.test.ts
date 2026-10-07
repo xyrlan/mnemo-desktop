@@ -22,8 +22,9 @@ test('childAgent answers the dialog through the question routes and the prompt t
       calls.push(['prompt', c.cwd, choice])
       return { choice, phase: 'sent', pane: 3, at: 0 }
     },
-    answerQuestion: async (id, index) => void calls.push(['answer', id, index]),
-    answerQuestionOther: async (id, text) => void calls.push(['other', id, text]),
+    // The child itself, as the latest snapshot has it: its attach runs on its account.
+    answerQuestion: async (c, index) => void calls.push(['answer', typeof c === 'string' ? c : (c as ChildSession).cwd, index]),
+    answerQuestionOther: async (c, text) => void calls.push(['other', typeof c === 'string' ? c : (c as ChildSession).cwd, text]),
   })
   // The snapshot moved on since the agent was made: the prompt is answered where the child is now.
   const moved = { ...first, cwd: '/moved' }
@@ -45,8 +46,8 @@ test('childAgent answers the dialog through the question routes and the prompt t
   expect(calls).toEqual([
     ['prompt', '/moved', 'yes'],
     ['prompt', '/moved', 'no'],
-    ['answer', first.id, 2],
-    ['other', first.id, 'purple'],
+    ['answer', '/moved', 2],
+    ['other', '/moved', 'purple'],
   ])
   expect(agent.bash).toBeUndefined()
 })

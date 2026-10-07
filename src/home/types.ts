@@ -1,9 +1,24 @@
 import type { Issue } from '../github/types'
+import { attachCmd, onAccount, stopCmd as stopOn, type AccountEnv } from '../mission/account'
 
 /** Mirrors `src-tauri/src/home.rs`. */
 export type Live = 'here' | 'bg' | 'elsewhere'
-/** `agent`: the `claude agents` name of a live session, only when it differs from `title`. */
-export type HomeSession = { id: string; title: string; cwd: string; last_at: number; transcript: boolean; live: Live | null; kind: string; agent: string | null }
+/** `agent`: the `claude agents` name of a live session, only when it differs from `title`.
+ *  `account`: the account it runs on (the one whose `claude agents` lists it, else whose `jobs/`
+ *  hold it), null when neither does; `account_env` what a command needs to reach it there, null
+ *  when there is nothing to route (see `../mission/account.ts`). Both absent before accounts. */
+export type HomeSession = {
+  id: string
+  title: string
+  cwd: string
+  last_at: number
+  transcript: boolean
+  live: Live | null
+  kind: string
+  agent: string | null
+  account?: string | null
+  account_env?: AccountEnv | null
+}
 export type Checks = 'pass' | 'fail' | 'pending' | 'none'
 /** An open PR (`src-tauri/src/home/lens.rs`). `child`: short id of the dispatch child that
  *  opened it, null when none resolves, which is ordinary: show the PR without a badge. */
@@ -46,16 +61,17 @@ export type Click =
 export const ELSEWHERE = 'open in another terminal'
 export const NO_TRANSCRIPT = 'transcript not found'
 
-/** Never fork: a live session is focused or attached, only a dead one is resumed. */
+/** Never fork: a live session is focused or attached, only a dead one is resumed. Attach and
+ *  resume run on the session's own account. */
 export function whatClickDoes(s: HomeSession, panes: Record<number, PaneLike>): Click {
   if (s.live === 'here') {
     const pane = paneForSession(panes, s.id)
     return pane === null ? { kind: 'nothing', why: ELSEWHERE } : { kind: 'focus', pane }
   }
-  if (s.live === 'bg') return { kind: 'command', cmd: `claude attach ${s.id}`, sessionId: s.id }
+  if (s.live === 'bg') return { kind: 'command', cmd: attachCmd(s), sessionId: s.id }
   if (s.live === 'elsewhere') return { kind: 'nothing', why: ELSEWHERE }
   if (!s.transcript) return { kind: 'nothing', why: NO_TRANSCRIPT }
-  return { kind: 'command', cmd: `claude --resume ${s.id}`, sessionId: s.id }
+  return { kind: 'command', cmd: onAccount(`claude --resume ${s.id}`, s), sessionId: s.id }
 }
 
 /** An unresolved repo the list folds away (see `HomeSnapshot.protected`). */
@@ -140,9 +156,10 @@ export function takeOver(s: HomeSession, panes: Record<number, PaneLike>): { lab
   const c = whatClickDoes(s, panes)
   if (c.kind === 'nothing') return { label: 'Take over', why: c.why }
   if (c.kind === 'focus') return { label: 'Show its pane', why: null }
-  return { label: c.cmd.startsWith('claude attach') ? 'Take over' : 'Resume', why: null }
+  return { label: s.live === 'bg' ? 'Take over' : 'Resume', why: null }
 }
 
-/** `claude stop <id>`, as the cockpit's inbox runs it (`src/cockpit/actions.ts`). Only a live
- *  child has one: there is nothing to stop in a finished session. */
-export const stopCmd = (s: HomeSession) => `claude stop ${s.id}`
+/** `claude stop <id>` on the session's own account, as the cockpit's inbox runs it
+ *  (`src/cockpit/actions.ts`). Only a live child has one: there is nothing to stop in a finished
+ *  session. */
+export const stopCmd = (s: HomeSession) => stopOn(s)
