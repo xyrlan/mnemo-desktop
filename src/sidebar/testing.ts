@@ -23,6 +23,7 @@ export const layoutStore = createStore(() => ({
   activeWorktree: null as string | null,
   tabs: [] as Tab[],
   activeTab: '',
+  panes: {} as Record<number, { id: number; view: string }>,
   switchWorktree: vi.fn(async (_path: string) => {}),
   goToPane: vi.fn((_id: number) => {}),
   closeWorktree: vi.fn(async (_path: string) => {}),
@@ -50,7 +51,7 @@ function recorder<A extends unknown[], R>(impl: (...a: A) => Promise<R>) {
 }
 /** What git says of each repo, by root: `cleanupFacts` answers from here. */
 export const gitFacts = new Map<string, CleanupFacts | string>()
-export const cleanupFacts = recorder(async (root: string): Promise<CleanupFacts> => {
+export const cleanupFacts = recorder(async (root: string, _panes: readonly number[] = []): Promise<CleanupFacts> => {
   const f = gitFacts.get(root)
   if (typeof f === 'string') throw f
   return f ?? { base: 'origin/main', trees: [] }
@@ -78,6 +79,8 @@ export const gitTree = (path: string, more: Partial<CleanupFacts['trees'][number
   dirty: false,
   setupJob: null,
   merged: false,
+  unpushed: false,
+  programs: [],
   ...more,
 })
 
@@ -92,6 +95,7 @@ export function resetFakes() {
     activeWorktree: null,
     tabs: [],
     activeTab: '',
+    panes: {},
     switchWorktree: vi.fn(async () => {}),
     goToPane: vi.fn(),
     closeWorktree: vi.fn(async () => {}),

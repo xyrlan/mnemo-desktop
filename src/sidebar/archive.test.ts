@@ -106,7 +106,7 @@ describe('the cleanup view', () => {
     openCleanup()
     expect(cleanup()).toMatchObject({ open: true, step: 'list', scanning: true })
     await flush()
-    expect(cleanupFacts.calls).toEqual([['/r/app'], ['/r/web']])
+    expect(cleanupFacts.calls).toEqual([['/r/app', []], ['/r/web', []]])
     expect(cleanup().candidates.map((c) => c.path)).toEqual(['/r/app-wt-done', '/r/app-wt-shipped'])
     expect(cleanup()).toMatchObject({ scanning: false, kept: '1 with changes · 1 not merged', errors: [] })
     expect(cleanup().selected.size).toBe(0)
@@ -176,7 +176,7 @@ describe('the cleanup view', () => {
     const run = removeSelected()
     expect(cleanup().progress).toEqual({ done: 0, failed: 0, total: 2 })
     await run
-    expect(order).toEqual(['remove /r/app-wt-done', 'close /r/app-wt-done', 'remove /r/app-wt-shipped', 'close /r/app-wt-shipped', 'refresh'])
+    expect(order).toEqual(['refresh', 'remove /r/app-wt-done', 'close /r/app-wt-done', 'remove /r/app-wt-shipped', 'close /r/app-wt-shipped', 'refresh'])
     expect(removeWorktree.calls).toEqual([
       ['/r/app-wt-done', false],
       ['/r/app-wt-shipped', false],

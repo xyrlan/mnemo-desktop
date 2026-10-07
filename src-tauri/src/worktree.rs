@@ -17,8 +17,9 @@
 //! already in the repo's default branch (`merged`): with no changes either, removing it loses
 //! nothing, since the branch is kept. A repo that squash- or rebase-merges never makes a branch
 //! an ancestor of the default branch, so `merged` also takes a branch whose changes are all
-//! there, and one whose pull request was merged or closed at the commit the tree is on. Only
-//! facts: nothing here removes anything.
+//! there, and one whose pull request was merged or closed at the commit the tree is on. It
+//! also says whether a tree holds commits no remote has (`unpushed`) and which programs run in
+//! it (`programs`), so the front keeps those too. Only facts: nothing here removes anything.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -294,6 +295,12 @@ pub struct CleanupTree {
     /// changes it makes are (a squash or rebase merge), or its branch's pull request was merged
     /// or closed with the tree's HEAD in it. True too for a tree that never made a commit.
     pub merged: bool,
+    /// Not `merged`, and some of its commits are on no remote: only this machine has them. The
+    /// branch keeps them once the tree is gone, but nothing says so anywhere else.
+    pub unpushed: bool,
+    /// The programs whose working directory is in it (`node (4123)`), other than the asking
+    /// window's terminals and Claude Code sessions, whose state the fleet judges.
+    pub programs: Vec<String>,
 }
 
 /// `CleanupFacts` in `src/worktrees/client.ts`.
@@ -374,12 +381,29 @@ fn ended_prs(root: &Path, gh: GhRun) -> HashMap<String, Vec<String>> {
     out
 }
 
-/// What cleaning up needs to know of the repo `repo` is in; see the module doc.
-pub fn cleanup_facts(repo: &str) -> Result<CleanupFacts, String> {
-    cleanup_facts_with(repo, &run_gh)
+/// The programs running in a tree, by its path.
+type ProgramsIn<'a> = &'a dyn Fn(&Path) -> Vec<String>;
+
+/// What cleaning up needs to know of the repo `repo` is in; see the module doc. `panes` are the
+/// pids of the asking window's terminals: closing them is part of removing a tree, so they and
+/// what runs in them are not counted as programs in it; nor is this app, nor what it runs (its
+/// own `git` calls, a setup job, which the front judges by itself).
+pub fn cleanup_facts(repo: &str, panes: &[u32]) -> Result<CleanupFacts, String> {
+    let all = crate::programs::all();
+    let roots: std::collections::HashSet<u32> = panes.iter().copied().chain([std::process::id()]).collect();
+    // `claude agents` is asked only once some tree has a program in it.
+    let spared = std::cell::OnceCell::new();
+    let programs = |tree: &Path| -> Vec<String> {
+        if crate::programs::inside(&all, tree, &roots, crate::chrome::parent_of).is_empty() {
+            return vec![];
+        }
+        let roots = spared.get_or_init(|| roots.iter().copied().chain(crate::chrome::claude_pids()).collect());
+        crate::programs::inside(&all, tree, roots, crate::chrome::parent_of).iter().map(|p| p.label()).collect()
+    };
+    cleanup_facts_with(repo, &run_gh, &programs)
 }
 
-fn cleanup_facts_with(repo: &str, gh: GhRun) -> Result<CleanupFacts, String> {
+fn cleanup_facts_with(repo: &str, gh: GhRun, programs: ProgramsIn) -> Result<CleanupFacts, String> {
     let root = main_root(repo)?;
     let mut trees = list(repo)?;
     let main_branch = trees.first().filter(|w| w.is_main).and_then(|w| w.branch.clone());
@@ -396,9 +420,20 @@ fn cleanup_facts_with(repo: &str, gh: GhRun) -> Result<CleanupFacts, String> {
         let pr_ended = || w.branch.as_ref().and_then(|b| prs.get(b)).is_some_and(|oids| oids.iter().any(|o| ancestor(head, o)));
         bases.iter().any(|b| ancestor(head, b)) || pr_ended() || bases.iter().any(|b| changes_in(&root, head, b))
     };
+    // A commit `rev-list` cannot vouch for counts as unpushed.
+    let unpushed = |w: &WorktreeInfo| {
+        let head = w.head.as_str();
+        !head.is_empty() && (head.starts_with('-') || git(&["rev-list", "-n1", head, "--not", "--remotes"], &root).map_or(true, |s| !s.trim().is_empty()))
+    };
     Ok(CleanupFacts {
         base: bases.first().cloned(),
-        trees: trees.into_iter().map(|info| CleanupTree { merged: merged(&info), info }).collect(),
+        trees: trees
+            .into_iter()
+            .map(|info| {
+                let merged = merged(&info);
+                CleanupTree { merged, unpushed: !merged && unpushed(&info), programs: programs(Path::new(&info.path)), info }
+            })
+            .collect(),
     })
 }
 
@@ -431,10 +466,13 @@ pub async fn worktree_remove(path: String, force: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || remove(&path, force)).await.map_err(|e| e.to_string())?
 }
 
-/// `cleanupFacts` in `src/worktrees/client.ts`.
+/// `cleanupFacts` in `src/worktrees/client.ts`. `panes`: the ids of the window's terminals.
 #[tauri::command]
-pub async fn worktree_cleanup_facts(repo: String) -> Result<CleanupFacts, String> {
-    tauri::async_runtime::spawn_blocking(move || cleanup_facts(&repo)).await.map_err(|e| e.to_string())?
+pub async fn worktree_cleanup_facts(state: tauri::State<'_, crate::commands::PtyState>, repo: String, panes: Option<Vec<crate::pty::PaneId>>) -> Result<CleanupFacts, String> {
+    let panes = panes.unwrap_or_default();
+    // Unknown when the terminals cannot be listed: then their shells count as programs too.
+    let pids: Vec<u32> = state.0.list().map(|l| l.into_iter().filter(|i| i.alive && panes.contains(&i.id)).map(|i| i.pid).collect()).unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || cleanup_facts(&repo, &pids)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -665,6 +703,10 @@ mod tests {
         Err("gh: not found".into())
     }
 
+    fn nobody(_: &Path) -> Vec<String> {
+        vec![]
+    }
+
     fn head_of(dir: &Path) -> String {
         git(&["rev-parse", "HEAD"], dir).unwrap().trim().to_string()
     }
@@ -685,7 +727,7 @@ mod tests {
         sh_git(&["merge", "-q", "--no-edit", "done"], &root);
         std::fs::write(Path::new(&fresh.path).join("scratch"), "x").unwrap();
 
-        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        let facts = cleanup_facts_with(&r, &no_gh, &nobody).unwrap();
         // No remote: measured against the main checkout's own branch.
         assert_eq!(facts.base.as_deref(), Some("main"));
         // The main checkout is left out; the rest keep `list`'s order, which is git's (by path).
@@ -694,7 +736,7 @@ mod tests {
             [("done".into(), true, false), ("fresh".into(), true, true), ("open".into(), false, false)]
         );
         // Asked from inside a tree, the same answer.
-        assert_eq!(cleanup_facts_with(&open.path, &no_gh).unwrap(), facts);
+        assert_eq!(cleanup_facts_with(&open.path, &no_gh, &nobody).unwrap(), facts);
     }
 
     #[test]
@@ -709,13 +751,13 @@ mod tests {
         sh_git(&["fetch", "-q", &tree.path, "shipped:shipped"], &origin);
         sh_git(&["merge", "-q", "--no-edit", "shipped"], &origin);
         sh_git(&["fetch", "-q"], &clone);
-        let facts = cleanup_facts_with(&c, &no_gh).unwrap();
+        let facts = cleanup_facts_with(&c, &no_gh, &nobody).unwrap();
         assert_eq!(facts.base.as_deref(), Some("origin/main"));
         assert_eq!(merged_of(&facts), [("shipped".into(), true, false)]);
         // With no default branch to measure against, nothing counts as merged.
         sh_git(&["checkout", "-q", "--detach"], &clone);
         sh_git(&["remote", "remove", "origin"], &clone);
-        let none = cleanup_facts_with(&c, &no_gh).unwrap();
+        let none = cleanup_facts_with(&c, &no_gh, &nobody).unwrap();
         assert_eq!((none.base, none.trees[0].merged), (None, false));
     }
 
@@ -735,7 +777,7 @@ mod tests {
         sh_git(&["commit", "-q", "-m", "sq (#1)"], &root);
         // Only one of `half`'s two commits lands.
         sh_git(&["cherry-pick", &format!("{}~1", head_of(Path::new(&half.path)))], &root);
-        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        let facts = cleanup_facts_with(&r, &no_gh, &nobody).unwrap();
         assert_eq!(merged_of(&facts), [("half".into(), false, false), ("sq".into(), true, false)]);
     }
 
@@ -757,7 +799,7 @@ mod tests {
         let head = head_of(t);
         assert!(!changes_in_merge_tree_only(&root, &head, "main"));
         assert!(changes_in(&root, &head, "main"));
-        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        let facts = cleanup_facts_with(&r, &no_gh, &nobody).unwrap();
         assert_eq!(merged_of(&facts), [("sq".into(), true, false)]);
     }
 
@@ -778,7 +820,7 @@ mod tests {
         commit(&root, "later.txt");
         let tip = head_of(Path::new(&rb.path));
         sh_git(&["cherry-pick", &format!("{tip}~1"), &tip], &root);
-        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        let facts = cleanup_facts_with(&r, &no_gh, &nobody).unwrap();
         assert_eq!(merged_of(&facts), [("rb".into(), true, false)]);
     }
 
@@ -813,7 +855,7 @@ mod tests {
             asked.lock().unwrap().push(args.join(" "));
             Ok(json.clone())
         };
-        let facts = cleanup_facts_with(&r, &gh).unwrap();
+        let facts = cleanup_facts_with(&r, &gh, &nobody).unwrap();
         assert_eq!(
             merged_of(&facts),
             [
@@ -829,7 +871,79 @@ mod tests {
         assert_eq!(*asked.lock().unwrap(), ["pr list --state all --limit 1000 --json headRefName,headRefOid,state"]);
         // `gh` failing or saying nonsense leaves git's signals alone.
         for bad in [&no_gh as GhRun, &|_: &[&str], _: &Path| Ok("not json".to_string())] {
-            assert!(cleanup_facts_with(&r, bad).unwrap().trees.iter().all(|t| !t.merged));
+            assert!(cleanup_facts_with(&r, bad, &nobody).unwrap().trees.iter().all(|t| !t.merged));
         }
+    }
+
+    fn unpushed_of(facts: &CleanupFacts) -> Vec<(String, bool, bool)> {
+        facts.trees.iter().map(|t| (t.info.branch.clone().unwrap_or_default(), t.merged, t.unpushed)).collect()
+    }
+
+    #[test]
+    fn unpushed_is_work_that_is_neither_merged_nor_on_a_remote() {
+        let origin = repo("wt-unpushed");
+        let clone = origin.parent().unwrap().join("clone");
+        sh_git(&["clone", "-q", &s(&origin), &s(&clone)], origin.parent().unwrap());
+        let c = s(&clone);
+        let local = create(&c, "local", None, None, quiet()).unwrap();
+        commit(Path::new(&local.path), "local.txt");
+        let pushed = create(&c, "pushed", None, None, quiet()).unwrap();
+        commit(Path::new(&pushed.path), "pushed.txt");
+        sh_git(&["push", "-q", "origin", "pushed"], Path::new(&pushed.path));
+        // A tree that made no commit is on origin/main already.
+        create(&c, "untouched", None, None, quiet()).unwrap();
+        let facts = cleanup_facts_with(&c, &no_gh, &nobody).unwrap();
+        assert_eq!(
+            unpushed_of(&facts),
+            [("local".into(), false, true), ("pushed".into(), false, false), ("untouched".into(), true, false)]
+        );
+        // Work merged into the default branch counts as merged, not unpushed, pushed or not.
+        sh_git(&["merge", "-q", "--no-edit", "local"], &clone);
+        let facts = cleanup_facts_with(&c, &no_gh, &nobody).unwrap();
+        assert_eq!(unpushed_of(&facts)[0], ("local".into(), true, false));
+    }
+
+    #[test]
+    fn cleanup_facts_name_the_programs_in_each_tree() {
+        let root = repo("wt-programs");
+        let r = s(&root);
+        let busy = create(&r, "busy", None, None, quiet()).unwrap();
+        create(&r, "calm", None, None, quiet()).unwrap();
+        let asked = Mutex::new(vec![]);
+        let programs = |tree: &Path| {
+            asked.lock().unwrap().push(git_form(tree));
+            if git_form(tree) == busy.path { vec!["node (4123)".to_string()] } else { vec![] }
+        };
+        let facts = cleanup_facts_with(&r, &no_gh, &programs).unwrap();
+        let got: Vec<_> = facts.trees.iter().map(|t| (t.info.branch.clone().unwrap(), t.programs.clone())).collect();
+        assert_eq!(got, [("busy".to_string(), vec!["node (4123)".to_string()]), ("calm".to_string(), vec![])]);
+        // Never asked of the main checkout.
+        assert!(!asked.lock().unwrap().contains(&git_form(&root)));
+    }
+
+    /// The real scan: a process sitting in a tree is named, unless it runs in one of the asking
+    /// window's terminals.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_process_in_a_tree_is_a_program_in_it_unless_it_is_a_pane_of_this_window() {
+        let root = repo("wt-programs-real");
+        let r = s(&root);
+        let busy = create(&r, "busy", None, None, quiet()).unwrap();
+        // Left behind by a shell that exits: not this process's child, which would be spared.
+        let out = crate::proc::command("sh").args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"]).current_dir(&busy.path).output().unwrap();
+        let pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        let mut programs = vec![];
+        for _ in 0..100 {
+            programs = cleanup_facts(&r, &[]).unwrap().trees[0].programs.clone();
+            // Named by the shell's fork until it execs sleep.
+            if programs.iter().any(|p| p.starts_with("sleep ")) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let spared = cleanup_facts(&r, &[pid]).unwrap().trees[0].programs.clone();
+        let _ = crate::proc::command("kill").arg(pid.to_string()).status();
+        assert_eq!(programs, [format!("sleep ({pid})")]);
+        assert_eq!(spared, Vec::<String>::new());
     }
 }

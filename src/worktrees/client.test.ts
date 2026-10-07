@@ -48,9 +48,11 @@ describe('worktrees client', () => {
   })
 
   it('reads cleanup facts through worktree_cleanup_facts', async () => {
-    const facts = { base: 'origin/main', trees: [{ ...tree, merged: true }] }
+    const facts = { base: 'origin/main', trees: [{ ...tree, merged: true, unpushed: false, programs: [] }] }
     invoke.mockResolvedValue(facts)
     expect(await cleanupFacts('/x/repo')).toEqual(facts)
-    expect(invoke).toHaveBeenLastCalledWith('worktree_cleanup_facts', { repo: '/x/repo' })
+    expect(invoke).toHaveBeenLastCalledWith('worktree_cleanup_facts', { repo: '/x/repo', panes: [] })
+    await cleanupFacts('/x/repo', [3, 7])
+    expect(invoke).toHaveBeenLastCalledWith('worktree_cleanup_facts', { repo: '/x/repo', panes: [3, 7] })
   })
 })

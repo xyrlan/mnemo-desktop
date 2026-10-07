@@ -207,7 +207,8 @@ function ListStep(): React.JSX.Element {
           <div className="min-w-0">
             <DialogTitle className="min-w-0 text-base">Clean up workspaces</DialogTitle>
             <DialogDescription className="mt-1 text-xs">
-              Merged, or their PR merged or closed, with no changes and no agent at work. Removing one keeps its branch.
+              Merged, or their PR merged or closed, with no changes, no unpushed commits and nothing at work in them. Removing one
+              keeps its branch.
             </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -306,7 +307,7 @@ function ConfirmStep(): React.JSX.Element {
               <DialogDescription className="mt-1.5 text-xs leading-5">
                 {deleting
                   ? 'You can close this and come back while deletion continues.'
-                  : 'Their folders are deleted and their terminals closed. Their branches are kept.'}
+                  : 'Their folders are deleted, files git ignores included, and their terminals closed. Each is checked again first. Their branches are kept.'}
               </DialogDescription>
             </div>
           </div>

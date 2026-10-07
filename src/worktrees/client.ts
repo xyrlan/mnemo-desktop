@@ -35,6 +35,11 @@ export type CleanupTree = WorktreeInfo & {
   /** Its HEAD is in the default branch (local or the remote's): none of its commits would be
    *  lost. True too for a tree that never made one. */
   merged: boolean
+  /** Not `merged`, and some of its commits are on no remote: only this machine has them. */
+  unpushed: boolean
+  /** The programs whose working directory is in it (`node (4123)`), other than the asking
+   *  window's terminals and Claude Code sessions (the fleet judges those by their state). */
+  programs: string[]
 }
 
 export type CleanupFacts = {
@@ -45,5 +50,8 @@ export type CleanupFacts = {
   trees: CleanupTree[]
 }
 
-/** What cleaning up stale worktrees needs to know of the repo `repo` is in. */
-export const cleanupFacts = (repo: string): Promise<CleanupFacts> => invoke<CleanupFacts>('worktree_cleanup_facts', { repo })
+/** What cleaning up stale worktrees needs to know of the repo `repo` is in. `panes`: the ids of
+ *  this window's terminals, which removing a tree closes: what runs in them is not a program in
+ *  it. */
+export const cleanupFacts = (repo: string, panes: readonly number[] = []): Promise<CleanupFacts> =>
+  invoke<CleanupFacts>('worktree_cleanup_facts', { repo, panes })
