@@ -1,0 +1,9 @@
+Vault: /Users/me/mnemo  (exists)
+Hooks (global): 4/4 — /Users/me/.claude/settings.json
+Circuit breaker: closed (ok)
+Activation:
+  Enforcement: enabled
+  Enrichment:  enabled
+  Rule activation index: missing — run `mnemo extract`
+
+Reflex: enabled (0 emissions today)

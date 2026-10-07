@@ -1,0 +1,21 @@
+Install scope: global — ~/.claude/settings.json
+Running diagnostic / preflight checks…
+  ✓ circuit breaker closed (2 errors in the last hour, most from briefing.corrections_rejected; 2 of 10 strikes)
+  ⚠ friction.autoRetire is true, but it is inert: nothing calls the automatic retirement, so no rule is retired by it
+       → no action needed; the key has no effect in this version
+  ✓ 670 background sessions (1 waiting)
+  ℹ 659 finished sessions whose worktree is gone (hidden from `mnemo sessions`; the branch is kept):
+       → for id in 000cfc94 006e70c6 01dd8f40 0261a154 0295d884 033b5bab; do mnemo sessions --forget $id; done
+  ℹ Rule 'validate-transaction-ownership' has no auto-testable path_globs (contains '?' or '[abc]' — manual verification required)
+  ⚠ Rule feedback/use-specified-tool-or-explain.md: source path does not resolve: bots/app/briefings/sessions/c94f6541.md
+  ✓ every rule page carries slug:
+  ✓ no staged rewrites in the live rule dirs
+  ⚠ 734 staged pages awaiting review in shared/_inbox/ (292 demotions, 6 backfill, 39 multi-source, 397 other; oldest confirmation-dialog-before-delete.md, 34 days)
+       → `mnemo inbox` lists them; `--promote KEY` moves one into shared/<type>/, `--drop KEY` archives it
+Universal promotion health: 8 universal rule(s).
+  Top universal topics: consistency, css, database, deployment, enforcement
+  ⚠ Stale citations: 8 live rules cite a file not in app at HEAD (159 scanned)
+       → run `mnemo stale` to see which path, and where it moved to
+  ✓ claude daemon: 1 idle spare (145 MB, oldest 1m); 4 children resident (1.68 GB: 4 working)
+  ℹ Recall: primacy@5 = 47.6% over 166 cases (measured 2026-10-03T03:17:03Z)
+Warnings above.

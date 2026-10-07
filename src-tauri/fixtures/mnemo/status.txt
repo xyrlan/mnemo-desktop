@@ -1,0 +1,32 @@
+Vault: /Users/me/mnemo  (exists)
+Briefings: 954 across 19 agents (5.9 MB) — 0 prunable (retention 180d, keep 20/agent)
+Hooks (project): settings.json missing — /Users/me/code/app/.claude/settings.json
+Hooks (global): 4/4 — /Users/me/.claude/settings.json
+Circuit breaker: closed (ok)
+Error log: /Users/me/mnemo/.errors.log (91458 bytes)
+Auto-brain:
+  enabled:     yes (minNewMemories=1, minIntervalMinutes=60)
+  last run:    46m ago — 10 pages (3 auto-promoted), 1 conflicts
+Activation:
+  Enforcement: enabled
+  Enrichment:  enabled
+  Rule activation index: present (built_at=2026-10-07T15:41:12Z, vault_root=/Users/me/mnemo)
+  Per-project rule counts (current=app, includes universal):
+    Enforce rules: 0
+    Enrich rules:  3
+  Recent denials (today): 0
+  Recent enrichments (today): 10
+  Last denial: none
+
+Reflex: enabled (51 emissions today)
+
+Recall rerank: typesafe, key from secrets
+  rerank: 218 calls in 14d, 214 ok, 1 error, 3 small
+
+Numbers (last 14 days):
+  reflex: injected on 747 of 2266 prompts (33.0%)
+  recall: primacy@5 47.6% over 166 cases (mnemo recall, 2026-10-03)
+
+Recently learned (app):
+  • feature-branch-integration-pattern — Feature branch integration: collect changes on stable branch before main merge [inferred]
+  (ledger: .mnemo/learned.jsonl)

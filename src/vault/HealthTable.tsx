@@ -28,11 +28,28 @@ function RawText({ title, result }: { title: string; result: RunResult }) {
     <div className="vr-raw-block min-w-0 flex-1">
       <div className="vr-raw-title pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
-        {failed && <span className="vh-fail normal-case tracking-normal text-destructive"> {result.code === null ? 'not run' : `exit ${result.code}`}</span>}
+        {/* No code: it could not start, was stopped, or died on a signal; stderr says which. */}
+        {failed && <span className="vh-fail normal-case tracking-normal text-destructive"> {result.code === null ? 'failed' : `exit ${result.code}`}</span>}
       </div>
       <pre className={failed ? ERROR_TEXT : cn(MONO_TEXT, 'text-foreground')}>{out || '(no output)'}</pre>
     </div>
   )
+}
+
+/** `12s`, `1m 05s`. */
+export function elapsedText(ms: number): string {
+  const s = Math.floor(Math.max(0, ms) / 1000)
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
+}
+
+/** The time since `since`, a tick a second, so a slow run shows it is still going. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  return <span className="vh-elapsed tabular-nums">{elapsedText(now - since)}</span>
 }
 
 /** A tone's dot on a tile: only a state that asks for something is coloured. */
@@ -60,7 +77,14 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
   const health = useVault((s) => s.health)
   const loading = useVault((s) => s.healthLoading)
   const doctor = useVault((s) => s.doctor)
+  const doctorSince = useVault((s) => s.doctorSince)
   const [raw, setRaw] = useState(false)
+  // `doctor` is the slow one (26s on a ~6k-page vault), so it is read here rather than with
+  // the rest of the health screen: the open panel is the only thing that ever shows it. Open,
+  // the panel always has a doctor read or running; a re-read (↻) drops the old one.
+  useEffect(() => {
+    if (raw && health && !doctor) void vault.getState().loadDoctor()
+  }, [raw, health, doctor])
   // Dismissing hides this read's error; the next read (↻) shows its own.
   const [dismissed, setDismissed] = useState<typeof health>(null)
   return (
@@ -102,9 +126,7 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
             className={cn('text-[11px] font-normal text-muted-foreground hover:text-foreground', raw && 'vt-mode-on bg-accent text-foreground')}
             aria-pressed={raw}
             title="mnemo status and mnemo doctor, as printed"
-            // `doctor` is the slow one, so it is read here rather than with the rest of the
-            // health screen: opening this panel is the only thing that ever shows it.
-            onClick={() => (setRaw(!raw), raw ? undefined : void vault.getState().loadDoctor())}
+            onClick={() => setRaw(!raw)}
           >
             <Terminal />
             status / doctor
@@ -116,7 +138,13 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
       {raw && health && (
         <div className="vr-raw mx-3 mb-2 flex max-h-[40%] min-h-0 gap-4 overflow-auto rounded-lg border border-border bg-card px-3 py-2">
           <RawText title="mnemo status" result={health.status} />
-          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <Loading className="flex-1 py-0">running mnemo doctor…</Loading>}
+          {doctor ? (
+            <RawText title="mnemo doctor" result={doctor} />
+          ) : (
+            <Loading className="vh-doctor-running flex-1 py-0">
+              running mnemo doctor…{doctorSince !== null && <> <Elapsed since={doctorSince} /></>}
+            </Loading>
+          )}
         </div>
       )}
     </>
