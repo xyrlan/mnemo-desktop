@@ -14,7 +14,8 @@ export interface VaultClient {
   ego(path: string, limit: number): Promise<VaultGraph>
   /** `mnemo status`, its tiles, and what needs review. Does not run `doctor`. */
   health(): Promise<Health>
-  /** `mnemo doctor`, on demand: 4.8s against a 5783-page vault, and only read behind a button. */
+  /** `mnemo doctor`, on demand: 26 s against a ~6k-page vault, and only read behind a button.
+   *  Rust stops it after `DOCTOR_TIMEOUT` (300 s): no exit code, stderr says so. */
   doctor(): Promise<RunResult>
 }
 

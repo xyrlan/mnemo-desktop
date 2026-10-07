@@ -59,6 +59,8 @@ export type VaultState = {
   /** `mnemo doctor`, read only when the raw panel is opened. Null until then. */
   doctor: RunResult | null
   doctorLoading: boolean
+  /** When the `mnemo doctor` in flight started (ms since the epoch), for its elapsed time. */
+  doctorSince: number | null
   /** `mnemo stale --json`, run in the current repo beside `vault_health`. */
   stale: RunResult | null
   /** `mnemo inbox --all`: every project, not just the one `cwd` names. */
@@ -103,7 +105,8 @@ export type VaultActions = {
   loadEgo(path: string): Promise<void>
   /** Reads health and runs `mnemo stale --json` in `cwd`, once at a time. */
   loadHealth(cwd: string): Promise<void>
-  /** Runs `mnemo doctor` unless it is already in flight or already read. */
+  /** Runs `mnemo doctor` unless it is already in flight or already read. Never rejects: a
+   *  failed call is a result with no exit code and the error as its stderr. */
   loadDoctor(): Promise<void>
   /** Sets `inboxAll` and re-reads the listing. */
   setInboxAll(all: boolean, cwd: string): Promise<void>
@@ -207,6 +210,7 @@ export function createVaultStore(client: VaultClient): VaultStore {
       healthLoading: false,
       doctor: null,
       doctorLoading: false,
+      doctorSince: null,
       stale: null,
       inboxAll: false,
       inboxListing: null,
@@ -342,14 +346,14 @@ export function createVaultStore(client: VaultClient): VaultStore {
 
       async loadDoctor() {
         if (get().doctorLoading || get().doctor) return
-        set({ doctorLoading: true })
+        set({ doctorLoading: true, doctorSince: Date.now() })
         let doctor: RunResult
         try {
           doctor = await client.doctor()
         } catch (e) {
           doctor = { stdout: '', stderr: String(e), code: null }
         }
-        set({ doctor, doctorLoading: false })
+        set({ doctor, doctorLoading: false, doctorSince: null })
       },
 
       async setInboxAll(all, cwd) {

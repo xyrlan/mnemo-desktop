@@ -21,6 +21,34 @@ export const PAGE_ROWS = 200
 /** Typing waits this long before the table is read again. */
 export const FILTER_MS = 200
 
+/** How a run ended, when it did not end well: an exit code, or none (not found, refused, stopped). */
+const exitText = (r: RunResult) => (r.code === null ? 'did not finish' : `exit ${r.code}`)
+
+/** `mnemo status` failing, as one line, or null when it ran. `vault_health` sets no error of its
+ *  own when the vault is found some other way, so without this a failed status is only missing
+ *  tiles. */
+function statusFailure(status: RunResult): string | null {
+  if (status.code === 0) return null
+  const said = [status.stderr, status.stdout].flatMap((t) => t.split('\n')).map((l) => l.trim()).find(Boolean)
+  return `mnemo status ${exitText(status)}: ${said ?? 'it printed nothing'}`
+}
+
+/** A command in flight and how long it has been running: `doctor` takes tens of seconds on a
+ *  big vault, and a count that moves says it is still at it. */
+function Running({ what, since }: { what: string; since: number | null }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  const secs = since === null ? 0 : Math.max(0, Math.floor((now - since) / 1000))
+  return (
+    <Loading className="vh-running flex-1 py-0">
+      running {what}… <span className="vh-elapsed tabular-nums">{secs} s</span>
+    </Loading>
+  )
+}
+
 function RawText({ title, result }: { title: string; result: RunResult }) {
   const out = [result.stdout.trimEnd(), result.stderr.trimEnd()].filter(Boolean).join('\n')
   const failed = result.code !== 0
@@ -28,7 +56,7 @@ function RawText({ title, result }: { title: string; result: RunResult }) {
     <div className="vr-raw-block min-w-0 flex-1">
       <div className="vr-raw-title pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
-        {failed && <span className="vh-fail normal-case tracking-normal text-destructive"> {result.code === null ? 'not run' : `exit ${result.code}`}</span>}
+        {failed && <span className="vh-fail normal-case tracking-normal text-destructive"> {exitText(result)}</span>}
       </div>
       <pre className={failed ? ERROR_TEXT : cn(MONO_TEXT, 'text-foreground')}>{out || '(no output)'}</pre>
     </div>
@@ -60,14 +88,22 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
   const health = useVault((s) => s.health)
   const loading = useVault((s) => s.healthLoading)
   const doctor = useVault((s) => s.doctor)
+  const doctorSince = useVault((s) => s.doctorSince)
   const [raw, setRaw] = useState(false)
   // Dismissing hides this read's error; the next read (↻) shows its own.
   const [dismissed, setDismissed] = useState<typeof health>(null)
+  const error = health && (health.error ?? statusFailure(health.status))
+  // `doctor` is the slow one, so it is read here rather than with the rest of the health
+  // screen: an open panel is the only thing that ever shows it. A re-read (↻) drops the old
+  // doctor, so an open panel runs it again rather than waiting on nothing.
+  useEffect(() => {
+    if (raw && health && !doctor) void vault.getState().loadDoctor()
+  }, [raw, health, doctor])
   return (
     <>
       <div className="vr-strip flex flex-wrap items-stretch gap-2 px-3 pt-3 pb-2">
-        {health?.tiles.map((t) => (
-          <div key={t.key} className={cn(TILE, `vh-${t.tone}`)} title={t.detail}>
+        {health?.tiles.map((t, i) => (
+          <div key={`${t.key}:${i}`} className={cn(TILE, `vh-${t.tone}`)} title={t.detail}>
             <TileBody value={t.value} label={t.label} tone={t.tone} />
           </div>
         ))}
@@ -102,9 +138,7 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
             className={cn('text-[11px] font-normal text-muted-foreground hover:text-foreground', raw && 'vt-mode-on bg-accent text-foreground')}
             aria-pressed={raw}
             title="mnemo status and mnemo doctor, as printed"
-            // `doctor` is the slow one, so it is read here rather than with the rest of the
-            // health screen: opening this panel is the only thing that ever shows it.
-            onClick={() => (setRaw(!raw), raw ? undefined : void vault.getState().loadDoctor())}
+            onClick={() => setRaw(!raw)}
           >
             <Terminal />
             status / doctor
@@ -112,11 +146,11 @@ function Strip({ cwd, review }: { cwd: string | undefined; review: number }) {
           <Refresh title="Re-run status and stale" busy={loading} onClick={() => void vault.getState().loadHealth(cwd ?? '')} />
         </div>
       </div>
-      {health?.error && dismissed !== health && <ErrorLine text={health.error} onDismiss={() => setDismissed(health)} className="mx-3 mb-2" />}
+      {error && dismissed !== health && <ErrorLine text={error} onDismiss={() => setDismissed(health)} className="mx-3 mb-2" />}
       {raw && health && (
         <div className="vr-raw mx-3 mb-2 flex max-h-[40%] min-h-0 gap-4 overflow-auto rounded-lg border border-border bg-card px-3 py-2">
           <RawText title="mnemo status" result={health.status} />
-          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <Loading className="flex-1 py-0">running mnemo doctor…</Loading>}
+          {doctor ? <RawText title="mnemo doctor" result={doctor} /> : <Running what="mnemo doctor" since={doctorSince} />}
         </div>
       )}
     </>

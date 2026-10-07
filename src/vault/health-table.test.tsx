@@ -120,7 +120,7 @@ test('the health screen is a table of rules by heat with badges, tiles, filters 
   // Tiles: status numbers, then review = bare (both lists, once) + stale target-dir, then inbox.
   expect([...host.querySelectorAll('.vr-strip .vh-tile')].map((t) => t.textContent)).toEqual(['5.0%reflex injected', '2needs review', '1inbox'])
   expect(host.querySelector('.vr-raw')).toBeNull()
-  // `doctor` is 4.8s against a real vault, so the health read does not run it.
+  // `doctor` is 26 s against a real vault, so the health read does not run it.
   expect(calls.some(([c]) => c === 'vault_doctor')).toBe(false)
   await click(byText(host, 'button', 'status / doctor'))
   await flush()

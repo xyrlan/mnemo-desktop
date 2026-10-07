@@ -892,9 +892,8 @@ pub struct Review {
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct Health {
     pub root: Option<String>,
-    /// `mnemo status` and `mnemo doctor`, ANSI stripped.
+    /// `mnemo status`, ANSI stripped. `mnemo doctor` is `vault_doctor`'s, read on demand.
     pub status: RunResult,
-    pub doctor: RunResult,
     /// The few numbers `status` prints that matter at a glance.
     pub tiles: Vec<Tile>,
     /// `confidence: verified` (or a `verified` key) with no `evidence` behind it.
@@ -937,10 +936,19 @@ pub fn parse_tiles(status: &str) -> Vec<Tile> {
             let (value, detail) = head.split_once(' ').unwrap_or((head, ""));
             out.push(tile("briefings", "briefings", value, detail, "muted"));
         } else if let Some(rest) = line.strip_prefix("Circuit breaker: ") {
-            // `closed (ok)`
-            let (state, note) = rest.split_once(" (").map_or((rest, ""), |(s, n)| (s, n.trim_end_matches(')')));
-            let ok = note == "ok" || (note.is_empty() && state == "closed");
+            // `closed (ok)`, or `OPEN — 4 errors in the last hour (top: x ×3). Run `mnemo fix` to reset.`:
+            // the state is the first word, the rest is its detail.
+            let cut = [" — ", " ("].iter().filter_map(|sep| rest.find(sep)).min().unwrap_or(rest.len());
+            let (state, note) = rest.split_at(cut);
+            let note = note.strip_prefix(" — ").unwrap_or(note);
+            let note = note.strip_prefix(" (").map_or(note, |n| n.strip_suffix(')').unwrap_or(n));
+            let ok = state.eq_ignore_ascii_case("closed") && matches!(note, "ok" | "");
             out.push(tile("breaker", "circuit breaker", state, note, if ok { "ok" } else { "bad" }));
+        }
+        // A known line mnemo has reworded until it has no number (no state, for the breaker)
+        // is no tile, like a line this does not know: both are still in the raw `status` text.
+        if out.last().is_some_and(|t| t.value.is_empty() || (t.key != "breaker" && !t.value.contains(|c: char| c.is_ascii_digit()))) {
+            out.pop();
         }
     }
     out
@@ -1257,6 +1265,14 @@ pub fn run_with(program: &str, path_env: &str, action: &str, args: &[String], cw
 
 /// `run_with` without the allowlist: only for fixed commands this file spells out.
 fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str) -> RunResult {
+    exec_within(program, path_env, action, args, cwd, None)
+}
+
+/// `exec`, killed after `timeout` when there is one. A stopped run has no exit code; its
+/// stderr ends by saying it was stopped, after whatever it had printed by then.
+fn exec_within(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str, timeout: Option<std::time::Duration>) -> RunResult {
+    use std::io::Read;
+    use std::process::Stdio;
     let refuse = |stderr: String| RunResult { stderr, ..Default::default() };
     let dir = match cwd.trim() {
         "" => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")),
@@ -1265,21 +1281,66 @@ fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str)
     if !dir.is_dir() {
         return refuse(format!("{}: not a directory", dir.display()));
     }
-    let out = crate::proc::command(program)
+    let spawned = crate::proc::command(program)
         .arg(action)
         .args(args)
         .current_dir(&dir)
         .env("PATH", path_env)
         .env("NO_COLOR", "1")
-        .stdin(std::process::Stdio::null())
-        .output();
-    match out {
-        Ok(o) => RunResult {
-            stdout: strip_ansi(&String::from_utf8_lossy(&o.stdout)),
-            stderr: strip_ansi(&String::from_utf8_lossy(&o.stderr)),
-            code: o.status.code(),
-        },
-        Err(e) => refuse(format!("{program}: {e}")),
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) => return refuse(format!("{program}: {e}")),
+    };
+    // Reader threads, so a program that prints a lot cannot stall on a full pipe while we wait.
+    // They fill buffers rather than return them: a stopped program's own children can hold its
+    // pipes open long after it is gone, and its output so far is read without waiting on them.
+    type Buf = std::sync::Arc<std::sync::Mutex<Vec<u8>>>;
+    let drain = |mut r: Box<dyn Read + Send>| {
+        let buf = Buf::default();
+        let sink = buf.clone();
+        let reader = std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(n @ 1..) = r.read(&mut chunk) {
+                if let Ok(mut b) = sink.lock() {
+                    b.extend_from_slice(&chunk[..n]);
+                }
+            }
+        });
+        (reader, buf)
+    };
+    let text = |b: &Buf| strip_ansi(&String::from_utf8_lossy(&b.lock().map(|b| b.clone()).unwrap_or_default()));
+    let (out_reader, out) = drain(Box::new(child.stdout.take().expect("stdout is piped")));
+    let (err_reader, err) = drain(Box::new(child.stderr.take().expect("stderr is piped")));
+    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    let ended = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status.code()),
+            Ok(None) if deadline.is_some_and(|d| std::time::Instant::now() >= d) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(format!("{program} {action} gave no answer in {}s and was stopped", timeout.unwrap_or_default().as_secs()));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(format!("{program}: {e}"));
+            }
+        }
+    };
+    match ended {
+        Ok(code) => {
+            let _ = (out_reader.join(), err_reader.join());
+            RunResult { stdout: text(&out), stderr: text(&err), code }
+        }
+        Err(why) => {
+            let stderr = text(&err);
+            RunResult { stdout: text(&out), stderr: if stderr.trim().is_empty() { why } else { format!("{}\n{why}", stderr.trim_end()) }, code: None }
+        }
     }
 }
 
@@ -1414,14 +1475,19 @@ pub async fn vault_health() -> Health {
     .unwrap_or_else(|e| Health { error: Some(e.to_string()), ..Default::default() })
 }
 
-/// `mnemo doctor`, on its own command because it is slow: 4.8s against a 5783-page vault,
+/// How long `mnemo doctor` runs before it is stopped. It took 26 s on a ~6k-page vault on
+/// 2026-10-07 and grows with the vault, so ten times that is still only a slow doctor; past
+/// it doctor is stuck, and the panel says so rather than "running" for ever.
+pub const DOCTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// `mnemo doctor`, on its own command because it is slow: 26 s against a ~6k-page vault,
 /// where `status` is 0.2s. It is only ever read behind the `status / doctor` button, so the
 /// health screen no longer waits on it to paint.
 #[tauri::command]
 pub async fn vault_doctor() -> RunResult {
-    tauri::async_runtime::spawn_blocking(|| exec("mnemo", &crate::mission::login_path(), "doctor", &[], ""))
+    tauri::async_runtime::spawn_blocking(|| exec_within("mnemo", &crate::mission::login_path(), "doctor", &[], "", Some(DOCTOR_TIMEOUT)))
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| RunResult { stderr: e.to_string(), ..Default::default() })
 }
 
 /// The square's numbers: the page walk and the fire logs (cached like the table), no `mnemo`.
@@ -2045,6 +2111,36 @@ mod tests {
         );
         assert_eq!(parse_tiles("Circuit breaker: open (3 failures)\n")[0].tone, "bad");
         assert!(parse_tiles("mnemo: command not found").is_empty());
+    }
+
+    #[test]
+    fn tiles_show_an_open_breaker_by_its_state_and_skip_lines_they_do_not_know() {
+        // `mnemo status`'s own wording for an open breaker (status.py).
+        let open = parse_tiles("Circuit breaker: OPEN — 4 errors in the last hour (top: briefing ×3). Run `mnemo fix` to reset.\n");
+        assert_eq!(
+            open.iter().map(|t| (t.value.as_str(), t.detail.as_str(), t.tone.as_str())).collect::<Vec<_>>(),
+            [("OPEN", "4 errors in the last hour (top: briefing ×3). Run `mnemo fix` to reset.", "bad")]
+        );
+        // Lines mnemo may add, and known prefixes reworded so they carry no number: no tile,
+        // nothing else lost.
+        let status = "Vault: /v  (exists)\nFrobnication: 3 widgets (beta)\n  recall: not measured yet\n  reflex: injected on\n\
+            Briefings: none\nCircuit breaker:  \n  reflex: injected on 1 of 4 prompts (25.0%)\n  rerank: 218 calls in 14d\n";
+        assert_eq!(parse_tiles(status).iter().map(|t| (t.key.as_str(), t.value.as_str())).collect::<Vec<_>>(), [("reflex", "25.0%")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_past_its_timeout_is_stopped_with_what_it_printed_and_says_so() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        let t = std::time::Instant::now();
+        let r = exec_within("sh", &path, "-c", &["echo started; sleep 30".into()], "", Some(std::time::Duration::from_millis(300)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "{:?}", t.elapsed());
+        assert_eq!((r.stdout.as_str(), r.code), ("started\n", None));
+        assert!(r.stderr.ends_with("gave no answer in 0s and was stopped"), "{}", r.stderr);
+        // Within its time, a run is as `exec` gives it: code and both streams.
+        let r = exec_within("sh", &path, "-c", &["echo out; echo err >&2; exit 3".into()], "", Some(std::time::Duration::from_secs(30)));
+        assert_eq!((r.stdout.as_str(), r.stderr.as_str(), r.code), ("out\n", "err\n", Some(3)));
+        assert!(exec("no-such-program-284", &path, "doctor", &[], "").stderr.starts_with("no-such-program-284: "));
     }
 
     #[test]
