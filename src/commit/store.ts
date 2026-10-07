@@ -68,7 +68,8 @@ export function createCommitStore(client: CommitClient, worktree: string): Commi
   let asking = 0
 
   return createStore<CommitState & CommitActions>((set, get) => {
-    const fail = (step: Step, e: unknown) => set((s) => ({ errors: { ...s.errors, [step]: said(e) } }))
+    // `done` ends the step in the same update, so no one sees it over with no outcome yet.
+    const fail = (step: Step, e: unknown, done: Partial<CommitState> = {}) => set((s) => ({ ...done, errors: { ...s.errors, [step]: said(e) } }))
     const clear = (step: Step) => set((s) => (s.errors[step] === undefined ? {} : { errors: { ...s.errors, [step]: undefined } }))
 
     return {
@@ -156,8 +157,10 @@ export function createCommitStore(client: CommitClient, worktree: string): Commi
           const committed = await client.commit(worktree, [...picked], message)
           set({ committed, message: '', committing: false })
         } catch (e) {
-          set({ committing: false })
-          fail('commit', e)
+          fail('commit', e, { committing: false })
+          // The refusal may be the list gone stale (a file changed on disk): read it again so
+          // the next try picks from what is there now.
+          await get().load()
           return
         }
         await get().load()
@@ -174,8 +177,7 @@ export function createCommitStore(client: CommitClient, worktree: string): Commi
           set({ pushed, pushing: false })
           ok = true
         } catch (e) {
-          set({ pushing: false })
-          fail('push', e)
+          fail('push', e, { pushing: false })
         }
         await get().load()
         if (ok && !get().pr) await get().findPr()
@@ -232,8 +234,7 @@ export function createCommitStore(client: CommitClient, worktree: string): Commi
           const pr = await client.createPr(worktree, { base: form.base.trim(), title: form.title.trim(), body: form.body, draft: form.draft })
           set({ pr, prForm: null, creating: false })
         } catch (e) {
-          set({ creating: false })
-          fail('pr', e)
+          fail('pr', e, { creating: false })
         }
       },
 

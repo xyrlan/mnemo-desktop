@@ -149,6 +149,24 @@ describe('the commit store', () => {
     expect(s.getState().errors.commit).toBe('git commit: lint: 3 problems')
     expect(s.getState().message).toBe('feat: x')
     expect(s.getState().committing).toBe(false)
+    expect(s.getState().committed).toBeNull()
+  })
+
+  it('reads the changes again after a refused commit, so a file gone from disk leaves the list', async () => {
+    const { client, calls, answers } = fake({
+      commit: () => {
+        throw 'b.ts changed on disk since the list was read: no changes to commit there any more.'
+      },
+    })
+    const s = createCommitStore(client, '/code/app')
+    await s.getState().load()
+    s.getState().setMessage('feat: x')
+    answers.status = () => status({ changes: [change('a.ts')] })
+    await s.getState().commit()
+    expect(calls.filter(([k]) => k === 'status')).toHaveLength(2)
+    expect(s.getState().status?.changes.map((c) => c.path)).toEqual(['a.ts'])
+    expect(s.getState().picked).toEqual(['a.ts'])
+    expect(s.getState().errors.commit).toContain('b.ts changed on disk')
   })
 
   it('does not commit without a message', async () => {
