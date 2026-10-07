@@ -56,7 +56,9 @@ export function fakeClient(init: { state: AccountsState; usage?: Record<string, 
     add: (label) =>
       answer('add', [label], () => {
         const a = account(label.toLowerCase(), { label, email: null, problem: 'Not logged in yet.' })
-        f.state = { ...f.state, accounts: [...f.state.accounts, a] }
+        // As accounts-core does: the new account becomes the active one, and `accounts://changed`
+        // says so before the command answers.
+        f.emit({ active: a.id, accounts: [...f.state.accounts, a] })
         return a
       }),
     rename: (id, label) => answer('rename', [id, label], () => (f.state = { ...f.state, accounts: f.state.accounts.map((a) => (a.id === id ? { ...a, label } : a)) })),

@@ -130,8 +130,10 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
 
       add: (label) =>
         attempt(async () => {
-          const account = await client.add(label)
+          // Read before adding: accounts-core makes the new account active, and its
+          // `accounts://changed` may land before `add` answers.
           const was = get().state?.active
+          const account = await client.add(label)
           // A pane runs on the account active when it spawns: switch for the spawn, then back.
           apply(await client.switchTo(account.id))
           try {
