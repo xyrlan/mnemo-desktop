@@ -26,8 +26,8 @@ export const listWorktrees = (repo: string): Promise<WorktreeInfo[]> => invoke<W
 export const createWorktree = (repo: string, name: string, opts: { base?: string; setup?: string } = {}): Promise<WorktreeInfo> =>
   invoke<WorktreeInfo>('worktree_create', { repo, name, base: opts.base ?? null, setup: opts.setup ?? null })
 
-/** Removes a worktree, keeping its branch. Rejects for the main checkout, while setup runs, and
- *  (without `force`) for a dirty tree. */
+/** Removes a worktree, keeping its branch. Rejects for the main checkout, while setup runs, for
+ *  a detached HEAD whose commit nothing else holds, and (without `force`) for a dirty tree. */
 export const removeWorktree = (path: string, force = false): Promise<void> => invoke<void>('worktree_remove', { path, force })
 
 /** A tree other than the main checkout, as cleaning up sees it. */
@@ -35,6 +35,9 @@ export type CleanupTree = WorktreeInfo & {
   /** Its HEAD is in the default branch (local or the remote's): none of its commits would be
    *  lost. True too for a tree that never made one. */
   merged: boolean
+  /** Its detached HEAD is all that holds its commit (no branch, remote branch or tag does):
+   *  removing it would lose that work, so `removeWorktree` refuses it, forced or not. */
+  stranded: boolean
 }
 
 export type CleanupFacts = {

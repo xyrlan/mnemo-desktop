@@ -9,9 +9,10 @@ import { norm } from './model'
  *  merged or closed. */
 export type StaleReason = 'pr-merged' | 'pr-closed' | 'merged'
 
-/** Why a worktree stays: it has changes, an agent at work, setup running, nothing that says it is
- *  done (`unmerged`), or git did not list it (`unchecked`). */
-export type KeepReason = 'changes' | 'agent' | 'setup' | 'unmerged' | 'unchecked'
+/** Why a worktree stays: it has changes, a commit only its detached HEAD holds (`stranded`), an
+ *  agent at work, setup running, nothing that says it is done (`unmerged`), or git did not list
+ *  it (`unchecked`). */
+export type KeepReason = 'changes' | 'stranded' | 'agent' | 'setup' | 'unmerged' | 'unchecked'
 
 export type Candidate = {
   path: string
@@ -41,6 +42,7 @@ export function classify(repo: RepoNode, tree: WorktreeNode, facts: CleanupFacts
   const keep: KeepReason[] = []
   if (!fact) keep.push('unchecked')
   if (fact?.dirty) keep.push('changes')
+  if (fact?.stranded) keep.push('stranded')
   if (tree.agents.some(isLive)) keep.push('agent')
   if (fact?.setupJob) keep.push('setup')
   if (stale.length === 0 && fact) keep.push('unmerged')
@@ -69,13 +71,14 @@ export function staleLabel(reason: StaleReason, c: Pick<Candidate, 'pr' | 'base'
 
 const KEPT_LABEL: Record<KeepReason, (n: number) => string> = {
   changes: (n) => `${n} with changes`,
+  stranded: (n) => `${n} with commits on no branch`,
   agent: (n) => `${n} with an agent at work`,
   setup: (n) => `${n} still setting up`,
   unmerged: (n) => `${n} not merged`,
   unchecked: (n) => `${n} git did not list`,
 }
 
-const KEEP_ORDER: KeepReason[] = ['changes', 'agent', 'setup', 'unmerged', 'unchecked']
+const KEEP_ORDER: KeepReason[] = ['changes', 'stranded', 'agent', 'setup', 'unmerged', 'unchecked']
 
 /** Why the rest stay, each worktree counted once under its first reason: "3 with changes · 20
  *  not merged". Empty when nothing was kept. */

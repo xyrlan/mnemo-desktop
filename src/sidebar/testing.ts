@@ -78,6 +78,7 @@ export const gitTree = (path: string, more: Partial<CleanupFacts['trees'][number
   dirty: false,
   setupJob: null,
   merged: false,
+  stranded: false,
   ...more,
 })
 

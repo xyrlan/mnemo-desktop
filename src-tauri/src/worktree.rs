@@ -254,8 +254,20 @@ pub fn create(repo: &str, name: &str, base: Option<&str>, setup: Option<&str>, s
     Ok(made)
 }
 
+/// Whether `w` is on a detached HEAD at a commit no branch, remote branch or tag holds: the
+/// tree's own HEAD (and its reflog, which goes with the tree) is all that keeps that commit, so
+/// removing the tree would lose it. Never on a branch, which outlives the tree.
+fn strands_commits(root: &Path, w: &WorktreeInfo) -> Result<bool, String> {
+    if w.branch.is_some() || w.head.is_empty() || w.head.starts_with('-') {
+        return Ok(false);
+    }
+    let held = git(&["for-each-ref", "--count=1", "--format=%(refname)", "--contains", &w.head, "refs/heads", "refs/remotes", "refs/tags"], root)?;
+    Ok(held.trim().is_empty())
+}
+
 /// Removes the worktree at `path`. Refused for the main checkout, for a folder that is not one
-/// of its repo's worktrees or lies outside the repo's parent folder, and while its setup runs.
+/// of its repo's worktrees or lies outside the repo's parent folder, while its setup runs, and,
+/// `force` or not, for a detached HEAD whose commit nothing else holds (`strands_commits`).
 /// Without `force`, git refuses a tree with changes; the branch is kept either way.
 pub fn remove(path: &str, force: bool) -> Result<(), String> {
     let root = main_root(path)?;
@@ -276,6 +288,9 @@ pub fn remove(path: &str, force: bool) -> Result<(), String> {
     if tree.setup_job.is_some() {
         return Err(format!("setup is still running in {path}"));
     }
+    if strands_commits(&root, tree)? {
+        return Err(format!("{path} is on no branch, at a commit no branch, remote or tag holds: removing it would lose that work. Make a branch there first"));
+    }
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
@@ -294,6 +309,9 @@ pub struct CleanupTree {
     /// changes it makes are (a squash or rebase merge), or its branch's pull request was merged
     /// or closed with the tree's HEAD in it. True too for a tree that never made a commit.
     pub merged: bool,
+    /// Its detached HEAD is the only thing holding its commit (`strands_commits`): `remove`
+    /// refuses it. True too when git could not tell.
+    pub stranded: bool,
 }
 
 /// `CleanupFacts` in `src/worktrees/client.ts`.
@@ -398,7 +416,10 @@ fn cleanup_facts_with(repo: &str, gh: GhRun) -> Result<CleanupFacts, String> {
     };
     Ok(CleanupFacts {
         base: bases.first().cloned(),
-        trees: trees.into_iter().map(|info| CleanupTree { merged: merged(&info), info }).collect(),
+        trees: trees
+            .into_iter()
+            .map(|info| CleanupTree { merged: merged(&info), stranded: strands_commits(&root, &info).unwrap_or(true), info })
+            .collect(),
     })
 }
 
@@ -717,6 +738,50 @@ mod tests {
         sh_git(&["remote", "remove", "origin"], &clone);
         let none = cleanup_facts_with(&c, &no_gh).unwrap();
         assert_eq!((none.base, none.trees[0].merged), (None, false));
+    }
+
+    #[test]
+    fn a_branch_with_commits_pushed_nowhere_keeps_them_when_its_tree_goes() {
+        let root = repo("wt-unpushed");
+        let r = s(&root);
+        let made = create(&r, "local", None, None, quiet()).unwrap();
+        let t = Path::new(&made.path);
+        commit(t, "local.txt");
+        let head = head_of(t);
+        // Not in main: cleaning up never calls it merged, so never lists it.
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        assert_eq!(merged_of(&facts), [("local".into(), false, false)]);
+        assert!(!facts.trees[0].stranded);
+        // Removed anyway (a card's Remove), the branch still holds the commit.
+        remove(&made.path, false).unwrap();
+        assert!(!t.exists());
+        assert_eq!(git(&["rev-parse", "refs/heads/local"], &root).unwrap().trim(), head);
+    }
+
+    #[test]
+    fn a_detached_tree_whose_commit_nothing_else_holds_is_never_removed() {
+        let root = repo("wt-stranded");
+        let r = s(&root);
+        let made = create(&r, "det", None, None, quiet()).unwrap();
+        let t = Path::new(&made.path);
+        // Detached at main's commit: main holds it, nothing would be lost.
+        sh_git(&["checkout", "-q", "--detach"], t);
+        assert!(!cleanup_facts_with(&r, &no_gh).unwrap().trees[0].stranded);
+        // A commit made there is held by the tree's HEAD alone.
+        commit(t, "only-here.txt");
+        let facts = cleanup_facts_with(&r, &no_gh).unwrap();
+        assert!(facts.trees[0].stranded && !facts.trees[0].merged);
+        for force in [false, true] {
+            assert!(remove(&made.path, force).unwrap_err().contains("on no branch"), "force {force}");
+        }
+        assert!(t.exists());
+        // Once a tag (or a branch, or a remote branch) holds it, the tree goes and the commit stays.
+        let head = head_of(t);
+        sh_git(&["tag", "kept", &head], &root);
+        assert!(!cleanup_facts_with(&r, &no_gh).unwrap().trees[0].stranded);
+        remove(&made.path, false).unwrap();
+        assert!(!t.exists());
+        assert_eq!(git(&["rev-parse", "kept^{commit}"], &root).unwrap().trim(), head);
     }
 
     #[test]

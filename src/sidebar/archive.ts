@@ -148,8 +148,13 @@ export function backToList() {
   if (!archiveStore.getState().cleanup.progress) setCleanup({ step: 'list' })
 }
 
-/** Remove the selection one at a time (git locks the repo's worktree list), none forced: each
- *  was clean when scanned, and one that changed since is refused and says why on its row. */
+/** The fleet's tree at `path` as it stands now. */
+const fleetTree = (path: string) => fleetStore.getState().repos.flatMap((r) => r.worktrees).find((w) => w.path === path)
+
+/** Remove the selection one at a time (git locks the repo's worktree list), none forced. Each
+ *  passed every guard when scanned and is asked again as its turn comes: one with an agent at
+ *  work now is left here, and the backend refuses one that has changes (git, unforced), a setup
+ *  running or a commit only its detached HEAD holds. Each one left says why on its row. */
 export async function removeSelected(): Promise<void> {
   const s = archiveStore.getState().cleanup
   const batch = selectedCandidates(s)
@@ -161,6 +166,7 @@ export async function removeSelected(): Promise<void> {
   let done = 0
   for (const c of batch) {
     try {
+      if (fleetTree(c.path)?.agents.some(isLive)) throw new Error('An agent is at work in it now.')
       await removeOne(c.path, false)
       done++
     } catch (e) {
