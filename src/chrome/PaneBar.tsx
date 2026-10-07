@@ -12,6 +12,7 @@ import type { Pulse } from '../pulse/store'
 import { openRule } from '../pulse/open'
 import Overlay from '../pulse/Overlay'
 import DropZoneOverlay from './DropZoneOverlay'
+import { PaneAccount } from '../accounts/PaneAccount'
 import './chrome.css'
 
 /** How often a visible bar asks git again (a `git switch` in the pane shows up this late). */
@@ -64,7 +65,7 @@ function usePulseFlash(id: PaneId): { live: Pulse | undefined; count: number } {
 }
 
 /** The header of every pane, in Orca's pane-title look (chrome.css): drag handle, repo · branch,
- *  Claude tokens, face toggle, close. Pressing it focuses the pane without taking keyboard focus
+ *  the Claude account when it is not the active one, Claude tokens, face toggle, close. Pressing it focuses the pane without taking keyboard focus
  *  from a terminal that already has it. It also learns the Claude session a terminal runs
  *  (`useSessionLearn`). */
 export default function PaneBar({ id, client = tauriChrome, sessions = tauriSession }: { id: PaneId; client?: ChromeClient; sessions?: SessionClient }) {
@@ -124,6 +125,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
           </span>
         )}
         <span className="pane-bar-title">{info.title}</span>
+        {id > 0 && <PaneAccount id={id} />}
         {live && <span key={live.id} className="pane-bar-glow" aria-hidden />}
         {count > 0 && (
           <button
