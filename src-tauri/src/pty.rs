@@ -19,6 +19,7 @@ mod client;
 #[cfg(all(test, unix))]
 mod server;
 
+use crate::accounts::{PaneAccount, PaneAccounts};
 use host::{Host, Subscriber};
 use portable_pty::CommandBuilder;
 use std::path::{Path, PathBuf};
@@ -54,6 +55,9 @@ pub struct PtyManager {
     /// Where the shell integration rc files are written; `None` turns integration off.
     shell_dir: Option<PathBuf>,
     hosting: Hosting,
+    /// The Claude Code account each pane is spawned on (`src/accounts.rs`); `None` leaves
+    /// `CLAUDE_CONFIG_DIR` as the app has it.
+    accounts: Option<PaneAccounts>,
 }
 
 enum Hosting {
@@ -170,18 +174,28 @@ pub fn default_shell() -> String {
 
 impl PtyManager {
     /// The daemon beside the app's binary, else terminals held in-process.
+    /// Each pane runs on the active Claude Code account.
     pub fn new() -> Self {
         let shell_dir = default_shell_dir();
+        // `cargo test` spawns panes through here too: they must not land in the app's own record.
+        let record = (!cfg!(test)).then(|| crate::app_dir::app_dir().join(crate::accounts::PANES_FILE));
+        let accounts = PaneAccounts::new(crate::accounts::Place::real(), record);
         #[cfg(unix)]
         if let Some(bin) = daemon_binary() {
-            return Self::with_daemon(crate::app_dir::app_dir().join(SOCKET), bin, shell_dir);
+            return Self::with_daemon(crate::app_dir::app_dir().join(SOCKET), bin, shell_dir).with_accounts(accounts);
         }
-        Self::with_shell_dir(shell_dir)
+        Self::with_shell_dir(shell_dir).with_accounts(accounts)
     }
 
     /// Terminals held in-process.
     pub fn with_shell_dir(shell_dir: Option<PathBuf>) -> Self {
-        Self { shell_dir, hosting: Hosting::Here(Host::default()) }
+        Self { shell_dir, hosting: Hosting::Here(Host::default()), accounts: None }
+    }
+
+    /// Spawns each pane on `accounts`' active account, and keeps which one it got.
+    pub fn with_accounts(mut self, accounts: PaneAccounts) -> Self {
+        self.accounts = Some(accounts);
+        self
     }
 
     /// Terminals held by the daemon at `socket`, started from `bin` when none answers there.
@@ -189,7 +203,7 @@ impl PtyManager {
     #[cfg(unix)]
     pub fn with_daemon(socket: PathBuf, bin: PathBuf, shell_dir: Option<PathBuf>) -> Self {
         let hosting = Hosting::Daemon { remote: client::Remote::new(socket, bin), reached: AtomicBool::new(false), fallback: OnceLock::new() };
-        Self { shell_dir, hosting }
+        Self { shell_dir, hosting, accounts: None }
     }
 
     fn via(&self) -> Result<Via<'_>, String> {
@@ -217,7 +231,25 @@ impl PtyManager {
 
     pub fn spawn(&self, opts: SpawnOptions, sink: Sink) -> Result<PaneId, String> {
         let (rows, cols) = (opts.rows, opts.cols);
-        self.launch(self.command(opts, default_shell()), rows, cols, sink)
+        let mut cmd = self.command(opts, default_shell());
+        let account = self.accounts.as_ref().map(PaneAccounts::current);
+        if let Some(a) = &account {
+            on_account(&mut cmd, a);
+        }
+        let id = self.launch(cmd, rows, cols, sink)?;
+        if let (Some(accounts), Some(a)) = (&self.accounts, account) {
+            accounts.spawned(id, a.id);
+        }
+        Ok(id)
+    }
+
+    /// The account each pane still held was spawned on, by id (`accounts_panes`).
+    pub fn pane_accounts(&self) -> Result<std::collections::HashMap<PaneId, String>, String> {
+        let Some(accounts) = &self.accounts else {
+            return Ok(Default::default());
+        };
+        let live: Vec<PaneId> = self.list()?.into_iter().map(|i| i.id).collect();
+        Ok(accounts.of(&live))
     }
 
     /// The command for `opts`, with `shell` standing for the default shell. Only the default
@@ -372,6 +404,16 @@ impl PtyManager {
     }
 }
 
+/// Runs `cmd` on `account`: the default account with `CLAUDE_CONFIG_DIR` unset, exactly as before
+/// there were accounts, even when the app itself was started with it set; another with it set
+/// to that account's dir.
+fn on_account(cmd: &mut CommandBuilder, account: &PaneAccount) {
+    match &account.config_dir {
+        Some(dir) => cmd.env(crate::accounts::CONFIG_DIR_VAR, dir),
+        None => cmd.env_remove(crate::accounts::CONFIG_DIR_VAR),
+    }
+}
+
 /// A sink as the host's subscriber, for terminals held in-process.
 fn local(sink: Sink) -> Subscriber {
     Subscriber {
@@ -460,6 +502,27 @@ mod tests {
         let (a, _ra) = sh(&m, "true");
         let (b, _rb) = sh(&m, "true");
         assert!(b > a);
+    }
+
+    #[test]
+    fn each_pane_runs_on_the_account_active_when_it_was_spawned() {
+        let root = crate::testutil::temp_dir("pty-accounts");
+        let place = crate::accounts::Place::new(root.join("home"), root.join("app"));
+        let m = PtyManager::with_shell_dir(None).with_accounts(PaneAccounts::new(place.clone(), None));
+        let probe = "printf '<%s>' \"${CLAUDE_CONFIG_DIR-unset}\"";
+
+        let (default, rx) = sh(&m, probe);
+        assert!(String::from_utf8_lossy(&collect(&rx).0).contains("<unset>"), "the default account leaves it unset");
+
+        place.add("Work").expect("add");
+        let (work, rx) = sh(&m, probe);
+        let want = format!("<{}>", root.join("home/.claude-work").display());
+        let out = collect(&rx).0;
+        assert!(String::from_utf8_lossy(&out).contains(&want), "got {:?}", String::from_utf8_lossy(&out));
+
+        assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(default, "default".to_string()), (work, "work".to_string())]));
+        m.kill(default);
+        assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(work, "work".to_string())]));
     }
 
     #[test]

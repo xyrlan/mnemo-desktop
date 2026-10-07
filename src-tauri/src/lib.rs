@@ -7,6 +7,9 @@ pub mod proc;
 // Feature modules register below. Each one owns its own block, separated by
 // blank lines, so two branches adding a module never touch the same hunk.
 
+// -- accounts (src/accounts.rs) --
+pub mod accounts;
+
 // -- editor (src/fs.rs) --
 pub mod fs;
 
@@ -167,6 +170,14 @@ pub fn run() {
             commands::pty_attach,
             // Feature commands, one block each, blank-line separated (see the
             // module anchors at the top of this file).
+
+            // -- accounts commands --
+            accounts::accounts_list,
+            accounts::accounts_switch,
+            accounts::accounts_add,
+            accounts::accounts_rename,
+            accounts::accounts_remove,
+            accounts::accounts_panes,
 
             // -- editor commands --
             fs::fs_read,
@@ -340,6 +351,10 @@ pub fn run() {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
                 run_smoke(app)?;
             }
+
+            // -- accounts --
+            // Every Claude Code account's shared links and MCP servers in step (src/accounts.rs).
+            accounts::start(app.handle());
 
             // -- agent hooks --
             // Claude Code's hooks tell the app where each session is (src/agent_hooks.rs).
