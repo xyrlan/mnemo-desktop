@@ -137,6 +137,13 @@ pub fn session_of(pane_pid: u32) -> Option<String> {
     session_below(pane_pid, &agents, children_of)
 }
 
+/// The pids of the live Claude Code sessions, from a `claude agents --json` at most a few seconds
+/// old; empty when `claude` cannot say.
+pub fn claude_pids() -> Vec<u32> {
+    let agents = agents().get_or("", Instant::now(), || run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j)));
+    agents.map(|a| a.into_keys().collect()).unwrap_or_default()
+}
+
 /// Whether `pid` is alive and is `root` or sits below it, at most `MAX_DEPTH` levels down, walking
 /// up through `parent` (None: the process is gone). A pid that is not alive is under nothing.
 pub fn under(root: u32, pid: u32, parent: impl Fn(u32) -> Option<u32>) -> bool {

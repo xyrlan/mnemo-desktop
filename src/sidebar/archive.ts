@@ -4,7 +4,7 @@
 // zustand store instead of Orca's slice and hooks.
 import type { RepoNode, WorktreeNode } from '../fleet/types'
 import { archiveStore, closedCleanup, type ArchiveState } from './archive-store'
-import { classify, isLive, isStale, keptSummary, type Candidate } from './cleanup-model'
+import { classify, isLive, isStale, keptSummary, keptWhy, type Candidate } from './cleanup-model'
 import { norm } from './model'
 import { cleanupFacts, fleetStore, forgetProject, layoutStore, listWorktrees, removeWorktree, toast } from './upstream'
 
@@ -73,6 +73,13 @@ export async function answerRemove(yes: boolean): Promise<void> {
   if (yes && ask) await removeWorkspace(ask, ask.dirty)
 }
 
+/** This window's terminals: removing a tree closes its own, so what runs in them is not a program
+ *  that keeps it. */
+const terminalPanes = () =>
+  Object.keys(layoutStore.getState().panes)
+    .map(Number)
+    .filter((id) => id > 0)
+
 let scanSeq = 0
 
 /** Look at every non-main worktree of every repo; the stale ones become the list. A scan started
@@ -81,12 +88,13 @@ export async function scanCleanup(): Promise<void> {
   const seq = ++scanSeq
   setCleanup({ scanning: true, errors: [] })
   const repos: readonly RepoNode[] = fleetStore.getState().repos
+  const panes = terminalPanes()
   const judged = await Promise.all(
     repos.map(async (repo) => {
       const trees = repo.worktrees.filter((w) => w.kind !== 'main')
       if (trees.length === 0) return { all: [] as Candidate[], error: null }
       try {
-        const facts = await cleanupFacts(repo.root)
+        const facts = await cleanupFacts(repo.root, panes)
         return { all: trees.map((t) => classify(repo, t, facts)), error: null }
       } catch (e) {
         return { all: [] as Candidate[], error: `${repo.name}: ${message(e)}` }
@@ -148,8 +156,37 @@ export function backToList() {
   if (!archiveStore.getState().cleanup.progress) setCleanup({ step: 'list' })
 }
 
-/** Remove the selection one at a time (git locks the repo's worktree list), none forced: each
- *  was clean when scanned, and one that changed since is refused and says why on its row. */
+/** The batch judged again, now: the fleet asked afresh (an agent may have started), git's facts
+ *  read again (changes, commits, programs), each tree classified as the scan did. Path → why one
+ *  is no longer stale; the others may go. */
+async function recheck(batch: readonly Candidate[]): Promise<Record<string, string>> {
+  try {
+    await fleetStore.getState().refresh()
+  } catch {
+    // The fleet as it stands, then: git's facts are read afresh below either way.
+  }
+  const repos = fleetStore.getState().repos
+  const panes = terminalPanes()
+  const roots = [...new Set(batch.map((c) => c.repoRoot))]
+  const facts = new Map(await Promise.all(roots.map(async (root) => [root, await cleanupFacts(root, panes).catch(message)] as const)))
+  const why: Record<string, string> = {}
+  for (const c of batch) {
+    const f = facts.get(c.repoRoot)!
+    const repo = repos.find((r) => r.root === c.repoRoot)
+    const tree = repo?.worktrees.find((w) => w.path === c.path)
+    if (typeof f === 'string') why[c.path] = `Kept: it could not be checked again: ${f}`
+    else if (!repo || !tree || tree.kind === 'main') why[c.path] = 'Kept: the fleet no longer lists it.'
+    else {
+      const now = classify(repo, tree, f)
+      if (!isStale(now)) why[c.path] = keptWhy(now)
+    }
+  }
+  return why
+}
+
+/** Remove the selection one at a time (git locks the repo's worktree list), none forced. Each is
+ *  judged again first: one that changed since the scan (changes, an agent or program at work,
+ *  new commits) is kept and says why on its row; git refuses a tree that turns dirty after. */
 export async function removeSelected(): Promise<void> {
   const s = archiveStore.getState().cleanup
   const batch = selectedCandidates(s)
@@ -157,9 +194,11 @@ export async function removeSelected(): Promise<void> {
   const total = batch.length
   setCleanup({ progress: { done: 0, failed: 0, total }, failures: {} })
   mark(batch.map((c) => c.path), true)
-  const failures: Record<string, string> = {}
+  const failures: Record<string, string> = await recheck(batch)
   let done = 0
+  setCleanup({ progress: { done, failed: Object.keys(failures).length, total } })
   for (const c of batch) {
+    if (c.path in failures) continue
     try {
       await removeOne(c.path, false)
       done++

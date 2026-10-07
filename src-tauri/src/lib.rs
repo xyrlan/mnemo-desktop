@@ -63,6 +63,8 @@ pub mod workspace;
 
 // -- worktrees (src/worktree.rs) --
 pub mod worktree;
+// Which programs sit in a worktree, asked before cleaning it up.
+pub mod programs;
 
 // -- mcp (src/mcp.rs) --
 pub mod mcp;
