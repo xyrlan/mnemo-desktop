@@ -96,9 +96,10 @@ function SyncLine({ store }: { store: CommitStore }): React.JSX.Element | null {
   const status = useStore(store, (s) => s.status)
   if (!status) return null
   const parts: string[] = []
+  if (status.merging) parts.push('merge in progress')
+  if (!status.branch) parts.push('detached HEAD')
   if (!status.remote) parts.push('no remote')
-  else if (!status.branch) parts.push('detached HEAD')
-  else if (!status.published) parts.push(`not on ${status.remote} yet`)
+  else if (status.branch && !status.published) parts.push(`not on ${status.remote} yet`)
   if (status.ahead > 0) parts.push(`${status.ahead} to push`)
   if (status.behind > 0) parts.push(`${status.behind} to pull`)
   return parts.length ? <span> · {parts.join(' · ')}</span> : null
@@ -258,8 +259,10 @@ function Actions({ store, busy, onOpenUrl }: { store: CommitStore; busy: boolean
   const prOpen = useStore(store, (s) => s.prForm !== null)
   if (!status) return null
 
-  const canCommit = !busy && picked > 0 && hasMessage
-  const commitWhy = picked === 0 ? 'Pick at least one file' : !hasMessage ? 'Write a message first' : undefined
+  // Git commits a merge whole: every change, no conflict left.
+  const mergeWhy = !status.merging ? undefined : status.changes.some((c) => c.conflicted) ? 'Resolve the conflicts first' : picked < status.changes.length ? 'A merge is committed whole: pick every change' : undefined
+  const canCommit = !busy && picked > 0 && hasMessage && !mergeWhy
+  const commitWhy = mergeWhy ?? (picked === 0 ? 'Pick at least one file' : !hasMessage ? 'Write a message first' : undefined)
   const pushWhy = !status.branch ? 'Check out a branch to push' : !status.remote ? 'This repo has no remote' : status.published && status.ahead === 0 ? 'Nothing to push' : undefined
   const canPush = !busy && !pushWhy
   const openPr = pr?.state === 'OPEN' ? pr : null

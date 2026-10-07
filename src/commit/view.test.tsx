@@ -38,6 +38,7 @@ const STATUS: Status = {
   behind: 0,
   base: 'main',
   unborn: false,
+  merging: false,
   changes: [
     { path: 'src/a.ts', origPath: null, index: '.', worktree: 'M', conflicted: false },
     { path: 'notes.md', origPath: null, index: '?', worktree: '?', conflicted: false },

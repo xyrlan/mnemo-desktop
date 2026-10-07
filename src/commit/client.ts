@@ -29,6 +29,8 @@ export type Status = {
   base: string
   /** No commit yet. */
   unborn: boolean
+  /** A merge is in progress: it is committed whole, never in part. */
+  merging: boolean
   changes: Change[]
 }
 

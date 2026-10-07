@@ -50,6 +50,8 @@ pub struct Status {
     pub base: String,
     /// No commit yet.
     pub unborn: bool,
+    /// A merge is in progress: git commits it whole, never in part.
+    pub merging: bool,
     pub changes: Vec<Change>,
 }
 
@@ -346,13 +348,18 @@ fn base_ref(root: &Path, remote: Option<&str>, base: &str) -> Option<String> {
     remote_ref.filter(|r| ref_exists(root, r)).or_else(|| Some(format!("refs/heads/{base}")).filter(|r| ref_exists(root, r)))
 }
 
+fn is_merging(root: &Path) -> bool {
+    ref_exists(root, "MERGE_HEAD")
+}
+
 pub fn status(worktree: &str) -> Result<Status, String> {
     let root = toplevel(worktree)?;
     let text = git(&root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"])?;
     let (branch, unborn, changes) = parse_status(&text);
     let remote = remote_of(&root, branch.as_deref());
     let base = base_of(&root, remote.as_deref());
-    let mut st = Status { root: root.to_string_lossy().into(), branch: branch.clone(), remote: remote.clone(), base: base.clone(), unborn, changes, ..Status::default() };
+    let merging = is_merging(&root);
+    let mut st = Status { root: root.to_string_lossy().into(), branch: branch.clone(), remote: remote.clone(), base: base.clone(), unborn, merging, changes, ..Status::default() };
     if unborn {
         return Ok(st);
     }
@@ -372,9 +379,7 @@ pub fn status(worktree: &str) -> Result<Status, String> {
 }
 
 /// Every path a commit of `paths` touches: renames bring their old path along.
-fn with_origins(root: &Path, paths: &[String]) -> Result<Vec<String>, String> {
-    let text = git(root, &["status", "--porcelain=v2", "-z", "--untracked-files=all"])?;
-    let (_, _, changes) = parse_status(&text);
+fn with_origins(changes: &[Change], paths: &[String]) -> Vec<String> {
     let mut out: Vec<String> = paths.to_vec();
     for c in changes.iter().filter(|c| paths.contains(&c.path)) {
         if let Some(o) = &c.orig_path {
@@ -383,7 +388,7 @@ fn with_origins(root: &Path, paths: &[String]) -> Result<Vec<String>, String> {
             }
         }
     }
-    Ok(out)
+    out
 }
 
 fn nul_list(paths: &[String]) -> Vec<u8> {
@@ -464,8 +469,12 @@ pub fn message(worktree: &str, paths: &[String]) -> Result<String, String> {
     message_with("claude", worktree, paths)
 }
 
-/// Commits exactly `paths`, as they are in the worktree, with `message`. Whatever else was
-/// staged stays staged and out of the commit.
+/// Commits exactly `paths`, as they are in the worktree, with `message` as written (only
+/// whitespace tidied: a line starting with `#` is kept). Whatever else was staged stays staged
+/// and out of the commit; a refused commit leaves the index as it found it.
+///
+/// A merge in progress is committed whole, as git allows nothing else: `paths` must then be
+/// every change, its conflicts resolved.
 pub fn commit(worktree: &str, paths: &[String], message: &str) -> Result<Committed, String> {
     if message.trim().is_empty() {
         return Err("Write a commit message first.".into());
@@ -474,11 +483,39 @@ pub fn commit(worktree: &str, paths: &[String], message: &str) -> Result<Committ
         return Err("Choose at least one file to commit.".into());
     }
     let root = toplevel(worktree)?;
-    // `add` brings new files into git's view; a rename's old path is already gone from the
-    // index, so only `commit` gets it, to record it removed.
-    git_in(&root, &["--literal-pathspecs", "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&nul_list(paths)))?;
-    let all = with_origins(&root, paths)?;
-    git_in(&root, &["--literal-pathspecs", "commit", "--cleanup=strip", "-m", message, "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&nul_list(&all)))?;
+    let (_, _, changes) = parse_status(&git(&root, &["status", "--porcelain=v2", "-z", "--untracked-files=all"])?);
+    let message_args = ["commit", "--cleanup=whitespace", "-m", message];
+    if is_merging(&root) {
+        let names = |cs: Vec<&Change>| cs.iter().map(|c| c.path.as_str()).collect::<Vec<_>>().join(", ");
+        let conflicts: Vec<&Change> = changes.iter().filter(|c| c.conflicted).collect();
+        if !conflicts.is_empty() {
+            return Err(format!("A merge is in progress with conflicts in {}: resolve them and `git add` them, then commit the merge.", names(conflicts)));
+        }
+        let left: Vec<&Change> = changes.iter().filter(|c| !paths.contains(&c.path)).collect();
+        if !left.is_empty() {
+            return Err(format!("A merge is in progress, and git commits a merge whole: pick every change ({} left out).", names(left)));
+        }
+        git_in(&root, &["--literal-pathspecs", "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&nul_list(paths)))?;
+        git(&root, &message_args)?;
+    } else {
+        // A path given to `commit` is taken as it is in the worktree, staged or not, so only a
+        // new file needs `add` first, to be known to git. A rename's old path is already gone
+        // from the index, so only `commit` gets it, to record it removed.
+        let new: Vec<String> = changes.iter().filter(|c| c.index == "?" && paths.contains(&c.path)).map(|c| c.path.clone()).collect();
+        if !new.is_empty() {
+            git_in(&root, &["--literal-pathspecs", "add", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&nul_list(&new)))?;
+        }
+        let mut args = vec!["--literal-pathspecs"];
+        args.extend(message_args);
+        args.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
+        if let Err(e) = git_in(&root, &args, Some(&nul_list(&with_origins(&changes, paths)))) {
+            if !new.is_empty() {
+                // They were untracked: untrack them again.
+                let _ = git_in(&root, &["--literal-pathspecs", "rm", "--cached", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&nul_list(&new)));
+            }
+            return Err(e);
+        }
+    }
     let sha = git(&root, &["rev-parse", "--short", "HEAD"])?.trim().to_string();
     let summary = git(&root, &["log", "-1", "--format=%s"])?.trim().to_string();
     Ok(Committed { sha, summary })
@@ -874,6 +911,169 @@ mod tests {
             assert!(prompt.contains("+thing"), "{prompt}");
             let err = pr_draft_with(fake.to_str().unwrap(), w, "nowhere").unwrap_err();
             assert!(err.contains("no branch nowhere"), "{err}");
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        fn head(work: &Path) -> String {
+            sh(work, &["rev-parse", "HEAD"]).trim().to_string()
+        }
+
+        #[test]
+        fn a_message_line_starting_with_a_hash_is_kept() {
+            let (base, work) = repo("hash");
+            let w = work.to_str().unwrap();
+            std::fs::write(work.join("keep.txt"), "a\n").unwrap();
+            assert_eq!(commit(w, &["keep.txt".into()], "#283 fix it").unwrap().summary, "#283 fix it");
+            std::fs::write(work.join("keep.txt"), "b\n").unwrap();
+            commit(w, &["keep.txt".into()], "fix: the subject\n\n# not a comment\n\n\nbody  \n").unwrap();
+            assert_eq!(sh(&work, &["log", "-1", "--format=%B"]), "fix: the subject\n\n# not a comment\n\nbody\n\n");
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        #[test]
+        fn the_first_commit_takes_only_the_chosen_new_file() {
+            let work = temp_dir("commit-unborn");
+            sh(&work, &["init", "-b", "main"]);
+            sh(&work, &["config", "user.email", "t@t"]);
+            sh(&work, &["config", "user.name", "t"]);
+            std::fs::write(work.join("a.txt"), "a\n").unwrap();
+            std::fs::write(work.join("b.txt"), "b\n").unwrap();
+            let w = work.to_str().unwrap();
+            assert!(status(w).unwrap().unborn);
+            commit(w, &["a.txt".into()], "feat: first").unwrap();
+            assert_eq!(sh(&work, &["ls-tree", "--name-only", "HEAD"]), "a.txt\n");
+            assert_eq!(sh(&work, &["status", "--porcelain"]), "?? b.txt\n");
+            let _ = std::fs::remove_dir_all(work);
+        }
+
+        #[test]
+        fn nothing_to_commit_is_refused_and_commits_nothing() {
+            let (base, work) = repo("nothing");
+            let w = work.to_str().unwrap();
+            let before = head(&work);
+            let err = commit(w, &[], "fix: it").unwrap_err();
+            assert!(err.contains("Choose at least one file"), "{err}");
+            let err = commit(w, &["keep.txt".into()], "fix: it").unwrap_err();
+            assert!(err.starts_with("git commit:") && err.contains("nothing"), "{err}");
+            let err = commit(w, &["keep.txt".into()], " \n\t").unwrap_err();
+            assert!(err.contains("Write a commit message"), "{err}");
+            assert_eq!(head(&work), before);
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        #[test]
+        fn a_refused_commit_leaves_head_and_the_index_as_they_were() {
+            let (base, work) = repo("msghook");
+            let w = work.to_str().unwrap();
+            write_script(&work.join(".git/hooks/commit-msg"), "#!/bin/sh\necho 'commit-msg: subject needs a ticket' >&2\nexit 1\n");
+            // keep.txt is half staged: its first line, not its second.
+            std::fs::write(work.join("keep.txt"), "one!\n").unwrap();
+            sh(&work, &["add", "keep.txt"]);
+            std::fs::write(work.join("keep.txt"), "one!\ntwo\n").unwrap();
+            std::fs::write(work.join("fresh.txt"), "new\n").unwrap();
+            let before = head(&work);
+            let staged = sh(&work, &["diff", "--cached"]);
+            let err = commit(w, &["keep.txt".into(), "fresh.txt".into()], "fix: it").unwrap_err();
+            assert!(err.contains("commit-msg: subject needs a ticket"), "{err}");
+            assert_eq!(head(&work), before);
+            assert_eq!(sh(&work, &["diff", "--cached"]), staged, "the half staged file stays half staged");
+            assert_eq!(sh(&work, &["status", "--porcelain", "--", "fresh.txt"]), "?? fresh.txt\n");
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        #[test]
+        fn a_detached_head_commits_where_it_is_and_cannot_push() {
+            let (base, work) = repo("detached");
+            let w = work.to_str().unwrap();
+            sh(&work, &["checkout", "--detach"]);
+            std::fs::write(work.join("keep.txt"), "detached\n").unwrap();
+            let st = status(w).unwrap();
+            assert_eq!(st.branch, None);
+            assert!(!st.published);
+            let done = commit(w, &["keep.txt".into()], "fix: on a detached head").unwrap();
+            assert_eq!(done.sha, sh(&work, &["rev-parse", "--short", "HEAD"]).trim());
+            assert_eq!(sh(&work, &["rev-parse", "main"]), sh(&work, &["rev-parse", "HEAD~1"]), "main stays where it was");
+            assert!(push(w).unwrap_err().contains("detached"));
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        /// `work` on `main`, midway through merging `side` (which changed `old.txt`), with
+        /// `keep.txt` changed on both sides when `conflict`.
+        fn merging(tag: &str, conflict: bool) -> (PathBuf, PathBuf) {
+            let (base, work) = repo(tag);
+            sh(&work, &["checkout", "-b", "side"]);
+            std::fs::write(work.join("old.txt"), "side\n").unwrap();
+            if conflict {
+                std::fs::write(work.join("keep.txt"), "side\n").unwrap();
+            }
+            sh(&work, &["commit", "-am", "side"]);
+            sh(&work, &["checkout", "main"]);
+            std::fs::write(work.join("keep.txt"), "main\n").unwrap();
+            sh(&work, &["commit", "-am", "main"]);
+            let _ = git(&work, &["merge", "--no-ff", "--no-commit", "side"]);
+            (base, work)
+        }
+
+        #[test]
+        fn a_merge_in_progress_is_committed_whole() {
+            let (base, work) = merging("merge", false);
+            let w = work.to_str().unwrap();
+            std::fs::write(work.join("fresh.txt"), "new\n").unwrap();
+            let st = status(w).unwrap();
+            assert!(st.merging);
+            let paths: Vec<String> = st.changes.iter().map(|c| c.path.clone()).collect();
+            assert_eq!(paths, ["old.txt", "fresh.txt"]);
+            let before = head(&work);
+            let staged = sh(&work, &["diff", "--cached", "--name-only"]);
+
+            let err = commit(w, &["old.txt".into()], "merge side").unwrap_err();
+            assert!(err.contains("merge") && err.contains("fresh.txt"), "{err}");
+            assert_eq!(head(&work), before);
+            assert_eq!(sh(&work, &["diff", "--cached", "--name-only"]), staged);
+
+            let done = commit(w, &paths, "Merge side").unwrap();
+            assert_eq!(done.summary, "Merge side");
+            assert_eq!(sh(&work, &["rev-list", "--parents", "-n", "1", "HEAD"]).split_whitespace().count(), 3, "a merge commit");
+            assert!(!status(w).unwrap().merging);
+            assert!(status(w).unwrap().changes.is_empty());
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        #[test]
+        fn a_merge_with_conflicts_left_says_so() {
+            let (base, work) = merging("mergeconflict", true);
+            let w = work.to_str().unwrap();
+            let st = status(w).unwrap();
+            assert!(st.merging);
+            assert!(st.changes.iter().any(|c| c.path == "keep.txt" && c.conflicted));
+            let before = head(&work);
+            let err = commit(w, &["old.txt".into()], "merge side").unwrap_err();
+            assert!(err.contains("conflict") && err.contains("keep.txt"), "{err}");
+            assert_eq!(head(&work), before);
+            let _ = std::fs::remove_dir_all(base);
+        }
+
+        #[test]
+        fn a_file_changed_after_the_list_was_read_commits_as_it_is_now_or_says_why() {
+            let (base, work) = repo("stale");
+            let w = work.to_str().unwrap();
+            std::fs::write(work.join("keep.txt"), "seen\n").unwrap();
+            std::fs::write(work.join("fresh.txt"), "seen\n").unwrap();
+            assert_eq!(status(w).unwrap().changes.len(), 2);
+            let before = head(&work);
+            // The new file is deleted before Commit: nothing is committed, and git says why.
+            std::fs::remove_file(work.join("fresh.txt")).unwrap();
+            let err = commit(w, &["keep.txt".into(), "fresh.txt".into()], "fix: it").unwrap_err();
+            assert!(err.contains("fresh.txt"), "{err}");
+            assert_eq!(head(&work), before);
+            // The picked file is put back as it was: nothing to commit.
+            std::fs::write(work.join("keep.txt"), "one\n").unwrap();
+            assert!(commit(w, &["keep.txt".into()], "fix: it").is_err());
+            assert_eq!(head(&work), before);
+            // Edited again: the commit takes it as it is on disk.
+            std::fs::write(work.join("keep.txt"), "later\n").unwrap();
+            commit(w, &["keep.txt".into()], "fix: it").unwrap();
+            assert_eq!(sh(&work, &["show", "HEAD:keep.txt"]), "later\n");
             let _ = std::fs::remove_dir_all(base);
         }
 

@@ -158,6 +158,8 @@ export function createCommitStore(client: CommitClient, worktree: string): Commi
         } catch (e) {
           set({ committing: false })
           fail('commit', e)
+          // The list may be what changed (a file gone, a change undone): show it as it is now.
+          await get().load()
           return
         }
         await get().load()

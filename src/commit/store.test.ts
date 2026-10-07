@@ -12,6 +12,7 @@ const status = (over: Partial<Status> = {}): Status => ({
   behind: 0,
   base: 'main',
   unborn: false,
+  merging: false,
   changes: [change('a.ts'), change('b.ts'), change('c.ts', { conflicted: true, index: 'U', worktree: 'U' })],
   ...over,
 })
@@ -136,8 +137,8 @@ describe('the commit store', () => {
     expect(calls.some(([k]) => k === 'push')).toBe(false)
   })
 
-  it('keeps the message and shows what the hook said when a commit fails', async () => {
-    const { client } = fake({
+  it('keeps the message, shows what the hook said and reads the changes again when a commit fails', async () => {
+    const { client, calls } = fake({
       commit: () => {
         throw 'git commit: lint: 3 problems'
       },
@@ -149,6 +150,8 @@ describe('the commit store', () => {
     expect(s.getState().errors.commit).toBe('git commit: lint: 3 problems')
     expect(s.getState().message).toBe('feat: x')
     expect(s.getState().committing).toBe(false)
+    expect(s.getState().committed).toBeNull()
+    expect(calls.map(([k]) => k)).toEqual(['status', 'commit', 'status'])
   })
 
   it('does not commit without a message', async () => {
