@@ -312,6 +312,7 @@ const child = (id: string, more: Record<string, unknown> = {}) => ({
   intent: null,
   branch: null,
   timeline_len: 0,
+  account: 'default',
   ...more,
 })
 
