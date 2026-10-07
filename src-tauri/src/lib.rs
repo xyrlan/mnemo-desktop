@@ -112,6 +112,9 @@ pub mod app_dir;
 // -- install review (src/install_review.rs) --
 pub mod install_review;
 
+// -- plan-usage (src/plan_usage.rs) --
+pub mod plan_usage;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -346,6 +349,9 @@ pub fn run() {
             marketplace::marketplace_publish,
             marketplace::marketplace_open_pr,
             marketplace::marketplace_import_new,
+
+            // -- plan-usage commands --
+            plan_usage::plan_usage,
         ])
         .setup(|app| {
             if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
