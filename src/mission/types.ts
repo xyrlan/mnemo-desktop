@@ -98,6 +98,12 @@ export function permissionAsk(c: Pick<ChildSession, 'needs'>): string | null {
   return n.startsWith('approve ') ? n.slice('approve '.length) : n
 }
 
+/** `Bash: cd … && …` as the tool and what it runs; a bare ask is all command. */
+export function splitAsk(ask: string): { tool: string | null; command: string } {
+  const m = /^([A-Za-z][\w.:-]*):\s+([\s\S]*)$/.exec(ask)
+  return m ? { tool: m[1], command: m[2] } : { tool: null, command: ask }
+}
+
 /** Events since the user last looked; 0 when never looked so a fresh child is not a wall of badges. */
 export function delta(c: Pick<ChildSession, 'id' | 'timeline_len'>, looked: Record<string, number>): number {
   const seen = looked[c.id]

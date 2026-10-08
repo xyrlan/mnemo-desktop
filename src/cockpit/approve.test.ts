@@ -2,7 +2,9 @@ import { vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
 
-import { answerPane, answerPrompt, answerStore, detachAnswer, DETACH_KEY, keyFor, promptOptions } from './approve'
+import { answerPrompt, answerStore } from './approve'
+import { DETACH_KEY, keyFor, promptOnScreen, promptOptions } from './prompt'
+import type { AttachSession } from '../mission/as-me'
 import { store as appStore } from '../layout/app-store'
 import { child } from '../mission/fixtures'
 
@@ -62,7 +64,47 @@ test('keyFor picks the digit of the option; Esc denies when no option says No; n
   expect(keyFor(bare, 'no')).toBe('\x1b')
 })
 
+test('promptOnScreen reads what the prompt asks: its box, not the conversation above it', () => {
+  const p = promptOnScreen(PROMPT)!
+  expect(p.options).toHaveLength(4)
+  expect(p.asks).toContain('touch approve-probe.txt && ls -la')
+  expect(p.asks).toContain('Bash command')
+  expect(p.asks).not.toContain('⎿')
+})
+
+const RULE = '─'.repeat(40)
+/** The same child once the prompt took its answer: the call runs, the input box is back. */
+const AFTER = ['⏺ Bash(touch approve-probe.txt && ls -la)', '  ⎿  approve-probe.txt', '', RULE, '❯ ', RULE]
+/** A prompt for another call than the card shows. */
+const OTHER = PROMPT.map((l) => l.replace('touch approve-probe.txt && ls -la', 'rm -rf build'))
+/** The card's call, on a prompt that offers no "don't ask again". */
+const BARE = [RULE, ' Bash command', '', '   touch approve-probe.txt && ls -la', '', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No', '']
+
 const probe = child({ id: '987fb657', session_id: '987fb657-a6c1', cwd: '/Users/me/probe', tempo: 'blocked', needs: 'approve Bash: touch approve-probe.txt && ls -la', waiting_for: 'permission prompt' })
+
+/** A hidden `claude attach` that draws `start` once the attach is typed, and `next(key)` after a key. */
+function fakeAttach(start: string[], next: (key: string) => string[] | null = () => null) {
+  const writes: string[] = []
+  let screen: string[] = ['~/ $ ']
+  let exited = false
+  let closed = false
+  const session: AttachSession = {
+    lines: () => screen,
+    write: async (data) => {
+      writes.push(data)
+      if (data === DETACH_KEY) exited = true
+      else if (writes.length === 1) screen = start
+      else screen = next(data) ?? screen
+    },
+    exited: () => exited,
+    close: async () => {
+      closed = true
+    },
+  }
+  return { session, writes, closed: () => closed }
+}
+
+const quick = { sleep: async () => {}, timeoutMs: 50, stepMs: 50, waitingFor: async () => 'permission prompt' }
 
 let typed: [string | undefined, string, string | undefined][]
 
@@ -73,71 +115,79 @@ beforeEach(() => {
     tabs: [],
     activeTab: '',
     panes: {},
-    // Like the real one: a new tab whose terminal is tagged with the session.
-    openCommandTab: async (cwd, cmd, sessionId) => {
-      typed.push([cwd, cmd, sessionId])
-      const id = 7 + typed.length
-      appStore.setState((s) => ({
-        tabs: [...s.tabs, { id: `tab-${id}`, root: { kind: 'leaf', pane: id }, focused: id }],
-        activeTab: `tab-${id}`,
-        panes: { ...s.panes, [id]: { id, view: 'terminal', cwd, sessionId } },
-      }))
-    },
+    openCommandTab: async (cwd, cmd, sessionId) => void typed.push([cwd, cmd, sessionId]),
   })
 })
 
-const deps = (screens: (string[] | undefined)[]) => {
-  const writes: [number, string][] = []
-  let i = 0
-  return {
-    writes,
-    read: vi.fn(() => screens[Math.min(i++, screens.length - 1)]),
-    write: async (pane: number, data: string) => void writes.push([pane, data]),
-    sleep: async () => {},
-    timeoutMs: 1000,
-  }
-}
-
-test('Approve opens claude attach in the child cwd, waits for the prompt, and presses its key', async () => {
-  const d = deps([undefined, ['Attaching…'], PROMPT])
-  const a = await answerPrompt(probe, 'yes', d)
-  expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', '987fb657-a6c1']])
-  expect(d.writes).toEqual([[8, '1']])
-  expect(a).toMatchObject({ phase: 'sent', choice: 'yes', pane: 8 })
+test('Allow presses the prompt\'s key in a hidden attach, and leaves it once the prompt is gone: no terminal opens', async () => {
+  const a = fakeAttach(PROMPT, (key) => (key === '1' ? AFTER : null))
+  const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', '1', DETACH_KEY])
+  expect(a.closed()).toBe(true)
+  expect(answer).toMatchObject({ phase: 'sent', choice: 'yes' })
   expect(answerStore.getState().answers['987fb657'].phase).toBe('sent')
-  expect(answerPane('987fb657')).toBe(8)
+  expect(typed).toEqual([])
+})
 
-  // The pane still shows the prompt (say the key was lost): Deny reuses it, no second attach.
-  const again = deps([PROMPT])
-  await answerPrompt(probe, 'no', again)
+test('Deny and "don\'t ask again" press their own options', async () => {
+  const deny = fakeAttach(PROMPT, (key) => (key === '4' ? AFTER : null))
+  expect(await answerPrompt(probe, 'no', { ...quick, open: async () => deny.session })).toMatchObject({ phase: 'sent' })
+  expect(deny.writes.slice(1, 2)).toEqual(['4'])
+  const always = fakeAttach(PROMPT, (key) => (key === '2' ? AFTER : null))
+  expect(await answerPrompt(probe, 'always', { ...quick, open: async () => always.session })).toMatchObject({ phase: 'sent' })
+  expect(always.writes.slice(1, 2)).toEqual(['2'])
+})
+
+test('a prompt for another call than the card shows: nothing is pressed, and the attach opens in a terminal to answer by hand', async () => {
+  const a = fakeAttach(OTHER)
+  const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])
+  expect(answer.phase).toBe('error')
+  expect(answer.error).toContain('not the one')
+  expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', '987fb657-a6c1']])
+})
+
+test('no prompt in time: nothing is pressed, and the attach opens in a terminal', async () => {
+  const a = fakeAttach(['Attaching…'])
+  const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])
+  expect(answer.phase).toBe('error')
   expect(typed).toHaveLength(1)
-  expect(again.writes).toEqual([[8, '4']])
-
-  detachAnswer('987fb657', again.write)
-  expect(again.writes.at(-1)).toEqual([8, DETACH_KEY])
-  expect(answerPane('987fb657')).toBeNull()
 })
 
-test('an attach pane back at its shell is not typed into: a fresh attach is opened', async () => {
-  await answerPrompt(probe, 'yes', deps([PROMPT]))
-  const d = deps([['~/probe $ '], ['~/probe $ '], PROMPT])
-  await answerPrompt(probe, 'no', d)
-  expect(typed).toHaveLength(2)
-  expect(d.writes).toEqual([[9, '4']])
+test('"don\'t ask again" on a prompt that does not offer it: nothing is pressed, no terminal', async () => {
+  const a = fakeAttach(BARE)
+  const answer = await answerPrompt(probe, 'always', { ...quick, open: async () => a.session })
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])
+  expect(answer.error).toContain("don't ask again")
+  expect(typed).toEqual([])
 })
 
-test('no prompt in time, or no always-allow option: an error, nothing typed, the pane left open', async () => {
-  const d = deps([['Attaching…']])
-  d.timeoutMs = -1
-  const a = await answerPrompt(probe, 'yes', d)
-  expect(a.phase).toBe('error')
-  expect(a.error).toContain('did not appear')
-  expect(d.writes).toEqual([])
-  expect(appStore.getState().panes[8]).toBeDefined()
+test('a child parked on something else, or showing a question: no key, no terminal', async () => {
+  let opened = 0
+  const question = await answerPrompt(probe, 'yes', { ...quick, waitingFor: async () => 'input needed', open: async () => (opened++, fakeAttach(PROMPT).session) })
+  expect(question.phase).toBe('error')
+  expect(opened).toBe(0)
 
-  const bare = deps([[' ❯ 1. Yes', '   2. No', '']])
-  const b = await answerPrompt(probe, 'always', bare)
-  expect(b.phase).toBe('error')
-  expect(b.error).toContain("don't ask again")
-  expect(bare.writes).toEqual([])
+  const dialog = ['Which colour?', '', '❯ 1. Yes', '  2. No', '  3. Type something.', RULE, '  4. Chat about this']
+  const a = fakeAttach(dialog)
+  const shown = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
+  expect(shown.error).toContain('question')
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])
+  expect(typed).toEqual([])
+})
+
+test('a card that only knows the child waits on a prompt answers the prompt on screen', async () => {
+  const bare = child({ id: '987fb657', cwd: '/Users/me/probe', needs: null, waiting_for: 'permission prompt' })
+  const a = fakeAttach(OTHER, (key) => (key === '1' ? AFTER : null))
+  expect(await answerPrompt(bare, 'yes', { ...quick, open: async () => a.session })).toMatchObject({ phase: 'sent' })
+  expect(a.writes).toEqual(['exec claude attach 987fb657\r', '1', DETACH_KEY])
+})
+
+test('a second click while the first answer is on its way does nothing', async () => {
+  answerStore.setState({ answers: { '987fb657': { choice: 'yes', phase: 'attaching', at: 1 } } })
+  let opened = 0
+  const again = await answerPrompt(probe, 'no', { ...quick, open: async () => (opened++, fakeAttach(PROMPT).session) })
+  expect(again).toMatchObject({ phase: 'attaching', choice: 'yes' })
+  expect(opened).toBe(0)
 })

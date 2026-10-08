@@ -11,7 +11,8 @@ import { allChildren, childWord, type ChildSession } from './types'
 /** How the chat answers a dispatched child, for each kind of block (the Dispatch tab's spec,
  *  *Answering*):
  *
- *  - a permission prompt: Approve / Deny, typed into `claude attach` (`answerPrompt`);
+ *  - a permission prompt: Approve / Deny, its key pressed in a hidden `claude attach`
+ *    (`answerPrompt`);
  *  - a question it asked as it ended its turn: the composer, by the route picked beside it;
  *  - the multiple-choice dialog (AskUserQuestion): its option, or words, typed into a hidden
  *    `claude attach` (`ask.ts`).

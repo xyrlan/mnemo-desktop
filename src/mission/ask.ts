@@ -1,6 +1,6 @@
 import { tail } from '../terminal/buffer'
 import { answerText, KEY_GAP_MS, SUBMIT_GAP_MS } from '../chat-input/pty'
-import { promptOptions } from '../cockpit/approve'
+import { promptOptions } from '../cockpit/prompt'
 import { attachDefaults, attached, SETTLE_MS, type Deps, type Until } from './as-me'
 import { idOf, type Target } from './account'
 

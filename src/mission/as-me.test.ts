@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
 
 import { boxShows, inputBox, pasteOf, typeAsMe, type AttachSession } from './as-me'
-import { DETACH_KEY } from '../cockpit/approve'
+import { DETACH_KEY } from '../cockpit/prompt'
 
 /** The bottom of `claude attach 5a824ae5` on an idle child, as xterm reads it back (captured
  *  2026-09-15 from a real `claude --bg --model haiku` child, Claude Code 2.1.272). */

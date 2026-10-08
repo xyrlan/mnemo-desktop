@@ -4,7 +4,7 @@ import { Button } from '@/ui'
 import { cn } from '@/ui/cn'
 import { missionStore, useMission } from './app-store'
 import { store as appStore } from '../layout/app-store'
-import { childWord, permissionAsk, type ChildSession } from './types'
+import { childWord, permissionAsk, splitAsk, type ChildSession } from './types'
 import { childStatus, setRoute, useRoute, type Route } from './agent'
 import { answerPrompt, useAnswer, type Choice } from '../cockpit/approve'
 import { accountOf, idOf, onAccount, type Target } from './account'
@@ -33,12 +33,6 @@ export function openMissionPane(child: ChildSession) {
 export function attachChild(child: Target, place: 'tab' | 'split-col' = 'tab') {
   const id = idOf(child)
   appStore.getState().openView('terminal-cmd', { cmd: onAccount(`claude attach ${id}`, accountOf(child)) }, place, `attach ${id}`)
-}
-
-/** `Bash: cd … && …` as the tool and what it runs; a bare ask is all command. */
-export function splitAsk(ask: string): { tool: string | null; command: string } {
-  const m = /^([A-Za-z][\w.:-]*):\s+([\s\S]*)$/.exec(ask)
-  return m ? { tool: m[1], command: m[2] } : { tool: null, command: ask }
 }
 
 const ANSWERED: Record<Choice, string> = { yes: 'approved', always: 'approved, not asking again', no: 'denied' }
@@ -94,10 +88,10 @@ function MissionAnswerLine({ c, className }: { c: ChildSession; className?: stri
       >
         Allow and don't ask again
       </Button>
-      {answer?.phase === 'attaching' && <span className="ms-answer">Opening claude attach {c.id}…</span>}
+      {answer?.phase === 'attaching' && <span className="ms-answer">Answering through claude attach {c.id}…</span>}
       {answer?.phase === 'sent' && Date.now() - answer.at < 120_000 && (
         <span className="ms-answer">
-          {ANSWERED[answer.choice]} ✓ · follow it in the attach pane
+          {ANSWERED[answer.choice]} ✓
         </span>
       )}
       {answer?.phase === 'error' && <span className="ms-answer text-destructive">{answer.error}</span>}
