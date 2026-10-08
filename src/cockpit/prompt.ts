@@ -12,13 +12,20 @@ const SCREEN = 40
 const OPTION = /^[\s│|❯>›]*(\d)\.\s+(.+?)\s*$/
 /** The rule a prompt's box opens with, under the conversation. */
 const RULE = /^\s*─{8,}/
-/** How far above its options a prompt without a rule is read. */
-const ABOVE = 15
+
+/** A permission prompt on screen: its options, and what it asks about. */
+export type Prompt = {
+  options: PromptOption[]
+  /** The lines between the rule that opens its box and the options. */
+  asks: string
+  /** Whether the box's rule is on screen. A box taller than the screen shows only its end. */
+  whole: boolean
+}
 
 /** The permission prompt at the bottom of a terminal: its numbered options (`1. Yes`,
- *  `2. Yes, and don't ask again for …`, `3. No`), and what it asks about, the lines between the
- *  rule that opens its box and the options. Null when no prompt is on screen. */
-export function promptOnScreen(lines: string[]): { options: PromptOption[]; asks: string } | null {
+ *  `2. Yes, and don't ask again for …`, `3. No`), and what it asks about. Null when no prompt is
+ *  on screen. */
+export function promptOnScreen(lines: string[]): Prompt | null {
   const screen = tail(lines, SCREEN)
   for (let i = screen.length - 1; i >= 0; i--) {
     const first = OPTION.exec(screen[i])
@@ -30,14 +37,9 @@ export function promptOnScreen(lines: string[]): { options: PromptOption[]; asks
       options.push({ n: Number(m[1]), text: m[2] })
     }
     if (options.length < 2 || !options.some((o) => /^yes\b/i.test(o.text))) return null
-    let top = Math.max(0, i - ABOVE)
-    for (let k = i - 1; k >= top; k--) {
-      if (RULE.test(screen[k])) {
-        top = k + 1
-        break
-      }
-    }
-    return { options, asks: screen.slice(top, i).join('\n') }
+    let rule = i - 1
+    while (rule >= 0 && !RULE.test(screen[rule])) rule--
+    return { options, asks: screen.slice(rule + 1, i).join('\n'), whole: rule >= 0 }
   }
   return null
 }
