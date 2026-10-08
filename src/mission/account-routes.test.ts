@@ -51,10 +51,22 @@ beforeEach(() => {
   })
 })
 
-test("Approve opens the attach on the child's account", async () => {
-  const a = await answerPrompt(onWork, 'yes', { read: () => PROMPT, write: async () => {}, sleep: async () => {}, timeoutMs: 100 })
+test("Approve presses the key in a hidden attach on the child's account", async () => {
+  const keys: string[] = []
+  let screen = ['~/ $ ']
+  const session = {
+    lines: () => screen,
+    write: async (data: string) => {
+      keys.push(data)
+      screen = data.startsWith('exec ') ? PROMPT : ['❯ ']
+    },
+    exited: () => false,
+    close: async () => {},
+  }
+  const a = await answerPrompt(onWork, 'yes', { open: async () => session, waitingFor: async () => 'permission prompt', sleep: async () => {}, timeoutMs: 100, stepMs: 100 })
   expect(a.phase).toBe('sent')
-  expect(commands).toEqual([['/r-wt-1', 'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0']])
+  expect(keys.slice(0, 2)).toEqual(['exec env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0\r', '1'])
+  expect(commands).toEqual([])
 })
 
 test("Take over and Stop under the Dispatch tab run on the child's account", async () => {

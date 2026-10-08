@@ -4,7 +4,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
 
 import { answerQuestion, answerQuestionOther, questionOnScreen, stillAsking, type Question } from './ask'
 import type { AttachSession } from './as-me'
-import { DETACH_KEY } from '../cockpit/approve'
+import { DETACH_KEY } from '../cockpit/prompt'
 
 /** The bottom of `claude attach` on a child parked on AskUserQuestion, as Claude Code draws the
  *  dialog: a header, the question, numbered options with their descriptions, the "Type

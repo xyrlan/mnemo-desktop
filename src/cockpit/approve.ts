@@ -1,147 +1,90 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import { store as appStore } from '../layout/app-store'
-import { paneForSession } from '../layout/tabs'
-import { readBuffer, tail } from '../terminal/buffer'
-import { tauriPty } from '../pty/client'
-import type { ChildSession } from '../mission/types'
+import { permissionAsk, splitAsk, type ChildSession } from '../mission/types'
 import { attachCmd } from '../mission/account'
+import { attached, attachDefaults, SETTLE_MS, type Deps } from '../mission/as-me'
+import { questionOnScreen } from '../mission/ask'
+import { keyFor, promptOnScreen, type Choice } from './prompt'
+
+export type { Choice } from './prompt'
 
 /** Answering a background child's permission prompt. Its inbox socket takes user turns only
- *  and there is no approve CLI (#81), so the answer is typed into `claude attach <id>`, on the
- *  child's own account (`attachCmd`): open
- *  (or reuse) that terminal, wait until the prompt's option list is on screen, press the key
- *  for the chosen option, and leave the pane open so the user sees the child go on. */
+ *  and there is no approve CLI (#81), so the key is pressed in a hidden `claude attach <id>` on
+ *  the child's own account (`attached`), as `src/mission/ask.ts` answers a dialog: the prompt is
+ *  read off the attach's screen and checked to be the call the card shows. Then its option's key
+ *  is pressed, and the attach is left once the prompt moved on. Nothing opens in the window. When
+ *  the prompt does not show, or shows another call, nothing is pressed and the attach opens in
+ *  a terminal instead, to answer by hand. */
 
-export type Choice = 'yes' | 'always' | 'no'
-export type PromptOption = { n: number; text: string }
-
-/** Lines of screen, from the bottom, a live prompt must sit in: older ones are scrollback. */
-const SCREEN = 40
-const OPTION = /^[\s│|❯>›]*(\d)\.\s+(.+?)\s*$/
-
-/** The numbered options of the permission prompt at the bottom of a terminal (`1. Yes`,
- *  `2. Yes, and don't ask again for …`, `3. No`), or null when none is on screen. */
-export function promptOptions(lines: string[]): PromptOption[] | null {
-  const screen = tail(lines, SCREEN)
-  for (let i = screen.length - 1; i >= 0; i--) {
-    const first = OPTION.exec(screen[i])
-    if (!first || first[1] !== '1') continue
-    const out: PromptOption[] = []
-    for (let j = i; j < screen.length; j++) {
-      const m = OPTION.exec(screen[j])
-      if (!m || Number(m[1]) !== out.length + 1) break
-      out.push({ n: Number(m[1]), text: m[2] })
-    }
-    return out.length >= 2 && out.some((o) => /^yes\b/i.test(o.text)) ? out : null
-  }
-  return null
-}
-
-/** What to type for `choice`: the option's digit, Esc for a deny the list does not name, null
- *  when the prompt does not offer it (not every prompt can be allowed for good). */
-export function keyFor(options: PromptOption[], choice: Choice): string | null {
-  const pick = (re: RegExp) => options.find((o) => re.test(o.text))
-  const o =
-    choice === 'yes' ? pick(/^yes\b(?!.*\band\b)/i) ?? pick(/^yes\b/i)
-    : choice === 'always' ? pick(/don'?t ask again|always allow|allow all/i)
-    : pick(/^no\b/i)
-  if (o) return String(o.n)
-  return choice === 'no' ? '\x1b' : null
-}
-
-/** `claude attach` hands the terminal back to the shell on Ctrl+Z; the child keeps running. */
-export const DETACH_KEY = '\x1a'
-
-export type Answer = { choice: Choice; phase: 'attaching' | 'sent' | 'error'; pane: number | null; error?: string; at: number }
+export type Answer = { choice: Choice; phase: 'attaching' | 'sent' | 'error'; error?: string; at: number }
 
 export const answerStore = createStore<{ answers: Record<string, Answer> }>(() => ({ answers: {} }))
 export const useAnswer = (id: string) => useStore(answerStore, (s) => s.answers[id])
 
-const put = (id: string, a: Answer) => answerStore.setState((s) => ({ answers: { ...s.answers, [id]: a } }))
-
-export type Deps = {
-  read: (pane: number) => string[] | undefined
-  write: (pane: number, data: string) => Promise<void>
-  sleep: (ms: number) => Promise<void>
-  /** How long the attached session gets to draw its prompt. */
-  timeoutMs: number
+const put = (id: string, a: Answer): Answer => {
+  answerStore.setState((s) => ({ answers: { ...s.answers, [id]: a } }))
+  return a
 }
 
-const defaults: Deps = {
-  read: readBuffer,
-  write: (pane, data) => tauriPty.write(pane, data),
-  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  timeoutMs: 20_000,
+/** An answer refused for what it is, not for what the screen showed: nothing to do by hand. */
+class Refused extends Error {}
+
+/** How much of the card's call the prompt must show, whitespace aside. */
+const CALL_CHARS = 40
+
+/** Whether the prompt asks about `command`: its box holds the start of it, whitespace aside (the
+ *  terminal wraps and indents a long command). */
+export function asksAbout(asks: string, command: string): boolean {
+  const flat = (s: string) => s.replace(/\s+/g, '')
+  return flat(asks).includes(flat(command).slice(0, CALL_CHARS))
 }
 
-const POLL_MS = 250
+async function press(child: ChildSession, choice: Choice, d: Deps) {
+  const id = child.id
+  const waiting = await d.waitingFor(id)
+  if (waiting && !waiting.toLowerCase().includes('permission')) throw new Refused(`${id} is on a ${waiting}, not a permission prompt: nothing was pressed`)
+  const ask = permissionAsk(child)
+  const command = ask ? splitAsk(ask).command : null
 
-/** The pane showing `child`'s prompt right now: one tagged with its session (an earlier
- *  attach), or the lone terminal in its cwd. A pane that is not showing the prompt (the attach
- *  was left, the shell is back) is not reused: a digit typed there would go to the shell. */
-function paneWithPrompt(child: ChildSession, read: Deps['read']): number | null {
-  const pane = paneForSession(appStore.getState(), child)
-  if (pane === null || pane <= 0) return null
-  const lines = read(pane)
-  return lines && promptOptions(lines) ? pane : null
+  await attached(child, d, async (s, until) => {
+    const shown = () => {
+      const lines = s.lines()
+      if (questionOnScreen(lines)) throw new Refused(`${id} is showing a question, not a permission prompt: nothing was pressed`)
+      return promptOnScreen(lines)
+    }
+    await until('its permission prompt showed', d.timeoutMs, shown)
+    await d.sleep(SETTLE_MS)
+    const prompt = await until('its permission prompt showed', d.timeoutMs, shown)
+    if (command !== null && !asksAbout(prompt.asks, command)) throw new Error(`the prompt on ${id}'s screen is not the one this card shows, nothing was pressed`)
+    const key = keyFor(prompt.options, choice)
+    if (key === null) throw new Refused('this prompt does not offer "don\'t ask again": nothing was pressed')
+    await s.write(key)
+    await until('the prompt took the answer', d.stepMs, () => {
+      const now = promptOnScreen(s.lines())
+      return now && now.asks === prompt.asks ? null : true
+    })
+  })
 }
 
 /** Answers `child`'s permission prompt with `choice`. Never throws: the outcome lands in
- *  `answerStore` under the child's id, and a failure leaves the pane open to answer by hand. */
+ *  `answerStore` under the child's id. A failure the maintainer can finish by hand opens the
+ *  attach in a terminal. */
 export async function answerPrompt(child: ChildSession, choice: Choice, deps: Partial<Deps> = {}): Promise<Answer> {
-  const d = { ...defaults, ...deps }
+  const d = { ...attachDefaults, ...deps }
   const prior = answerStore.getState().answers[child.id]
   if (prior?.phase === 'attaching') return prior
-  const started = Date.now()
-  const fail = (error: string, pane: number | null) => {
-    const a: Answer = { choice, phase: 'error', pane, error, at: Date.now() }
-    put(child.id, a)
-    return a
+  put(child.id, { choice, phase: 'attaching', at: Date.now() })
+  try {
+    await press(child, choice, d)
+    return put(child.id, { choice, phase: 'sent', at: Date.now() })
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e)
+    if (e instanceof Refused) return put(child.id, { choice, phase: 'error', error: why, at: Date.now() })
+    await appStore
+      .getState()
+      .openCommandTab(child.cwd || undefined, attachCmd(child), child.session_id ?? undefined)
+      .catch(() => {})
+    return put(child.id, { choice, phase: 'error', error: `${why}: answer it in the attach that opened`, at: Date.now() })
   }
-  put(child.id, { choice, phase: 'attaching', pane: null, at: started })
-
-  let pane = paneWithPrompt(child, d.read)
-  if (pane !== null) appStore.getState().goToPane(pane)
-  else {
-    const before = new Set(Object.keys(appStore.getState().panes))
-    await appStore.getState().openCommandTab(child.cwd || undefined, attachCmd(child), child.session_id ?? undefined)
-    const s = appStore.getState()
-    const fresh = Object.keys(s.panes).map(Number).filter((id) => !before.has(String(id)))
-    pane = fresh.find((id) => id > 0) ?? s.tabs.find((t) => t.id === s.activeTab)?.focused ?? null
-    if (pane === null || pane <= 0) return fail('could not open a terminal for the attach', pane)
-  }
-
-  for (;;) {
-    const lines = d.read(pane)
-    const options = lines && promptOptions(lines)
-    if (options) {
-      const key = keyFor(options, choice)
-      if (key === null) return fail('this prompt does not offer "don\'t ask again" — choose in the attach pane', pane)
-      await d.write(pane, key)
-      const a: Answer = { choice, phase: 'sent', pane, at: Date.now() }
-      put(child.id, a)
-      return a
-    }
-    if (Date.now() - started > d.timeoutMs) return fail('the prompt did not appear in the attach — answer in the attach pane', pane)
-    await d.sleep(POLL_MS)
-  }
-}
-
-/** The attach pane an answer opened, while it is still open in this window. */
-export function answerPane(id: string): number | null {
-  const pane = answerStore.getState().answers[id]?.pane
-  return pane != null && pane > 0 && appStore.getState().panes[pane] ? pane : null
-}
-
-/** Leaves the attach an answer opened: the pane goes back to its shell, the child keeps running. */
-export function detachAnswer(id: string, write: Deps['write'] = defaults.write) {
-  const pane = answerPane(id)
-  if (pane === null) return
-  void write(pane, DETACH_KEY)
-  answerStore.setState((s) => {
-    const answers = { ...s.answers }
-    delete answers[id]
-    return { answers }
-  })
 }

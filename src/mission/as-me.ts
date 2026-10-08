@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { bufferLines, tail } from '../terminal/buffer'
 import { tauriPty } from '../pty/client'
-import { DETACH_KEY, promptOptions } from '../cockpit/approve'
+import { DETACH_KEY, promptOptions } from '../cockpit/prompt'
 import { accountOf, idOf, onAccount, type Target } from './account'
 
 /** "Reply as me": the draft, as typed, goes into the child's own terminal through a hidden

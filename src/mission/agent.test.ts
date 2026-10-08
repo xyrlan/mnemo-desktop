@@ -20,7 +20,7 @@ test('childAgent answers the dialog through the question routes and the prompt t
   const agent = childAgent(first, {
     answerPrompt: async (c: ChildSession, choice: Choice): Promise<Answer> => {
       calls.push(['prompt', c.cwd, choice])
-      return { choice, phase: 'sent', pane: 3, at: 0 }
+      return { choice, phase: 'sent', at: 0 }
     },
     // The child itself, as the latest snapshot has it: its attach runs on its account.
     answerQuestion: async (c, index) => void calls.push(['answer', typeof c === 'string' ? c : (c as ChildSession).cwd, index]),
@@ -53,7 +53,7 @@ test('childAgent answers the dialog through the question routes and the prompt t
 })
 
 test('a prompt answer that did not go through rejects with why', async () => {
-  const agent = childAgent(first, { answerPrompt: async (_c, choice) => ({ choice, phase: 'error', pane: null, error: 'no attach', at: 0 }) })
+  const agent = childAgent(first, { answerPrompt: async (_c, choice) => ({ choice, phase: 'error', error: 'no attach', at: 0 }) })
   await expect(agent.allow()).rejects.toThrow('no attach')
 })
 
