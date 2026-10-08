@@ -5,6 +5,7 @@ import type { SessionStatus } from '../conversation/types'
 import { answerPrompt, type Answer, type Choice } from '../cockpit/approve'
 import { missionStore } from './app-store'
 import { answerQuestion, answerQuestionOther } from './ask'
+import type { Target } from './account'
 import { allChildren, childWord, type ChildSession } from './types'
 
 /** How the chat answers a dispatched child, for each kind of block (the Dispatch tab's spec,
@@ -33,14 +34,14 @@ export const setRoute = (id: string, route: Route) => routeStore.setState((s) =>
 
 export type ChildAgentDeps = {
   answerPrompt(child: ChildSession, choice: Choice): Promise<Answer>
-  answerQuestion(id: string, index: number): Promise<void>
-  answerQuestionOther(id: string, text: string): Promise<void>
+  answerQuestion(child: Target, index: number): Promise<void>
+  answerQuestionOther(child: Target, text: string): Promise<void>
 }
 
 const defaults: ChildAgentDeps = {
   answerPrompt: (child, choice) => answerPrompt(child, choice),
-  answerQuestion: (id, index) => answerQuestion(id, index),
-  answerQuestionOther: (id, text) => answerQuestionOther(id, text),
+  answerQuestion: (child, index) => answerQuestion(child, index),
+  answerQuestionOther: (child, text) => answerQuestionOther(child, text),
 }
 
 /** The chat's answers for `child`. Each reads the child as the latest snapshot has it, so one
@@ -65,8 +66,8 @@ export function childAgent(child: ChildSession, deps: Partial<ChildAgentDeps> = 
     },
     allow: () => approve('yes'),
     deny: () => approve('no'),
-    answer: (index) => d.answerQuestion(child.id, index),
-    other: (text) => d.answerQuestionOther(child.id, text),
+    answer: (index) => d.answerQuestion(latest(), index),
+    other: (text) => d.answerQuestionOther(latest(), text),
   }
 }
 

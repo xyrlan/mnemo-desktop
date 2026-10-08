@@ -1,6 +1,7 @@
 //! Home screen data: repositories and past Claude Code sessions, from
-//! `~/.claude/history.jsonl` joined with `claude agents --json --all`, plus each repo's
-//! open issues and PRs as the last `refresh_github` left them (`lens`).
+//! `~/.claude/history.jsonl` (every account's, through links) joined with each account's
+//! `claude agents --json --all`, plus each repo's open issues and PRs as the last
+//! `refresh_github` left them (`lens`).
 
 pub mod lens;
 
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::github::Issue;
+use crate::mission::account_dirs::{self, AccountEnv, Accounts};
 pub use lens::Pr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,6 +99,13 @@ pub struct HomeSession {
     pub kind: String,
     /// The `claude agents` name of a live session, only when it differs from `title`.
     pub agent: Option<String>,
+    /// Id of the account the session runs on: the one whose `claude agents` lists it, else the
+    /// one whose `jobs/` holds it. None when neither does (a finished interactive session): it is
+    /// resumed on the active account.
+    pub account: Option<String>,
+    /// What a command typed into a pane needs to reach the session on `account`
+    /// (`account_dirs::Accounts::route`); None when there is nothing to route.
+    pub account_env: Option<AccountEnv>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -139,6 +148,8 @@ pub struct LiveRow {
     pub kind: String,
     pub name: Option<String>,
     pub cwd: String,
+    /// The account whose `claude agents` listed it.
+    pub account: String,
 }
 
 pub fn parse_live(json: &str) -> Result<HashMap<String, LiveRow>, String> {
@@ -158,6 +169,7 @@ pub fn parse_live(json: &str) -> Result<HashMap<String, LiveRow>, String> {
                     kind: r.get("kind").and_then(|k| k.as_str()).unwrap_or("interactive").to_string(),
                     name: r.get("name").and_then(|n| n.as_str()).map(str::to_string),
                     cwd: r.get("cwd").and_then(|c| c.as_str()).unwrap_or("").to_string(),
+                    account: account_dirs::DEFAULT_ID.to_string(),
                 },
             ))
         })
@@ -199,9 +211,10 @@ pub fn protected_count(repos: &[HomeRepo]) -> u32 {
     repos.iter().filter(|r| r.unresolved && !r.hidden && !r.pinned).count() as u32
 }
 
-/// Roots Home never lists: Claude Code's own scratch clones under `~/.claude/`.
-pub fn is_internal_root(root: &str, home: &str) -> bool {
-    !home.is_empty() && Path::new(root).starts_with(Path::new(home).join(".claude"))
+/// Roots Home never lists: Claude Code's own scratch clones under `~/.claude/` or under any other
+/// account's dir.
+pub fn is_internal_root(root: &str, accounts: &Accounts) -> bool {
+    accounts.contains(Path::new(root))
 }
 
 fn basename(p: &str) -> String {
@@ -279,6 +292,8 @@ fn home_sessions(mut ss: Vec<KnownSession>) -> Vec<HomeSession> {
             live: None,
             kind: "interactive".into(),
             agent: None,
+            account: None,
+            account_env: None,
         })
         .collect()
 }
@@ -325,6 +340,33 @@ pub fn join_live(
     }
 }
 
+/// Each session's account and how to reach it: the account whose `claude agents` lists it live,
+/// else the one whose `jobs/` holds it (`jobs`: session id → account id).
+pub fn join_accounts(repos: &mut [HomeRepo], live: &HashMap<String, LiveRow>, jobs: &HashMap<String, String>, accounts: &Accounts) {
+    for r in repos.iter_mut() {
+        for s in r.sessions.iter_mut().chain(r.children.iter_mut()) {
+            s.account = live.get(&s.id).map(|l| l.account.clone()).or_else(|| jobs.get(&s.id).cloned());
+            s.account_env = s.account.as_deref().and_then(|id| accounts.get(id)).and_then(|a| accounts.route(a));
+        }
+    }
+}
+
+/// Every account's live sessions, each row tagged with its account; a session id is kept once.
+fn live_of(accounts: &Accounts, errors: &mut Vec<String>) -> HashMap<String, LiveRow> {
+    let mut live = HashMap::new();
+    for (a, got) in crate::mission::agents_of(accounts) {
+        match got.and_then(|j| parse_live(&j)) {
+            Ok(rows) => {
+                for (id, row) in rows {
+                    live.entry(id).or_insert(LiveRow { account: a.id.clone(), ..row });
+                }
+            }
+            Err(e) => errors.push(crate::mission::on_account_error(a, e)),
+        }
+    }
+    live
+}
+
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
@@ -347,7 +389,8 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
         pinned,
         hidden,
     );
-    repos.retain(|r| !is_internal_root(&r.root, &home));
+    let accounts = account_dirs::accounts();
+    repos.retain(|r| !is_internal_root(&r.root, &accounts));
     for root in extra_roots {
         if !repos.iter().any(|r| &r.root == root) {
             repos.push(HomeRepo {
@@ -365,14 +408,15 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
         }
     }
     sort_repos(&mut repos);
-    let live = match crate::mission::run("claude", &["agents", "--json", "--all"], None).and_then(|j| parse_live(&j)) {
-        Ok(l) => l,
-        Err(e) => {
-            errors.push(e);
-            HashMap::new()
-        }
-    };
+    let live = live_of(&accounts, &mut errors);
     join_live(&mut repos, &live, here, &|cwd, id| crate::mission::transcript_path(cwd, id).is_some());
+    // A finished child is found by its jobs dir only when there is another account to tell apart.
+    let jobs: HashMap<String, String> = if accounts.0.len() > 1 {
+        lens::read_all_jobs(&accounts).into_iter().filter_map(|j| Some((j.session_id?, j.account))).collect()
+    } else {
+        HashMap::new()
+    };
+    join_accounts(&mut repos, &live, &jobs, &accounts);
     *lens::last_roots().lock().unwrap_or_else(|p| p.into_inner()) = Some(github_roots(&repos));
     errors.extend(join_github(&mut repos, &lens::cache().lock().unwrap_or_else(|p| p.into_inner())));
     let roots: Vec<String> = repos.iter().map(|r| r.root.clone()).collect();
@@ -576,9 +620,44 @@ mod tests {
 
     #[test]
     fn internal_roots_are_claude_scratch_dirs() {
-        assert!(is_internal_root("/Users/me/.claude/jobs/e3/tmp/probe-repo", "/Users/me"));
-        assert!(!is_internal_root("/Users/me/github/mnemo", "/Users/me"));
-        assert!(!is_internal_root("/Users/me/github/mnemo", ""));
+        let one = Accounts::single(Path::new("/Users/me"));
+        assert!(is_internal_root("/Users/me/.claude/jobs/e3/tmp/probe-repo", &one));
+        assert!(!is_internal_root("/Users/me/github/mnemo", &one));
+        assert!(!is_internal_root("/Users/me/.claude-work/jobs/e3/tmp/probe-repo", &one), "not an account yet");
+        assert!(!is_internal_root("/Users/me/github/mnemo", &Accounts::single(Path::new(""))));
+        let two = Accounts::parse(r#"{"accounts":[{"id":"work","configDir":"/Users/me/.claude-work"}]}"#, Path::new("/Users/me"));
+        assert!(is_internal_root("/Users/me/.claude/jobs/e3/tmp/probe-repo", &two));
+        assert!(is_internal_root("/Users/me/.claude-work/jobs/e3/tmp/probe-repo", &two));
+        assert!(!is_internal_root("/Users/me/.claude-workshop/repo", &two));
+    }
+
+    #[test]
+    fn each_session_carries_the_account_that_lists_it_live_else_the_one_whose_jobs_hold_it() {
+        let sessions = sessions_from_history(&parse_history(HISTORY));
+        let mut repos = group_repos(sessions.into_values().collect(), &fake_root, &quiet, &[], &[]);
+        let mut live = parse_live(
+            r#"[{"id":"a","cwd":"/x","kind":"interactive","pid":10,"sessionId":"aaaa-1"},
+                {"id":"i","cwd":"/x","kind":"background","sessionId":"iiii-9","state":"working"}]"#,
+        )
+        .unwrap();
+        live.get_mut("iiii-9").unwrap().account = "work".into();
+        let jobs = HashMap::from([("cccc-3".to_string(), "work".to_string()), ("iiii-9".to_string(), "default".to_string())]);
+        let two = Accounts::parse(r#"{"accounts":[{"id":"work","configDir":"/Users/me/.claude-work"}]}"#, Path::new("/Users/me"));
+        join_accounts(&mut repos, &live, &jobs, &two);
+        let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
+        let by = |id: &str| mnemo.sessions.iter().chain(&mnemo.children).find(|s| s.id == id).unwrap();
+        assert_eq!(by("aaaa-1").account.as_deref(), Some("default"));
+        assert_eq!(by("aaaa-1").account_env, Some(AccountEnv { config_dir: None }));
+        assert_eq!(by("iiii-9").account.as_deref(), Some("work"), "live wins over a jobs dir");
+        assert_eq!(by("iiii-9").account_env, Some(AccountEnv { config_dir: Some("/Users/me/.claude-work".into()) }));
+        assert_eq!(by("cccc-3").account.as_deref(), Some("work"), "a finished child, by its jobs dir");
+        assert_eq!(by("hhhh-8").account, None, "a finished interactive session runs on the active account");
+        assert_eq!(by("hhhh-8").account_env, None);
+
+        let one = Accounts::single(Path::new("/Users/me"));
+        join_accounts(&mut repos, &live, &HashMap::new(), &one);
+        let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
+        assert!(mnemo.sessions.iter().chain(&mnemo.children).all(|s| s.account_env.is_none()), "one account routes nothing");
     }
 
     #[test]

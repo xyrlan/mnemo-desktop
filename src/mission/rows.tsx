@@ -7,6 +7,7 @@ import { store as appStore } from '../layout/app-store'
 import { childWord, permissionAsk, type ChildSession } from './types'
 import { childStatus, setRoute, useRoute, type Route } from './agent'
 import { answerPrompt, useAnswer, type Choice } from '../cockpit/approve'
+import { accountOf, idOf, onAccount, type Target } from './account'
 import { ChatComposer } from '../chat-input/Composer'
 import { ApprovalCard } from '../chat-input/ApprovalCard'
 import type { ComposerProps } from '../conversation/chat-input'
@@ -28,8 +29,10 @@ export function openMissionPane(child: ChildSession) {
   void missionStore.getState().markLooked(child.id, child.timeline_len)
 }
 
-export function attachChild(id: string, place: 'tab' | 'split-col' = 'tab') {
-  appStore.getState().openView('terminal-cmd', { cmd: `claude attach ${id}` }, place, `attach ${id}`)
+/** `claude attach` to the child, on its own account, in a terminal. */
+export function attachChild(child: Target, place: 'tab' | 'split-col' = 'tab') {
+  const id = idOf(child)
+  appStore.getState().openView('terminal-cmd', { cmd: onAccount(`claude attach ${id}`, accountOf(child)) }, place, `attach ${id}`)
 }
 
 /** `Bash: cd … && …` as the tool and what it runs; a bare ask is all command. */

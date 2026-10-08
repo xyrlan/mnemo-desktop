@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { bufferLines, tail } from '../terminal/buffer'
 import { tauriPty } from '../pty/client'
 import { DETACH_KEY, promptOptions } from '../cockpit/approve'
+import { accountOf, idOf, onAccount, type Target } from './account'
 
 /** "Reply as me": the draft, as typed, goes into the child's own terminal through a hidden
  *  `claude attach <id>`, so it lands as the maintainer's turn (`origin.kind: "human"`) instead
@@ -117,14 +118,16 @@ const defaults: Deps = {
 /** How long `until` waits for what it looks for; what it looks for returns null until then. */
 export type Until = <T>(what: string, ms: number, probe: () => T | null) => Promise<T>
 
-/** Runs `body` inside a hidden `claude attach <id>`, then, whatever happened, presses Ctrl+Z and
- *  closes the PTY. On Claude Code 2.1.282 Ctrl+Z does not end the attach (seen live in #266:
- *  the process was still there 3 s later), so nothing waits for it to: closing the PTY ends it. */
-export async function attached<R>(id: string, d: Deps, body: (s: AttachSession, until: Until) => Promise<R>): Promise<R> {
+/** Runs `body` inside a hidden `claude attach <id>` on the child's own account, then, whatever
+ *  happened, presses Ctrl+Z and closes the PTY. On Claude Code 2.1.282 Ctrl+Z does not end the
+ *  attach (seen live in #266: the process was still there 3 s later), so nothing waits for it to:
+ *  closing the PTY ends it. */
+export async function attached<R>(target: Target, d: Deps, body: (s: AttachSession, until: Until) => Promise<R>): Promise<R> {
+  const id = idOf(target)
   const s = await d.open()
   try {
     // `exec`: when the attach ends, the PTY ends, and no shell is left to type into.
-    await s.write(`exec claude attach ${id}\r`)
+    await s.write(`exec ${onAccount(`claude attach ${id}`, accountOf(target))}\r`)
     const until: Until = async (what, ms, probe) => {
       const end = Date.now() + ms
       for (;;) {
@@ -147,15 +150,16 @@ export const attachDefaults: Deps = defaults
 
 /** Types `text` into child `id`'s terminal as the maintainer and presses Enter. Resolves once
  *  the input box took it; rejects with what to do by hand when a guard stops it. */
-export async function typeAsMe(id: string, text: string, deps: Partial<Deps> = {}): Promise<void> {
+export async function typeAsMe(target: Target, text: string, deps: Partial<Deps> = {}): Promise<void> {
   const d = { ...defaults, ...deps }
+  const id = idOf(target)
   if (!text.trim()) throw new Error('nothing to type')
   // Typed first, a `!` puts Claude Code's input in shell mode: the reply would run as a command.
   if (text.trimStart().startsWith('!')) throw new Error("a reply that starts with ! would run as a shell command in the child's terminal: reword it, nothing was typed")
   const waiting = await d.waitingFor(id)
   if (waiting) throw new Error(`${id} is on a ${waiting}: answer it first, keys typed now would go to the dialog`)
 
-  await attached(id, d, async (s, until) => {
+  await attached(target, d, async (s, until) => {
     const dialog = () => {
       if (promptOptions(s.lines())) throw new Error(`${id} is showing a prompt: answer it first, nothing more was typed`)
     }

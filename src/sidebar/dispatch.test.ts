@@ -17,6 +17,7 @@ const child = (id: string, more: Partial<ChildSession> = {}): ChildSession => ({
   intent: null,
   branch: null,
   timeline_len: 0,
+  account: 'default',
   ...more,
 })
 const mission = (feature: string, children: ChildSession[]): Mission => ({
