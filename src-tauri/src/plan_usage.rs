@@ -86,15 +86,22 @@ pub fn read_credentials_file(config_dir: &Path) -> Result<String, String> {
     })
 }
 
-/// The Keychain service Claude Code keeps an account's login under, on macOS. The default
-/// account's is confirmed. A non-default config dir uses another name, which has to be read
-/// from the installed `claude` before it goes here: never guessed.
-pub fn keychain_service(_config_dir: &Path, is_default: bool) -> Option<String> {
+/// The Keychain service Claude Code keeps an account's login under, on macOS. As `claude` 2.1.293
+/// names it (read from its own code, 2026-10-07): with `CLAUDE_CONFIG_DIR` unset,
+/// `Claude Code-credentials`; with it set, that name plus `-` and the first 8 hex digits of the
+/// dir's sha256. The dir is hashed as the pane passes it, which is the account's `configDir`.
+/// Claude Code normalizes it to NFC first, a no-op for the ASCII dirs accounts get.
+/// (`CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides all of this in Claude Code. The app never sets
+/// it.)
+pub fn keychain_service(config_dir: &Path, is_default: bool) -> String {
+    const SERVICE: &str = "Claude Code-credentials";
     if is_default {
-        Some("Claude Code-credentials".to_string())
-    } else {
-        None
+        return SERVICE.to_string();
     }
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(config_dir.to_string_lossy().as_bytes());
+    let hex: String = hash.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    format!("{SERVICE}-{hex}")
 }
 
 /// The machine's own store: the Keychain on macOS, `.credentials.json` elsewhere.
@@ -103,8 +110,7 @@ pub struct SystemStore;
 impl CredentialStore for SystemStore {
     #[cfg(target_os = "macos")]
     fn read(&self, config_dir: &Path, is_default: bool) -> Result<String, String> {
-        let service = keychain_service(config_dir, is_default)
-            .ok_or("The app does not know yet where Claude Code keeps this account's login in the Keychain.")?;
+        let service = keychain_service(config_dir, is_default);
         let out = crate::proc::command("/usr/bin/security")
             .args(["find-generic-password", "-s", &service, "-w"])
             .output()
@@ -660,8 +666,9 @@ mod tests {
     }
 
     #[test]
-    fn the_default_accounts_keychain_name_is_known_and_no_other_is_guessed() {
-        assert_eq!(keychain_service(Path::new("/h/.claude"), true).as_deref(), Some("Claude Code-credentials"));
-        assert_eq!(keychain_service(Path::new("/h/.claude-work"), false), None);
+    fn keychain_names_are_claude_codes_own() {
+        assert_eq!(keychain_service(Path::new("/h/.claude"), true), "Claude Code-credentials");
+        // sha256("/h/.claude-work") starts 55414178.
+        assert_eq!(keychain_service(Path::new("/h/.claude-work"), false), "Claude Code-credentials-55414178");
     }
 }

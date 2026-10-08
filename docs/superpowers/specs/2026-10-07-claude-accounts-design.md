@@ -91,9 +91,10 @@ response also carries many null fields with code names. Ignore them.
 **Credentials.**
 - **macOS:** a Keychain generic password. For the default account its service is
   `Claude Code-credentials`. Its secret is JSON with `claudeAiOauth.accessToken` (confirmed
-  2026-10-07). A non-default config dir uses a different service name. It is believed to be
-  `Claude Code-credentials-<hash of the dir>`, but this is **unverified**: check it against
-  the installed `claude`, never guess.
+  2026-10-07). When `CLAUDE_CONFIG_DIR` is set, the service is
+  `Claude Code-credentials-<first 8 hex digits of sha256(dir)>`. That was read from the code of
+  `claude` 2.1.293 on 2026-10-07. `CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides it, and the app
+  never sets that variable.
 - **Linux and Windows:** `<config dir>/.credentials.json`, same JSON.
 - Reading the Keychain makes macOS ask the maintainer once per reader.
 
