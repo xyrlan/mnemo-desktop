@@ -3,7 +3,6 @@
 import React, { useState } from 'react'
 import { BrushCleaning, FolderPlus, Loader2, Plus, X } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
-import { AccountSwitcher } from '../accounts/AccountSwitcher'
 import { addProject } from './actions'
 import { openCleanup } from './archive'
 import { run } from './upstream'
@@ -24,7 +23,7 @@ function HeaderAction({ label, shortcut, children, ...props }: React.ComponentPr
   )
 }
 
-/** The Claude account panes open on (`AccountSwitcher`), then "Projects", with Clean up workspaces (`worktree.cleanup`), Add project (Home's folder picker)
+/** "Projects", with Clean up workspaces (`worktree.cleanup`), Add project (Home's folder picker)
  *  and New workspace (`workspace.new`). A folder that could not be added says why under the row,
  *  until dismissed. */
 export const SidebarHeader = React.memo(function SidebarHeader() {
@@ -43,7 +42,6 @@ export const SidebarHeader = React.memo(function SidebarHeader() {
   }
   return (
     <>
-      <AccountSwitcher />
       <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
         <div className="flex min-w-0 items-center gap-1">
           <span className="min-w-0 truncate select-none pl-2 pr-0.5 text-xs font-semibold text-muted-foreground/80" data-sidebar-section-title="projects">

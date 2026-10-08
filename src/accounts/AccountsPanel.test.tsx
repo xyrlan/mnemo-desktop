@@ -40,10 +40,14 @@ async function mount(ui: React.ReactNode, init: Parameters<typeof fakeClient>[0]
   await act(async () => root!.render(<AccountsContext.Provider value={store}>{ui}</AccountsContext.Provider>))
   await act(settle)
 }
+// The switcher reads the clock itself: pinned to NOW, or a fixture's reset passes as the real day
+// goes by and its limit reads 0%.
+beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: NOW }))
 afterEach(() => {
   act(() => root?.unmount())
   root = null
   document.body.innerHTML = ''
+  vi.useRealTimers()
 })
 
 const card = (id: string) => host.querySelector(`[data-account="${id}"]`)!
