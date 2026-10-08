@@ -241,7 +241,8 @@ mod tests {
         let work = home.join(".claude-work");
         std::fs::create_dir_all(work.join("jobs").join("b0b0b0b0")).unwrap();
         std::fs::create_dir_all(home.join(".claude").join("jobs").join("a1a1a1a1")).unwrap();
-        let text = format!(r#"{{"accounts":[{{"id":"work","configDir":"{}"}}]}}"#, work.display());
+        // Through serde: a Windows path's backslashes need escaping in JSON.
+        let text = serde_json::json!({ "accounts": [{ "id": "work", "configDir": work }] }).to_string();
         let a = Accounts::parse(&text, &home);
         assert_eq!(a.owning_job("b0b0b0b0").map(|a| a.id.as_str()), Some("work"));
         assert_eq!(a.owning_job("a1a1a1a1").map(|a| a.id.as_str()), Some(DEFAULT_ID));

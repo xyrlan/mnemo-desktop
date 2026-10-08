@@ -2208,12 +2208,13 @@ mod account_tests {
     fn another_accounts_children_are_live_by_its_roster_and_a_stale_one_is_left_out() {
         let dir = crate::testutil::temp_dir("acct-children");
         let jobs = dir.join("jobs");
-        let here = dir.to_string_lossy().to_string();
+        // Through serde: a Windows path's backslashes need escaping in JSON.
+        let here = |state: &str, tempo: &str| serde_json::json!({ "state": state, "tempo": tempo, "cwd": dir }).to_string();
         job(&jobs, "a43d3832", STATE);
-        job(&jobs, "094c6a03", &format!(r#"{{"state":"working","tempo":"blocked","cwd":"{here}"}}"#));
+        job(&jobs, "094c6a03", &here("working", "blocked"));
         job(&jobs, "dead0001", r#"{"state":"done","tempo":"done","cwd":"/nonexistent/wt-1"}"#);
         job(&jobs, "dead0002", r#"{"state":"stopped","tempo":"blocked","cwd":"/nonexistent/wt-2"}"#);
-        job(&jobs, "done0003", &format!(r#"{{"state":"done","tempo":"done","cwd":"{here}"}}"#));
+        job(&jobs, "done0003", &here("done", "done"));
         job(&jobs, "broken04", "{");
         std::fs::write(jobs.join("pins.json"), "{}").unwrap();
 
@@ -2234,7 +2235,8 @@ mod account_tests {
         std::fs::create_dir_all(work.join("daemon")).unwrap();
         std::fs::create_dir_all(work.join("jobs").join("b0b0b0b0")).unwrap();
         std::fs::write(work.join("daemon").join("roster.json"), r#"{"workers":{"b0b0b0b0":{"pid":4242}}}"#).unwrap();
-        let text = format!(r#"{{"accounts":[{{"id":"work","configDir":"{}"}}]}}"#, work.display());
+        // Through serde: a Windows path's backslashes need escaping in JSON.
+        let text = serde_json::json!({ "accounts": [{ "id": "work", "configDir": work }] }).to_string();
         let accounts = Accounts::parse(&text, &home);
         // The default account has no roster at all; the work account's answers.
         assert_eq!(roster_host(&accounts, "b0b0b0b0"), Ok(4242));
