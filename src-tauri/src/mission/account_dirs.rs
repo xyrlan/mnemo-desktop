@@ -85,7 +85,9 @@ impl Accounts {
         }
         for e in file.accounts.into_iter().filter(|e| !e.is_default) {
             let dir = PathBuf::from(&e.config_dir);
-            if e.id.is_empty() || !dir.is_absolute() || out.0.iter().any(|a| a.id == e.id || a.config_dir == dir) {
+            // `has_root`, not `is_absolute`: a relative dir is refused on every OS, and a rooted one
+            // without a drive (`/Users/x/.claude-work`) is not, which `is_absolute` is on Windows.
+            if e.id.is_empty() || !dir.has_root() || out.0.iter().any(|a| a.id == e.id || a.config_dir == dir) {
                 continue;
             }
             out.0.push(Account { id: e.id, config_dir: dir, is_default: false });
