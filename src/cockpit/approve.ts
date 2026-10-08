@@ -5,7 +5,7 @@ import { permissionAsk, splitAsk, type ChildSession } from '../mission/types'
 import { attachCmd } from '../mission/account'
 import { attached, attachDefaults, SETTLE_MS, type Deps } from '../mission/as-me'
 import { questionOnScreen } from '../mission/ask'
-import { keyFor, promptOnScreen, type Choice } from './prompt'
+import { keyFor, promptOnScreen, type Choice, type Prompt } from './prompt'
 
 export type { Choice } from './prompt'
 
@@ -30,14 +30,20 @@ const put = (id: string, a: Answer): Answer => {
 /** An answer refused for what it is, not for what the screen showed: nothing to do by hand. */
 class Refused extends Error {}
 
-/** How much of the card's call the prompt must show, whitespace aside. */
-const CALL_CHARS = 40
+/** How much of its end a prompt taller than the screen must show of the card's command. */
+const END_CHARS = 200
 
-/** Whether the prompt asks about `command`: its box holds the start of it, whitespace aside (the
- *  terminal wraps and indents a long command). */
-export function asksAbout(asks: string, command: string): boolean {
+/** Whether `prompt` asks about `command`, whitespace aside (the terminal wraps and indents it).
+ *  A box on screen whole must hold all of the command: a child starts most commands with the same
+ *  `cd <worktree> &&`, so a part of one is not enough. A box taller than the screen shows only
+ *  its end. A command Claude Code cut short with `…` is compared up to the cut. */
+export function asksAbout(prompt: Prompt, command: string): boolean {
   const flat = (s: string) => s.replace(/\s+/g, '')
-  return flat(asks).includes(flat(command).slice(0, CALL_CHARS))
+  const cut = /(…|\.\.\.)$/.test(command.trimEnd())
+  const card = flat(command.trimEnd().replace(/(…|\.\.\.)$/, ''))
+  const box = flat(prompt.asks)
+  if (prompt.whole) return box.includes(card)
+  return !cut && box.includes(card.slice(-END_CHARS))
 }
 
 async function press(child: ChildSession, choice: Choice, d: Deps) {
@@ -56,7 +62,7 @@ async function press(child: ChildSession, choice: Choice, d: Deps) {
     await until('its permission prompt showed', d.timeoutMs, shown)
     await d.sleep(SETTLE_MS)
     const prompt = await until('its permission prompt showed', d.timeoutMs, shown)
-    if (command !== null && !asksAbout(prompt.asks, command)) throw new Error(`the prompt on ${id}'s screen is not the one this card shows, nothing was pressed`)
+    if (command !== null && !asksAbout(prompt, command)) throw new Error(`the prompt on ${id}'s screen is not the one this card shows, nothing was pressed`)
     const key = keyFor(prompt.options, choice)
     if (key === null) throw new Refused('this prompt does not offer "don\'t ask again": nothing was pressed')
     await s.write(key)

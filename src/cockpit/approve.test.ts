@@ -191,3 +191,59 @@ test('a second click while the first answer is on its way does nothing', async (
   expect(again).toMatchObject({ phase: 'attaching', choice: 'yes' })
   expect(opened).toBe(0)
 })
+
+/** A long command, as a dispatched child runs them: 13 lines, about 1000 characters. */
+const LONG_CMD = [
+  'cd /Users/me/probe/ui-tauri/src-tauri && f=src/cliente/plano.rs; cp $f $TMPDIR/plano.bak 2>/dev/null || cp $f /Users/me/.claude-work/jobs/560f5a32/tmp/plano.bak',
+  ...Array.from({ length: 12 }, (_, i) => `mut "fn passo_${i}(&self) -> bool {" "fn passo_${i}(&self) -> bool { return false;" && cargo test cliente::plano 2>&1 | tail -3`),
+].join('\n')
+/** Its prompt as the hidden attach (120 columns) draws it: each line wrapped under a 3-space
+ *  indent, so the command's first line sits about 20 rows above the options. */
+const wrapped = (line: string, width = 117) => Array.from({ length: Math.ceil(line.length / width) }, (_, i) => `   ${line.slice(i * width, (i + 1) * width)}`)
+const LONG = [
+  RULE,
+  ' Bash command',
+  '',
+  ...LONG_CMD.split('\n').flatMap((l) => wrapped(l)),
+  '   Run named mutations against plano tests',
+  '',
+  ' Do you want to proceed?',
+  ' ❯ 1. Yes',
+  "   2. Yes, and don't ask again for cargo test commands in /Users/me/probe",
+  '   3. No',
+  '',
+]
+const long = child({ id: '560f5a32', cwd: '/Users/me/probe', tempo: 'blocked', needs: `approve Bash: ${LONG_CMD}`, waiting_for: 'permission prompt' })
+
+test("a long command, its first line far above the options, is still the card's: Allow presses its key, no terminal", async () => {
+  const a = fakeAttach(LONG, (key) => (key === '1' ? AFTER : null))
+  const answer = await answerPrompt(long, 'yes', { ...quick, open: async () => a.session })
+  expect(answer.error).toBeUndefined()
+  expect(a.writes).toEqual(['exec claude attach 560f5a32\r', '1', DETACH_KEY])
+  expect(typed).toEqual([])
+})
+
+test('a prompt taller than the screen, its rule scrolled off: the end of the command is enough', async () => {
+  const tall = [...Array.from({ length: 30 }, (_, i) => `step_${i}() { cargo test cliente::plano::passo_${i} 2>&1 | tail -3; }`), LONG_CMD].join('\n')
+  const screen = [RULE, ' Bash command', '', ...tall.split('\n').flatMap((l) => wrapped(l)), '   Run every step', '', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No', '']
+  expect(screen.length).toBeGreaterThan(40)
+  const a = fakeAttach(screen, (key) => (key === '1' ? AFTER : null))
+  const answer = await answerPrompt({ ...long, needs: `approve Bash: ${tall}` }, 'yes', { ...quick, open: async () => a.session })
+  expect(answer.error).toBeUndefined()
+  expect(a.writes[1]).toBe('1')
+})
+
+test('another command that starts with the same cd as the card is not the card: nothing pressed', async () => {
+  const other = LONG.map((l) => l.replace('passo_11', 'passo_99'))
+  const a = fakeAttach(other)
+  const answer = await answerPrompt(long, 'yes', { ...quick, open: async () => a.session })
+  expect(answer.error).toContain('not the one')
+  expect(a.writes).toEqual(['exec claude attach 560f5a32\r', DETACH_KEY])
+})
+
+test('a card whose command Claude Code cut short with … is compared up to the cut', async () => {
+  const a = fakeAttach(LONG, (key) => (key === '1' ? AFTER : null))
+  const answer = await answerPrompt({ ...long, needs: `approve Bash: ${LONG_CMD.slice(0, 300)}…` }, 'yes', { ...quick, open: async () => a.session })
+  expect(answer.error).toBeUndefined()
+  expect(a.writes[1]).toBe('1')
+})
