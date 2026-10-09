@@ -181,6 +181,7 @@ pub fn run() {
             accounts::accounts_rename,
             accounts::accounts_remove,
             accounts::accounts_panes,
+            accounts::accounts_move_pane,
 
             // -- editor commands --
             fs::fs_read,

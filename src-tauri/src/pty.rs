@@ -252,6 +252,17 @@ impl PtyManager {
         Ok(accounts.of(&live))
     }
 
+    /// Records that pane `id`, still open, now runs on `account` (`accounts_move_pane`).
+    pub fn move_pane(&self, id: PaneId, account: &str) -> Result<(), String> {
+        let Some(accounts) = &self.accounts else {
+            return Err("panes are not kept by account here".into());
+        };
+        if !self.list()?.iter().any(|i| i.id == id) {
+            return Err(format!("no pane {id}"));
+        }
+        accounts.moved(id, account)
+    }
+
     /// The command for `opts`, with `shell` standing for the default shell. Only the default
     /// shell gets the integration: an explicit program is run as asked.
     fn command(&self, opts: SpawnOptions, shell: String) -> CommandBuilder {
@@ -523,6 +534,10 @@ mod tests {
         assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(default, "default".to_string()), (work, "work".to_string())]));
         m.kill(default);
         assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(work, "work".to_string())]));
+
+        m.move_pane(work, "default").unwrap();
+        assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(work, "default".to_string())]));
+        assert_eq!(m.move_pane(default, "work"), Err(format!("no pane {default}")), "an ended pane is not recorded");
     }
 
     #[test]

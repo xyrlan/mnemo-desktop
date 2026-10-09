@@ -177,7 +177,9 @@ impl Place {
 
     fn state_of(&self, list: &List) -> AccountsState {
         let default_servers = servers_in(&read_json(&self.home.join(".claude.json")));
-        AccountsState { active: list.active.clone(), accounts: list.accounts.iter().map(|e| self.account(e, &default_servers)).collect() }
+        let mut accounts: Vec<Account> = list.accounts.iter().map(|e| self.account(e, &default_servers)).collect();
+        same_login(&mut accounts);
+        AccountsState { active: list.active.clone(), accounts }
     }
 
     fn account(&self, e: &Entry, default_servers: &Map<String, Value>) -> Account {
@@ -406,6 +408,27 @@ impl Place {
 
 /// The servers `have` should hold, and what was written of them: per server, the default's
 /// (`wanted`) where `have` still reads as last written (`written`), `have`'s own otherwise.
+/// Decision 10: an account whose login another account also holds says which ones, since
+/// switching between them changes nothing.
+fn same_login(accounts: &mut [Account]) {
+    let notes: Vec<Option<String>> = accounts
+        .iter()
+        .map(|a| {
+            let email = a.email.as_deref()?;
+            let others: Vec<&str> = accounts.iter().filter(|o| o.id != a.id && o.email.as_deref() == Some(email)).map(|o| o.label.as_str()).collect();
+            (!others.is_empty()).then(|| format!("Logged in as {email}, the same Claude account as {}.", others.join(", ")))
+        })
+        .collect();
+    for (a, note) in accounts.iter_mut().zip(notes) {
+        if let Some(note) = note {
+            a.problem = Some(match a.problem.take() {
+                Some(p) => format!("{p} {note}"),
+                None => note,
+            });
+        }
+    }
+}
+
 fn step(wanted: &Map<String, Value>, written: &Map<String, Value>, have: &Map<String, Value>) -> (Map<String, Value>, Map<String, Value>) {
     let mut next = have.clone();
     let mut now_written = Map::new();
@@ -502,6 +525,15 @@ impl PaneAccounts {
         self.persist(&panes);
     }
 
+    /// `id` now runs on `account`: its session moved there. Refuses an account not in the list.
+    pub fn moved(&self, id: PaneId, account: &str) -> Result<(), String> {
+        if !self.place.state()?.accounts.iter().any(|a| a.id == account) {
+            return Err(format!("no account `{account}`"));
+        }
+        self.spawned(id, account.to_string());
+        Ok(())
+    }
+
     /// The account of each pane in `live`; the others are forgotten.
     pub fn of(&self, live: &[PaneId]) -> HashMap<PaneId, String> {
         let mut panes = self.panes.lock().unwrap_or_else(|e| e.into_inner());
@@ -584,6 +616,13 @@ pub fn accounts_remove<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Acco
 #[tauri::command(async)]
 pub fn accounts_panes(state: State<'_, PtyState>) -> Result<HashMap<PaneId, String>, String> {
     state.0.pane_accounts()
+}
+
+/// Pane `pane` now runs on account `id`: its Claude session moved there (decision 9).
+/// `accounts_panes` reports it there from now on.
+#[tauri::command(async)]
+pub fn accounts_move_pane(state: State<'_, PtyState>, pane: PaneId, id: String) -> Result<(), String> {
+    state.0.move_pane(pane, &id)
 }
 
 #[cfg(test)]
@@ -836,6 +875,42 @@ mod tests {
         assert_eq!(again.of(&[1, 2]), HashMap::from([(1, "default".to_string()), (2, "work".to_string())]));
         assert_eq!(again.of(&[2]), HashMap::from([(2, "work".to_string())]));
         assert_eq!(PaneAccounts::new(p, Some(file)).of(&[1, 2]), HashMap::from([(2, "work".to_string())]));
+    }
+
+    #[test]
+    fn a_moved_pane_is_reported_on_its_new_account() {
+        let p = place("moved");
+        p.add("Work").unwrap();
+        let file = p.app.join(PANES_FILE);
+        let panes = PaneAccounts::new(p.clone(), Some(file.clone()));
+        panes.spawned(1, "default".into());
+        panes.moved(1, "work").unwrap();
+        assert_eq!(panes.of(&[1]), HashMap::from([(1, "work".to_string())]));
+        assert_eq!(PaneAccounts::new(p.clone(), Some(file)).of(&[1]), HashMap::from([(1, "work".to_string())]), "kept across launches");
+        assert_eq!(panes.moved(1, "gone"), Err("no account `gone`".into()));
+        assert_eq!(panes.of(&[1]), HashMap::from([(1, "work".to_string())]));
+    }
+
+    #[test]
+    fn accounts_holding_the_same_login_say_so() {
+        let p = place("same");
+        logged_in(&p, "me@x.io");
+        p.add("Work").unwrap();
+        p.add("Spare").unwrap();
+        let config = |slug: &str, email: &str| {
+            let mut c = read_json(&p.home.join(format!(".claude-{slug}/.claude.json")));
+            c["oauthAccount"] = json!({ "emailAddress": email });
+            write(&p.home.join(format!(".claude-{slug}/.claude.json")), c);
+        };
+        config("work", "me@x.io");
+        config("spare", "s@x.io");
+        let s = p.state().unwrap();
+        assert_eq!(s.accounts[0].problem.as_deref(), Some("Logged in as me@x.io, the same Claude account as Work."));
+        assert_eq!(s.accounts[1].problem.as_deref(), Some("Logged in as me@x.io, the same Claude account as Default."));
+        assert_eq!(s.accounts[2].problem, None);
+        config("spare", "me@x.io");
+        let s = p.state().unwrap();
+        assert_eq!(s.accounts[0].problem.as_deref(), Some("Logged in as me@x.io, the same Claude account as Work, Spare."));
     }
 
     #[test]
