@@ -15,8 +15,8 @@ want to switch from the app and see the plan usage of both accounts (what `/usag
    its login differently. Every other account is `~/.claude-<slug>`, with its own login.
 
 2. **One active account for the whole app.** Switching changes the account of panes opened
-   afterwards. A running pane keeps its account. When there is more than one account, a pane
-   shows which account it runs on, so the maintainer knows which ones to reopen.
+   afterwards, and the open Claude sessions follow it (decision 9). When there is more than one
+   account, a pane still on another account shows which one.
    *Why global:* the Claude in Chrome extension is signed in to one claude.ai account at a time,
    so sessions on two accounts at once may fight over it. Nobody has checked whether the
    extension actually requires the same account. A global switch avoids the question.
@@ -59,6 +59,25 @@ want to switch from the app and see the plan usage of both accounts (what `/usag
 
 8. **Dropped: local token counts per account.** With shared transcripts, nothing says which
    account wrote a line. The endpoint's percentages are the account's real numbers anyway.
+
+9. **Open sessions follow the switch, silently** (decided 2026-10-08). The maintainer switches
+   when an account runs out, and expects the sessions already open to go on, on the new account.
+   A running `claude` reads its config dir once, at start, so it cannot change account in place.
+   Because history is shared (decision 3), it can be resumed there instead.
+   - **What moves:** each Claude session open in a pane on another account than the new active
+     one. Claude leaves, the pane's shell moves to the new account, and the same session resumes
+     in the same pane (`claude --resume <id>`).
+   - **When:** an idle session moves at once. One that is working, or waiting on the
+     maintainer, moves when it next goes idle. A draft in its input box is never lost.
+   - **No notice:** no prompt, no count, no toast. The maintainer: *"não precisa ter esses avisos
+     … só vai começar a usar outra conta"*.
+   - **What stays:** background children (`mnemo dispatch`) run on their account's daemon and
+     stay there (decision 5).
+
+10. **Two accounts logged in as the same Claude account say so.** On 2026-10-08 a `/login`
+    typed into a session still on the default account replaced that account's login with the
+    other account's. Both then held `xyrlancoding@gmail.com`, and switching changed nothing. An
+    account whose email another account also has gets a `problem` that says which one.
 
 ## Facts
 
