@@ -65,6 +65,10 @@ export const KEY_GAP_MS = 100
 const POLL_MS = 250
 /** How long Claude gets to leave once Ctrl+D was pressed twice. */
 export const LEAVE_MS = 15_000
+/** How long Claude gets to say the first Ctrl+D armed its exit, inside its double-press window. */
+export const ARM_MS = 800
+/** Claude's word that one more Ctrl+D leaves. */
+const ARMED = /again to exit/i
 /** How long the shell's screen has to stay still before the lines are typed. */
 export const SHELL_SETTLE_MS = 500
 /** Tries per pane and switch: a Claude that did not leave is left where it is. */
@@ -232,10 +236,26 @@ export function createFollow(d: FollowDeps): Follow {
     }
     if (!empty()) return
     await d.write(pane, EOF)
-    await d.sleep(KEY_GAP_MS)
-    // A key typed in between made a draft: the first Ctrl+D only arms the exit, and lapses.
-    if (!empty()) return
-    await d.write(pane, EOF)
+    // The second Ctrl+D goes only to a Claude that says the first armed its exit. One that leaves
+    // on the first already gets none: while it winds down its box is still up, and a second
+    // Ctrl+D would reach the shell after it, end it, and close the pane.
+    let first: 'armed' | 'left' | null = null
+    for (const end = d.now() + ARM_MS; first === null && d.now() < end; ) {
+      await d.sleep(KEY_GAP_MS)
+      const lines = screen()
+      if (!inputBox(lines)) first = 'left'
+      else if (ARMED.test(tail(lines, SCREEN_ROWS).join('\n'))) first = 'armed'
+    }
+    if (first === null) {
+      // Not heard, or a key typed in between made a draft: the armed exit lapses on its own.
+      if (tries >= TRIES) drop(pane)
+      return
+    }
+    if (first === 'armed') {
+      // A key typed in between made a draft: the first Ctrl+D only arms the exit, and lapses.
+      if (!empty()) return
+      await d.write(pane, EOF)
+    }
 
     let last = ''
     const left = await until(LEAVE_MS, async () => {

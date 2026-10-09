@@ -43,6 +43,9 @@ const SID = '7f3c2a10-0d1e-4b55-9a77-1c2d3e4f5a6b'
 
 type Screen = 'idle' | 'working' | 'dialog' | 'shell' | { draft: string } | { status: string }
 
+/** How long a Claude that leaves on one Ctrl+D keeps its box up: its SessionEnd hooks run first. */
+const LEAVING_MS = 300
+
 /** A terminal pane with Claude Code in it, answering keys the way the TUI does: Ctrl+D on an empty
  *  box arms the exit, a second one inside the window leaves to the shell, and `claude --resume`
  *  typed there brings the box back. */
@@ -54,8 +57,17 @@ function pane(id: number, screen: Screen = 'idle', sessionId = SID) {
     armed: false,
     /** Ctrl+D is ignored, as by a Claude that did not hear it. */
     deaf: false,
+    /** The first Ctrl+D leaves, with no second one asked: its box stays up while it winds down. */
+    oneShot: false,
+    leavingSince: null as number | null,
+    /** A Ctrl+D reached the shell, which ends it and closes the pane. */
+    ended: false,
     typed: [] as string[],
     lines(): string[] {
+      if (p.leavingSince !== null && Date.now() - p.leavingSince >= LEAVING_MS) {
+        p.leavingSince = null
+        p.screen = 'shell'
+      }
       const s = p.screen
       if (s === 'idle') return p.armed ? [...IDLE.slice(0, -1), '  Press Ctrl-D again to exit'] : IDLE
       if (s === 'working') return WORKING
@@ -66,7 +78,16 @@ function pane(id: number, screen: Screen = 'idle', sessionId = SID) {
     },
     key(data: string) {
       p.typed.push(data)
+      p.lines()
+      if (data === EOF && (p.screen === 'shell' || p.leavingSince !== null)) {
+        p.ended = true
+        return
+      }
       const s = p.screen
+      if (data === EOF && p.oneShot && s === 'idle') {
+        p.leavingSince = Date.now()
+        return
+      }
       if (data === EOF && !p.deaf && (s === 'idle' || (typeof s === 'object' && 'status' in s))) {
         if (p.armed) {
           p.armed = false
@@ -313,7 +334,8 @@ test('a Claude that does not leave is left running, and tried again only a few t
   await follow.switched()
   await run(TRIES * (LEAVE_MS + 5 * TICK_MS))
   expect(p.typed.filter((t) => t !== EOF)).toEqual([])
-  expect(p.typed).toHaveLength(2 * TRIES)
+  // One Ctrl+D a try: with no "again to exit", the second is never pressed.
+  expect(p.typed).toHaveLength(TRIES)
   expect(follow.pending()).toEqual([])
   expect(w.recorded).toEqual([])
 })
@@ -475,4 +497,16 @@ describe('the store', () => {
     expect(p.typed).toEqual([])
     expect(fake.called('move')).toEqual([])
   })
+})
+
+test('a Claude that leaves on the first Ctrl+D gets no second one, which would end the shell and close the pane', async () => {
+  const p = pane(3)
+  p.oneShot = true
+  const { w, follow } = world([p], { 3: 'default' })
+  w.active = 'work'
+  await follow.switched()
+  await run()
+  expect(p.ended).toBe(false)
+  expect(p.typed).toEqual([EOF, ' export CLAUDE_CONFIG_DIR=/Users/me/.claude-work\r', `claude --resume ${SID}\r`])
+  expect(w.recorded).toEqual([[3, 'work']])
 })
