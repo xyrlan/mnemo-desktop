@@ -65,6 +65,7 @@ export function fakeClient(init: { state: AccountsState; usage?: Record<string, 
     remove: (id) =>
       answer('remove', [id], () => (f.state = { active: f.state.active === id ? 'default' : f.state.active, accounts: f.state.accounts.filter((a) => a.id !== id) })),
     panes: () => answer('panes', [], () => f.panes),
+    movePane: (pane, id) => answer('move', [pane, id], () => void (f.panes = { ...f.panes, [pane]: id })),
     usage: (a, refresh) =>
       answer('usage', [a.id, refresh], () => {
         const u = f.usage[a.id]
