@@ -1037,13 +1037,18 @@ fn children_of(accounts: &Accounts, errors: &mut Vec<String>) -> Vec<ChildSessio
 /// `claude agents --json --all` on every account, at once. Each answer is tagged with its account.
 /// An account whose dir is gone is not asked: `claude` would make the dir again.
 pub(crate) fn agents_of<'a>(accounts: &'a Accounts) -> Vec<(&'a Account, Result<String, String>)> {
+    claude_on_every(accounts, &["agents", "--json", "--all"])
+}
+
+/// `claude <args>` on every account, at once, as `agents_of` asks it.
+pub(crate) fn claude_on_every<'a>(accounts: &'a Accounts, args: &[&str]) -> Vec<(&'a Account, Result<String, String>)> {
     std::thread::scope(|s| {
         let asks: Vec<_> = accounts
             .iter()
             .filter(|a| a.is_default || a.config_dir.is_dir())
-            .map(|a| (a, s.spawn(move || run_on(accounts, a, "claude", &["agents", "--json", "--all"], None))))
+            .map(|a| (a, s.spawn(move || run_on(accounts, a, "claude", args, None))))
             .collect();
-        asks.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("claude agents panicked".into())))).collect()
+        asks.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err(format!("claude {} panicked", args.join(" ")))))).collect()
     })
 }
 
