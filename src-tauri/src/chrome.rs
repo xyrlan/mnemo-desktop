@@ -3,8 +3,8 @@
 //! outside any repo costs one `git` spawn per TTL, not one per render.
 //!
 //! It also learns which Claude Code session a terminal pane runs when `claude` was typed by
-//! hand: the pids of `claude agents --json` matched against the process tree under the
-//! pane's shell.
+//! hand: the pids of every account's `claude agents --json` matched against the process tree
+//! under the pane's shell.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -98,6 +98,33 @@ pub fn parse_agent_pids(json: &str) -> HashMap<u32, (String, u64)> {
         .collect()
 }
 
+/// Every account's `claude agents --json`, asked at once. Each account keeps its own
+/// `sessions/`, so a `claude` started in a pane on another account is listed by that account's
+/// answer only. A failed answer names its account.
+pub fn ask_agents() -> Vec<Result<String, String>> {
+    ask_agents_on(&crate::mission::account_dirs::accounts())
+}
+
+fn ask_agents_on(accounts: &crate::mission::account_dirs::Accounts) -> Vec<Result<String, String>> {
+    crate::mission::claude_on_every(accounts, &["agents", "--json"])
+        .into_iter()
+        .map(|(a, got)| got.map_err(|e| crate::mission::on_account_error(a, e)))
+        .collect()
+}
+
+/// The accounts' answers as one table: pids are the system's, so rows from two accounts never
+/// collide. None only when no account could say.
+pub fn merge_agents(answers: impl IntoIterator<Item = Result<String, String>>) -> Option<HashMap<u32, (String, u64)>> {
+    answers.into_iter().filter_map(Result::ok).map(|j| parse_agent_pids(&j)).reduce(|mut all, more| {
+        all.extend(more);
+        all
+    })
+}
+
+fn live_agents() -> Option<HashMap<u32, (String, u64)>> {
+    merge_agents(ask_agents())
+}
+
 /// The session of the Claude process nearest below `root` (or `root` itself), walking the tree
 /// a level at a time: `children` answers every pid parented by any of the given ones, as
 /// `pgrep -P a,b,c` does. A session's own descendants are not searched, so a `claude` run by
@@ -130,17 +157,17 @@ fn children_of(pids: &[u32]) -> Vec<u32> {
 /// The Claude Code session running under a pane's shell, None when there is none (or `claude`
 /// is not installed).
 pub fn session_of(pane_pid: u32) -> Option<String> {
-    let agents = agents().get_or("", Instant::now(), || run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j)))?;
+    let agents = agents().get_or("", Instant::now(), live_agents)?;
     if agents.is_empty() {
         return None;
     }
     session_below(pane_pid, &agents, children_of)
 }
 
-/// The pids of the live Claude Code sessions, from a `claude agents --json` at most a few seconds
-/// old; empty when `claude` cannot say.
+/// The pids of the live Claude Code sessions on every account, from `claude agents --json` at most
+/// a few seconds old; empty when `claude` cannot say.
 pub fn claude_pids() -> Vec<u32> {
-    let agents = agents().get_or("", Instant::now(), || run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j)));
+    let agents = agents().get_or("", Instant::now(), live_agents);
     agents.map(|a| a.into_keys().collect()).unwrap_or_default()
 }
 
@@ -218,7 +245,7 @@ pub fn parent_of(_pid: u32) -> Option<u32> {
     None
 }
 
-/// Every pane asks on its own poll; one `claude agents` answers them all.
+/// Every pane asks on its own poll; one `claude agents` per account answers them all.
 fn agents() -> &'static Cache<Option<HashMap<u32, (String, u64)>>> {
     static C: std::sync::OnceLock<Cache<Option<HashMap<u32, (String, u64)>>>> = std::sync::OnceLock::new();
     C.get_or_init(|| Cache::new(Duration::from_secs(3)))
@@ -258,7 +285,7 @@ pub async fn chrome_claude_running(pane_pid: u32) -> bool {
     tauri::async_runtime::spawn_blocking(move || {
         let now = Instant::now();
         let fresh = || {
-            let found = run("claude", &["agents", "--json"], None).ok().map(|j| parse_agent_pids(&j));
+            let found = live_agents();
             agents().put("", Instant::now(), found.clone());
             found
         };
@@ -322,6 +349,28 @@ mod tests {
         assert_eq!(agents[&9102], ("7c3e9d41-2b6a-4f0e-8d15-a9c4e2f7b603".to_string(), 1789431000000));
         assert!(agents.contains_key(&20147), "a background session with a pid is live");
         assert!(parse_agent_pids("not json").is_empty());
+    }
+
+    /// A `claude` typed in a pane on another account, as only that account's `claude agents` lists it.
+    const OTHER: &str = r#"[{"sessionId": "1b870196-d631-4ba3-bd8b-93f08e1d4a8a", "pid": 32791, "startedAt": 1789432000000, "kind": "interactive"}]"#;
+
+    #[test]
+    fn every_accounts_agents_are_one_table() {
+        let both = merge_agents([Ok(AGENTS.to_string()), Ok(OTHER.to_string())]).unwrap();
+        assert_eq!(both.len(), 8, "{both:?}");
+        assert_eq!(both[&9102].0, "7c3e9d41-2b6a-4f0e-8d15-a9c4e2f7b603");
+        assert_eq!(both[&32791].0, "1b870196-d631-4ba3-bd8b-93f08e1d4a8a");
+        // The pane on the other account learns its session.
+        let pane = |parents: &[u32]| if parents.contains(&32790) { vec![32791] } else { vec![] };
+        assert_eq!(session_below(32790, &both, pane).as_deref(), Some("1b870196-d631-4ba3-bd8b-93f08e1d4a8a"));
+
+        // An account that cannot say does not hide the others'.
+        let one = merge_agents([Err("account work: claude agents --json: boom".into()), Ok(OTHER.to_string())]).unwrap();
+        assert_eq!(one.keys().collect::<Vec<_>>(), [&32791]);
+        // None only when no account could say: `claude` missing, or no account asked.
+        assert_eq!(merge_agents([Err("claude: not found".into()), Err("account work: claude: not found".into())]), None);
+        assert_eq!(merge_agents([]), None);
+        assert_eq!(merge_agents([Ok("[]".to_string())]), Some(HashMap::new()));
     }
 
     #[test]
@@ -504,6 +553,32 @@ mod tests {
         m.kill(id);
         let found = found.expect("the claude typed in the pane was not found");
         assert!(agents.contains(&found), "{found} is not a live session");
+    }
+
+    /// A Claude running on an account other than the default is found under its parent, as a pane's
+    /// would be. The accounts are the installed app's: a debug build keeps its own `accounts.json`.
+    /// `cargo test session_on_another_account_live -- --ignored --nocapture` with one running.
+    #[test]
+    #[ignore]
+    fn session_on_another_account_live() {
+        let home = crate::app_dir::home();
+        let file = crate::app_dir::shared_dir_in(&home).join("accounts.json");
+        let accounts = crate::mission::account_dirs::Accounts::parse(&std::fs::read_to_string(&file).unwrap(), &home);
+        let all = merge_agents(ask_agents_on(&accounts)).expect("claude agents");
+        let mut seen = 0;
+        for (a, got) in crate::mission::claude_on_every(&accounts, &["agents", "--json"]) {
+            if a.is_default {
+                continue;
+            }
+            for (pid, (session, _)) in parse_agent_pids(&got.unwrap()) {
+                let Some(pane) = parent_of(pid) else { continue };
+                let found = session_below(pane, &all, children_of);
+                eprintln!("account {}: pid {pid} under {pane}, session {session}, found {found:?}", a.id);
+                assert!(found.is_some(), "account {}: nothing found under {pane}", a.id);
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "no Claude runs on another account");
     }
 
     /// What the send guard costs against a live Claude: any running session that is not this

@@ -32,24 +32,28 @@ pub fn workspace_read() -> serde_json::Value {
     read_at(&path())
 }
 
-/// Which of `ids` a running `claude` process holds, from `claude agents --json`: a row with a pid.
-/// Another app instance (a `tauri dev` beside the installed app, the app opened twice) may be
-/// running them, and `claude --resume` would start a second copy of the session (#168).
-pub fn live_among(agents_json: &str, ids: &[String]) -> Vec<String> {
-    let live: std::collections::HashSet<String> = crate::chrome::parse_agent_pids(agents_json).into_values().map(|(s, _)| s).collect();
+/// Which of `ids` a running `claude` process holds, from every account's `claude agents --json`: a
+/// row with a pid. Another app instance (a `tauri dev` beside the installed app, the app opened
+/// twice) may be running them, and `claude --resume` would start a second copy of the session (#168).
+pub fn live_among<'a>(answers: impl IntoIterator<Item = &'a str>, ids: &[String]) -> Vec<String> {
+    let live: std::collections::HashSet<String> =
+        answers.into_iter().flat_map(|j| crate::chrome::parse_agent_pids(j).into_values()).map(|(s, _)| s).collect();
     ids.iter().filter(|id| live.contains(*id)).cloned().collect()
 }
 
-/// The saved sessions the restore must not resume. An error when `claude agents` cannot say:
-/// the restore then resumes nothing rather than risk a copy.
+/// The saved sessions the restore must not resume. An error when any account's `claude agents`
+/// cannot say: the restore then resumes nothing rather than risk a copy.
 #[tauri::command]
 pub async fn workspace_live_sessions(ids: Vec<String>) -> Result<Vec<String>, String> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    tauri::async_runtime::spawn_blocking(move || crate::mission::run("claude", &["agents", "--json"], None).map(|j| live_among(&j, &ids)))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let answers = crate::chrome::ask_agents().into_iter().collect::<Result<Vec<_>, _>>()?;
+        Ok(live_among(answers.iter().map(String::as_str), &ids))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -69,15 +73,18 @@ mod tests {
             {"sessionId": "c", "pid": 12, "kind": "background", "state": "working"}
         ]"#;
         let ids = ["a", "b", "c", "d"].map(String::from);
-        assert_eq!(live_among(json, &ids), ["a", "c"]);
-        assert_eq!(live_among(json, &[]), Vec::<String>::new());
-        assert_eq!(live_among("not json", &ids), Vec::<String>::new());
+        assert_eq!(live_among([json], &ids), ["a", "c"]);
+        assert_eq!(live_among([json], &[]), Vec::<String>::new());
+        assert_eq!(live_among(["not json"], &ids), Vec::<String>::new());
+        // Another account's answer: a session live there is not resumed here either.
+        let other = r#"[{"sessionId": "d", "pid": 13, "kind": "interactive"}]"#;
+        assert_eq!(live_among([json, other], &ids), ["a", "c", "d"]);
         // The captured listing: interactive sessions carry their pid.
         let real = include_str!("../fixtures/agents.json");
         let rows: Vec<serde_json::Value> = serde_json::from_str(real).unwrap();
         let with_pid = rows.iter().find(|r| r.get("pid").is_some()).unwrap()["sessionId"].as_str().unwrap().to_string();
         let without = rows.iter().find(|r| r.get("pid").is_none()).unwrap()["sessionId"].as_str().unwrap().to_string();
-        assert_eq!(live_among(real, &[with_pid.clone(), without]), [with_pid]);
+        assert_eq!(live_among([real], &[with_pid.clone(), without]), [with_pid]);
     }
 
     fn dir(name: &str) -> PathBuf {

@@ -41,7 +41,7 @@ export type FollowDeps = {
   lines(pane: number): string[] | undefined
   write(pane: number, data: string): Promise<void>
   /** Whether a Claude Code process runs under the pane's shell. Never wrongly true; wrongly false
-   *  for a session the app's `claude agents` does not list. */
+   *  for a session no account's `claude agents` lists. */
   runsClaude(pane: number): Promise<boolean>
   /** The session is working or waiting on the maintainer, as the app last heard. */
   busy(sessionId: string): Promise<boolean>
