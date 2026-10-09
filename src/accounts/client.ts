@@ -15,6 +15,8 @@ export interface AccountsClient {
   remove(id: string): Promise<AccountsState>
   /** The account each terminal pane was spawned on, by pane id. */
   panes(): Promise<Record<number, string>>
+  /** Records that pane `pane`'s session moved to account `id` (its shell was moved there). */
+  movePane(pane: number, id: string): Promise<void>
   usage(account: Account, refresh: boolean): Promise<PlanUsage>
   /** Calls `cb` with every new state; resolves to the unsubscribe. */
   onChanged(cb: (state: AccountsState) => void): Promise<() => void>
@@ -29,6 +31,7 @@ export const tauriAccounts: AccountsClient = {
   rename: (id, label) => invoke<AccountsState>('accounts_rename', { id, label }),
   remove: (id) => invoke<AccountsState>('accounts_remove', { id }),
   panes: () => invoke<Record<number, string>>('accounts_panes'),
+  movePane: (pane, id) => invoke<void>('accounts_move_pane', { pane, id }),
   usage: (a, refresh) => invoke<PlanUsage>('plan_usage', { configDir: a.configDir, isDefault: a.isDefault, refresh }),
   onChanged: (cb) => listen<AccountsState>(CHANGED_EVENT, (e) => cb(e.payload)),
   openTerminal: (cmd) => layout.getState().openCommandTab(undefined, cmd),

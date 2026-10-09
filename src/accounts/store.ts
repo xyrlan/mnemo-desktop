@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect } from 'react'
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import { tauriAccounts, type AccountsClient } from './client'
+import { createFollow, type FollowDeps } from './follow'
+import { appFollow } from './follow-app'
 import type { Account, AccountsState, PlanUsage } from './types'
 
 /** How often every account's usage is read again while the app is open. */
@@ -38,11 +40,35 @@ export type Accounts = {
 
 export type AccountsStore = StoreApi<Accounts>
 
+/** What moving the open sessions on a switch needs from the rest of the app (`follow.ts`); the
+ *  accounts themselves come from the store. */
+export type FollowEnv = Omit<FollowDeps, 'paneAccounts' | 'target' | 'record'>
+
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-export function createAccountsStore(client: AccountsClient, opts: { pollMs?: number } = {}): AccountsStore {
+/** `follow`: open Claude sessions follow a switch (decision 9). None given: they stay. */
+export function createAccountsStore(client: AccountsClient, opts: { pollMs?: number; follow?: FollowEnv } = {}): AccountsStore {
   return createZustand<Accounts>((set, get) => {
     let started = false
+    /** The active account the open sessions were last sent to; null until the list is read. */
+    let followed: string | null = null
+    /** An add under way switches to the new account for its login terminal and back: the
+     *  sessions stay put meanwhile. */
+    let adding = 0
+    const follow =
+      opts.follow &&
+      createFollow({
+        ...opts.follow,
+        paneAccounts: () => client.panes(),
+        target: () => {
+          const s = get().state
+          return s?.accounts.find((a) => a.id === s.active) ?? null
+        },
+        record: async (pane, id) => {
+          await client.movePane(pane, id)
+          void readPanes()
+        },
+      })
     /** The newest usage request per account: an older answer landing after it is dropped. */
     const asked: Record<string, number> = {}
     let seq = 0
@@ -51,6 +77,10 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       const ids = new Set(state.accounts.map((a) => a.id))
       const usage = Object.fromEntries(Object.entries(get().usage).filter(([id]) => ids.has(id)))
       set({ state, usage })
+      if (adding) return
+      const was = followed
+      followed = state.active
+      if (was !== null && was !== state.active) void follow?.switched().catch(() => {})
     }
 
     async function readPanes() {
@@ -133,13 +163,21 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
           // Read before adding: accounts-core makes the new account active, and its
           // `accounts://changed` may land before `add` answers.
           const was = get().state?.active
-          const account = await client.add(label)
-          // A pane runs on the account active when it spawns: switch for the spawn, then back.
-          apply(await client.switchTo(account.id))
+          let account: Account
+          adding++
           try {
-            await client.openTerminal(LOGIN_CMD)
+            account = await client.add(label)
+            // A pane runs on the account active when it spawns: switch for the spawn, then back.
+            apply(await client.switchTo(account.id))
+            try {
+              await client.openTerminal(LOGIN_CMD)
+            } finally {
+              if (was && was !== account.id) apply(await client.switchTo(was))
+            }
           } finally {
-            if (was && was !== account.id) apply(await client.switchTo(was))
+            adding--
+            // The sessions stay where they were sent last, whatever the add left active.
+            if (!adding) followed = get().state?.active ?? followed
           }
           void readPanes()
           void get().readUsage(false)
@@ -163,8 +201,8 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
   })
 }
 
-/** The app's accounts, on the Tauri commands. */
-export const accountsStore = createAccountsStore(tauriAccounts)
+/** The app's accounts, on the Tauri commands; the open sessions follow a switch. */
+export const accountsStore = createAccountsStore(tauriAccounts, { follow: appFollow })
 
 /** The store the accounts UI reads: the app's, or a test's. */
 export const AccountsContext = createContext<AccountsStore>(accountsStore)
