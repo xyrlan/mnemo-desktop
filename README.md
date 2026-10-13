@@ -27,6 +27,11 @@ So a bundle from before the merge reads as old instead of looking like a missing
 
     bundle installed at 2026-09-15 10:49 is behind main (6 commits); run `pnpm run install-app`
 
+On Linux and Windows `pnpm tauri build` makes the bundle. On Windows, set MSVC's Release flags first, for a dev build too: without them whisper is compiled with no optimization and dictation takes many times longer than it should (#312). CI and the release set them themselves.
+
+    $env:CMAKE_C_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+    $env:CMAKE_CXX_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+
 ## Test
 
     pnpm test                                        # front-end

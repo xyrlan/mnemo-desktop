@@ -6,11 +6,15 @@ import {
   APP_BIN,
   BASELINE,
   LIMIT,
+  SPILL_LIMIT,
   checkConfig,
   configProblems,
+  executableProblems,
   executables,
   ggmlSettings,
   isOff,
+  releaseFlags,
+  spillCounter,
   topSymbols,
   whisperCaches,
   wideCounter,
@@ -51,6 +55,22 @@ test('both workflows ask for a build that is not tuned to the runner, and both r
     const yml = readFileSync(join(ROOT, '.github/workflows', name), 'utf8')
     expect(yml, name).toMatch(/^ {2}GGML_NATIVE: 'OFF'$/m)
     expect(yml, name).toMatch(/run: node scripts\/portable-build\.mjs/)
+  }
+})
+
+test('on Windows both workflows define MSVC’s Release flags before anything is built or restored', () => {
+  for (const name of ['ci.yml', 'release.yml']) {
+    const yml = readFileSync(join(ROOT, '.github/workflows', name), 'utf8')
+    for (const lang of ['C', 'CXX']) expect(yml, name).toContain(`echo "CMAKE_${lang}_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG" >> "$GITHUB_ENV"`)
+    const at = yml.indexOf('CMAKE_C_FLAGS_RELEASE=')
+    // Windows only: these are MSVC's flags, and the build script would hand them to gcc and clang too.
+    expect(yml.lastIndexOf("if: runner.os == 'Windows'", at), name).toBeGreaterThan(yml.lastIndexOf('- name:', at))
+    expect(at, name).toBeLessThan(yml.indexOf('pnpm install'))
+    // The cache is keyed on CMAKE_*, because whisper's build script does not rerun when they change.
+    if (name === 'ci.yml') {
+      expect(at).toBeLessThan(yml.indexOf('swatinem/rust-cache'))
+      expect(yml).toMatch(/env-vars: .*\bCMAKE\b/)
+    }
   }
 })
 
@@ -115,6 +135,42 @@ test('an executable with no symbols counts into one bucket, Intel syntax include
   const { total, bySymbol } = count(['140e35322:      vxorps  %xmm0, %xmm0, %xmm0', '140e35326:      vmovups %zmm0, 0x100(%rbp)', ' 1000: vmovups zmmword ptr [rbp + 256], zmm0'])
   expect(total).toBe(2)
   expect(topSymbols(bySymbol)).toEqual(['2 (no symbol)'])
+})
+
+test('a register stored to the stack and loaded straight back is counted, in both syntaxes', () => {
+  const c = spillCounter()
+  ;[
+    // llvm-objdump, as MSVC compiled whisper's intrinsics without optimization (#312).
+    '140e35326:      vmovups %ymm0, 0x100(%rbp)',
+    '140e3532d:      vmovups 0x100(%rbp), %ymm0',
+    '140e35334:      vmovups %ymm0, 0x2c0(%rbp)',
+    '140e3533b:      leaq    0x300(%rbp), %rax',
+    // binutils: no space after the comma.
+    '  401000:\tvmovaps %ymm1,-0x40(%rsp)',
+    '  401004:\tvmovaps -0x40(%rsp),%ymm2',
+    // Another slot, and a register operand: neither is a reload.
+    '  401008:\tvmovaps %ymm1,0x20(%rsp)',
+    '  40100c:\tvmovaps 0x40(%rsp),%ymm2',
+    '  401010:\tvaddps  %ymm1, %ymm2, %ymm3',
+  ].forEach(c.feed)
+  expect(c.result()).toEqual({ vector: 8, spills: 2, perThousand: 250 })
+  expect(spillCounter().result()).toEqual({ vector: 0, spills: 0, perThousand: 0 })
+})
+
+test('an executable is judged on both counts, with the published ones on either side of each limit', () => {
+  expect(executableProblems({ total: 26, perThousand: 0.5 })).toEqual([]) // v0.5.0 for Linux
+  expect(executableProblems({ total: 0, perThousand: 0 })).toEqual([]) // Apple silicon: no such registers
+  expect(executableProblems({ total: 26, perThousand: 129.1 })).toEqual(['256-bit code compiled without optimization']) // v0.5.1 for Windows
+  expect(executableProblems({ total: 10871, perThousand: 129.1 })).toHaveLength(2) // v0.5.0 for Windows
+  expect(0.5).toBeLessThan(SPILL_LIMIT)
+  expect(129.1).toBeGreaterThan(SPILL_LIMIT)
+})
+
+test('a cache’s Release flags are read for the line that explains a failure', () => {
+  expect(releaseFlags('CMAKE_C_FLAGS_RELEASE:STRING=/MD /O2 /Ob2 /DNDEBUG\nCMAKE_CXX_FLAGS_RELEASE:STRING=x')).toBe('/MD /O2 /Ob2 /DNDEBUG')
+  // What cmake-rs writes when nothing defined them first: no /O flag at all.
+  expect(releaseFlags('CMAKE_C_FLAGS_RELEASE:UNINITIALIZED= -nologo -MD -Brepro')).toBe('-nologo -MD -Brepro')
+  expect(releaseFlags(cache('OFF'))).toBeNull()
 })
 
 test('the limit sits between a routine picked at run time and a library built for AVX-512', () => {
