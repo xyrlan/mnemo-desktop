@@ -25,12 +25,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
+      # cmake-rs replaces MSVC's Release flags with a line that has no /O flag unless they are
+      # already defined, and whisper's build script forwards CMAKE_* from the environment (#312).
+      # Before the cache: its key takes CMAKE_*, and a build restored from before stays as it was.
+      - name: MSVC Release flags for whisper
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "CMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG" >> "$GITHUB_ENV"
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # whisper's build script does not rerun when a GGML_* variable changes, so a cache
-          # from before one did would keep the old build: the key has to change with it.
-          env-vars: GGML
+          # whisper's build script does not rerun when a GGML_* or CMAKE_* variable changes, so
+          # a cache from before one did would keep the old build: the key has to change with it.
+          env-vars: GGML CMAKE
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -60,7 +69,7 @@ jobs:
         if: runner.os != 'Windows'
         run: node scripts/bundle-helpers.mjs
       # What was built, not what was asked for: whisper's configuration and the executable.
-      - name: built for other machines
+      - name: built for other machines, and optimized
         run: node scripts/portable-build.mjs
       - name: smoke (shell round-trip inside the built app)
         if: runner.os == 'Linux'

@@ -11,13 +11,19 @@
  *   node scripts/portable-build.mjs [<target dir>]    every whisper build and app executable there
  *   node scripts/portable-build.mjs --exe <file>…     only count, in executables from anywhere
  *
- * Two readings, and both must pass:
+ * Three readings, and all must pass:
  *   1. every whisper build under the target was configured with GGML_NATIVE off and with no
  *      instruction set on beyond the baseline voice.rs checks for at run time;
  *   2. the app's executable has at most LIMIT instructions touching a 512-bit register. A
  *      routine that picks AVX-512 at run time has a handful (crc32fast: 26, all there are in
  *      v0.5.0's Linux binary); a C library compiled for an AVX-512 machine has thousands
- *      (10,871 in v0.5.0's Windows one).
+ *      (10,871 in v0.5.0's Windows one);
+ *   3. its 256-bit code is optimized (#312): at most SPILL_LIMIT in a thousand of those
+ *      instructions store a register to a stack slot and load it straight back, which is what a
+ *      compiler emits for intrinsics when it is not optimizing and all but never otherwise.
+ *      cmake-rs replaces MSVC's Release flags with a line that has no /O flag unless they are
+ *      already defined, so every Windows release up to v0.5.1 shipped whisper unoptimized:
+ *      129.1 in a thousand there, 0.5 in the Linux binary built from the same commit.
  *
  * Run by CI after it builds, and by the release after it uploads: a release is a draft until
  * someone publishes it, and this failing is the reason not to.
@@ -33,6 +39,8 @@ export const APP_BIN = 'mnemo-desktop'
 export const BASELINE = ['SSE42', 'AVX', 'F16C', 'FMA', 'BMI2', 'AVX2']
 /** Instructions touching a 512-bit register an executable may have; see the two cases above. */
 export const LIMIT = 200
+/** Store-then-reload pairs per thousand 256-bit instructions an executable may have; see above. */
+export const SPILL_LIMIT = 10
 
 const FALSE = new Set(['OFF', '0', 'NO', 'FALSE', 'N', 'IGNORE', 'NOTFOUND', ''])
 
@@ -122,42 +130,94 @@ export function topSymbols(bySymbol, n = 5) {
     .map(([name, count]) => `${count} ${name || '(no symbol)'}`)
 }
 
+const STACK_SLOT = String.raw`((?:-?0x[0-9a-f]+|-?\d+)?\(%r[sb]p\))`
+const STORE = new RegExp(String.raw`\bvmov\w+\s+%ymm\d+,\s*${STACK_SLOT}\s*$`)
+const LOAD = new RegExp(String.raw`\bvmov\w+\s+${STACK_SLOT},\s*%ymm\d+`)
+
+/**
+ * Counts, over the same output, the 256-bit instructions and how many of them load a register
+ * from the stack slot the instruction before stored one to. AT&T syntax, with or without a
+ * space after the comma (llvm-objdump's and binutils').
+ */
+export function spillCounter() {
+  let vector = 0
+  let spills = 0
+  let stored = null
+  return {
+    feed(line) {
+      if (/\bymm\d/.test(line)) vector += 1
+      if (stored !== null && LOAD.exec(line)?.[1] === stored) spills += 1
+      stored = STORE.exec(line)?.[1] ?? null
+    },
+    result: () => ({ vector, spills, perThousand: vector ? (1000 * spills) / vector : 0 }),
+  }
+}
+
 /** The first disassembler that runs: LLVM's, then binutils'. Null when there is none. */
 export function disassembler(candidates = ['llvm-objdump', 'objdump', 'C:\\Program Files\\LLVM\\bin\\llvm-objdump.exe']) {
   return candidates.find((c) => spawnSync(c, ['--version'], { stdio: 'ignore' }).status === 0) ?? null
 }
 
 /** Disassembles `file` with `tool` and counts as it streams: the text runs to hundreds of MB. */
-export function wideIn(tool, file) {
+export function readExecutable(tool, file) {
   return new Promise((resolve, reject) => {
-    const counter = wideCounter()
+    const wide = wideCounter()
+    const spill = spillCounter()
     const child = spawn(tool, ['-d', '--no-show-raw-insn', file], { stdio: ['ignore', 'pipe', 'inherit'] })
-    createInterface({ input: child.stdout }).on('line', counter.feed)
+    createInterface({ input: child.stdout }).on('line', (line) => {
+      wide.feed(line)
+      spill.feed(line)
+    })
     child.on('error', reject)
-    child.on('close', (code) => (code === 0 ? resolve(counter.result()) : reject(new Error(`${tool} exited ${code} on ${file}`))))
+    child.on('close', (code) =>
+      code === 0 ? resolve({ ...wide.result(), ...spill.result() }) : reject(new Error(`${tool} exited ${code} on ${file}`)),
+    )
   })
 }
 
-/** One line per whisper build; true when every one is for other machines. */
+/** A cache's C flags for the Release configuration; null when it does not record any. */
+export function releaseFlags(cacheText) {
+  return /^CMAKE_C_FLAGS_RELEASE:[A-Z]+=(.*)$/m.exec(cacheText)?.[1].trim() ?? null
+}
+
+/** One line per whisper build (two with its Release flags); true when every one is for other machines. */
 export function checkConfig(caches, log = console.log) {
   let ok = true
   for (const cache of caches) {
-    const problems = configProblems(ggmlSettings(readFileSync(cache, 'utf8')))
+    const text = readFileSync(cache, 'utf8')
+    const problems = configProblems(ggmlSettings(text))
     if (problems.length) ok = false
     log(problems.length ? `${cache}: ${problems.join('; ')}` : `${cache}: GGML_NATIVE off, nothing on beyond ${BASELINE.join(' ')}`)
+    // Not judged here: the executable is. Printed because it is where an unoptimized one comes from.
+    const flags = releaseFlags(text)
+    if (flags !== null) log(`  CMAKE_C_FLAGS_RELEASE: ${flags || '(empty)'}`)
   }
   return ok
 }
 
-/** One line per executable (and the symbols to look at when it fails); true when all pass. */
+/** What is wrong with what `readExecutable` counted; empty when the executable passes. */
+export function executableProblems({ total, perThousand }) {
+  const problems = []
+  if (total > LIMIT) problems.push('512-bit code that runs whatever the CPU is')
+  if (perThousand > SPILL_LIMIT) problems.push('256-bit code compiled without optimization')
+  return problems
+}
+
+/** Two lines per executable, and what failed when something did; true when all pass. */
 export async function checkExecutables(files, tool, log = console.log) {
   let ok = true
   for (const file of files) {
-    const { total, bySymbol } = await wideIn(tool, file)
-    log(`${file}: ${total} instructions touch a 512-bit register (limit ${LIMIT})`)
-    if (total > LIMIT) {
+    const read = await readExecutable(tool, file)
+    log(`${file}: ${read.total} instructions touch a 512-bit register (limit ${LIMIT})`)
+    log(
+      `  ${read.spills} of its ${read.vector} 256-bit instructions reload what the one before stored: ` +
+        `${read.perThousand.toFixed(1)} in a thousand (limit ${SPILL_LIMIT})`,
+    )
+    const problems = executableProblems(read)
+    if (problems.length) {
       ok = false
-      log(`  most of them in: ${topSymbols(bySymbol).join(', ')}`)
+      log(`  FAILED: ${problems.join('; ')}`)
+      if (read.total > LIMIT) log(`  most of the 512-bit ones in: ${topSymbols(read.bySymbol).join(', ')}`)
     }
   }
   return ok
