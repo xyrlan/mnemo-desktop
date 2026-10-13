@@ -8,6 +8,9 @@ permissions:
   contents: write
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+  # Built for other machines, not for the runner (#308): left alone, whisper's ggml tunes
+  # itself to the CPU it is compiled on, and v0.5.0 for Windows came out needing AVX-512.
+  GGML_NATIVE: 'OFF'
 jobs:
   build:
     strategy:
@@ -50,3 +53,7 @@ jobs:
           # leave a public release with a platform missing. Publish by hand.
           releaseDraft: true
           args: ${{ matrix.args }}
+      # After the upload, so it cannot stop one. The release is a draft until someone publishes
+      # it, and this step failing on any platform is the reason not to.
+      - name: built for other machines
+        run: node scripts/portable-build.mjs

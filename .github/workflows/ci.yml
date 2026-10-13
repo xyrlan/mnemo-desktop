@@ -5,6 +5,9 @@ on:
   pull_request:
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+  # Built for other machines, not for the runner (#308): left alone, whisper's ggml tunes
+  # itself to the CPU it is compiled on, and v0.5.0 for Windows came out needing AVX-512.
+  GGML_NATIVE: 'OFF'
 jobs:
   test:
     strategy:
@@ -25,6 +28,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # whisper's build script does not rerun when a GGML_* variable changes, so a cache
+          # from before one did would keep the old build: the key has to change with it.
+          env-vars: GGML
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -53,6 +59,9 @@ jobs:
       - name: helpers in the bundle
         if: runner.os != 'Windows'
         run: node scripts/bundle-helpers.mjs
+      # What was built, not what was asked for: whisper's configuration and the executable.
+      - name: built for other machines
+        run: node scripts/portable-build.mjs
       - name: smoke (shell round-trip inside the built app)
         if: runner.os == 'Linux'
         run: MNEMO_DESKTOP_SMOKE=1 xvfb-run -a src-tauri/target/release/mnemo-desktop

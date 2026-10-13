@@ -3,6 +3,7 @@
 //! downloads once, on first use, into `~/.mnemo-desktop/models/`; nothing else leaves the
 //! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. On macOS the
 //! model runs on the GPU (Metal); `warm` loads it at launch so the first take does not wait.
+//! A published build asks the CPU for `BASELINE` before it lets whisper run (#308).
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -301,6 +302,60 @@ pub fn clean_transcript(raw: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------------------
+// CPU baseline
+
+/// What a published build's whisper needs from an x86 CPU (#308): the instruction sets ggml
+/// turns on by itself once it is told not to tune the build to the machine compiling it, which
+/// `GGML_NATIVE=OFF` in ci.yml and release.yml does. Haswell (2013) and Zen (2017) onwards have
+/// all six; `scripts/portable-build.mjs` fails a build that has anything on beyond them.
+pub const BASELINE: [&str; 6] = ["sse4.2", "avx", "f16c", "fma", "bmi2", "avx2"];
+
+/// CMake's reading of a value as false, for `GGML_NATIVE`.
+fn cmake_off(value: &str) -> bool {
+    matches!(value.trim().to_ascii_uppercase().as_str(), "OFF" | "0" | "NO" | "FALSE" | "N")
+}
+
+/// The features of `BASELINE` that `has` does not report, in its order.
+pub fn missing_features(has: impl Fn(&str) -> bool) -> Vec<&'static str> {
+    BASELINE.iter().copied().filter(|f| !has(f)).collect()
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn cpu_has(feature: &str) -> bool {
+    match feature {
+        "sse4.2" => std::arch::is_x86_feature_detected!("sse4.2"),
+        "avx" => std::arch::is_x86_feature_detected!("avx"),
+        "f16c" => std::arch::is_x86_feature_detected!("f16c"),
+        "fma" => std::arch::is_x86_feature_detected!("fma"),
+        "bmi2" => std::arch::is_x86_feature_detected!("bmi2"),
+        "avx2" => std::arch::is_x86_feature_detected!("avx2"),
+        _ => false,
+    }
+}
+
+/// The baseline is x86's: on another architecture there is nothing of it to lack.
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+fn cpu_has(_feature: &str) -> bool {
+    true
+}
+
+/// Whether whisper can run on this CPU, asked before anything of whisper's runs. It cannot be
+/// left to fail: on a CPU below what it was compiled for it executes an instruction the CPU
+/// does not have, and the whole app dies with it, at every launch once the model is on disk.
+/// A build tuned to its own machine (compiled without `GGML_NATIVE=OFF`) is not asked: that
+/// machine has what the build was tuned to.
+pub fn cpu_check() -> Result<(), String> {
+    if !option_env!("GGML_NATIVE").is_some_and(cmake_off) {
+        return Ok(());
+    }
+    let missing = missing_features(cpu_has);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!("dictation is not available on this CPU: it lacks {}", missing.join(", ")))
+}
+
+// ---------------------------------------------------------------------------------------
 // Model and transcription
 
 pub fn models_dir() -> PathBuf {
@@ -447,6 +502,8 @@ struct Progress {
 }
 
 fn model(app: &AppHandle) -> Result<Arc<WhisperContext>, String> {
+    // Before the download as well as the load: a model this CPU cannot run is 60 MB of nothing.
+    cpu_check()?;
     let state = app.state::<VoiceState>();
     let mut slot = lock(&state.model);
     if let Some(ctx) = slot.as_ref() {
@@ -497,6 +554,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 #[tauri::command]
 pub async fn voice_start(app: AppHandle) -> Result<(), String> {
     blocking(move || {
+        // Said at the first press, not after a take nothing will transcribe.
+        cpu_check()?;
         let state = app.state::<VoiceState>();
         {
             let mut slot = lock(&state.recording);
@@ -563,6 +622,39 @@ mod tests {
 
     fn rms(s: &[f32]) -> f32 {
         (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
+    }
+
+    #[test]
+    fn a_cpu_with_the_whole_baseline_lacks_nothing_and_avx512_is_never_asked_for() {
+        assert!(missing_features(|_| true).is_empty());
+        // The machine of #308, an i7-10700F: all of the baseline, no AVX-512.
+        let comet_lake = ["sse4.2", "avx", "f16c", "fma", "bmi2", "avx2"];
+        assert!(missing_features(|f| comet_lake.contains(&f)).is_empty());
+        assert!(!BASELINE.iter().any(|f| f.starts_with("avx512")));
+    }
+
+    #[test]
+    fn a_cpu_below_the_baseline_is_told_what_it_lacks_in_order() {
+        // Sandy Bridge: AVX, and nothing that came after it.
+        let sandy_bridge = ["sse4.2", "avx"];
+        assert_eq!(missing_features(|f| sandy_bridge.contains(&f)), vec!["f16c", "fma", "bmi2", "avx2"]);
+        assert_eq!(missing_features(|_| false), BASELINE.to_vec());
+    }
+
+    #[test]
+    fn ggml_native_is_off_the_way_cmake_reads_it() {
+        for off in ["OFF", "off", "0", "FALSE", "No", " OFF "] {
+            assert!(cmake_off(off), "{off:?}");
+        }
+        for on in ["ON", "1", "TRUE", "", "native"] {
+            assert!(!cmake_off(on), "{on:?}");
+        }
+    }
+
+    #[test]
+    fn the_machine_running_the_suite_passes_its_own_check() {
+        // Every CI runner has the baseline; with `GGML_NATIVE=OFF` this is the real probe.
+        assert_eq!(cpu_check(), Ok(()));
     }
 
     #[test]
