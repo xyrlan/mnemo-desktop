@@ -12,6 +12,7 @@ import { macChord, pasteBytes } from './keymap'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
 import { resizeRequest } from './reattach'
+import { loadFaces, onFaces, redraw } from './fonts'
 import { provideSessions } from './sessions'
 import { tauriSessions } from './tauri-sessions'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
@@ -119,9 +120,22 @@ export default function TerminalPane({ id }: PaneViewProps) {
     const ro = new ResizeObserver(refit)
     ro.observe(el)
     refit()
+    // The renderer keeps each glyph as it first drew it, and a web font's face arrives when it
+    // is first used: the faces are asked for now, and each arrival draws the pane again (#315).
+    let open = true
+    const family = term.options.fontFamily ?? ''
+    const facesArrived = () => {
+      if (!open) return
+      redraw(term)
+      refit()
+    }
+    void loadFaces(family, term.options.fontSize ?? 13).then(facesArrived)
+    const stopFaces = onFaces(family, facesArrived)
     const releaseDrop = holdFileDrop()
 
     return () => {
+      open = false
+      stopFaces()
       unregisterBuffer()
       releaseDrop()
       ro.disconnect()
