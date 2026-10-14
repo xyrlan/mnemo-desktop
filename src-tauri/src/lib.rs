@@ -201,6 +201,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
+            pty::shells::pty_shells,
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
