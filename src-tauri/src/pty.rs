@@ -562,8 +562,7 @@ mod closing_tests {
         assert_eq!(closing::question(&m.busy()), None, "an idle shell loses nothing");
 
         // `; :` keeps sh from becoming the one command it was given.
-        // On Windows a second `cmd`, by its full path: on windows-latest a pane started through
-        // `command` finds neither `ping` nor `powershell` by name (its `PATH` is not this test's).
+        // On Windows a second `cmd`, by its full path, which needs nothing of the pane's `PATH`.
         let nested = format!("{} /d /c set /p y=", std::env::var("COMSPEC").unwrap_or_default());
         let (working, printed) = shell(&m, if cfg!(windows) { &nested } else { "sleep 60; :" });
         let program = if cfg!(windows) { "cmd" } else { "sleep" };
@@ -598,6 +597,60 @@ mod mcp_env_tests {
         let socket = crate::mcp::socket_path();
         let want = if cfg!(windows) { None } else { Some(socket.as_os_str()) };
         assert_eq!(cmd.get_env(crate::mcp::SOCKET_ENV), want);
+    }
+}
+
+/// A pane's `PATH` on Windows (#371): what a terminal opened from the Start menu finds, a pane
+/// finds. Only Windows: elsewhere a pane's login shell builds its own.
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_pane_finds_the_systems_own_tools_by_name() {
+        let m = PtyManager::with_shell_dir(None);
+        // `cmd` by name, whichever shell is the default: every pane gets the same `PATH`.
+        let line = "where powershell && where ping && echo ALL-FOUND";
+        let program = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+        let opts = SpawnOptions { program: Some(program), args: ["/d", "/c"].into_iter().chain(line.split(' ')).map(String::from).collect(), cwd: None, cols: 200, rows: 24, login: false };
+        let (tx, rx) = mpsc::channel();
+        let id = m.spawn(opts, Box::new(move |e| drop(tx.send(e)))).expect("spawn");
+        // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
+        m.write(id, b"\x1b[1;1R").unwrap();
+        let (mut printed, mut exit) = (Vec::new(), None);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while exit.is_none() && Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(Event::Output(b)) => printed.extend(b),
+                Ok(Event::Exit(code)) => exit = Some(code),
+                Err(_) => {}
+            }
+        }
+        m.kill(id);
+        let said = String::from_utf8_lossy(&printed).into_owned();
+        let path = crate::tools::pane_path();
+        let found = |name: &str| crate::tools::Lookup::native().find(name, &path);
+        let plain = crate::proc::command(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()))
+            .args(["/d", "/c", "where", "powershell"])
+            .env("PATH", &path)
+            .output()
+            .map(|o| (o.status.code(), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()));
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        assert!(
+            said.contains("ALL-FOUND"),
+            "exit {exit:?}, printed {said:?}; the pane's PATH is {} chars, {} entries, powershell {:?}, ping {:?} in it; \
+             the same PATH outside a pty: {plain:?}; registry {:?} chars; inherited {} chars: {inherited}; pane: {path}",
+            path.len(),
+            path.split(';').count(),
+            found("powershell"),
+            found("ping"),
+            crate::tools::system_path().map(|s| s.len()),
+            inherited.len(),
+        );
+        let said = said.to_ascii_lowercase();
+        assert!(said.contains("powershell.exe") && said.contains("ping.exe"), "{said}");
     }
 }
 
