@@ -4,6 +4,9 @@ pub mod pty;
 // -- process spawning (src/proc.rs) --
 pub mod proc;
 
+// -- the process table (src/procs.rs) --
+pub mod procs;
+
 // Feature modules register below. Each one owns its own block, separated by
 // blank lines, so two branches adding a module never touch the same hunk.
 

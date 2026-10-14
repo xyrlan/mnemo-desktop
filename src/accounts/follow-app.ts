@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/core'
 import { store as layout } from '../layout/app-store'
-import { ptyPid, tauriPty } from '../pty/client'
+import { paneRunsClaude } from '../chrome/running'
+import { tauriPty } from '../pty/client'
 import { readBuffer } from '../terminal/buffer'
 import type { FollowEnv } from './store'
 
@@ -22,10 +22,7 @@ export const appFollow: FollowEnv = {
     ),
   lines: readBuffer,
   write: (pane, data) => tauriPty.write(pane, data),
-  runsClaude: async (pane) => {
-    const pid = await ptyPid(pane).catch(() => null)
-    return pid !== null && (await invoke<boolean>('chrome_claude_running', { panePid: pid }).catch(() => false))
-  },
+  runsClaude: paneRunsClaude,
   busy: async (sessionId) =>
     (await fleet()).repos.some((r) =>
       r.worktrees.some((w) => w.agents.some((a) => same(a.sessionId, sessionId) && (a.state === 'working' || a.state === 'needs-you'))),

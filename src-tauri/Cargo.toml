@@ -68,9 +68,10 @@ tauri-plugin-notification = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# An account's shared dirs are junctions, which need no privilege to make (accounts.rs).
+# An account's shared dirs are junctions, which need no privilege to make (accounts.rs). The
+# process table and a pid's exit code are read from the system (procs.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading"] }
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
