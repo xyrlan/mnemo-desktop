@@ -5,7 +5,7 @@
 import { store } from '../layout/app-store'
 import { tauriPty } from '../pty/client'
 import { register, registerProvider } from '../actions/registry'
-import { detectPlatform } from '../actions/keys'
+import { shortcutKeys } from '../actions/chords'
 import { tauriVoice, type Language } from './client'
 import { createVoice, LANGUAGES, nextLanguage } from './controller'
 import { insert, resolveTarget, withSeparator } from './route'
@@ -68,9 +68,8 @@ async function setLanguage(l: Language) {
   }
 }
 
-const mac = detectPlatform() === 'mac'
-const toggleKeys = mac ? ['⌘', 'E'] : ['Ctrl', 'E']
-register({ id: 'dictation.toggle', title: 'Dictate (start / stop)', shortcut: mac ? '⌘E' : 'Ctrl+E', run: () => voice.toggle() })
+const toggleKeys = shortcutKeys('dictation.toggle')
+register({ id: 'dictation.toggle', title: 'Dictate (start / stop)', run: () => voice.toggle() })
 registerProvider(() => [
   {
     id: 'voice.language',

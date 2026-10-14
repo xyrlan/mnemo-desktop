@@ -91,6 +91,6 @@ function NewWorkspace(): React.JSX.Element {
   )
 }
 
-register({ id: 'workspace.new', title: 'New workspace', shortcut: '⌘N', run: () => openNewWorkspace() })
+register({ id: 'workspace.new', title: 'New workspace', run: () => openNewWorkspace() })
 
 mountInSlot('overlay', NewWorkspace)

@@ -25,6 +25,7 @@ import type { Side } from '../layout/tree'
 import { AgentStateDot } from './AgentStateDot'
 import type { DropIndicator } from './model'
 import { usePointerActivation } from './pointer-activation'
+import { shortcutLabel } from '../actions/chords'
 
 // A definite width pins every tab, so one live title update cannot resize the strip; flex-shrink
 // still narrows them to the floor when many are open.
@@ -262,7 +263,7 @@ export default function SortableTab({
                     : 'text-transparent group-hover:text-muted-foreground hover:!bg-muted hover:!text-foreground focus-visible:!bg-muted focus-visible:!text-foreground',
                 )}
                 aria-label={`Close tab ${title}`}
-                title="Close tab (⌘⇧W)"
+                title={`Close tab (${shortcutLabel('tab.close')})`}
                 data-tab-close-button="true"
                 onPointerDown={(e) => e.button === 0 && e.stopPropagation()}
                 onMouseDown={(e) => e.button === 0 && e.stopPropagation()}
@@ -300,7 +301,7 @@ export default function SortableTab({
           <ContextMenuItem onSelect={() => onClose(id)}>
             <X className="size-3.5" />
             Close Tab
-            <ContextMenuShortcut>⌘⇧W</ContextMenuShortcut>
+            <ContextMenuShortcut>{shortcutLabel('tab.close')}</ContextMenuShortcut>
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
