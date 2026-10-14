@@ -5,7 +5,12 @@
  *  face is still on the way is drawn in the fallback font, and kept, beside the glyphs first
  *  drawn after the face arrived. On Windows, where the fallback looks nothing like it, bold
  *  words came out in two typefaces. So a terminal asks for its faces when it opens, and whenever
- *  one arrives it measures its cells and draws every glyph again. */
+ *  one arrives it measures its cells and draws every glyph again.
+ *
+ *  The texture is shared: every terminal with the same font, size and colours draws from one.
+ *  Each keeps, per cell, where its glyph sat in that texture, and draws a cell again only when
+ *  the cell changes. So when one terminal drops the glyphs, every other one must forget where
+ *  they were, or its cells point at whatever glyph is drawn there next (#393). */
 import type { Terminal } from '@xterm/xterm'
 
 /** The weights a terminal draws with: the ones theme.css imports. */
@@ -44,12 +49,27 @@ export function onFaces(family: string, arrived: () => void, fonts: Fonts | unde
   return () => fonts.removeEventListener('loadingdone', done)
 }
 
+type Drawn = Pick<Terminal, 'options' | 'clearTextureAtlas'>
+
+/** The open terminals, any of which may share `term`'s texture. */
+const open = new Set<Drawn>()
+
+/** Counts `term` among the open terminals until the returned function is called. */
+export function track(term: Drawn): () => void {
+  open.add(term)
+  return () => void open.delete(term)
+}
+
 /** Makes `term` measure its cells and draw every glyph again, in the fonts as they are now. */
-export function redraw(term: Pick<Terminal, 'options' | 'clearTextureAtlas'>): void {
+export function redraw(term: Drawn): void {
   // xterm measures a cell when the family changes and at no other time, so it is changed and
   // put back. That brings the same texture back, glyphs and all, which is why it is cleared.
   const family = term.options.fontFamily
   term.options.fontFamily = 'monospace'
   term.options.fontFamily = family
   term.clearTextureAtlas()
+  // The others forget their cells' places, a hidden one included: it rebuilds them when shown.
+  // Nothing is drawn before the next frame, so the texture they find is the empty one and
+  // clearing it again is free; each draws its own visible rows once, not its scrollback.
+  for (const other of open) if (other !== term) other.clearTextureAtlas()
 }

@@ -13,7 +13,7 @@ import { detectPlatform } from '../actions/chords'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
 import { resizeRequest } from './reattach'
-import { loadFaces, onFaces, redraw } from './fonts'
+import { loadFaces, onFaces, redraw, track } from './fonts'
 import { provideSessions } from './sessions'
 import { tauriSessions } from './tauri-sessions'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
@@ -135,6 +135,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
     // The renderer keeps each glyph as it first drew it, and a web font's face arrives when it
     // is first used: the faces are asked for now, and each arrival draws the pane again (#315).
     let open = true
+    const untrack = track(term)
     const family = term.options.fontFamily ?? ''
     const facesArrived = () => {
       if (!open) return
@@ -147,6 +148,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
 
     return () => {
       open = false
+      untrack()
       stopFaces()
       unregisterBuffer()
       releaseDrop()
