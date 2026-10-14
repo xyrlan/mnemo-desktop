@@ -740,7 +740,7 @@ pub fn extract_marked_path(out: &str) -> Option<String> {
 
 /// Tool dirs an app must find even when the shell probe missed them.
 fn well_known_dirs() -> Vec<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::app_dir::home().to_string_lossy().to_string();
     ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         .iter()
         .map(|d| d.to_string())
@@ -836,7 +836,7 @@ pub fn may_probe(path: &str) -> bool {
     if !cfg!(target_os = "macos") {
         return true;
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::app_dir::home().to_string_lossy().to_string();
     !is_protected(path, &home) || unlock_covers(path)
 }
 
