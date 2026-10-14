@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ChevronsUpDown, UserRound } from 'lucide-react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui'
+import { AlertTriangle, ChevronsUpDown, RefreshCw, UserRound } from 'lucide-react'
+import { Button, Popover, PopoverContent, PopoverTrigger } from '@/ui'
 import { useAccounts, useAccountsStore } from './store'
 import { limitName, percentNow, resetsWhen, tightest } from './format'
 import { LimitBar } from './Usage'
@@ -16,16 +16,54 @@ function useNow(): number {
   return now
 }
 
+/** In place of the switcher while the accounts list cannot be read: why, what it means for a new
+ *  terminal, and a retry. */
+function Unreadable({ why }: { why: string }) {
+  const store = useAccountsStore()
+  const [trying, setTrying] = useState(false)
+  return (
+    <div
+      role="alert"
+      className="mx-2 mt-2 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-xs"
+      title={`The Claude accounts list could not be read: ${why}\nUntil it can, new terminals run on the default account.`}
+      data-account-switcher-error=""
+    >
+      <AlertTriangle className="size-3.5 shrink-0 text-status-warning" strokeWidth={2.25} aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">Accounts unreadable</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="shrink-0"
+        disabled={trying}
+        onClick={() => {
+          setTrying(true)
+          void store
+            .getState()
+            .retryList()
+            .finally(() => setTrying(false))
+        }}
+      >
+        <RefreshCw className="size-3" aria-hidden />
+        Retry
+      </Button>
+    </div>
+  )
+}
+
 /** The left sidebar's account row: the active account's label and its tightest limit. A click opens
  *  the accounts (`AccountsPanel`), and reads every account's usage again. Draws nothing until the
- *  accounts are known. */
+ *  accounts are known, unless they could not be read (`Unreadable`). A failure the panel shows
+ *  marks the row, so it is seen with the panel closed. */
 export function AccountSwitcher() {
   const store = useAccountsStore()
   const state = useAccounts((s) => s.state)
+  const listError = useAccounts((s) => s.listError)
+  const error = useAccounts((s) => s.error)
   const usage = useAccounts((s) => (s.state ? s.usage[s.state.active] : undefined))
   const [open, setOpen] = useState(false)
   const now = useNow()
-  if (!state) return null
+  if (!state) return listError ? <Unreadable why={listError} /> : null
   const account = state.accounts.find((a) => a.id === state.active)
   const label = account?.label ?? state.active
   const limit = usage?.usage ? tightest(usage.usage.limits, now) : undefined
@@ -36,6 +74,7 @@ export function AccountSwitcher() {
     limit && `${limitName(limit)} ${percent}%${resets && resets !== 'reset' ? `, resets ${resets}` : ''}`,
     usage?.usage?.stale && `Old reading: ${usage.usage.stale}`,
     account?.problem,
+    error,
   ]
     .filter(Boolean)
     .join('\n')
@@ -57,7 +96,7 @@ export function AccountSwitcher() {
         >
           <UserRound className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={2.25} aria-hidden />
           <span className="min-w-0 truncate text-xs font-semibold text-foreground/90">{label}</span>
-          {account?.problem && <span className="size-1.5 shrink-0 rounded-full bg-status-warning" aria-label={account.problem} />}
+          {(account?.problem || error) && <span className="size-1.5 shrink-0 rounded-full bg-status-warning" aria-label={error ?? account?.problem ?? undefined} />}
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {limit && percent !== null && (
               <>

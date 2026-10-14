@@ -21,11 +21,16 @@ unset MNEMO_BASH_LOGIN
 
 # Percent-encoded byte by byte, as /etc/bashrc_Apple_Terminal does. Runs first in
 # PROMPT_COMMAND and hands back $? so the user's own prompt commands still see it.
+# Git Bash (MSYS) and Cygwin on Windows report the Windows folder, `/C:/...`: their `$PWD` is
+# a mount, and `/tmp` there is the user's temp folder.
 if [ "$MNEMO_NO_SHELL_INTEGRATION" != 1 ]; then
   __mnemo_osc7() {
-    local status=$? LC_ALL=C url_path='' i ch byte
-    for ((i = 0; i < ${#PWD}; i++)); do
-      ch=${PWD:i:1}
+    local status=$? LC_ALL=C url_path='' i ch byte dir=$PWD
+    case $OSTYPE in
+      msys* | cygwin*) dir=/$(pwd -W 2>/dev/null || cygpath -m "$PWD") ;;
+    esac
+    for ((i = 0; i < ${#dir}; i++)); do
+      ch=${dir:i:1}
       case $ch in
         [/._~A-Za-z0-9-]) url_path+=$ch ;;
         # bash 3.2 (macOS) sign-extends bytes above 0x7F: mask to one byte.

@@ -74,11 +74,10 @@ pub fn run(id: &str, cwd: &str, argv: &[String], sink: Arc<dyn Fn(JobEvent) + Se
     if !live().lock().unwrap().insert(id.to_string()) {
         return Err(format!("job {id} is already running"));
     }
-    let spawned = crate::proc::command(program)
+    let spawned = crate::proc::tool(program, &login_path())
         .args(args)
         .current_dir(cwd)
         // Apps started from Finder or the Dock get a bare PATH, without Homebrew's `gh` or `mnemo`.
-        .env("PATH", login_path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

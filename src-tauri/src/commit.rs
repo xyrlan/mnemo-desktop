@@ -114,10 +114,9 @@ impl Ran {
 /// Runs `program` in `cwd` with the login PATH, `stdin` fed and closed, never prompting, and
 /// killed after `timeout`. `Err` only when it could not run or timed out.
 fn exec(program: &str, args: &[&str], cwd: &Path, stdin: Option<&[u8]>, timeout: Duration) -> Result<Ran, String> {
-    let mut cmd = crate::proc::command(program);
+    let mut cmd = crate::proc::tool(program, &login_path());
     cmd.args(args)
         .current_dir(cwd)
-        .env("PATH", login_path())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GH_PROMPT_DISABLED", "1")
         .env("NO_COLOR", "1")

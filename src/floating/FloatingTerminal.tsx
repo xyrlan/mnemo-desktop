@@ -9,6 +9,7 @@ import type { Bounds } from './bounds'
 import { ResizeHandles } from './ResizeHandles'
 import type { FloatingActions, FloatingState, FloatingStore } from './store'
 import { shortcutLabel } from '../actions/chords'
+import { basename } from '../path/path'
 
 /** The shortcut `floating-terminal.toggle` is bound to, from the chord table. */
 export const TOGGLE_SHORTCUT = shortcutLabel('floating-terminal.toggle')
@@ -18,8 +19,6 @@ const NO_DRAG = 'button,input,textarea,select,[role="menuitem"],[data-floating-t
 const isDragTarget = (t: EventTarget) => !(t instanceof Element && t.closest(NO_DRAG))
 
 const controlButton = 'border-border bg-secondary text-secondary-foreground shadow-xs hover:bg-accent hover:text-accent-foreground'
-
-const basename = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
 
 type Props = {
   store: FloatingStore

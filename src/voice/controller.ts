@@ -7,10 +7,12 @@ export type Phase =
   | { kind: 'idle' }
   /** The microphone is opening. */
   | { kind: 'starting' }
-  | { kind: 'listening' }
+  /** `device` is the microphone's name, when it gave one. */
+  | { kind: 'listening'; device: string | null }
   | { kind: 'transcribing' }
   | { kind: 'done'; text: string; landed: boolean }
   | { kind: 'note'; text: string }
+  /** Stays, whole, until dismissed or the next take begins. */
   | { kind: 'error'; message: string }
 
 export type VoiceState = {
@@ -29,6 +31,10 @@ export type Voice = {
   toggle(): Promise<void>
   note(text: string): void
   progress(p: Progress): void
+  /** The microphone stopped during the take: ends it, and `end` says why. */
+  lost(why: string): void
+  /** Hides an error. */
+  dismiss(): void
 }
 
 export type VoiceDeps = {
@@ -54,16 +60,14 @@ export function createVoice(deps: VoiceDeps): Voice {
   /** The open take: its target and whether the microphone actually opened. */
   let take: { target: Target; opened: Promise<boolean>; ending: boolean } | null = null
 
-  async function open(): Promise<boolean> {
+  async function open(): Promise<string | null> {
     try {
-      await deps.client.start()
-      return true
+      return await deps.client.start()
     } catch (e) {
       // A take left open by a reloaded webview: discard it and try once more.
       if (!message(e).includes('already recording')) throw e
       await deps.client.stop().catch(() => '')
-      await deps.client.start()
-      return true
+      return deps.client.start()
     }
   }
 
@@ -73,12 +77,12 @@ export function createVoice(deps: VoiceDeps): Voice {
     show({ kind: 'starting' })
     const t = { target, opened: Promise.resolve(false), ending: false }
     t.opened = open().then(
-      () => {
-        if (take === t && !t.ending) show({ kind: 'listening' })
+      (device) => {
+        if (take === t && !t.ending) show({ kind: 'listening', device: device ?? null })
         return true
       },
       (e) => {
-        show({ kind: 'error', message: message(e) }, true)
+        show({ kind: 'error', message: message(e) })
         // Nothing to close: the next press or toggle starts fresh.
         if (take === t) take = null
         return false
@@ -99,7 +103,7 @@ export function createVoice(deps: VoiceDeps): Voice {
       const landed = await deps.insert(t.target, text)
       show({ kind: 'done', text, landed }, true)
     } catch (e) {
-      show({ kind: 'error', message: message(e) }, true)
+      show({ kind: 'error', message: message(e) })
     } finally {
       if (take === t) take = null
       // The model is ready or its download failed; either way no bar should linger.
@@ -117,11 +121,30 @@ export function createVoice(deps: VoiceDeps): Voice {
     },
     note: (text) => show({ kind: 'note', text }, true),
     progress: ({ downloaded, total }) => store.setState({ download: total > 0 && downloaded < total ? downloaded / total : null }),
+    lost: () => void end(),
+    dismiss() {
+      if (store.getState().phase.kind === 'error') show({ kind: 'idle' })
+    },
   }
 }
 
-export const LANGUAGES: Language[] = ['auto', 'pt', 'en']
+export const LANGUAGES: Language[] = ['pt', 'en', 'auto']
 
-export function nextLanguage(l: Language): Language {
-  return LANGUAGES[(LANGUAGES.indexOf(l) + 1) % LANGUAGES.length]
+/** How each language reads in the palette. */
+export const LANGUAGE_NAMES: Record<Language, string> = {
+  pt: 'Portuguese',
+  en: 'English',
+  auto: 'any (detected per take)',
+}
+
+/** The language dictation starts on: the one saved, else the first of the system's preferred
+ *  languages that is Portuguese or English. `auto` only when neither is among them: whisper's
+ *  detection picks among 99 languages and gets a short take wrong more often than not (#325). */
+export function firstLanguage(saved: string | null, preferred: readonly string[]): Language {
+  if (saved && (LANGUAGES as string[]).includes(saved)) return saved as Language
+  for (const tag of preferred) {
+    const primary = tag.toLowerCase().split(/[-_]/)[0]
+    if (primary === 'pt' || primary === 'en') return primary
+  }
+  return 'auto'
 }
