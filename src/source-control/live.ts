@@ -3,6 +3,7 @@ import type { StoreApi } from 'zustand/vanilla'
 import { norm, within } from '../fleet/model'
 import type { ScmClient } from './client'
 import type { ScmState } from './store'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** How often the changes are read when the tree cannot be watched. */
 export const POLL_MS = 5_000
@@ -48,9 +49,9 @@ export function useLiveChanges(worktree: string | null, store: StoreApi<ScmState
     let gone = false
     const load = () => void store.getState().load(worktree)
     load()
-    let poll: ReturnType<typeof setInterval> | null = null
+    let poll: (() => void) | null = null
     watch(worktree).catch(() => {
-      if (!gone) poll = setInterval(load, pollMs)
+      if (!gone) poll = pollWhileShown(load, pollMs, { wait: true })
     })
     let unlisten: (() => void) | null = null
     client
@@ -61,7 +62,7 @@ export function useLiveChanges(worktree: string | null, store: StoreApi<ScmState
     const unsubscribe = onCommitClosed(load)
     return () => {
       gone = true
-      if (poll) clearInterval(poll)
+      poll?.()
       unlisten?.()
       window.removeEventListener('focus', load)
       unsubscribe()

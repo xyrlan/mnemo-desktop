@@ -4,10 +4,14 @@ import { store as appStore, useApp } from '../layout/app-store'
 import type { Store } from '../layout/store'
 import type { PaneId } from '../layout/tree'
 import { ptyPid } from '../pty/client'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** How often a terminal pane asks which Claude session it runs, on screen or not: the workspace
  *  restore resumes every tab, so a hidden one must be as current as the visible one. */
 export const SESSION_POLL_MS = 5000
+/** How often while the window is hidden, as the mission poll: slower, never stopped, since the
+ *  restore and the notifications read what it learns. */
+export const SESSION_HIDDEN_MS = 15_000
 
 export interface SessionClient {
   /** The pid of the pane's shell, null once it has exited. */
@@ -70,16 +74,6 @@ export function useSessionLearn(id: PaneId, client: SessionClient = tauriSession
   const terminal = useApp((s) => s.panes[id]?.view === 'terminal' && s.panes[id]?.exitCode === undefined)
   useEffect(() => {
     if (!terminal || id <= 0) return
-    let busy = false
-    const tick = () => {
-      if (busy) return
-      busy = true
-      learnSession(id, client)
-        .catch(() => {})
-        .finally(() => (busy = false))
-    }
-    tick()
-    const timer = setInterval(tick, SESSION_POLL_MS)
-    return () => clearInterval(timer)
+    return pollWhileShown(() => learnSession(id, client), SESSION_POLL_MS, { hiddenMs: SESSION_HIDDEN_MS })
   }, [id, terminal, client])
 }

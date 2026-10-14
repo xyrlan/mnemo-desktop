@@ -7,6 +7,7 @@ import { usePulse } from '../pulse/app-store'
 import { makeLevelClient, type LevelClient } from '../vaultlevel/client'
 import { levelOf, xpOf } from '../vaultlevel/level'
 import type { VaultLevel } from '../vaultlevel/types'
+import { pollWhileShown, type Shown } from '../shell/while-shown'
 import { activePane, agentSummary, countAgents, paneTokens } from './model'
 
 const DOT: Record<string, string> = {
@@ -19,9 +20,9 @@ const DOT: Record<string, string> = {
 export const POLL_MS = 30_000
 const liveClient = makeLevelClient(invoke)
 
-/** The vault's level, polled as the vault square does. Null until the first read, and when the
- *  vault cannot be read. */
-export function useVaultLevel(client: LevelClient, pollMs = POLL_MS): number | null {
+/** The vault's level, polled as the vault square does, and not while the window is hidden.
+ *  Null until the first read, and when the vault cannot be read. */
+export function useVaultLevel(client: LevelClient, pollMs = POLL_MS, shown?: Shown): number | null {
   const [level, setLevel] = useState<number | null>(null)
   useEffect(() => {
     let live = true
@@ -37,13 +38,12 @@ export function useVaultLevel(client: LevelClient, pollMs = POLL_MS): number | n
         console.warn('status bar: vault level not read', e)
       }
     }
-    void tick()
-    const timer = setInterval(tick, pollMs)
+    const stop = pollWhileShown(tick, pollMs, { shown })
     return () => {
       live = false
-      clearInterval(timer)
+      stop()
     }
-  }, [client, pollMs])
+  }, [client, pollMs, shown])
   return level
 }
 

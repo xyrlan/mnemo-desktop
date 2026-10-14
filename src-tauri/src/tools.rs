@@ -55,9 +55,11 @@ fn extra_dirs_in(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Forget the cached `login_path()`, so the next call reads PATH again: after an install, or
-/// when the user asks to check again.
+/// when the user asks to check again. A remembered "no vault" goes with it: the mnemo found now
+/// may name one.
 pub fn refresh() {
     crate::mission::forget_login_path();
+    crate::vault::forget_no_vault();
 }
 
 /// This platform's `PATH` separator.

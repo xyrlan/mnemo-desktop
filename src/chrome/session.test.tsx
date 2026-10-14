@@ -5,8 +5,8 @@ import { vi } from 'vitest'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
 
-import PaneBar from './PaneBar'
-import { learnSession, nextSession, SESSION_POLL_MS, type SessionClient } from './session'
+import PaneBar, { POLL_MS as PANE_BAR_POLL_MS } from './PaneBar'
+import { learnSession, nextSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, type SessionClient } from './session'
 import type { ChromeClient } from './client'
 import { createStore } from '../layout/store'
 import { store as appStore } from '../layout/app-store'
@@ -150,5 +150,52 @@ describe('PaneBar', () => {
     const calls = client.session.mock.calls.length
     await act(async () => vi.advanceTimersByTime(SESSION_POLL_MS * 3))
     expect(client.session).toHaveBeenCalledTimes(calls)
+  })
+
+  test('while the window is hidden it asks every 15 s instead of every 5, and at once when shown', async () => {
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    try {
+      const { client } = tree()
+      await act(async () => root.render(<PaneBar id={41} client={git} sessions={client} />))
+      expect(client.session).toHaveBeenCalledTimes(1)
+      state.mockReturnValue('hidden')
+      // The beat already set runs once more, then the hidden one.
+      await act(async () => void (await vi.advanceTimersByTimeAsync(SESSION_POLL_MS)))
+      expect(client.session).toHaveBeenCalledTimes(2)
+      await act(async () => void (await vi.advanceTimersByTimeAsync(SESSION_HIDDEN_MS - 1)))
+      expect(client.session).toHaveBeenCalledTimes(2)
+      await act(async () => void (await vi.advanceTimersByTimeAsync(1)))
+      expect(client.session).toHaveBeenCalledTimes(3)
+      await act(async () => void (await vi.advanceTimersByTimeAsync(SESSION_POLL_MS)))
+      state.mockReturnValue('visible')
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(client.session).toHaveBeenCalledTimes(4)
+      expect(SESSION_HIDDEN_MS).toBe(15_000)
+    } finally {
+      state.mockRestore()
+    }
+  })
+
+  test('the bar asks git every 5 s while it shows, and not while the window is hidden', async () => {
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    // jsdom lays nothing out: every element lacks an offsetParent unless told otherwise.
+    const parent = vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockReturnValue(document.body)
+    try {
+      const branch = vi.fn(async () => 'main')
+      const { client } = tree()
+      await act(async () => root.render(<PaneBar id={41} client={{ repo: async () => 'app', branch }} sessions={client} />))
+      expect(branch).toHaveBeenCalledTimes(1)
+      await act(async () => void (await vi.advanceTimersByTimeAsync(PANE_BAR_POLL_MS)))
+      expect(branch).toHaveBeenCalledTimes(2)
+      state.mockReturnValue('hidden')
+      await act(async () => void (await vi.advanceTimersByTimeAsync(PANE_BAR_POLL_MS * 10)))
+      expect(branch).toHaveBeenCalledTimes(2)
+      state.mockReturnValue('visible')
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(branch).toHaveBeenCalledTimes(3)
+    } finally {
+      parent.mockRestore()
+      state.mockRestore()
+    }
   })
 })

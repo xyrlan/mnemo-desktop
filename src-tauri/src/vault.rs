@@ -1354,18 +1354,68 @@ fn exec_within(program: &str, path_env: &str, action: &str, args: &[String], cwd
     RunResult { stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default(), code: status.code() }
 }
 
-/// Only a root that exists is cached, so installing mnemo later is picked up.
-static ROOT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+/// What `vault_root` last found: `Some(None)` is "no vault", remembered as well as a vault is.
+/// Without that, the status bar, the pet and the pulse each started `mnemo status` every 30 s
+/// for as long as there was no vault (#369).
+type Found = Option<Option<PathBuf>>;
 
-/// The vault `mnemo status` names, else `~/mnemo` when it holds a `mnemo.config.json`.
-pub fn vault_root() -> Option<PathBuf> {
-    if let Some(r) = ROOT.lock().ok()?.clone() {
-        return Some(r);
+/// Held while `mnemo status` runs, so callers that ask at once wait for the one answer.
+static ROOT: std::sync::Mutex<Found> = std::sync::Mutex::new(None);
+
+/// The cached root, else `look()`'s answer, cached. One `look` at a time: a caller that comes
+/// while one runs waits for it and takes its answer.
+fn root_in(cache: &std::sync::Mutex<Found>, look: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+    let mut found = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(root) = found.as_ref() {
+        return root.clone();
     }
-    let status = run_with("mnemo", &crate::mission::login_path(), "status", &[], "");
-    let found = parse_status_root(&status.stdout).filter(|p| p.is_dir()).or_else(|| home_vault(&crate::app_dir::home()))?;
-    *ROOT.lock().ok()? = Some(found.clone());
-    Some(found)
+    let root = look();
+    *found = Some(root.clone());
+    root
+}
+
+/// Forgets a "no vault", so the next `vault_root` asks `mnemo status` again. Called by what
+/// could make one: `tools::refresh` (setup's check, an install) and the end of `mnemo init`.
+/// A vault once found stays: the app has never had a way to move it.
+pub fn forget_no_vault() {
+    forget_none_in(&ROOT);
+}
+
+fn forget_none_in(cache: &std::sync::Mutex<Found>) {
+    let mut found = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if matches!(*found, Some(None)) {
+        *found = None;
+    }
+}
+
+/// The vault `mnemo status` names, else `~/mnemo` when it holds a `mnemo.config.json`. Read
+/// once; "no vault" is remembered too, until `forget_no_vault`.
+pub fn vault_root() -> Option<PathBuf> {
+    root_in(&ROOT, || {
+        let status = exec_within("mnemo", &crate::mission::login_path(), "status", &[], "", Some(STATUS_TIMEOUT));
+        status_root(&status.stdout)
+    })
+}
+
+/// How long the `mnemo status` behind `vault_root` may take (it takes 0.2 s): every caller
+/// waits on the one run, so one that hangs must not hold them all.
+const STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The root a `mnemo status` report names, else `~/mnemo`.
+fn status_root(stdout: &str) -> Option<PathBuf> {
+    parse_status_root(stdout).filter(|p| p.is_dir()).or_else(|| home_vault(&crate::app_dir::home()))
+}
+
+/// `vault_health` ran `mnemo status` itself: a vault it names is the root, with no second run.
+/// One it does not name settles nothing but a root never looked for: a failed run must not
+/// hide a vault found before.
+fn learn_root(stdout: &str) {
+    let mut found = ROOT.lock().unwrap_or_else(|e| e.into_inner());
+    match status_root(stdout) {
+        Some(root) => *found = Some(Some(root)),
+        None if found.is_none() => *found = Some(None),
+        None => {}
+    }
 }
 
 // ------------------------------------------------------------ commands --
@@ -1467,6 +1517,7 @@ pub async fn vault_ego(path: String, limit: u32) -> VaultGraph {
 pub async fn vault_health() -> Health {
     tauri::async_runtime::spawn_blocking(|| {
         let status = exec("mnemo", &crate::mission::login_path(), "status", &[], "");
+        learn_root(&status.stdout);
         let mut health = match vault_root() {
             Some(root) => {
                 let (_, _, fires) = snapshot(&root);
@@ -1741,6 +1792,51 @@ mod tests {
         assert_eq!(parse_status_root(out), Some(PathBuf::from("/Users/x/my vault")));
         assert_eq!(parse_status_root("Vault: /v\n"), Some(PathBuf::from("/v")));
         assert_eq!(parse_status_root("no vault configured\n"), None);
+    }
+
+    #[test]
+    fn no_vault_is_remembered_until_forgotten() {
+        let cache = std::sync::Mutex::new(None);
+        let looks = std::cell::Cell::new(0);
+        let look = |found: Option<&str>| {
+            looks.set(looks.get() + 1);
+            found.map(PathBuf::from)
+        };
+        // The status bar, the pet and the pulse, every 30 s: one `mnemo status`.
+        for _ in 0..3 {
+            assert_eq!(root_in(&cache, || look(None)), None);
+        }
+        assert_eq!(looks.get(), 1);
+        // `mnemo init` ran, or setup checked again: the next caller asks again.
+        forget_none_in(&cache);
+        assert_eq!(root_in(&cache, || look(Some("/v"))), Some(PathBuf::from("/v")));
+        assert_eq!(looks.get(), 2);
+        // A vault found is kept: forgetting "none" leaves it.
+        forget_none_in(&cache);
+        assert_eq!(root_in(&cache, || look(None)), Some(PathBuf::from("/v")));
+        assert_eq!(looks.get(), 2);
+    }
+
+    #[test]
+    fn callers_asking_at_once_share_one_look() {
+        let cache = std::sync::Mutex::new(None);
+        let looks = std::sync::atomic::AtomicUsize::new(0);
+        let roots: Vec<_> = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..3)
+                .map(|_| {
+                    s.spawn(|| {
+                        root_in(&cache, || {
+                            looks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            None
+                        })
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(roots, [None, None, None]);
+        assert_eq!(looks.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     /// Issue #332: with no pane open the page says "runs in your home directory", and Windows

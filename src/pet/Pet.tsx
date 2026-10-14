@@ -6,6 +6,7 @@ import { useFleet } from '../fleet/store'
 import { shellStore } from '../shell/store'
 import { withPartIndex } from '../avatar/scenes'
 import { makeLevelClient } from '../vaultlevel/client'
+import { pollWhileShown } from '../shell/while-shown'
 import type { VaultLevel } from '../vaultlevel/types'
 import { clampPosition, defaultPosition, loadPosition, PET_SIZE, petScene, petStateOf, savePosition, type Point } from './state'
 import '../avatar/avatar.css'
@@ -33,11 +34,11 @@ export default function Pet() {
         .level()
         .then((v) => live && setVault(v))
         .catch((e) => console.warn('pet: vault level not read', e))
-    void tick()
-    const timer = setInterval(tick, POLL_MS)
+    // Not while the window is hidden: nobody sees the pet then.
+    const stop = pollWhileShown(tick, POLL_MS)
     return () => {
       live = false
-      clearInterval(timer)
+      stop()
     }
   }, [])
 

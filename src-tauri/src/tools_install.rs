@@ -312,7 +312,10 @@ pub fn install(say: &(dyn Fn(String) + Sync)) -> Result<String, String> {
     let tag = fetch_and_install(&dest, target, exe, say)?;
     crate::tools::refresh();
     say(format!("mnemo {tag} is installed in {}.", dest.display()));
-    run_init(&dest.join(exe), say).map_err(|e| format!("mnemo {tag} is installed, but {e}"))?;
+    let init = run_init(&dest.join(exe), say);
+    // `mnemo init` made the vault, or tried: the "no vault" read before it is stale either way.
+    crate::vault::forget_no_vault();
+    init.map_err(|e| format!("mnemo {tag} is installed, but {e}"))?;
     say(format!("mnemo {tag} is ready."));
     Ok(tag)
 }
