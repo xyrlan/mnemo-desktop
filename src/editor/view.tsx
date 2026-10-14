@@ -13,6 +13,7 @@ import { registerReuse } from '../layout/reuse'
 import { editorShows, keepEditedTabs } from './tabs'
 import { promptPath } from './Prompt'
 import { basename, defaultRoot, languageFor } from './paths'
+import { savedText } from './text'
 import './editor.css'
 
 const fs = tauriFs
@@ -51,7 +52,7 @@ function EditorPane({ id, props }: PaneViewProps) {
     const model = buf.model as MonacoEditor.ITextModel
     const version = model.getAlternativeVersionId()
     try {
-      await fs.write(buf.path, model.getValue())
+      await fs.write(buf.path, savedText(model))
     } catch (e) {
       sessions.getState().setError(id, `Could not save ${basename(buf.path)}: ${e}`)
       return false
