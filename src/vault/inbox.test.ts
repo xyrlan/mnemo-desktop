@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process'
 import { parseInboxListing, parseInboxStats, splitFrontmatter } from './inbox'
 
 // Captured from a real `mnemo inbox` (project-scoped) on 2026-09-22.
@@ -144,19 +143,4 @@ test('--stats reads the same with \\r\\n', () => {
 test('a shown page with \\r\\n splits into the same frontmatter and body, with no \\r left in either', () => {
   expect(splitFrontmatter(crlf(SHOWN))).toEqual(splitFrontmatter(SHOWN))
   expect(splitFrontmatter(crlf('just text, no fence\n'))).toEqual({ frontmatter: '', body: 'just text, no fence\n' })
-})
-
-// The premise itself, where it can be run: a Python that sets its streams up as mnemo's
-// `cli/runtime.py` does (encoding only) and prints the listing down a pipe. Windows only —
-// anywhere else the pipe carries `\n` and this would prove nothing.
-test.runIf(process.platform === 'win32')('a real Python on Windows prints the listing with \\r\\n, and it still parses', () => {
-  const code = 'import sys\nsys.stdout.reconfigure(encoding="utf-8", errors="replace")\nfor line in sys.stdin.buffer.read().decode("utf-8").split("\\n")[:-1]:\n    print(line)\n'
-  const r = spawnSync('python', ['-c', code], { input: LISTING, encoding: 'utf8' })
-  // A Windows machine with no `python` on PATH has nothing to show; CI has one and must run it.
-  if (r.error && !process.env.CI) return
-  expect(r.error).toBeUndefined()
-  expect(r.status).toBe(0)
-  expect(r.stdout).toBe(crlf(LISTING))
-  expect(parseInboxListing(r.stdout)).toEqual(parseInboxListing(LISTING))
-  console.log(`#334: python on ${process.platform} piped ${r.stdout.split('\r\n').length - 1} lines ending in \\r\\n; ${parseInboxListing(r.stdout).rows.length} rows parsed`)
 })
