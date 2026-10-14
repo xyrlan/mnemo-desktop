@@ -35,7 +35,8 @@ struct Session {
     pid: Option<u32>,
     /// The folder it started in.
     cwd: String,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    /// `None` once the terminal is closed, which only Windows does by hand (`exit_of`).
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     /// To the thread that writes into the PTY: a program that stops reading blocks that
     /// thread, not whoever typed.
     input: mpsc::Sender<Vec<u8>>,
@@ -98,7 +99,7 @@ impl Host {
         let session = Arc::new(Session {
             pid: child.process_id(),
             cwd,
-            master: Mutex::new(pair.master),
+            master: Mutex::new(Some(pair.master)),
             input,
             killer: Mutex::new(child.clone_killer()),
             state: Mutex::new(State { screen: Screen::new(rows, cols), sub: Some(sub), exit: None, killed: false }),
@@ -115,9 +116,9 @@ impl Host {
                 }
             }
         });
-        let started = started.and_then(|_| {
+        let started = started.and_then(|_| exit_of(id, child, &session)).and_then(|exit| {
             let (session, table) = (Arc::clone(&session), Arc::clone(&self.sessions));
-            thread::Builder::new().name(format!("pty-reader-{id}")).spawn(move || pump(id, reader, child, session, table))
+            thread::Builder::new().name(format!("pty-reader-{id}")).spawn(move || pump(id, reader, exit, session, table))
         });
         if let Err(e) = started {
             drop(held);
@@ -155,9 +156,9 @@ impl Host {
 
     pub fn resize(&self, id: PaneId, cols: u16, rows: u16) -> Result<(), String> {
         let s = self.get(id).ok_or_else(|| format!("pane {id} not found"))?;
-        lock(&s.master)
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| format!("resize: {e}"))?;
+        if let Some(master) = lock(&s.master).as_ref() {
+            master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| format!("resize: {e}"))?;
+        }
         lock(&s.state).screen.resize(rows, cols);
         Ok(())
     }
@@ -169,8 +170,9 @@ impl Host {
         s.pid.filter(|_| alive)
     }
 
-    /// Idempotent; an unknown id is a no-op. The subscriber still gets `Exit` when the PTY
-    /// closes.
+    /// Ends the program, and with it whatever else is on its terminal: hung up by the kernel
+    /// when a session leader goes, by `exit_of` on Windows. Idempotent; an unknown id is a
+    /// no-op. The subscriber still gets `Exit` when the PTY closes.
     pub fn kill(&self, id: PaneId) {
         let Some(s) = self.get(id) else { return };
         let ended = {
@@ -237,9 +239,36 @@ impl Host {
     }
 }
 
+type Child = Box<dyn portable_pty::Child + Send + Sync>;
+
+/// What waits for the program to end and answers its exit code.
+#[cfg(not(windows))]
+fn exit_of(_id: PaneId, mut child: Child, _session: &Arc<Session>) -> std::io::Result<impl FnOnce() -> Option<i32> + Send> {
+    Ok(move || child.wait().ok().map(|s| s.exit_code() as i32))
+}
+
+/// On Windows nothing hangs a terminal up when its shell ends: the pseudoconsole stays until it
+/// is closed, and while a program is still attached to it (the `claude` or the dev server the
+/// shell was running) so does that program, unseen, and the pipe the reader waits on stays
+/// open. So a thread waits for the shell and then closes the pseudoconsole, by dropping the
+/// master: every program left on it is told the console is closing, as when a console window
+/// is closed, and the reader gets to the end (#338).
+#[cfg(windows)]
+fn exit_of(id: PaneId, mut child: Child, session: &Arc<Session>) -> std::io::Result<impl FnOnce() -> Option<i32> + Send> {
+    let session = Arc::clone(session);
+    let waiter = thread::Builder::new().name(format!("pty-wait-{id}")).spawn(move || {
+        let code = child.wait().ok().map(|s| s.exit_code() as i32);
+        // Out of the lock first: closing can take as long as the programs take to leave.
+        let master = lock(&session.master).take();
+        drop(master);
+        code
+    })?;
+    Ok(move || waiter.join().ok().flatten())
+}
+
 /// Reads what the program prints into its screen and to its subscriber until the PTY closes,
-/// then reports the exit.
-fn pump(id: PaneId, mut reader: Box<dyn Read + Send>, mut child: Box<dyn portable_pty::Child + Send + Sync>, session: Arc<Session>, table: Table) {
+/// then reports the exit `exit` answers.
+fn pump(id: PaneId, mut reader: Box<dyn Read + Send>, exit: impl FnOnce() -> Option<i32>, session: Arc<Session>, table: Table) {
     let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut buf = vec![0u8; 64 * 1024];
         loop {
@@ -261,7 +290,7 @@ fn pump(id: PaneId, mut reader: Box<dyn Read + Send>, mut child: Box<dyn portabl
     if read.is_err() {
         log::error!("pty reader {id} panicked");
     }
-    let code = child.wait().ok().map(|s| s.exit_code() as i32);
+    let code = exit();
     let killed = {
         let mut st = lock(&session.state);
         st.exit = Some(code);
