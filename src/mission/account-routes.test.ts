@@ -84,6 +84,27 @@ test("Take over and Stop under the Dispatch tab run on the child's account", asy
   ])
 })
 
+test('on Windows, Take over and Stop are typed for cmd, with one account and with two', async () => {
+  const agent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0')
+  vi.useFakeTimers()
+  try {
+    await takeOver({ ...onWork, account_env: { config_dir: 'C:\\Users\\Jo Doe\\.claude-work' } })
+    await stopChild(onDefault)
+    await stopChild({ ...onDefault, id: 'c2c2c2c2', account_env: null })
+    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
+    attachChild({ ...onWork, account_env: { config_dir: 'C:\\Users\\Jo Doe\\.claude-work' } })
+  } finally {
+    vi.useRealTimers()
+    agent.mockRestore()
+  }
+  expect(written.map(([, d]) => d)).toEqual([
+    'cmd /d /s /c "set "CLAUDE_CONFIG_DIR=C:\\Users\\Jo Doe\\.claude-work"& claude attach b0b0b0b0"\r',
+    'cmd /d /s /c "set "CLAUDE_CONFIG_DIR="& claude stop a1a1a1a1"\r',
+    'claude stop c2c2c2c2\r',
+  ])
+  expect(views).toEqual([{ cmd: 'cmd /d /s /c "set "CLAUDE_CONFIG_DIR=C:\\Users\\Jo Doe\\.claude-work"& claude attach b0b0b0b0"', title: 'attach b0b0b0b0' }])
+})
+
 test("the mission pane's attach runs on the child's account; an id alone is typed as before", () => {
   attachChild(onWork, 'split-col')
   attachChild('c2c2c2c2')

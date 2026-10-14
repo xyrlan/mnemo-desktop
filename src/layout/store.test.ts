@@ -117,6 +117,54 @@ test('openCommandTab spawns in cwd, tags the pane with the session and types the
   vi.useRealTimers()
 })
 
+test('on Windows a typed command ends in a carriage return: a console does not take a line feed as Enter', async () => {
+  vi.useFakeTimers()
+  const agent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0')
+  try {
+    const pty = fakePty()
+    const s = createStore(pty)
+    await s.getState().openCommandTab('C:\\repo', 'claude --resume abc', 'abc')
+    const id = s.getState().tabs[0].focused
+    s.getState().typeCommand(id, 'claude stop c2c2c2c2')
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(pty.writes).toEqual([
+      [id, 'claude --resume abc\r'],
+      [id, 'claude stop c2c2c2c2\r'],
+    ])
+  } finally {
+    agent.mockRestore()
+    vi.useRealTimers()
+  }
+})
+
+test('a command the pane refused is said in the pane, before or after its terminal is drawn', async () => {
+  vi.useFakeTimers()
+  try {
+    const pty = { ...fakePty(), write: async () => Promise.reject('pane 1 has exited') }
+    const s = createStore(pty)
+    const shown = (chunks: Uint8Array[]) => chunks.map((b) => new TextDecoder().decode(b)).join('')
+    await s.getState().openCommandTab('/repo', 'claude --resume abc', 'abc')
+    const id = s.getState().tabs[0].focused
+    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
+    // No terminal drew the pane yet: the line waits for it.
+    const drawn: Uint8Array[] = []
+    s.getState().attachSink(id, (b) => drawn.push(b))
+    expect(shown(drawn)).toContain('mnemo: could not type `claude --resume abc` here: pane 1 has exited')
+    drawn.length = 0
+    s.getState().typeCommand(id, 'claude stop c2c2c2c2')
+    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
+    expect(shown(drawn)).toContain('mnemo: could not type `claude stop c2c2c2c2` here: pane 1 has exited')
+    // A pane closed meanwhile has nowhere to say it, and keeps nothing.
+    drawn.length = 0
+    s.getState().typeCommand(id, 'claude stop gone')
+    await s.getState().closeTab(s.getState().tabs[0].id)
+    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
+    expect(shown(drawn)).toBe('')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('closing a pane in a split promotes the sibling and focuses it', async () => {
   const s = createStore(fakePty())
   await s.getState().newTab()
