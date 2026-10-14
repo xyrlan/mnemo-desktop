@@ -1,7 +1,7 @@
 import { store as layout } from '../layout/app-store'
 import { cockpitStore } from '../cockpit/app-store'
 import { runJob } from '../cockpit/job'
-import { settingsStore } from '../settings/app-store'
+import { saveSetting, settingsStore } from '../settings/app-store'
 import { githubStore } from './app-store'
 import { currentOs, installRoute } from '../setup/tools'
 import { SCOPE_FIX, type Issue } from './types'
@@ -84,5 +84,5 @@ export function setIssueLabels(root: string, labels: string[]) {
   const all = { ...settingsStore.getState().issueLabels }
   if (labels.length) all[root] = labels
   else delete all[root]
-  void settingsStore.getState().set('issueLabels', all)
+  void saveSetting('issueLabels', all)
 }

@@ -8,7 +8,7 @@ import { register } from '../actions/registry'
 import { store as layout, useApp } from '../layout/app-store'
 import { fleetStore, useFleet } from '../fleet/store'
 import { homeStore } from '../home/app-store'
-import { settingsStore, useSettings } from '../settings/app-store'
+import { saveSetting, settingsStore, useSettings } from '../settings/app-store'
 import { mountInSlot } from '../shell/slots'
 import { dispatchIssue } from '../github/actions'
 import { createWorktree } from '../worktrees/client'
@@ -45,7 +45,7 @@ const deps: CreateDeps = {
     const next = { ...all }
     if (setup) next[repo] = setup
     else delete next[repo]
-    void settingsStore.getState().set('repoSetup', next)
+    void saveSetting('repoSetup', next)
   },
   listenSetup,
   trackSetup: (job, tree) => setupStore.getState().track(job, tree),
@@ -54,7 +54,7 @@ const deps: CreateDeps = {
 
 const create = (input: CreateInput) => createWorkspace(deps, input)
 const setupFor = (root: string) => settingsStore.getState().repoSetup[root] ?? ''
-const setSkip = (v: boolean) => void settingsStore.getState().set('skipPermissions', v)
+const setSkip = (v: boolean) => void saveSetting('skipPermissions', v)
 const modLabel = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'
 
 /** Registers a folder through Home, as Home's own "Open folder" does; its root, or null when

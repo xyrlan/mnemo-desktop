@@ -44,31 +44,45 @@ export interface SettingsClient {
 
 export type SettingsState = Settings & {
   loaded: boolean
+  /** Why the settings file could not be read, when it is there and could not be. What shows is
+   *  then the defaults, not what the person saved, and nothing is written while this stands. */
+  unreadable: string | null
   load(): Promise<void>
+  /** Sets the value and writes the file. Rejects when the file was not written: the value is
+   *  then kept for this run only, and the caller says so. */
   set<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void>
 }
 
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 export function createSettingsStore(client: SettingsClient): StoreApi<SettingsState> {
+  /** The read under way or last made: a `set` waits for it, so the defaults never reach the file. */
+  let reading: Promise<void> | null = null
   return createZustand<SettingsState>((set, get) => ({
     ...DEFAULTS,
     loaded: false,
-    async load() {
-      try {
-        const v = await client.read()
-        set({ ...DEFAULTS, ...pick(v), loaded: true })
-      } catch {
-        set({ loaded: true })
-      }
+    unreadable: null,
+    load() {
+      reading = (async () => {
+        try {
+          const v = await client.read()
+          set({ ...DEFAULTS, ...pick(v), loaded: true, unreadable: null })
+        } catch (e) {
+          set({ loaded: true, unreadable: message(e) })
+        }
+      })()
+      return reading
     },
     async set(key, value) {
+      if (!get().loaded) await (reading ?? get().load())
+      // The file may have been mended or moved away since: ask again before refusing.
+      if (get().unreadable !== null) await get().load()
       set({ [key]: value } as Partial<SettingsState>)
       const s = get()
+      // Never the defaults over a file that could not be read.
+      if (s.unreadable !== null) throw new Error(s.unreadable)
       const whole = Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, s[k as keyof Settings]])) as Settings
-      try {
-        await client.write(whole)
-      } catch {
-        /* keep the in-memory value; the file is a convenience */
-      }
+      await client.write(whole)
     },
   }))
 }

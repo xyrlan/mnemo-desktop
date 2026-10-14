@@ -27,6 +27,8 @@ pub mod browser;
 
 // -- settings (src/settings.rs) --
 pub mod settings;
+// One JSON object in one file: how settings.json and workspace.json are read and written.
+pub mod json_file;
 
 // -- mission (src/mission.rs) --
 pub mod mission;

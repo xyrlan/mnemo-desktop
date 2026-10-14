@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
-import { TooltipProvider } from '@/ui'
+import { Toaster, TooltipProvider } from '@/ui'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -19,7 +19,15 @@ vi.mock('../fleet/store', async () => {
   const fleetStore = createStore(() => ({ repos: [{ root: '/code/app', name: 'app', worktrees: [{ path: '/code/app' }, { path: '/code/app-wt-x' }] }] }))
   return { fleetStore, useFleet: (sel: (s: unknown) => unknown) => useStore(fleetStore, sel) }
 })
-vi.mock('@tauri-apps/api/core', () => ({ invoke: async (cmd: string) => (cmd === 'settings_read' ? {} : null), Channel: class {} }))
+const disk = vi.hoisted(() => ({ refuses: null as string | null }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: async (cmd: string) => {
+    // Tauri rejects with the command's own `Err` string.
+    if (cmd === 'settings_write' && disk.refuses !== null) throw disk.refuses
+    return cmd === 'settings_read' ? {} : null
+  },
+  Channel: class {},
+}))
 
 import { store as layout } from '../layout/app-store'
 import { uiStore } from './app-ui'
@@ -30,6 +38,7 @@ let root: Root
 let host: HTMLDivElement
 let errors: unknown[]
 beforeEach(async () => {
+  disk.refuses = null
   await writeQuickCommands({ [R]: [{ label: 'Dev', command: 'pnpm dev' }] })
   uiStore.setState({ menuOpen: false, dialog: null })
   host = document.createElement('div')
@@ -86,4 +95,22 @@ test('editing the second command, then removing it', () => {
   expect(document.querySelector<HTMLInputElement>('#quick-command-label')!.value).toBe('Test')
   act(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Remove')!.click())
   expect(readQuickCommands()[R]).toEqual([{ label: 'Dev', command: 'pnpm dev' }])
+})
+
+// #336: `set` swallowed the write's error, so this line could never show.
+test('a save the disk refuses says "Could not save the command" and why', async () => {
+  act(() => root.render(<TooltipProvider><QuickCommands /><Toaster /></TooltipProvider>))
+  act(() => uiStore.getState().openDialog({ mode: 'add' }))
+  const set = (el: HTMLInputElement | HTMLTextAreaElement, v: string) => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')!.set!.call(el, v)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  act(() => set(document.querySelector<HTMLInputElement>('#quick-command-label')!, 'Test'))
+  act(() => set(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Command"]')!, 'pnpm test'))
+  disk.refuses = 'C:\\Users\\u\\.mnemo-desktop\\settings.json: Access is denied. (os error 5)'
+  await act(async () => {
+    ;[...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Save'))!.click()
+    await new Promise((r) => setTimeout(r, 20))
+  })
+  expect(document.body.textContent).toContain(`Could not save the command: ${disk.refuses}`)
 })

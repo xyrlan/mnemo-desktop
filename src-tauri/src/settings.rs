@@ -6,27 +6,20 @@ fn path() -> PathBuf {
     crate::app_dir::app_dir().join("settings.json")
 }
 
-pub fn read() -> serde_json::Value {
-    std::fs::read_to_string(path())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_else(|| serde_json::json!({}))
+/// The settings, `{}` on a first run. An error naming the file when it is there and cannot be read
+/// as an object (`json_file::read`).
+pub fn read() -> Result<serde_json::Value, String> {
+    crate::json_file::read(&path())
 }
 
 pub fn write(v: &serde_json::Value) -> Result<(), String> {
-    let p = path();
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+    crate::json_file::write(&path(), v)
 }
 
 /// The saved projects (`Settings['projects']`): their folders, as the front wrote them. Anything
-/// that is not a non-empty string is left out.
+/// that is not a non-empty string is left out. None when the file cannot be read.
 pub fn projects() -> Vec<String> {
-    projects_in(&read())
+    read().map(|v| projects_in(&v)).unwrap_or_default()
 }
 
 fn projects_in(v: &serde_json::Value) -> Vec<String> {
@@ -37,7 +30,7 @@ fn projects_in(v: &serde_json::Value) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn settings_read() -> serde_json::Value {
+pub fn settings_read() -> Result<serde_json::Value, String> {
     read()
 }
 
