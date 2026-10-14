@@ -1,8 +1,8 @@
 // adapted from stablyai/orca src/renderer/src/components/native-chat/native-chat-runtime-send.ts,
 // native-chat-send.ts, native-chat-pty-send-queue.ts and native-chat-interactive-prompt.ts
-import { invoke } from '@tauri-apps/api/core'
 import { pasteOf } from '../browser/grab-agent'
-import { ptyPid, tauriPty } from '../pty/client'
+import { paneRunsClaude } from '../chrome/running'
+import { tauriPty } from '../pty/client'
 
 /** How a prompt, a shell command, an approval and an answer are typed into a live Claude Code
  *  TUI. Every key below was checked against Claude Code 2.1.282 in a real pty (2026-09-25, the
@@ -156,10 +156,7 @@ export function makeChatPty(s: PtySinks): ChatPty {
 /** The app's terminals, asked the way Design Mode asks (`src/browser/design-live.ts`). */
 export const chatPty = makeChatPty({
   writePty: (pane, data) => tauriPty.write(pane, data),
-  paneRunsClaude: async (pane) => {
-    const pid = await ptyPid(pane).catch(() => null)
-    return pid !== null && (await invoke<boolean>('chrome_claude_running', { panePid: pid }).catch(() => false))
-  },
+  paneRunsClaude,
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 })
 
