@@ -94,6 +94,11 @@ pub struct ChildSession {
     /// (`account_dirs::Accounts::route`); None while there is only the default account.
     #[serde(default)]
     pub account_env: Option<AccountEnv>,
+    /// Whether the parent has this child's finish notice (Nexus spec Q12): `held` while it
+    /// waits in mnemo's `held-notices.jsonl` for the parent's next prompt, `delivered` once the
+    /// parent has it, None while the child has sent none (`notices_from`).
+    #[serde(default)]
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -215,6 +220,7 @@ pub fn parse_sessions(json: &str) -> Result<Vec<ChildSession>, String> {
                 pr: None,
                 account: default_account(),
                 account_env: None,
+                notice: None,
             })
         })
         .collect())
@@ -970,6 +976,7 @@ pub fn parse_job_child(short: &str, json: &str) -> Option<ChildSession> {
         pr: None,
         account: default_account(),
         account_env: None,
+        notice: None,
     })
 }
 
@@ -1028,6 +1035,94 @@ fn dispatch_parents() -> HashMap<String, String> {
         .and_then(|v| std::fs::read_to_string(v.join(".mnemo").join("dispatch-parents.jsonl")).ok())
         .map(|t| parse_dispatch_parents(&t))
         .unwrap_or_default()
+}
+
+/// mnemo's own records of a child's finish notice, in `<vault>/.mnemo/`: `child-reports.jsonl`
+/// (`mnemo/core/sessions/report_card.py`) and `held-notices.jsonl` (`held_notices.py`).
+const REPORTS_LOG: &str = "child-reports.jsonl";
+const HELD_LOG: &str = "held-notices.jsonl";
+
+/// `held_notices.HOLD_DAYS`: mnemo shows no held notice older than this, so it never arrives.
+const HOLD_MS: u64 = 14 * 86_400_000;
+
+/// `2026-10-14T19:37:15-0300`, `…+00:00` or `…Z` → epoch ms. `child-reports.jsonl` stamps local
+/// time with its offset (`%z`), `held-notices.jsonl` UTC with `Z`.
+pub fn stamp_ms(s: &str) -> Option<u64> {
+    if s.ends_with('Z') {
+        return iso_ms(s);
+    }
+    let t = s.find('T')?;
+    let cut = t + s[t..].rfind(['+', '-'])?;
+    let off = s[cut + 1..].replace(':', "");
+    let (hh, mm): (i64, i64) = (off.get(..2)?.parse().ok()?, off.get(2..)?.parse().ok()?);
+    let sign = if s[cut..].starts_with('-') { -1 } else { 1 };
+    let local = iso_ms(&format!("{}Z", &s[..cut]))? as i64;
+    u64::try_from(local - sign * (hh * 60 + mm) * 60_000).ok()
+}
+
+fn json_rows(text: &str) -> impl Iterator<Item = serde_json::Map<String, serde_json::Value>> + '_ {
+    text.lines().filter_map(|l| match serde_json::from_str(l) {
+        Ok(serde_json::Value::Object(m)) => Some(m),
+        _ => None,
+    })
+}
+
+/// `short id → "held" | "delivered"` from mnemo's notice records; a child with neither has sent
+/// no notice yet and is absent. The newest notice for a child says where it stands:
+/// - a `child-reports.jsonl` row with `delivered: true` went onto the parent's socket;
+/// - a `held-notices.jsonl` notice (written with the `delivered: false` row when the socket
+///   failed) is `held` until a later row names it `claimed`, when the parent's next prompt took
+///   it, and is then delivered. One older than `HOLD_MS` and unclaimed never arrives, so it
+///   counts for nothing, as `held_notices.pending` skips it.
+///
+/// An undelivered row with no held notice (the reporter crashed, `pr-follow` stood the watch
+/// down) carried nothing to the parent and counts for nothing either. On a tie, held wins: a
+/// robot that powers down on `delivered` must not do it early.
+pub fn notices_from(reports: &str, held: &str, now_ms: u64) -> HashMap<String, String> {
+    // short id → (stamp, delivered)
+    let mut newest: HashMap<String, (u64, bool)> = HashMap::new();
+    let mut note = |short: &str, at: u64, delivered: bool| {
+        let e = newest.entry(short.to_string()).or_insert((at, delivered));
+        if at > e.0 || (at == e.0 && !delivered) {
+            *e = (at, delivered);
+        }
+    };
+    let str_of = |r: &serde_json::Map<String, serde_json::Value>, k: &str| r.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(str::to_string);
+    for r in json_rows(reports) {
+        if r.get("delivered").and_then(|d| d.as_bool()) != Some(true) {
+            continue;
+        }
+        if let (Some(short), Some(at)) = (str_of(&r, "short_id"), str_of(&r, "ts").and_then(|t| stamp_ms(&t))) {
+            note(&short, at, true);
+        }
+    }
+    let rows: Vec<_> = json_rows(held).collect();
+    let claimed: std::collections::HashSet<String> = rows.iter().filter_map(|r| str_of(r, "claimed")).collect();
+    for r in &rows {
+        let (Some(id), Some(short), Some(at)) = (str_of(r, "id"), str_of(r, "short_id"), str_of(r, "ts").and_then(|t| stamp_ms(&t))) else { continue };
+        if str_of(r, "parent").is_none() || str_of(r, "text").is_none() {
+            continue;
+        }
+        if claimed.contains(&id) {
+            note(&short, at, true);
+        } else if now_ms.saturating_sub(at) <= HOLD_MS {
+            note(&short, at, false);
+        }
+    }
+    newest.into_iter().map(|(k, (_, d))| (k, if d { "delivered" } else { "held" }.to_string())).collect()
+}
+
+fn read_notices(now_ms: u64) -> HashMap<String, String> {
+    let Some(dir) = crate::vault::vault_root().map(|v| v.join(".mnemo")) else { return HashMap::new() };
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap_or_default();
+    notices_from(&read(REPORTS_LOG), &read(HELD_LOG), now_ms)
+}
+
+/// Every child's `notice` from `notices`; one mnemo has no record for is None.
+pub fn apply_notices(children: &mut [ChildSession], notices: &HashMap<String, String>) {
+    for c in children {
+        c.notice = notices.get(&c.id).cloned();
+    }
 }
 
 /// Every account's background children, each carrying its account, read from its `jobs/` and
@@ -1157,6 +1252,8 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     }
     let mut children = children_of(&accounts, &dispatch_parents());
     apply_waiting(&mut children, &agent_waiting);
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or_default();
+    apply_notices(&mut children, &read_notices(now_ms));
     let mut child_starts = HashMap::new();
     for c in &mut children {
         let jobs = accounts.get(&c.account).unwrap_or(accounts.default_account()).jobs_dir();
@@ -1647,7 +1744,7 @@ mod tests {
             id: id.into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: cwd.into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
-            model: None, effort: None, pr: None, account: default_account(), account_env: None,
+            model: None, effort: None, pr: None, account: default_account(), account_env: None, notice: None,
         }
     }
 
@@ -1714,7 +1811,7 @@ mod tests {
             id: "x".into(), session_id: None, name: None, state: "done".into(), tempo: "done".into(), needs: None,
             detail: String::new(), suggested_reply: None, cwd: "/tmp/elsewhere".into(), tokens: 0, live: false,
             updated_at: None, intent: None, branch: None, timeline_len: 0, parent_session: None, waiting_for: None,
-            model: None, effort: None, pr: None, account: default_account(), account_env: None,
+            model: None, effort: None, pr: None, account: default_account(), account_env: None, notice: None,
         }];
         let empty = HashMap::new();
         let groups = join(JoinInput {
@@ -1930,6 +2027,78 @@ mod tests {
         // whatever it adds, `run` must resolve programs through the same list.
         assert!(run("git", &["--version"], None).map(|o| o.starts_with("git version")).unwrap_or(false));
         assert!(!login_path().is_empty());
+    }
+
+    #[test]
+    fn stamps_read_with_their_offset_or_z() {
+        let utc = stamp_ms("2026-10-14T22:37:15Z").unwrap();
+        assert_eq!(stamp_ms("2026-10-14T19:37:15-0300"), Some(utc));
+        assert_eq!(stamp_ms("2026-10-15T00:07:15+01:30"), Some(utc));
+        assert_eq!(stamp_ms("2026-10-14T22:37:15+0000"), Some(utc));
+        assert_eq!(stamp_ms("2026-10-14T22:37:15"), None);
+        assert_eq!(stamp_ms("yesterday"), None);
+    }
+
+    /// Rows shaped as mnemo writes them (`report_card.record`, `held_notices.hold` and `claim`);
+    /// the ids are synthetic.
+    const REPORTS: &str = r#"{"ts": "2026-10-14T10:00:00-0300", "short_id": "aaaa0001", "parent": "p1", "reporter": 1, "event": "spawned", "pid": 2}
+{"ts": "2026-10-14T10:00:05-0300", "short_id": "aaaa0001", "parent": "p1", "reporter": 2, "event": "finished", "state": "pr-open", "pr": 7, "delivered": true}
+{"ts": "2026-10-14T10:00:05-0300", "short_id": "bbbb0002", "parent": "p1", "reporter": 3, "event": "finished", "state": "stopped", "pr": null, "delivered": false, "reason": "parent not live"}
+{"ts": "2026-10-14T10:00:06-0300", "short_id": "cccc0003", "parent": "p1", "reporter": 4, "event": "finished", "state": "stopped", "pr": null, "delivered": false, "reason": "parent not live"}
+{"ts": "2026-10-14T10:00:07-0300", "short_id": "dddd0004", "parent": "p1", "reporter": 5, "event": "finished", "delivered": false, "reason": "child-report crashed: OSError: x"}
+{"ts": "2026-10-14T09:00:00-0300", "short_id": "eeee0005", "parent": "p1", "reporter": 6, "event": "finished", "delivered": true}
+not json
+{"ts": "2026-10-14T10:00:08-0300", "short_id": "ffff0006", "event": "spawned", "pid": 9}
+"#;
+    const HELD: &str = r#"{"id": "h1", "ts": "2026-10-14T13:00:05Z", "parent": "p1", "short_id": "bbbb0002", "text": "<mnemo-child-finished> bbbb0002"}
+{"id": "h2", "ts": "2026-10-14T13:00:06Z", "parent": "p1", "short_id": "cccc0003", "text": "<mnemo-child-finished> cccc0003"}
+{"claimed": "h2", "ts": "2026-10-14T13:05:00Z"}
+{"id": "h3", "ts": "2026-10-14T13:00:00Z", "parent": "p1", "short_id": "eeee0005", "text": "<mnemo-child-finished> eeee0005 again"}
+{"id": "h4", "ts": "2026-09-01T13:00:00Z", "parent": "p1", "short_id": "gggg0007", "text": "old"}
+{"id": "h5", "ts": "2026-10-14T13:00:00Z", "parent": "", "short_id": "hhhh0008", "text": "no parent, never held"}
+"#;
+
+    #[test]
+    fn notices_say_held_until_the_parent_claims_them() {
+        let now = stamp_ms("2026-10-14T14:00:00Z").unwrap();
+        let got = notices_from(REPORTS, HELD, now);
+        let n = |id: &str| got.get(id).map(String::as_str);
+        assert_eq!(n("aaaa0001"), Some("delivered"), "went onto the socket");
+        assert_eq!(n("bbbb0002"), Some("held"), "held, not yet claimed");
+        assert_eq!(n("cccc0003"), Some("delivered"), "held, then claimed by the parent's prompt");
+        assert_eq!(n("dddd0004"), None, "undelivered with nothing held carried nothing");
+        assert_eq!(n("eeee0005"), Some("held"), "a newer stop's held notice outranks an older delivery");
+        assert_eq!(n("ffff0006"), None, "spawned only: no notice sent yet");
+        assert_eq!(n("gggg0007"), None, "older than mnemo shows a held notice");
+        assert_eq!(n("hhhh0008"), None, "mnemo holds nothing without a parent");
+        assert_eq!(got.len(), 4);
+    }
+
+    #[test]
+    fn a_delivery_after_a_held_notice_is_delivered_and_a_tie_stays_held() {
+        let held = r#"{"id": "h1", "ts": "2026-10-14T13:00:00Z", "parent": "p", "short_id": "a", "text": "t"}"#;
+        let later = r#"{"ts": "2026-10-14T10:30:00-0300", "short_id": "a", "delivered": true}"#;
+        let same = r#"{"ts": "2026-10-14T10:00:00-0300", "short_id": "a", "delivered": true}"#;
+        let now = stamp_ms("2026-10-14T14:00:00Z").unwrap();
+        assert_eq!(notices_from(later, held, now).get("a").map(String::as_str), Some("delivered"));
+        assert_eq!(notices_from(same, held, now).get("a").map(String::as_str), Some("held"));
+        assert!(notices_from("", "", now).is_empty());
+    }
+
+    #[test]
+    fn notice_fills_every_child_and_serialises_as_the_front_end_reads_it() {
+        let mut kids = vec![bare_child("aaaa0001", "/r"), bare_child("bbbb0002", "/r"), bare_child("zzzz0009", "/r")];
+        kids[2].notice = Some("delivered".into());
+        let now = stamp_ms("2026-10-14T14:00:00Z").unwrap();
+        apply_notices(&mut kids, &notices_from(REPORTS, HELD, now));
+        let json: Vec<serde_json::Value> = kids.iter().map(|c| serde_json::to_value(c).unwrap()).collect();
+        assert_eq!(json[0]["notice"], "delivered");
+        assert_eq!(json[1]["notice"], "held");
+        assert_eq!(json[2]["notice"], serde_json::Value::Null, "a stale value never survives a poll");
+        // A snapshot written before the field still reads.
+        let mut old = json[0].clone();
+        old.as_object_mut().unwrap().remove("notice");
+        assert_eq!(serde_json::from_value::<ChildSession>(old).unwrap().notice, None);
     }
 
     #[test]
