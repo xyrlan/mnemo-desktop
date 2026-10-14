@@ -120,6 +120,13 @@ pub mod install_review;
 // -- plan-usage (src/plan_usage.rs) --
 pub mod plan_usage;
 
+// -- crash (src/crash.rs) --
+// The log, a panic written into it, and a start that fails said in a dialog.
+pub mod crash;
+
+// -- console (src/console.rs) --
+pub mod console;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -155,39 +162,11 @@ fn run_smoke(app: &tauri::App) -> Result<(), String> {
     Ok(())
 }
 
-/// The log a release build on Windows keeps, in the app dir.
-const LOG_FILE: &str = "app.log";
-/// Past this at a start, the log starts over.
-const LOG_MAX: u64 = 1024 * 1024;
-
-/// The log goes to stderr, errors only unless `RUST_LOG` says more. A release build on Windows
-/// has no console (`windows_subsystem = "windows"`) and so no stderr anyone can read: there it
-/// goes to `LOG_FILE`, warnings included (#311).
-fn init_log() {
-    let mut log = env_logger::Builder::new();
-    log.filter_level(log::LevelFilter::Error);
-    if cfg!(all(windows, not(debug_assertions))) {
-        if let Ok(file) = log_file(&app_dir::app_dir().join(LOG_FILE), LOG_MAX) {
-            log.filter_level(log::LevelFilter::Warn).target(env_logger::Target::Pipe(Box::new(file)));
-        }
-    }
-    log.parse_default_env().init();
-}
-
-/// `path` open to be added to, started over when it has passed `max` bytes.
-fn log_file(path: &std::path::Path, max: u64) -> std::io::Result<std::fs::File> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > max) {
-        std::fs::remove_file(path)?;
-    }
-    std::fs::OpenOptions::new().create(true).append(true).open(path)
-}
-
 pub fn run() {
-    init_log();
-    tauri::Builder::default()
+    crash::init_log();
+    crash::install_panic_hook();
+    crash::starting();
+    let ran = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
@@ -509,6 +488,7 @@ pub fn run() {
                 });
             }
 
+            crash::started();
             Ok(())
         })
         // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
@@ -524,8 +504,13 @@ pub fn run() {
             tauri::WindowEvent::Destroyed => window.state::<PtyState>().0.release(),
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running mnemo-desktop");
+        .run(tauri::generate_context!());
+    // `build` failing (a plugin, the event loop) is the one failed start Tauri returns rather
+    // than panics on (`crash::install_panic_hook`).
+    if let Err(e) = ran {
+        crash::failed_start(&e.to_string());
+        std::process::exit(1);
+    }
 }
 
 /// Asks `question` over a window that was asked to close, and closes it on a yes. One question
@@ -552,23 +537,6 @@ fn ask_to_close(window: &tauri::Window, question: String) {
                 let _ = closing.destroy();
             }
         });
-}
-
-#[cfg(test)]
-mod log_tests {
-    use std::io::Write;
-
-    #[test]
-    fn the_log_file_is_added_to_and_starts_over_once_too_long() {
-        let path = crate::testutil::temp_dir("log").join("app/app.log");
-        super::log_file(&path, 8).unwrap().write_all(b"one\n").unwrap();
-        super::log_file(&path, 8).unwrap().write_all(b"two\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\n");
-        super::log_file(&path, 8).unwrap().write_all(b"three\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\nthree\n");
-        super::log_file(&path, 8).unwrap().write_all(b"four\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "four\n");
-    }
 }
 
 #[cfg(test)]
