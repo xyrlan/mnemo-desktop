@@ -446,6 +446,7 @@ mod tests {
         assert!(read_in(&secret, &s.with(&[&s.outside])).is_ok());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn roots_system_folders_and_homes_parents_are_too_wide() {
         let home = Path::new("/Users/me");
@@ -455,5 +456,91 @@ mod tests {
         for p in ["/opt/src/repo", "/Volumes/work/repo", "/usr/local/src/repo", "/Users/me/code", "/srv/git/repo"] {
             assert!(!too_wide(Path::new(p), home), "{p}");
         }
+    }
+
+    /// The same on Windows, where the system folders are Windows' own and a POSIX name under a
+    /// drive is a folder like any other (#333). The `\\?\` forms are what `canonicalize` hands
+    /// `too_wide`.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_system_folders_are_windows_own() {
+        let home = Path::new(r"C:\Users\me");
+        for p in [
+            r"C:\",
+            r"\\?\C:\",
+            r"D:\",
+            r"C:\Windows",
+            r"C:\Windows\System32",
+            r"c:\windows\system32",
+            r"\\?\C:\Windows\System32",
+            r"D:\Windows\System32",
+            r"C:\Program Files",
+            r"C:\Program Files\Git",
+            r"C:\Program Files (x86)\x",
+            r"C:\ProgramData\x",
+            r"C:\Users",
+            r"\\?\C:\Users",
+            r"\\server\share",
+            r"\\?\UNC\server\share",
+        ] {
+            assert!(too_wide(Path::new(p), home), "{p}");
+        }
+        for p in [
+            r"C:\dev\repo",
+            r"\\?\C:\dev\repo",
+            r"C:\dev",
+            r"D:\dev\repo",
+            r"D:\lib\x",
+            r"C:\bin\tool",
+            r"C:\etc\x",
+            r"D:\sys\x",
+            r"C:\boot\x",
+            r"E:\proc\x",
+            r"C:\src\repo",
+            r"C:\Users\me\code",
+            r"C:\Users\other\repo",
+            r"\\server\share\repo",
+            r"\\?\UNC\server\share\repo",
+        ] {
+            assert!(!too_wide(Path::new(p), home), "{p}");
+        }
+    }
+
+    /// The whole way through, on a real folder: a project saved under `C:\dev` is read, written
+    /// and listed (#333). Where the drive's root cannot be written to there is nothing to try
+    /// this on; on CI it can, and there the test does not skip.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_project_under_dev_on_the_drive_opens() {
+        let s = Sandbox::new("win-dev");
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let dev = PathBuf::from(format!(r"{drive}\dev"));
+        let made_dev = !dev.exists();
+        let proj = dev.join(format!("mnemo-desktop-fs-{}", std::process::id()));
+        if let Err(e) = std::fs::create_dir_all(proj.join("src")) {
+            assert!(std::env::var_os("CI").is_none(), "cannot make {}: {e}", proj.display());
+            return;
+        }
+        std::fs::write(proj.join("src").join("a.rs"), "fn a() {}").unwrap();
+        let scope = s.with(&[&proj]);
+        let read = read_in(&at(&proj.join("src").join("a.rs")), &scope);
+        let wrote = write_in(&at(&proj.join("src").join("b.rs")), "fn b() {}", &scope);
+        let listed = list_in(&at(&proj.join("src")), &scope);
+        // The drive itself, saved as a project, still opens nothing beside the project.
+        std::fs::write(dev.join(format!("mnemo-desktop-fs-{}.txt", std::process::id())), "nope").unwrap();
+        let beside = at(&dev.join(format!("mnemo-desktop-fs-{}.txt", std::process::id())));
+        let through_root = read_in(&beside, &s.with(&[Path::new(&format!(r"{drive}\"))]));
+        let unsaved = read_in(&beside, &scope);
+        let _ = std::fs::remove_file(&beside);
+        let _ = std::fs::remove_dir_all(&proj);
+        if made_dev {
+            let _ = std::fs::remove_dir(&dev);
+        }
+        assert_eq!(read.unwrap(), "fn a() {}");
+        wrote.unwrap();
+        let names: Vec<_> = listed.unwrap().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, vec!["a.rs", "b.rs"]);
+        assert!(through_root.unwrap_err().contains("outside the home directory"));
+        assert!(unsaved.unwrap_err().contains("outside the home directory"));
     }
 }
