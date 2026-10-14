@@ -91,6 +91,8 @@ export type CheckDetails = {
   completedAt: string | null
   steps: Step[]
   annotations: Annotation[]
+  /** Why the annotations could not be read: `annotations` is empty for want of them. */
+  annotationsError: string | null
   /** The failed log's last lines, up to its last error. */
   logTail: string | null
   logError: string | null

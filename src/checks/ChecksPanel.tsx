@@ -259,6 +259,14 @@ function CheckRunDetails({ check, state, onRetry, onOpenUrl }: { check: Check; s
               </div>
             </div>
           )}
+          {details?.annotationsError && (
+            <div className="flex items-center gap-2" data-annotations-error="">
+              <span className="min-w-0 flex-1 text-[12px] break-words text-muted-foreground">Its annotations could not be read: {details.annotationsError}</span>
+              <Button type="button" variant="outline" size="xs" className="shrink-0" disabled={state?.loading} onClick={onRetry}>
+                Retry
+              </Button>
+            </div>
+          )}
           {details?.logTail && <LogTail text={details.logTail} />}
           {details?.logError && <div className="text-[12px] break-words text-muted-foreground">Its log could not be read: {details.logError}</div>}
           {!check.jobId && (
@@ -273,7 +281,7 @@ function CheckRunDetails({ check, state, onRetry, onOpenUrl }: { check: Check; s
               )}
             </div>
           )}
-          {details && !failedSteps.length && !annotations.length && !details.logTail && !details.logError && (
+          {details && !failedSteps.length && !annotations.length && !details.logTail && !details.logError && !details.annotationsError && (
             <div className="text-[12px] text-muted-foreground">No inline details are available for this check.</div>
           )}
         </div>

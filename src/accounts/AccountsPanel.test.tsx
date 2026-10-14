@@ -240,6 +240,34 @@ test('the switcher draws nothing before the accounts are known', async () => {
   expect(host.innerHTML).toBe('')
 })
 
+test('an unreadable list says so in the switcher’s place, with a retry that brings the switcher back (#367)', async () => {
+  const { client, fake: f } = fakeClient({ state: state(), usage: usage() })
+  f.refuse.list = 'accounts.json: permission denied'
+  const s = createAccountsStore(client)
+  host = document.body.appendChild(document.createElement('div'))
+  root = createRoot(host)
+  await act(async () => root!.render(<AccountsContext.Provider value={s}><AccountSwitcher /></AccountsContext.Provider>))
+  await act(settle)
+  const alert = host.querySelector<HTMLElement>('[data-account-switcher-error]')!
+  expect(alert.textContent).toContain('Accounts unreadable')
+  expect(alert.title).toContain('accounts.json: permission denied')
+  expect(alert.title).toContain('new terminals run on the default account')
+  expect(host.querySelector('[data-account-switcher]')).toBeNull()
+  delete f.refuse.list
+  await act(async () => [...alert.querySelectorAll('button')].find((b) => b.textContent?.includes('Retry'))!.click())
+  await act(settle)
+  expect(host.querySelector('[data-account-switcher-error]')).toBeNull()
+  expect(host.querySelector('[data-account-switcher]')?.getAttribute('aria-label')).toBe('Claude accounts: Personal')
+})
+
+test('a failure the panel would show marks the switcher row, so it is seen with the panel closed (#367)', async () => {
+  await mount(<AccountSwitcher />)
+  await act(async () => store.setState({ error: 'A session moved to Work, but the app could not record it: disk full' }))
+  const trigger = host.querySelector<HTMLButtonElement>('[data-account-switcher]')!
+  expect(trigger.title).toContain('could not record it: disk full')
+  expect(trigger.querySelector('[aria-label="A session moved to Work, but the app could not record it: disk full"]')).not.toBeNull()
+})
+
 test('a pane on another account than the active one says which, when there is more than one', async () => {
   await mount(
     <>

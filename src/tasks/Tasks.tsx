@@ -8,9 +8,10 @@ import type { PaneViewProps } from '../panes/registry'
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from '@/ui'
 import { cn } from '@/ui/cn'
 import { homeStore, useHome } from '../home/app-store'
-import { childSession, relTime, type HomeRepo, type Pr } from '../home/types'
+import { childSession, otherErrors, relTime, type HomeRepo, type Pr } from '../home/types'
 import PrPane from '../home/pr-pane'
 import { useMission } from '../mission/app-store'
+import { SnapshotErrors } from '../mission/SnapshotErrors'
 import { selectionStore, useSelection } from '../github/app-store'
 import { dispatchIssue, dispatchIssues, openIssue, openUrl } from '../github/actions'
 import { linkIssues, linkWord, type Issue, type IssueLink } from '../github/types'
@@ -380,6 +381,9 @@ export default function Tasks(_: PaneViewProps) {
           </Button>
         </header>
         <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* `gh`'s per-repo reasons are in their groups; what is left is why the projects
+              themselves may be missing (Claude's history unreadable). */}
+          <SnapshotErrors errors={otherErrors(snap.errors)} sources={['history', 'other']} className="mx-3 mt-2" />
           {body}
           {batch && <BatchBar root={batch.root} ns={batch.ns} onDispatch={() => setBatchOpen(true)} />}
         </div>
