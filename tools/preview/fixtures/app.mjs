@@ -46,6 +46,8 @@ export const BASE = {
   plan_usage: () => ({ limits: [], plan: null, fetchedAt: Date.now(), stale: null }),
   // No project to offer "what mnemo learned" for, so that screen never opens by itself.
   install_review_project: () => null,
+  // Off a Mac the app hands its chord table to the host for browser panes (src/actions/keys.ts).
+  browser_chords: () => null,
 }
 
 /**
