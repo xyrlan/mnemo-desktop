@@ -23,14 +23,17 @@ function mark(paths: readonly string[], on: boolean) {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-/** Removes one worktree (its branch stays) and closes its panes. The fleet is not refreshed. */
+/** Closes one worktree's panes, then removes it (its branch stays). The fleet is not refreshed.
+ *  The panes go first: Windows does not let go of a folder a terminal's shell still runs in, so
+ *  the backend would refuse it. Callers have just read that git will not refuse it. */
 async function removeOne(path: string, force: boolean) {
-  await removeWorktree(path, force)
   await layoutStore.getState().closeWorktree(path)
+  await removeWorktree(path, force)
 }
 
 /** Remove the worktree now: the backend refuses a dirty one unless `force`. Its card says
- *  "Removing…" until the fleet has dropped it; a failure is a toast. */
+ *  "Removing…" until the fleet has dropped it; a failure is a toast, and the fleet is read again
+ *  either way, so the card shows what is on disk. */
 export async function removeWorkspace(tree: Pick<WorktreeNode, 'path' | 'name' | 'branch'>, force: boolean): Promise<boolean> {
   mark([tree.path], true)
   try {
@@ -40,6 +43,7 @@ export async function removeWorkspace(tree: Pick<WorktreeNode, 'path' | 'name' |
     return true
   } catch (e) {
     toast.error(`Could not remove ${tree.name}`, { description: message(e) })
+    await fleetStore.getState().refresh().catch(() => {})
     return false
   } finally {
     mark([tree.path], false)
@@ -53,6 +57,8 @@ export async function requestRemove(tree: WorktreeNode): Promise<void> {
   try {
     const listed = (await listWorktrees(tree.path)).find((w) => norm(w.path) === tree.path)
     if (!listed) throw new Error(`git does not list ${tree.path} as a worktree`)
+    // Said before its terminals are closed for a removal that would be refused.
+    if (listed.setupJob) throw new Error(`setup is still running in ${tree.path}`)
     dirty = listed.dirty
   } catch (e) {
     toast.error(`Could not remove ${tree.name}`, { description: message(e) })
