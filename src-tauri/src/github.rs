@@ -352,8 +352,8 @@ enum Gh {
 }
 
 fn gh(args: &[&str], cwd: Option<&Path>) -> Gh {
-    let mut cmd = crate::proc::command("gh");
-    cmd.args(args).env("PATH", login_path()).stdin(std::process::Stdio::null());
+    let mut cmd = crate::proc::tool("gh", &login_path());
+    cmd.args(args).stdin(std::process::Stdio::null());
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }

@@ -262,6 +262,11 @@ impl Lookup {
         }
     }
 
+    /// Resolves names through `PATHEXT`.
+    pub fn is_windows(&self) -> bool {
+        self.sep == ';'
+    }
+
     /// The first executable called `name` in `path`, as an absolute path.
     pub fn find(&self, name: &str, path: &str) -> Option<PathBuf> {
         let names: Vec<String> =
@@ -314,9 +319,8 @@ fn is_under(path: &Path, dir: &Path) -> bool {
 /// `exe --version` with `PATH` set to `path_env`, its first line when it exits 0 within
 /// `timeout`. A tool that hangs is killed rather than holding up the setup screen.
 fn version_of(exe: &Path, path_env: &str, timeout: Duration) -> Option<String> {
-    let mut child = crate::proc::command(exe)
+    let mut child = crate::proc::tool(exe, path_env)
         .arg("--version")
-        .env("PATH", path_env)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

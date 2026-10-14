@@ -773,9 +773,8 @@ pub(crate) fn run_on(accounts: &Accounts, account: &Account, program: &str, args
 }
 
 fn run_with(program: &str, args: &[&str], cwd: Option<&Path>, env: impl FnOnce(&mut std::process::Command)) -> Result<String, String> {
-    let mut cmd = crate::proc::command(program);
+    let mut cmd = crate::proc::tool(program, &login_path());
     cmd.args(args);
-    cmd.env("PATH", login_path());
     env(&mut cmd);
     if let Some(d) = cwd {
         cmd.current_dir(d);

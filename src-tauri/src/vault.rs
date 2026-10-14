@@ -1312,11 +1312,10 @@ fn exec_within(program: &str, path_env: &str, action: &str, args: &[String], cwd
     if !dir.is_dir() {
         return refuse(format!("{}: not a directory", dir.display()));
     }
-    let child = crate::proc::command(program)
+    let child = crate::proc::tool(program, path_env)
         .arg(action)
         .args(args)
         .current_dir(&dir)
-        .env("PATH", path_env)
         .env("NO_COLOR", "1")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
