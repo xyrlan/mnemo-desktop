@@ -11,6 +11,7 @@ import { VIEW } from './open'
 import { bornOf } from './seen'
 import { watchDispatches } from './watch'
 import { DispatchPane } from './pane'
+import { basename } from '../path/path'
 
 /** The Dispatch tab: a pane view (App imports every `src/*\/view.tsx`), the watch that opens it
  *  when a wave is dispatched, and ⌘K's ways back to it once closed (spec decision 4). */
@@ -42,7 +43,7 @@ registerProvider(() => {
   const known = knownWorktrees(fleetStore.getState().repos, layout.getState().worktrees)
   const parents = [...new Set(allChildren(snap).flatMap((c) => parentOf(snap, c.id, known) ?? []))]
   return parents.flatMap((parent) => {
-    const name = parent.split('/').pop() || parent
+    const name = basename(parent)
     return wavesOf(snap, parent, known, bornOf).flatMap((w) => {
       const label = w.issues ? `issues of ${name}` : w.feature
       const asks = w.needsYou ? ` (${w.needsYou} need${w.needsYou === 1 ? 's' : ''} you)` : ''

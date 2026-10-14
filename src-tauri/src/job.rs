@@ -71,13 +71,14 @@ fn pump(id: String, stream: &'static str, from: impl Read, sink: Arc<dyn Fn(JobE
 /// program that cannot be started (the error says which) — those emit nothing.
 pub fn run(id: &str, cwd: &str, argv: &[String], sink: Arc<dyn Fn(JobEvent) + Send + Sync>) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("job: empty argv")?;
-    let mut command = crate::proc::command(program);
+    let mut command = crate::proc::tool(program, &login_path());
     command.args(args);
     start(id, cwd, program, command, sink)
 }
 
 /// [`run`] for a command its caller built, `program` naming it in an error: a worktree's setup
-/// line goes to `cmd` on Windows as it was typed, which no argv can say.
+/// line goes to `cmd` on Windows as it was typed, which no argv can say. The caller sets its
+/// `PATH`, with `crate::proc::tool`.
 pub fn start(id: &str, cwd: &str, program: &str, mut command: Command, sink: Arc<dyn Fn(JobEvent) + Send + Sync>) -> Result<(), String> {
     if !live().lock().unwrap().insert(id.to_string()) {
         return Err(format!("job {id} is already running"));
@@ -85,7 +86,6 @@ pub fn start(id: &str, cwd: &str, program: &str, mut command: Command, sink: Arc
     let spawned = command
         .current_dir(cwd)
         // Apps started from Finder or the Dock get a bare PATH, without Homebrew's `gh` or `mnemo`.
-        .env("PATH", login_path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

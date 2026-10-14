@@ -1,5 +1,5 @@
 // adapted from stablyai/orca src/renderer/src/components/dictation/DictationIndicator.tsx (MIT, 122b8c25)
-import { Square } from 'lucide-react'
+import { Square, X } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
 import { Button, Kbd, KbdGroup, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
@@ -11,7 +11,21 @@ type Props = {
   store: StoreApi<VoiceState>
   /** The toggle's keys, shown in the Stop button's tooltip: `['⌘', 'E']`. */
   shortcut: readonly string[]
+  /** The hold chord's keys, shown beside the toggle's: `['⌥', 'Space']`. */
+  hold?: readonly string[]
   onStop(): void
+  /** Hides an error, which otherwise stays until the next take. */
+  onDismiss?(): void
+}
+
+function Keys({ keys }: { keys: readonly string[] }) {
+  return (
+    <KbdGroup>
+      {keys.map((k) => (
+        <Kbd key={k}>{k}</Kbd>
+      ))}
+    </KbdGroup>
+  )
 }
 
 /** The line beside the grapes. */
@@ -33,9 +47,10 @@ function label(phase: Exclude<Phase, { kind: 'idle' }>, downloading: boolean): s
 }
 
 /** Orca's dictation indicator, floating above the status bar: the grapes, what dictation is
- *  doing and a Stop button while a take is open. After the take, the transcript lingers under
- *  it for a moment (Orca's partial-transcript row; whisper has only the final text). */
-export function Indicator({ store, shortcut, onStop }: Props) {
+ *  doing, the microphone it listens to and a Stop button while a take is open. After the take,
+ *  the transcript lingers under it for a moment (Orca's partial-transcript row; whisper has only
+ *  the final text). An error is shown whole, wrapped, and stays until dismissed. */
+export function Indicator({ store, shortcut, hold = [], onStop, onDismiss }: Props) {
   const phase = useStore(store, (s) => s.phase)
   const download = useStore(store, (s) => s.download)
   if (phase.kind === 'idle') return null
@@ -45,7 +60,8 @@ export function Indicator({ store, shortcut, onStop }: Props) {
   const isError = phase.kind === 'error'
   const text = label(phase, download !== null)
   const transcript = phase.kind === 'done' ? phase.text.trim() : ''
-  const wide = transcript !== '' || download !== null
+  const device = phase.kind === 'listening' ? phase.device : null
+  const wide = transcript !== '' || download !== null || isError
   const stopLabel = 'Stop dictation'
 
   return (
@@ -61,14 +77,36 @@ export function Indicator({ store, shortcut, onStop }: Props) {
         isError && 'border-destructive/40 text-destructive',
       )}
     >
-      <div className={cn('flex h-10 items-center gap-2 px-2', !open && 'pr-3')}>
+      <div className={cn('flex min-h-10 items-center gap-2 px-2', !open && !isError && 'pr-3', isError && 'py-2')}>
         <Grapes level={0} active={busy} transitioning={phase.kind === 'starting' || phase.kind === 'transcribing'} />
-        <span aria-hidden className="min-w-0 truncate font-medium">
+        <span
+          aria-hidden
+          data-testid="dictation-text"
+          className={cn('min-w-0 font-medium', isError ? 'flex-1 whitespace-normal break-words select-text' : 'truncate')}
+        >
           {text}
         </span>
-        <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-          {text}
+        {device ? (
+          <span aria-hidden data-testid="dictation-device" title={device} className="min-w-0 truncate text-xs text-muted-foreground">
+            {device}
+          </span>
+        ) : null}
+        <span role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'} aria-atomic="true" className="sr-only">
+          {device ? `${text}: ${device}` : text}
         </span>
+        {isError && onDismiss ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Dismiss"
+            className="shrink-0 self-start text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onDismiss}
+          >
+            <X className="size-3" />
+          </Button>
+        ) : null}
         {open ? (
           <>
             <span aria-hidden className="ml-0.5 h-4 w-px shrink-0 bg-border" />
@@ -89,12 +127,12 @@ export function Indicator({ store, shortcut, onStop }: Props) {
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={6} className="flex items-center gap-1.5">
                 {stopLabel}
-                {shortcut.length > 0 ? (
-                  <KbdGroup>
-                    {shortcut.map((k) => (
-                      <Kbd key={k}>{k}</Kbd>
-                    ))}
-                  </KbdGroup>
+                {shortcut.length > 0 ? <Keys keys={shortcut} /> : null}
+                {hold.length > 0 ? (
+                  <>
+                    or release
+                    <Keys keys={hold} />
+                  </>
                 ) : null}
               </TooltipContent>
             </Tooltip>

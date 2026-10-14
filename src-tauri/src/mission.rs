@@ -5,6 +5,9 @@
 //! to `collect_snapshot` and the small helpers under `// -- io --`.
 
 pub mod account_dirs;
+pub mod asked;
+#[cfg(test)]
+mod spawn_tests;
 
 use account_dirs::{Account, AccountEnv, Accounts};
 use serde::{Deserialize, Serialize};
@@ -260,7 +263,9 @@ pub fn waiting_for(id: &str) -> Result<Option<String>, String> {
     let accounts = account_dirs::accounts();
     let mut last = None;
     for a in accounts.looking_for(id) {
-        match run_on(&accounts, a, "claude", &["agents", "--json", "--all"], None).and_then(|j| agent_waiting_for(&j, id)) {
+        // A gate before keys are typed: an answer asked after this call began, shared with any
+        // caller asking at the same moment.
+        match agents_answer(&accounts, a, std::time::Instant::now()).and_then(|j| agent_waiting_for(&j, id)) {
             Ok(w) => return Ok(w),
             Err(e) => last = Some(e),
         }
@@ -773,9 +778,8 @@ pub(crate) fn run_on(accounts: &Accounts, account: &Account, program: &str, args
 }
 
 fn run_with(program: &str, args: &[&str], cwd: Option<&Path>, env: impl FnOnce(&mut std::process::Command)) -> Result<String, String> {
-    let mut cmd = crate::proc::command(program);
+    let mut cmd = crate::proc::tool(program, &login_path());
     cmd.args(args);
-    cmd.env("PATH", login_path());
     env(&mut cmd);
     if let Some(d) = cwd {
         cmd.current_dir(d);
@@ -788,10 +792,11 @@ fn run_with(program: &str, args: &[&str], cwd: Option<&Path>, env: impl FnOnce(&
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// Main checkout root for a cwd, following worktrees back to their common dir.
-/// Callers that act without a user gesture check `may_probe` first.
+/// Main checkout root for a cwd, following worktrees back to their common dir. Kept per cwd
+/// while the `.git` git would find from it is unchanged (`asked::Roots`): every poll asks it of
+/// every cwd it knows. Callers that act without a user gesture check `may_probe` first.
 pub fn repo_root(cwd: &str) -> Option<String> {
-    git_root(cwd).ok()
+    asked::roots().get(cwd, || git_root(cwd))
 }
 
 /// `repo_root` with git's error kept, so a TCC denial can be told apart from "not a repo".
@@ -844,10 +849,19 @@ pub fn unlock_covers(path: &str) -> bool {
     unlocked().iter().any(|d| Path::new(path).starts_with(d))
 }
 
-/// worktree path → branch name, from `git worktree list --porcelain`.
+/// worktree path → branch name, from `git worktree list --porcelain`, kept while the files it
+/// reads are unchanged (`asked::Worktrees`); empty when git fails.
 pub fn worktree_branches(root: &str) -> HashMap<String, String> {
+    asked::worktrees().get(root, || ask_worktree_branches(root))
+}
+
+/// `git worktree list --porcelain` in `root`, asked now.
+pub fn ask_worktree_branches(root: &str) -> Result<HashMap<String, String>, String> {
+    run("git", &["worktree", "list", "--porcelain"], Some(Path::new(root))).map(|text| parse_worktree_branches(&text))
+}
+
+pub fn parse_worktree_branches(text: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let Ok(text) = run("git", &["worktree", "list", "--porcelain"], Some(Path::new(root))) else { return map };
     let mut cur: Option<String> = None;
     for line in text.lines() {
         if let Some(p) = line.strip_prefix("worktree ") {
@@ -994,48 +1008,106 @@ pub fn read_job_children(jobs: &Path, roster: Option<&str>, alive: &dyn Fn(u32) 
     out
 }
 
-/// Every account's background children, each carrying its account. The default account's come
-/// from `mnemo sessions`, as before accounts; a short id is listed once, by the first account.
-fn children_of(accounts: &Accounts, errors: &mut Vec<String>) -> Vec<ChildSession> {
+/// `short id → parent session` from mnemo's dispatch log (`<vault>/.mnemo/dispatch-parents.jsonl`),
+/// read as `mnemo sessions` stamps `parent_session` (`mnemo/core/sessions/parents.py`): a line
+/// that is not a JSON object with both strings is skipped, and a later line wins.
+pub fn parse_dispatch_parents(text: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(str::to_string);
+        if let (Some(short), Some(parent)) = (s("short_id"), s("parent_session")) {
+            out.insert(short, parent);
+        }
+    }
+    out
+}
+
+fn dispatch_parents() -> HashMap<String, String> {
+    crate::vault::vault_root()
+        .and_then(|v| std::fs::read_to_string(v.join(".mnemo").join("dispatch-parents.jsonl")).ok())
+        .map(|t| parse_dispatch_parents(&t))
+        .unwrap_or_default()
+}
+
+/// Every account's background children, each carrying its account, read from its `jobs/` and
+/// roster as `mnemo sessions --json --all` reads them, with the parent mnemo recorded at
+/// dispatch. The default account's came from a `mnemo sessions` start every poll until #368. A
+/// short id is listed once, by the first account.
+fn children_of(accounts: &Accounts, parents: &HashMap<String, String>) -> Vec<ChildSession> {
     let mut out: Vec<ChildSession> = Vec::new();
     for a in accounts.iter() {
-        let mut got = if a.is_default {
-            match run("mnemo", &["sessions", "--json", "--all"], None).and_then(|j| parse_sessions(&j)) {
-                Ok(c) => c,
-                Err(e) => {
-                    errors.push(e);
-                    vec![]
-                }
-            }
-        } else {
-            let roster = std::fs::read_to_string(a.roster_path()).ok();
-            read_job_children(&a.jobs_dir(), roster.as_deref(), &pid_alive)
-        };
+        let roster = std::fs::read_to_string(a.roster_path()).ok();
+        let mut got = read_job_children(&a.jobs_dir(), roster.as_deref(), &pid_alive);
         got.retain(|c| !out.iter().any(|o| o.id == c.id));
         for c in &mut got {
             c.account = a.id.clone();
             c.account_env = accounts.route(a);
+            c.parent_session = parents.get(&c.id).cloned();
         }
         out.extend(got);
     }
     out
 }
 
-/// `claude agents --json --all` on every account, at once. Each answer is tagged with its account.
-/// An account whose dir is gone is not asked: `claude` would make the dir again.
-pub(crate) fn agents_of<'a>(accounts: &'a Accounts) -> Vec<(&'a Account, Result<String, String>)> {
-    claude_on_every(accounts, &["agents", "--json", "--all"])
+/// How old a `claude agents` answer may be and still be handed to a poll: the panes' own cache
+/// before #368. The mission poll comes back after at least 3 s, so it asks anew each round; a
+/// pane, Home or the fleet that asks within 3 s of it gets its answer.
+pub(crate) const AGENTS_FRESH: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The one question asked of `claude agents`: `--all` lists every live row `--json` alone does,
+/// with the same fields, and the finished background jobs besides (which carry no pid).
+const AGENTS_ARGS: [&str; 3] = ["agents", "--json", "--all"];
+
+/// The shared answer's key: an account is its dir as much as its id.
+fn agents_key(a: &Account) -> String {
+    format!("{}\n{}", a.id, a.config_dir.display())
 }
 
-/// `claude <args>` on every account, at once, as `agents_of` asks it.
+/// `account`'s `claude agents --json --all`, asked at or after `not_before`: one ask per account at
+/// a time, whoever asks (`asked::Shared`).
+pub(crate) fn agents_answer(accounts: &Accounts, a: &Account, not_before: std::time::Instant) -> Result<String, String> {
+    asked::agents().get(&agents_key(a), not_before, std::time::Instant::now, || run_on(accounts, a, "claude", &AGENTS_ARGS, None))
+}
+
+/// The accounts `claude` is asked on: an account whose dir is gone is not, since `claude` would
+/// make the dir again.
+fn askable(accounts: &Accounts) -> impl Iterator<Item = &Account> {
+    accounts.iter().filter(|a| a.is_default || a.config_dir.is_dir())
+}
+
+/// `claude agents --json --all` on every account, at once, at most `AGENTS_FRESH` old. Each answer
+/// is tagged with its account.
+pub(crate) fn agents_of<'a>(accounts: &'a Accounts) -> Vec<(&'a Account, Result<String, String>)> {
+    let now = std::time::Instant::now();
+    agents_since(accounts, now.checked_sub(AGENTS_FRESH).unwrap_or(now))
+}
+
+/// `agents_of`, with answers asked at or after `not_before`.
+pub(crate) fn agents_since<'a>(accounts: &'a Accounts, not_before: std::time::Instant) -> Vec<(&'a Account, Result<String, String>)> {
+    on_every(accounts, |a| agents_answer(accounts, a, not_before))
+}
+
+/// The last `claude agents` answer of every account and the oldest of their times, asking
+/// nothing; None while some account has none yet.
+pub(crate) fn agents_last(accounts: &Accounts) -> Option<(std::time::Instant, Vec<Result<String, String>>)> {
+    let last: Option<Vec<_>> = askable(accounts).map(|a| asked::agents().last(&agents_key(a))).collect();
+    let last = last?;
+    let at = last.iter().map(|(at, _)| *at).min()?;
+    Some((at, last.into_iter().map(|(_, got)| got).collect()))
+}
+
+/// `claude <args>` on every account, at once, asked now and not shared.
+#[cfg(test)]
 pub(crate) fn claude_on_every<'a>(accounts: &'a Accounts, args: &[&str]) -> Vec<(&'a Account, Result<String, String>)> {
+    on_every(accounts, |a| run_on(accounts, a, "claude", args, None))
+}
+
+fn on_every<'a>(accounts: &'a Accounts, ask: impl Fn(&'a Account) -> Result<String, String> + Sync) -> Vec<(&'a Account, Result<String, String>)> {
     std::thread::scope(|s| {
-        let asks: Vec<_> = accounts
-            .iter()
-            .filter(|a| a.is_default || a.config_dir.is_dir())
-            .map(|a| (a, s.spawn(move || run_on(accounts, a, "claude", args, None))))
-            .collect();
-        asks.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err(format!("claude {} panicked", args.join(" ")))))).collect()
+        let ask = &ask;
+        let asks: Vec<_> = askable(accounts).map(|a| (a, s.spawn(move || ask(a)))).collect();
+        asks.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("claude panicked".to_string())))).collect()
     })
 }
 
@@ -1083,7 +1155,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
             Err(e) => errors.push(on_account_error(a, e)),
         }
     }
-    let mut children = children_of(&accounts, &mut errors);
+    let mut children = children_of(&accounts, &dispatch_parents());
     apply_waiting(&mut children, &agent_waiting);
     let mut child_starts = HashMap::new();
     for c in &mut children {
@@ -2219,6 +2291,34 @@ mod account_tests {
     }
 
     #[test]
+    fn the_parent_mnemo_recorded_is_read_as_mnemo_sessions_stamps_it() {
+        let log = "{\"short_id\":\"a43d3832\",\"parent_session\":\"p-1\"}\nnot json\n[]\n{\"short_id\":\"b\",\"parent_session\":\"\"}\n{\"short_id\":\"a43d3832\",\"parent_session\":\"p-2\"}\n";
+        assert_eq!(parse_dispatch_parents(log), HashMap::from([("a43d3832".to_string(), "p-2".to_string())]));
+        assert!(parse_dispatch_parents("").is_empty());
+    }
+
+    #[test]
+    fn the_default_accounts_children_are_read_from_its_jobs_as_the_others_are() {
+        let home = crate::testutil::temp_dir("acct-default-jobs");
+        let def = home.join(".claude");
+        let work = home.join(".claude-work");
+        job(&def.join("jobs"), "a43d3832", STATE);
+        job(&work.join("jobs"), "a43d3832", STATE);
+        job(&work.join("jobs"), "b0b0b0b0", r#"{"state":"working","tempo":"active"}"#);
+        std::fs::create_dir_all(def.join("daemon")).unwrap();
+        std::fs::write(def.join("daemon").join("roster.json"), format!(r#"{{"workers":{{"a43d3832":{{"pid":{}}}}}}}"#, std::process::id())).unwrap();
+        let text = serde_json::json!({ "accounts": [{ "id": "work", "configDir": work }] }).to_string();
+        let accounts = Accounts::parse(&text, &home);
+        let parents = HashMap::from([("b0b0b0b0".to_string(), "parent-1".to_string())]);
+        let got = children_of(&accounts, &parents);
+        let rows: Vec<_> = got.iter().map(|c| (c.id.as_str(), c.account.as_str(), c.live, c.parent_session.as_deref())).collect();
+        assert_eq!(rows, [("a43d3832", account_dirs::DEFAULT_ID, true, None), ("b0b0b0b0", "work", false, Some("parent-1"))]);
+        let route = accounts.route(accounts.default_account());
+        assert_eq!(got[0], ChildSession { live: true, account_env: route, ..parse_job_child("a43d3832", STATE).unwrap() });
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn a_session_is_found_in_its_own_accounts_roster() {
         let home = crate::testutil::temp_dir("acct-roster");
         let work = home.join(".claude-work");
@@ -2258,11 +2358,17 @@ mod account_tests {
     fn dump_real_accounts() {
         let accounts = account_dirs::accounts();
         eprintln!("{accounts:?}");
-        // The port reads the default account's jobs as `mnemo sessions` lists them.
-        let def = accounts.default_account();
-        let roster = std::fs::read_to_string(def.roster_path()).ok();
-        let key = |c: &ChildSession| (c.id.clone(), c.state.clone(), c.tempo.clone(), c.live, c.model.clone(), c.effort.clone(), c.intent.clone());
-        let mut ported: Vec<_> = read_job_children(&def.jobs_dir(), roster.as_deref(), &pid_alive).iter().map(key).collect();
+        // The port reads every account's jobs as `mnemo sessions` lists them (it reads every
+        // account since mnemo#640). The accounts are the installed app's: a debug build keeps its
+        // own `accounts.json`.
+        let home = crate::app_dir::home();
+        let installed = std::fs::read_to_string(crate::app_dir::shared_dir_in(&home).join("accounts.json"))
+            .map(|t| Accounts::parse(&t, &home))
+            .unwrap_or_else(|_| accounts.clone());
+        let key = |c: &ChildSession| {
+            (c.id.clone(), c.state.clone(), c.tempo.clone(), c.live, c.model.clone(), c.effort.clone(), c.intent.clone(), c.parent_session.clone())
+        };
+        let mut ported: Vec<_> = children_of(&installed, &dispatch_parents()).iter().map(key).collect();
         let mut mnemo: Vec<_> = parse_sessions(&run("mnemo", &["sessions", "--json", "--all"], None).unwrap()).unwrap().iter().map(key).collect();
         ported.sort();
         mnemo.sort();

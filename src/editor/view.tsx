@@ -15,6 +15,7 @@ import { promptPath } from './Prompt'
 import { basename, defaultRoot, languageFor } from './paths'
 import { savedText } from './text'
 import './editor.css'
+import { norm, relativeTo } from '../path/path'
 
 const fs = tauriFs
 const sessions = createSessions()
@@ -161,7 +162,7 @@ function EditorPane({ id, props }: PaneViewProps) {
 
   const st = sessions.getState()
   const root = session?.root ?? null
-  const shown = root && path.startsWith(root + '/') ? path.slice(root.length + 1) : path
+  const shown = (root && norm(root) !== '/' && relativeTo(path, root)) || path
   const hasBuffer = sessions.buffers.get(id)?.path === path
 
   return (

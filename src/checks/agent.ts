@@ -1,13 +1,7 @@
 // adapted from stablyai/orca lib/fix-checks-agent-launch.ts: an existing agent in the worktree
 // gets the prompt; with none, one is started there and gets it once it is up
 import { deliver, resolveAgent, type AgentTarget, type Sinks, type Where } from '../browser/grab-agent'
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const within = (cwd: string, path: string) => {
-  const c = norm(cwd)
-  const p = norm(path)
-  return c === p || c.startsWith(p === '/' ? p : `${p}/`)
-}
+import { norm, within } from '../path/path'
 
 /** Nothing runs in the worktree at all: no session the fleet knows of, no dispatched child. Only
  *  then is a new agent started; one waiting on a prompt, or running outside the app's terminals,

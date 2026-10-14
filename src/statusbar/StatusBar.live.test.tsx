@@ -13,7 +13,7 @@ vi.mock('../layout/app-store', async () => {
   return { store, useApp: (sel: (s: unknown) => unknown) => useStore(store, sel) }
 })
 vi.mock('../fleet/store', () => ({ useFleet: (sel: (f: unknown) => unknown) => sel({ repos: [] }) }))
-vi.mock('../mission/app-store', () => ({ useMission: (sel: (s: unknown) => unknown) => sel({ snapshot: { repos: [] } }) }))
+vi.mock('../mission/app-store', () => ({ useMission: (sel: (s: unknown) => unknown) => sel({ snapshot: { repos: [], errors: [] } }) }))
 vi.mock('../pulse/app-store', () => ({ usePulse: (sel: (s: unknown) => unknown) => sel({ counts: {} }) }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 

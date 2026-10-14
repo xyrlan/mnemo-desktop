@@ -33,7 +33,34 @@ test('without the accounts commands nothing is shown and nothing more is asked',
   store.getState().start()
   await settle()
   expect(store.getState().state).toBeNull()
+  expect(store.getState().listError).toBeNull()
   expect(fake.calls.map((c) => c[0])).toEqual(['list'])
+})
+
+test('a list that cannot be read says why, and a retry reads it and starts the rest (#367)', async () => {
+  const { fake, client } = fakeClient({ state: two(), usage: {} })
+  fake.refuse.list = '/Users/me/Library/Application Support/mnemo-desktop/accounts.json: expected value at line 1 column 1'
+  const store = createAccountsStore(client)
+  store.getState().start()
+  await settle()
+  expect(store.getState().state).toBeNull()
+  expect(store.getState().listError).toBe(fake.refuse.list)
+
+  // Still unreadable: still says so.
+  await store.getState().retryList()
+  expect(store.getState().listError).toBe(fake.refuse.list)
+
+  delete fake.refuse.list
+  await Promise.all([store.getState().retryList(), store.getState().retryList()])
+  await settle()
+  expect(store.getState().listError).toBeNull()
+  expect(store.getState().state?.accounts.map((a) => a.id)).toEqual(['default', 'work'])
+  expect(fake.called('list')).toHaveLength(3)
+  expect(fake.called('panes')).toHaveLength(1)
+  expect(fake.called('usage')).toHaveLength(2)
+  // Known now: a retry asks nothing.
+  await store.getState().retryList()
+  expect(fake.called('list')).toHaveLength(3)
 })
 
 test('a usage that cannot be read says why, and keeps the reading it had', async () => {

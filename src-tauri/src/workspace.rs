@@ -32,7 +32,8 @@ pub async fn workspace_live_sessions(ids: Vec<String>) -> Result<Vec<String>, St
         return Ok(vec![]);
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let answers = crate::chrome::ask_agents().into_iter().collect::<Result<Vec<_>, _>>()?;
+        // Asked after the restore began: a session resumed a moment ago must be seen.
+        let answers = crate::chrome::ask_agents(std::time::Instant::now()).into_iter().collect::<Result<Vec<_>, _>>()?;
         Ok(live_among(answers.iter().map(String::as_str), &ids))
     })
     .await

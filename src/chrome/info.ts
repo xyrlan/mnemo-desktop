@@ -3,9 +3,7 @@ import type { ParentSession, Snapshot } from '../mission/types'
 import { parentTokenLine } from '../mission/tokens'
 import { paneCwd, repoOfCwd } from '../mission/scope'
 import type { PulseEvent } from '../pulse/types'
-
-const trimSlash = (p: string) => p.replace(/\/+$/, '') || '/'
-const basename = (p: string) => trimSlash(p).split('/').pop() || p
+import { basename, samePath } from '../path/path'
 
 /** The Claude session a pane runs: the one it was opened for, else the only live parent
  *  sitting in exactly its cwd. Two parents in one directory are ambiguous: none. */
@@ -17,7 +15,7 @@ export function paneParent(pane: Pane | undefined, cwd: string | undefined, snap
     if (own) return own
   }
   if (!cwd || pane.view !== 'terminal') return undefined
-  const here = parents.filter((p) => p.cwd && trimSlash(p.cwd) === trimSlash(cwd))
+  const here = parents.filter((p) => p.cwd && samePath(p.cwd, cwd))
   return here.length === 1 ? here[0] : undefined
 }
 

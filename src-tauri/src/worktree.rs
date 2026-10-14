@@ -190,13 +190,13 @@ fn setup_command(setup: &str) -> (&'static str, std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let mut cmd = crate::proc::command("cmd");
+        let mut cmd = crate::proc::tool("cmd", &crate::mission::login_path());
         cmd.raw_arg("/S /C").raw_arg(format!("\"{setup}\""));
         ("cmd", cmd)
     }
     #[cfg(not(windows))]
     {
-        let mut sh = crate::proc::command("sh");
+        let mut sh = crate::proc::tool("sh", &crate::mission::login_path());
         sh.arg("-c").arg(setup);
         ("sh", sh)
     }

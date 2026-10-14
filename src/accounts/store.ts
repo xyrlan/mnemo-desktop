@@ -18,17 +18,24 @@ export type Usage = { usage: PlanUsage | null; error: string | null; loading: bo
 export type Accounts = {
   /** Null until the list is read (and for good when the app has no accounts commands). */
   state: AccountsState | null
+  /** Why the list could not be read, while it cannot: new terminals then run on the default
+   *  account whatever was chosen. Null once read, and when the app has no accounts commands. */
+  listError: string | null
   usage: Record<string, Usage>
   /** The account each terminal pane was spawned on. A pane missing here was spawned after the last
    *  switch, so it runs on the active account. */
   panes: Record<number, string>
-  /** What the last add, rename, remove, share or switch said when it failed. */
+  /** What the last add, rename, remove, share or switch said when it failed, or a session that
+   *  followed a switch but could not be recorded on its new account. */
   error: string | null
   /** What the last share left to say: where the copies that differed were kept. */
   note: string | null
   /** Reads the list, the panes and the usage, follows `accounts://changed` and polls the usage.
    *  Once: later calls do nothing. */
   start(): void
+  /** Reads the list again after it could not be read (`listError`), and starts what `start`
+   *  could not. Nothing once the list is known. */
+  retryList(): Promise<void>
   /** Reads every account's usage. `refresh`: past the reading kept from under a minute ago. */
   readUsage(refresh: boolean): Promise<void>
   switchTo(id: string): Promise<void>
@@ -51,6 +58,11 @@ export type FollowEnv = Omit<FollowDeps, 'paneAccounts' | 'target' | 'record'>
 
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+/** No accounts commands to ask: a backend without them refuses with `command … not found`, and
+ *  outside Tauri (a test, a page with no IPC) `invoke` throws an `Error`. Nothing to show then,
+ *  and nothing went wrong. A command that ran and failed refuses with its `Err`, a string. */
+const noCommands = (e: unknown) => typeof e !== 'string' || /^command \S+ not found$/.test(e)
+
 /** `follow`: open Claude sessions follow a switch (decision 9). None given: they stay. */
 export function createAccountsStore(client: AccountsClient, opts: { pollMs?: number; follow?: FollowEnv } = {}): AccountsStore {
   return createZustand<Accounts>((set, get) => {
@@ -70,8 +82,15 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
           return s?.accounts.find((a) => a.id === s.active) ?? null
         },
         record: async (pane, id) => {
-          await client.movePane(pane, id)
-          void readPanes()
+          try {
+            await client.movePane(pane, id)
+          } catch (e) {
+            const label = get().state?.accounts.find((a) => a.id === id)?.label ?? id
+            set({ error: `A session moved to ${label}, but the app could not record it: ${say(e)}` })
+            throw e
+          } finally {
+            void readPanes()
+          }
         },
       })
     /** The newest usage request per account: an older answer landing after it is dropped. */
@@ -121,8 +140,41 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       }
     }
 
+    /** The list read under way, so a retry pressed twice reads it once. */
+    let reading: Promise<void> | null = null
+
+    /** Reads the list; once it is known, the panes, the usage, the change event and the poll. */
+    async function begin() {
+      try {
+        apply(await client.list())
+      } catch (e) {
+        set({ listError: noCommands(e) ? null : say(e) })
+        return
+      }
+      set({ listError: null })
+      if (!get().state) return
+      void readPanes()
+      void get().readUsage(false)
+      try {
+        await client.onChanged((state) => {
+          apply(state)
+          void readPanes()
+          void get().readUsage(false)
+        })
+      } catch {
+        // No event: the list still changes through this store's own actions.
+      }
+      setInterval(() => void get().readUsage(false), opts.pollMs ?? POLL_MS)
+    }
+
+    function readList() {
+      reading ??= begin().finally(() => (reading = null))
+      return reading
+    }
+
     return {
       state: null,
+      listError: null,
       usage: {},
       panes: {},
       error: null,
@@ -131,26 +183,13 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       start() {
         if (started) return
         started = true
-        void (async () => {
-          try {
-            apply(await client.list())
-          } catch {
-            return
-          }
-          if (!get().state) return
-          void readPanes()
-          void get().readUsage(false)
-          try {
-            await client.onChanged((state) => {
-              apply(state)
-              void readPanes()
-              void get().readUsage(false)
-            })
-          } catch {
-            // No event: the list still changes through this store's own actions.
-          }
-          setInterval(() => void get().readUsage(false), opts.pollMs ?? POLL_MS)
-        })()
+        void readList()
+      },
+
+      async retryList() {
+        if (get().state) return
+        started = true
+        await readList()
       },
 
       async readUsage(refresh) {

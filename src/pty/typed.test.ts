@@ -105,6 +105,23 @@ test('a pane just spawned runs cmd on Windows and a POSIX shell elsewhere; a pro
   expect(shellOf(['PS1 % '], false)).toBe('posix')
 })
 
+test('on Windows a pane just spawned is the kind of shell chosen for new panes (#360)', () => {
+  expect(paneShell(true, 'powershell')).toBe('powershell')
+  expect(paneShell(true, 'posix')).toBe('posix')
+  expect(paneShell(true, null)).toBe('cmd')
+  // macOS and Linux: whatever was chosen on Windows, a POSIX shell.
+  expect(paneShell(false, 'powershell')).toBe('posix')
+  // A prompt that is neither PowerShell's nor cmd's is the kind new panes start: Git Bash's.
+  expect(shellOf(['me@pc MINGW64 ~/repo', '$ '], true, 'posix')).toBe('posix')
+  expect(shellOf(['me@pc MINGW64 ~/repo', '$ '], true, null)).toBe('cmd')
+  expect(shellOf(['C:\\Users\\me>'], true, 'posix')).toBe('cmd')
+  expect(shellOf(['\\\\server\\share\\x> '], true, 'powershell')).toBe('cmd')
+  expect(shellOf(['PS C:\\Users\\me> '], true, 'posix')).toBe('powershell')
+  // Git Bash reads its Enter from a Windows console: `\r`, as cmd's.
+  expect(enter('posix', '\n', true)).toBe('\r')
+  expect(typed('ls', 'posix')).toBe('ls\n')
+})
+
 test('a command that could not be typed is a line for the terminal, naming the command and the reason', () => {
   const text = new TextDecoder().decode(notTyped('claude --resume abc', new Error('pane 4 has exited')))
   expect(text).toContain('mnemo: could not type `claude --resume abc` here: pane 4 has exited')

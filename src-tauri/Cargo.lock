@@ -2468,6 +2468,7 @@ dependencies = [
  "notify",
  "objc2",
  "portable-pty",
+ "rfd",
  "serde",
  "serde_json",
  "sha2",

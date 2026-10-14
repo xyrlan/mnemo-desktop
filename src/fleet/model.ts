@@ -1,4 +1,5 @@
 import type { HomeSnapshot } from '../home/types'
+import { basename, norm, within } from '../path/path'
 import { allChildren, needKind, type ChildSession, type ParentSession, type Pr as MissionPr, type Snapshot } from '../mission/types'
 import type { AgentEvent, WorktreeInfo } from './upstream'
 import type { AgentNode, AgentState, PrNode, RepoNode, WaitingFor, WorktreeNode } from './types'
@@ -24,21 +25,13 @@ export const HOOK_TRUST_MS = 8_000
 
 export type Next = { state: AgentState; waitingFor: WaitingFor }
 
-export const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const base = (p: string) => norm(p).split('/').pop() || p
-
-/** `cwd` is `path` or somewhere under it. */
-export const within = (cwd: string, path: string) => {
-  const c = norm(cwd)
-  const p = norm(path)
-  return c === p || c.startsWith(p === '/' ? p : `${p}/`)
-}
+export { norm, within }
 
 /** A card's name: the repo's own folder for the main checkout, else the tree's folder without
  *  the `<repo>-wt-` every sibling tree carries (`mnemo dispatch`'s convention, and ours). */
 export function worktreeName(info: Pick<WorktreeInfo, 'path' | 'isMain'>, root: string): string {
-  const name = base(info.path)
-  const prefix = `${base(root)}-wt-`
+  const name = basename(info.path)
+  const prefix = `${basename(root)}-wt-`
   return !info.isMain && name.startsWith(prefix) && name.length > prefix.length ? name.slice(prefix.length) : name
 }
 

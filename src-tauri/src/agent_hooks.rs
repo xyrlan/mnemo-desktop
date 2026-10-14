@@ -408,6 +408,11 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
         return Ok(());
     }
+    // Absent by design is not a failure: a warning here would open every log on Windows (#364).
+    if let Some(why) = ABSENT {
+        log::info!("agent hooks: off on this system: {why}");
+        return Ok(());
+    }
     listen(app.clone());
     if guard().is_ok() && !app_dir().join(OFF_MARKER).exists() {
         std::thread::spawn(|| {
@@ -433,10 +438,15 @@ fn listen<R: Runtime>(app: AppHandle<R>) {
     }
 }
 
+/// Why this system has no hook socket, None where it has one.
+#[cfg(unix)]
+const ABSENT: Option<&str> = None;
 #[cfg(not(unix))]
-fn listen<R: Runtime>(_app: AppHandle<R>) {
-    log::warn!("agent hooks: not listening: the hook socket needs unix sockets");
-}
+const ABSENT: Option<&str> = Some("the hook socket needs unix sockets");
+
+/// Never reached: `start` returns first where `ABSENT` says why.
+#[cfg(not(unix))]
+fn listen<R: Runtime>(_app: AppHandle<R>) {}
 
 #[cfg(unix)]
 fn install() -> Result<(), String> {
@@ -492,6 +502,14 @@ mod tests {
     use super::*;
 
     const BIN: &str = "/Users/me/.mnemo-desktop/bin/mnemo-desktop-hook";
+
+    /// Windows has no hook socket by design: `start` says so at info, below what the log file
+    /// keeps (`crash::tests::a_panic_on_any_thread_lands_in_the_log_with_where`), and neither
+    /// listens nor installs, which wrote two warnings at every start before #364.
+    #[test]
+    fn a_system_without_the_hook_socket_knows_it_before_trying() {
+        assert_eq!(ABSENT.is_some(), cfg!(windows));
+    }
 
     fn mark() -> String {
         owner_mark(crate::app_dir::RELEASE)
