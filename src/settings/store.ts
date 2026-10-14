@@ -5,6 +5,9 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
  *  in that language. Persisted whole to ~/.mnemo-desktop/settings.json. */
 export type Settings = {
   outgoing: 'en' | 'as-typed'
+  /** `outgoing` was set by the person (the palette toggle), not carried in a file written while
+   *  'en' was the default. An 'en' without it is that old default, and loads as 'as-typed' (#391). */
+  outgoingChosen: boolean
   replyLanguage: 'pt' | 'en' | 'unchanged'
   /** Home screen: repo roots pinned to the top / hidden, and where `gh repo clone` lands. */
   homePinned: string[]
@@ -29,7 +32,8 @@ export type Settings = {
 }
 
 export const DEFAULTS: Settings = {
-  outgoing: 'en',
+  outgoing: 'as-typed',
+  outgoingChosen: false,
   replyLanguage: 'unchanged',
   homePinned: [],
   homeHidden: [],
@@ -82,7 +86,7 @@ export function createSettingsStore(client: SettingsClient): StoreApi<SettingsSt
       if (!get().loaded) await (reading ?? get().load())
       // The file may have been mended or moved away since: ask again before refusing.
       if (get().unreadable !== null) await get().load()
-      set({ [key]: value } as Partial<SettingsState>)
+      set({ [key]: value, ...(key === 'outgoing' && { outgoingChosen: true }) } as Partial<SettingsState>)
       const s = get()
       // Never the defaults over a file that could not be read.
       if (s.unreadable !== null) throw new Error(s.unreadable)
@@ -94,7 +98,9 @@ export function createSettingsStore(client: SettingsClient): StoreApi<SettingsSt
 
 function pick(v: Partial<Settings>): Partial<Settings> {
   const out: Partial<Settings> = {}
-  if (v.outgoing === 'en' || v.outgoing === 'as-typed') out.outgoing = v.outgoing
+  if (v.outgoingChosen === true) out.outgoingChosen = true
+  // Every file saved before #391 holds 'en', the default then, whether or not anyone chose it.
+  if (v.outgoing === 'as-typed' || (v.outgoing === 'en' && out.outgoingChosen)) out.outgoing = v.outgoing
   if (v.replyLanguage === 'pt' || v.replyLanguage === 'en' || v.replyLanguage === 'unchanged') out.replyLanguage = v.replyLanguage
   const strs = (x: unknown): string[] | null => (Array.isArray(x) && x.every((s) => typeof s === 'string') ? (x as string[]) : null)
   const pinned = strs(v.homePinned)
