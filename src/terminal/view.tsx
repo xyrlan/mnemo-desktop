@@ -113,6 +113,8 @@ export default function TerminalPane({ id }: PaneViewProps) {
     const data = term.onData((d) => {
       void tauriPty.write(id, d)
     })
+    // A key, not `onData`: the terminal's own answers to the shell are data too.
+    const noticed = term.onKey(() => store.getState().shellNoticed(id))
     const title = term.onTitleChange((t) => store.getState().setTitle(id, t))
     const osc7 = term.parser.registerOscHandler(7, (d) => {
       const p = parseOsc7(d)
@@ -143,6 +145,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
       releaseDrop()
       ro.disconnect()
       data.dispose()
+      noticed.dispose()
       title.dispose()
       osc7.dispose()
       resized.dispose()
@@ -165,6 +168,12 @@ export default function TerminalPane({ id }: PaneViewProps) {
     >
       {!broken && <div ref={host} style={{ height: '100%' }} />}
       {!broken && pane?.face === 'conversation' && <ConversationFace paneId={id} />}
+      {pane?.renewed && !exited && (
+        <div className="pane-notice" role="status">
+          The shell that ran in this pane is no longer running. This is a new one, in the same folder.
+          <button onClick={() => store.getState().shellNoticed(id)}>ok</button>
+        </div>
+      )}
       {exited && (
         <div className="pane-message">[process exited with code {pane?.exitCode ?? '?'}] press any key to close</div>
       )}

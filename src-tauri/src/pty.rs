@@ -8,6 +8,7 @@
 //! `cargo test`; Windows; `MNEMO_NO_PTYD=1`) the same host runs in-process: a reload still finds
 //! its shells, a quit takes them along.
 
+pub mod closing;
 mod host;
 mod screen;
 // Most of it is the daemon protocol, which only unix speaks.
@@ -400,6 +401,20 @@ impl PtyManager {
         }
     }
 
+    /// The terminals the app holds itself whose shell is running something: what closing the
+    /// window would end (`closing.rs`). The daemon's are never among them: they run on. Starts
+    /// nothing.
+    pub fn busy(&self) -> Vec<closing::Busy> {
+        let here = match &self.hosting {
+            Hosting::Here(h) => Some(h),
+            #[cfg(unix)]
+            Hosting::Daemon { fallback, .. } => fallback.get(),
+        };
+        let Some(host) = here else { return Vec::new() };
+        // A table that cannot be read says nothing of what runs: nothing is asked, as before.
+        crate::procs::table().map(|table| closing::busy(&host.list(), |pid| table.children(&[pid]), closing::name_of)).unwrap_or_default()
+    }
+
     /// The app is going away: terminals held in-process go with it (they would anyway); the
     /// daemon's keep running for the next launch. Starts nothing.
     pub fn release(&self) {
@@ -444,6 +459,86 @@ fn daemon_binary() -> Option<PathBuf> {
     }
     let bin = std::env::current_exe().ok()?.with_file_name(DAEMON_BIN);
     bin.is_file().then_some(bin)
+}
+
+/// The question on close (#338), on every platform: these start a real shell, Windows' too.
+#[cfg(test)]
+mod closing_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    /// A terminal held by `manager`, its shell running `script` (`/bin/sh -c`, `cmd /d /c`), and
+    /// what it has printed.
+    fn shell(manager: &PtyManager, script: &str) -> (PaneId, Arc<Mutex<Vec<u8>>>) {
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            // Word by word: `cmd` does not read the quotes portable-pty puts around a spaced argument.
+            ("cmd.exe", ["/d", "/c"].into_iter().chain(script.split(' ')).map(String::from).collect())
+        } else {
+            ("/bin/sh", vec!["-c".into(), script.into()])
+        };
+        let program = std::env::var("COMSPEC").ok().filter(|_| cfg!(windows)).unwrap_or_else(|| program.into());
+        let opts = SpawnOptions { program: Some(program), args, cwd: None, cols: 80, rows: 24, login: false };
+        let printed = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&printed);
+        let record = move |e| {
+            if let Event::Output(b) = e {
+                sink.lock().unwrap().extend(b);
+            }
+        };
+        let id = manager.spawn(opts, Box::new(record)).expect("spawn");
+        if cfg!(windows) {
+            // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
+            manager.write(id, b"\x1b[1;1R").unwrap();
+        }
+        (id, printed)
+    }
+
+    /// `manager.busy()` once it names `program`, within 30 s. `printed` is what its shell said.
+    fn busy_with(manager: &PtyManager, program: &str, printed: &Mutex<Vec<u8>>) -> Vec<closing::Busy> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let busy = manager.busy();
+            if busy.iter().any(|b| b.programs.iter().any(|p| p.eq_ignore_ascii_case(program))) {
+                return busy;
+            }
+            if Instant::now() >= deadline {
+                let (held, said) = (manager.list(), String::from_utf8_lossy(&printed.lock().unwrap()).into_owned());
+                let table = crate::procs::table().unwrap_or_default();
+                let below: Vec<_> = held.iter().flatten().map(|t| (t.pid, table.children(&[t.pid]))).collect();
+                panic!("{program} never showed under a shell: busy {busy:?}, held {held:?}, processes {below:?}, printed {said:?}");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn closing_asks_when_a_terminal_held_here_is_running_something_and_not_over_idle_shells() {
+        let m = PtyManager::with_shell_dir(None);
+        assert_eq!(closing::question(&m.busy()), None, "no terminal, no question");
+        // A shell waiting for a line, as at its prompt.
+        let (idle, _) = shell(&m, if cfg!(windows) { "set /p x=" } else { "read x" });
+        assert_eq!(closing::question(&m.busy()), None, "an idle shell loses nothing");
+
+        // `; :` keeps sh from becoming the one command it was given.
+        // On Windows a second `cmd`, by its full path: on windows-latest a pane started through
+        // `command` finds neither `ping` nor `powershell` by name (its `PATH` is not this test's).
+        let nested = format!("{} /d /c set /p y=", std::env::var("COMSPEC").unwrap_or_default());
+        let (working, printed) = shell(&m, if cfg!(windows) { &nested } else { "sleep 60; :" });
+        let program = if cfg!(windows) { "cmd" } else { "sleep" };
+        let busy = busy_with(&m, program, &printed);
+        assert_eq!(busy.len(), 1, "the idle shell is not among them: {busy:?}");
+        let question = closing::question(&busy).expect("asked");
+        assert!(question.to_lowercase().contains(program), "{question}");
+
+        m.kill(working);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !m.busy().is_empty() {
+            assert!(Instant::now() < deadline, "still busy after its terminal was closed");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        m.kill(idle);
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -805,6 +900,20 @@ mod tests {
     /// An app: talks to the daemon at `socket`, and has no binary to start one with.
     fn app(socket: &Path) -> PtyManager {
         PtyManager::with_daemon(socket.to_path_buf(), PathBuf::from("/nonexistent/mnemo-desktop-ptyd"), None)
+    }
+
+    /// The other half of the question on close (#338): what the daemon holds runs on.
+    #[test]
+    fn closing_asks_nothing_over_terminals_the_daemon_holds() {
+        let (socket, srv, _rx) = daemon("closing");
+        let m = app(&socket);
+        let (id, _out) = sh(&m, "sleep 60; :");
+        let pid = m.pid(id).expect("a running shell");
+        eventually("the shell to start its program", || crate::procs::table().is_ok_and(|t| !t.children(&[pid]).is_empty()));
+        assert!(m.busy().is_empty(), "the daemon keeps it: nothing to ask");
+        assert_eq!(closing::question(&m.busy()), None);
+        m.kill(id);
+        drop(srv);
     }
 
     /// Output until `want` shows up, within 5 s.
