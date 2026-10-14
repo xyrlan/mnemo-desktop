@@ -29,10 +29,17 @@ fn typed_runs(enter: &str, wait: Duration) -> (bool, String) {
         )
         .expect("spawn the default shell");
     let mut out = String::new();
-    let read = |until: Instant, out: &mut String, stop: &dyn Fn(&str) -> bool| {
+    // ConPTY opens by asking where the cursor is (`CSI 6 n`) and holds everything until a
+    // terminal answers; in the app xterm.js does.
+    let mut answered = 0;
+    let mut read = |until: Instant, out: &mut String, stop: &dyn Fn(&str) -> bool| {
         while Instant::now() < until && !stop(out.as_str()) {
             if let Ok(Event::Output(b)) = rx.recv_timeout(Duration::from_millis(100)) {
                 out.push_str(&String::from_utf8_lossy(&b));
+            }
+            while let Some(at) = out[answered..].find("\x1b[6n") {
+                answered += at + 4;
+                m.write(id, b"\x1b[1;1R").expect("answer the cursor report");
             }
         }
     };
