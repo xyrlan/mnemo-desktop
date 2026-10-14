@@ -40,6 +40,16 @@ pub const DEV_TOOLS: &[&str] = &[APP_DRIVE];
 pub const APP_SNAPSHOT: &str = "desktop_app_snapshot";
 pub const APP_DRIVE: &str = "desktop_app_drive";
 
+/// Why no tool works on Windows. Keep in step with `UNAVAILABLE` in `src/bin/mnemo-desktop-mcp.rs`,
+/// which lists the tools: it lists no snapshot where `snapshot` is not implemented either.
+pub const UNAVAILABLE: &str =
+    "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
+
+/// Whether the desktop MCP can be served on `os` (`std::env::consts::OS`) at all.
+pub fn available_on(os: &str) -> bool {
+    os != "windows"
+}
+
 /// Whether this build serves `method`.
 pub fn serves(method: &str) -> bool {
     serves_in(method, cfg!(debug_assertions))
@@ -66,9 +76,10 @@ pub fn socket_path() -> PathBuf {
 
 /// What a pane's environment carries so a session in it reaches this app, not another
 /// instance: the binary Claude Code starts is found through the user's registration, which
-/// may be another build's, and falls back to the release socket without it.
-pub fn pane_env() -> (&'static str, PathBuf) {
-    (SOCKET_ENV, socket_path())
+/// may be another build's, and falls back to the release socket without it. Nothing where
+/// no socket is ever served: the pane gets no `SOCKET_ENV` at all (`pty::command`).
+pub fn pane_env() -> Option<(&'static str, PathBuf)> {
+    available_on(std::env::consts::OS).then(|| (SOCKET_ENV, socket_path()))
 }
 
 /// Where sessions are pointed at: a symlink to the binary of whichever app build started
@@ -182,16 +193,42 @@ pub fn mcp_answer(ask: u64, content: Option<Value>, error: Option<String>) {
 
 static STARTED: OnceLock<Result<(), String>> = OnceLock::new();
 
+/// What `mcp_socket_path` tells the webview: where the app serves, or, on a system where it
+/// cannot (`available_on`), why, which the webview shows. `unavailable` is set at the first
+/// start only (`unavailable_said`): the person is told once, not at every launch.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct Serving {
+    pub socket: Option<String>,
+    pub unavailable: Option<String>,
+}
+
 /// Where the app serves the MCP binary. The first call binds the socket and refreshes the
 /// session registration (`~/.mnemo-desktop/mcp.json`, the user-scope `claude mcp` entry).
 #[tauri::command]
-pub fn mcp_socket_path<R: Runtime>(app: AppHandle<R>) -> String {
+pub fn mcp_socket_path<R: Runtime>(app: AppHandle<R>) -> Serving {
+    if !available_on(std::env::consts::OS) {
+        log::info!("mcp: not serving: {UNAVAILABLE}");
+        return Serving { socket: None, unavailable: unavailable_said(&app_dir().join("mcp-unavailable-said")) };
+    }
     let path = socket_path();
     let started = STARTED.get_or_init(|| start(app, &path));
     if let Err(e) = started {
         log::warn!("mcp: not serving: {e}");
     }
-    path.display().to_string()
+    Serving { socket: Some(path.display().to_string()), unavailable: None }
+}
+
+/// `UNAVAILABLE` the first time it is asked for, then `None`: `marker` remembers it was said.
+/// A marker that cannot be written says it again next time rather than never.
+pub fn unavailable_said(marker: &Path) -> Option<String> {
+    if marker.exists() {
+        return None;
+    }
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(marker, "");
+    Some(UNAVAILABLE.into())
 }
 
 #[cfg(unix)]
@@ -215,7 +252,7 @@ fn start<R: Runtime>(app: AppHandle<R>, path: &Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn start<R: Runtime>(_app: AppHandle<R>, _path: &Path) -> Result<(), String> {
-    Err("the desktop MCP needs unix sockets".into())
+    Err(UNAVAILABLE.into())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -501,6 +538,16 @@ mod tests {
         // `cargo test` is a debug build, like `tauri dev`.
         let r = parse(answer_line(r#"{"id":1,"method":"desktop_app_drive","params":{"action":"eval","js":"1"}}"#, &echo));
         assert_eq!(r["content"][0]["text"], r#"desktop_app_drive {"action":"eval","js":"1"}"#);
+    }
+
+    #[test]
+    fn a_system_that_cannot_serve_says_so_once_and_exports_no_socket() {
+        assert_eq!(pane_env().is_some(), !cfg!(windows));
+        assert!(available_on("macos") && available_on("linux") && !available_on("windows"));
+        let marker = crate::testutil::temp_dir("mcp-unavailable").join("mcp-unavailable-said");
+        assert_eq!(unavailable_said(&marker).as_deref(), Some(UNAVAILABLE));
+        assert_eq!(unavailable_said(&marker), None, "said once");
+        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
     }
 
     #[test]

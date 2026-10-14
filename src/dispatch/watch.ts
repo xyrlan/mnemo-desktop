@@ -6,6 +6,7 @@ import { issueKey, waveKey } from './model'
 import { placeDispatch } from './open'
 import { markSeen, seenStore, type Seen } from './seen'
 import { reveal } from './store'
+import { norm } from '../path/path'
 
 /** The tab opens by itself when a parent dispatches a wave (spec decision 4): once per wave, when
  *  its first child shows up in the snapshot and the session that dispatched it runs in a
@@ -37,8 +38,6 @@ export type WatchDeps = {
   paneOf(child: ChildSession): PaneId | null
   now(): number
 }
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 
 /** How long a new wave waits for its parent's terminal to be found: a pane learns which session
  *  it runs every few seconds, and the workspace restore recreates them after the first snapshots. */

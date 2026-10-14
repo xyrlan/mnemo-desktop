@@ -12,7 +12,7 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
 })
 
 test('a sidebarScope left in an old settings file is dropped, not written back', async () => {
@@ -21,10 +21,10 @@ test('a sidebarScope left in an old settings file is dropped, not written back',
   await s.getState().load()
   expect('sidebarScope' in s.getState()).toBe(false)
   await s.getState().set('outgoing', 'en')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
+  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
 })
 
-const WHOLE = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }
+const WHOLE = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }
 const WHY = '/home/u/.mnemo-desktop/settings.json: trailing comma at line 3 column 1'
 
 // #336, expected 1: what `settings_read` now answers for a file that is there and does not parse.
@@ -202,4 +202,19 @@ test('quickCommands keep each repo\'s valid commands in order and drop junk', as
   const junk = createSettingsStore({ read: async () => ({ quickCommands: [] as unknown as Record<string, never> }), write: async () => {} })
   await junk.getState().load()
   expect(junk.getState().quickCommands).toEqual({})
+})
+
+test('windowsShell keeps a chosen id across a write and reads junk as no choice', async () => {
+  let written: unknown = null
+  const s = createSettingsStore({ read: async () => ({ windowsShell: 'pwsh' }), write: async (v) => { written = v } })
+  await s.getState().load()
+  expect(s.getState().windowsShell).toBe('pwsh')
+  // Another setting written keeps the choice in the file, where the Rust side reads it.
+  await s.getState().set('outgoing', 'as-typed')
+  expect((written as { windowsShell: unknown }).windowsShell).toBe('pwsh')
+  for (const junk of [3, '', ['cmd']]) {
+    const j = createSettingsStore({ read: async () => ({ windowsShell: junk as never }), write: async () => {} })
+    await j.getState().load()
+    expect(j.getState().windowsShell).toBeNull()
+  }
 })

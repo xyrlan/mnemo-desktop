@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css'
 import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
-import { parseOsc7 } from './osc7'
+import { parseOsc7, parseOsc9 } from './osc7'
 import { pasteBytes, terminalKey } from './keymap'
 import { detectPlatform } from '../actions/chords'
 import { holdFileDrop } from './file-drop'
@@ -19,6 +19,7 @@ import { tauriSessions } from './tauri-sessions'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { openUrl } from '../github/actions'
 import { openTerminalLink } from './links'
+import './shell-choice'
 import ConversationFace from '../conversation/Face'
 
 const platform = detectPlatform()
@@ -121,6 +122,12 @@ export default function TerminalPane({ id }: PaneViewProps) {
       if (p) store.getState().setCwd(id, p)
       return true
     })
+    // Windows' cmd and PowerShell report the folder with OSC 9;9 (`pty.rs`, the integration).
+    const osc9 = term.parser.registerOscHandler(9, (d) => {
+      const p = parseOsc9(d)
+      if (p) store.getState().setCwd(id, p)
+      return p !== null
+    })
 
     const ro = new ResizeObserver(refit)
     ro.observe(el)
@@ -148,6 +155,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
       noticed.dispose()
       title.dispose()
       osc7.dispose()
+      osc9.dispose()
       resized.dispose()
       term.dispose()
       termRef.current = null

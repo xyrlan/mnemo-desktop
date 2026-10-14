@@ -233,9 +233,8 @@ pub fn fetch_and_install(dest: &Path, target: &str, exe: &str, say: &dyn Fn(Stri
 /// exit and the last thing it said.
 fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
     say("Running mnemo init…".into());
-    let mut cmd = crate::proc::command(exe);
+    let mut cmd = crate::proc::tool(exe, &crate::mission::login_path());
     cmd.args(["init", "--yes"])
-        .env("PATH", crate::mission::login_path())
         // A pipe on Windows gets the ANSI code page, and mnemo prints emoji.
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())

@@ -1,4 +1,5 @@
 import { childWord, isOpen, isRecent, type ChildSession, type Mission, type Pr, type RepoGroup, type Snapshot } from '../mission/types'
+import { norm, within } from '../path/path'
 
 /** The Dispatch tab's model (spec `2026-09-25-dispatch-tab-design.md`, decisions 1, 3 and 5):
  *  which children belong to a parent workspace, grouped by wave, and in what order they show.
@@ -42,9 +43,6 @@ export type Wave = {
   /** Nothing in it is working or waiting on you: the section shows folded. */
   finished: boolean
 }
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const within = (path: string, dir: string) => path === dir || path.startsWith(dir === '/' ? dir : `${dir}/`)
 
 /** A wave's name across polls and reloads: its repo and its feature. */
 export const waveKey = (root: string, feature: string) => `${norm(root)}#${feature}`

@@ -411,33 +411,40 @@ pub async fn browser_save_shot(id: BrowserId, data: String) -> Result<String, St
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// The open PR for the branch checked out in `cwd`, via `gh pr view`. `None` when `gh` is
-/// missing, unauthenticated, or the branch has no PR: the palette action skips silently.
-/// Runs through a login shell because apps launched from Finder/Dock get a bare PATH.
+/// The open PR for the branch checked out in `cwd`, via `gh pr view`. When there is none, a
+/// sentence saying which reason it hit: `gh` missing, not logged in, GitHub unreachable, or no
+/// PR for this branch (#367). `gh` runs with the login shell's PATH (`checks::run`): apps
+/// launched from Finder/Dock get a bare one.
 #[tauri::command]
-pub async fn browser_pr_url(cwd: Option<String>) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || pr_url(cwd)).await.ok().flatten()
+pub async fn browser_pr_url(cwd: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || pr_url(cwd, &crate::checks::run)).await.map_err(|e| e.to_string())?
 }
 
-fn pr_url(cwd: Option<String>) -> Option<String> {
-    const GH: &str = "gh pr view --json url --jq .url";
-    let mut cmd = if cfg!(windows) {
-        let mut c = crate::proc::command("gh");
-        c.args(["pr", "view", "--json", "url", "--jq", ".url"]);
-        c
-    } else {
-        let mut c = crate::proc::command(crate::pty::default_shell());
-        c.args(["-l", "-c", GH]);
-        c
+fn pr_url(cwd: Option<String>, run: crate::checks::Run) -> Result<String, String> {
+    let dir = match cwd.map(std::path::PathBuf::from).filter(|d| d.is_dir()) {
+        Some(d) => d,
+        None => std::env::current_dir().map_err(|e| e.to_string())?,
     };
-    if let Some(dir) = cwd.filter(|d| std::path::Path::new(d).is_dir()) {
-        cmd.current_dir(dir);
+    let out = run("gh", &["pr", "view", "--json", "url", "--jq", ".url"], &dir).map_err(|e| no_pr_reason(&e))?;
+    last_url(&out).ok_or_else(|| format!("gh answered without a pull request link: {}", out.trim()))
+}
+
+/// Why `gh pr view` found no PR, from what it said, in words that say what to do.
+fn no_pr_reason(e: &str) -> String {
+    let low = e.to_lowercase();
+    if e == crate::checks::GH_MISSING {
+        "The GitHub CLI (gh) is not installed, or not on the PATH: install it from https://cli.github.com and try again.".into()
+    } else if low.contains("gh auth login") || low.contains("not logged in") || low.contains("authentication") || low.contains("http 401") {
+        format!("gh is not logged in to GitHub: run `gh auth login` in a terminal, then try again. ({e})")
+    } else if low.contains("no pull requests found") || low.contains("no open pull requests") {
+        "This branch has no pull request yet.".into()
+    } else if ["error connecting", "could not resolve", "dial tcp", "no such host", "network is unreachable", "timeout", "gave no answer"].iter().any(|n| low.contains(n)) {
+        format!("GitHub could not be reached: check the connection and try again. ({e})")
+    } else if low.contains("not a git repository") {
+        format!("This folder is not in a git repository, so it has no branch to look up. ({e})")
+    } else {
+        format!("gh could not find the pull request: {e}")
     }
-    let out = cmd.stdin(std::process::Stdio::null()).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    last_url(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// A login shell may print banners before `gh`'s output; take the last line that parses.
@@ -597,5 +604,25 @@ mod tests {
         );
         assert_eq!(last_url("no pull requests found for branch \"x\"\n"), None);
         assert_eq!(last_url(""), None);
+    }
+
+    /// #367: each reason the PR action finds no PR is told apart.
+    #[test]
+    fn no_pr_says_which_reason_it_hit() {
+        let said = |answer: Result<&str, &str>| {
+            let answer = answer.map(String::from).map_err(String::from);
+            pr_url(Some(".".into()), &move |p, a, _| {
+                assert_eq!((p, a), ("gh", &["pr", "view", "--json", "url", "--jq", ".url"][..]));
+                answer.clone()
+            })
+        };
+        assert_eq!(said(Ok("https://github.com/o/r/pull/4\n")).as_deref(), Ok("https://github.com/o/r/pull/4"));
+        assert!(said(Err(crate::checks::GH_MISSING)).unwrap_err().contains("not installed"));
+        assert!(said(Err("To get started with GitHub CLI, please run:  gh auth login")).unwrap_err().contains("not logged in"));
+        assert_eq!(said(Err("no pull requests found for branch \"x\"")), Err("This branch has no pull request yet.".into()));
+        assert!(said(Err("error connecting to api.github.com")).unwrap_err().contains("could not be reached"));
+        assert!(said(Err("fatal: not a git repository (or any of the parent directories): .git")).unwrap_err().contains("not in a git repository"));
+        assert!(said(Err("something else")).unwrap_err().contains("something else"));
+        assert!(said(Ok("")).is_err());
     }
 }

@@ -1,3 +1,10 @@
+import type { Platform } from '../actions/chords'
+
+/** The hold chord as keycaps, for where dictation is shown: `['⌥', 'Space']` on a Mac. */
+export function holdKeys(platform: Platform): string[] {
+  return [platform === 'mac' ? '⌥' : 'Alt', 'Space']
+}
+
 /** ⌥Space (Alt+Space elsewhere), matched on `code`: on macOS ⌥Space reports `key` as a
  *  non-breaking space. */
 export function isDictationChord(e: KeyboardEvent): boolean {

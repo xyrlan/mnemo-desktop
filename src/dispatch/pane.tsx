@@ -7,6 +7,8 @@ import { openUrl } from '../github/actions'
 import { stopChild, takeOver } from './run'
 import type { ChildSession } from '../mission/types'
 import { useFleet } from '../fleet/store'
+import { useMission } from '../mission/app-store'
+import { SnapshotErrors } from '../mission/SnapshotErrors'
 import type { PaneViewProps } from '../panes/registry'
 import { dispatchTitle, waveOfTarget, type Wave } from './model'
 import { knownWorktrees, useWaves } from './live'
@@ -14,12 +16,10 @@ import { foldKey, select, setFold, useUi } from './store'
 import { WaveList } from './list'
 import { Detail, type DetailActions } from './detail'
 import './dispatch.css'
+import { basename, norm, within } from '../path/path'
 
 /** A title this tab gave itself, which it may change again; any other is the user's. */
 const OWN_TITLE = /^Dispatch( · \d+ needs? you)?$/
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const within = (path: string, dir: string) => path === dir || path.startsWith(dir === '/' ? dir : `${dir}/`)
 
 /** Whether the pane's tab is the one its group shows. Hidden panes of parked workspaces stay
  *  mounted; they poll nothing. */
@@ -62,6 +62,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
   const now = useNow()
   const repos = useFleet((f) => f.repos)
   const open = useApp((s) => s.worktrees)
+  const errors = useMission((s) => s.snapshot.errors)
   const list = useRef<HTMLDivElement>(null)
   useTitle(id, waves)
 
@@ -103,7 +104,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
     }
   }, [repos, open])
 
-  const name = parent.split('/').pop() || parent
+  const name = basename(parent)
   return (
     <div className="dispatch-pane" data-pane={id} data-dispatch={parent} data-picked={row?.child ? '' : undefined}>
       <div className="dispatch-body">
@@ -114,6 +115,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
               from {name}
             </span>
           </div>
+          <SnapshotErrors errors={errors} sources={['children', 'sessions', 'prs']} className="mx-2 mt-2" />
           <WaveList parent={parent} waves={waves} selected={selected} answeringRight={answeringRight} actions={actions} now={now} />
         </div>
         <div className="dispatch-detail">

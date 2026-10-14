@@ -24,6 +24,7 @@ import {
 import type { PtyClient } from '../pty/client'
 import { notTyped, typed } from '../pty/typed'
 import { providedSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
+import { within } from '../path/path'
 
 /** `name`: what the user renamed the tab to; it wins over the name its focused pane gives it.
  *  `preview`: the tab the next preview opened in its group replaces (a file looked at, not kept). */
@@ -1024,7 +1025,7 @@ const NO_TABS: Tab[] = []
 
 /** Whether `folder` is worktree `w` or lies in it (a sibling whose name only starts the same does not). */
 function inside(folder: string | undefined, w: string): boolean {
-  return !!folder && (folder === w || folder.startsWith(w.endsWith('/') ? w : `${w}/`))
+  return !!folder && within(folder, w)
 }
 
 /** One layout as the file keeps it: transient views leave their tab, and a tab left with none

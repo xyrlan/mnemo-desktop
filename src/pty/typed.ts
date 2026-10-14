@@ -1,30 +1,37 @@
 /** What the app types into a pane's shell, written for that shell (#331). A pane runs `$SHELL` on
- *  macOS and Linux and `%COMSPEC%`, cmd.exe, on Windows (`pty.rs`, `default_shell`); a POSIX line
+ *  macOS and Linux; on Windows the shell the person chose, cmd unless they chose PowerShell, pwsh
+ *  or Git Bash (`pty/shells.rs`, `./shells`); a POSIX line
  *  typed into cmd runs nothing: it has no `exec` and no `env`, and reads no single quotes. Every
  *  command the app types is built here, for one of three shells, and ends in that shell's Enter.
  *
  *  The cmd and PowerShell lines are run for real, against a stand-in `claude`, by
  *  `scripts/typed-windows.test.mjs` on CI's Windows job. */
 
+import { newPaneKind } from './shells'
+
 export type Shell = 'posix' | 'cmd' | 'powershell'
 
 export const onWindows = () => typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
 
-/** The shell of a pane the app just spawned and has not read yet. On Windows that is cmd:
- *  `%COMSPEC%` is set by the system on every install. The front end cannot ask which program a
- *  pane runs, so a machine whose `COMSPEC` names PowerShell gets cmd's line here. */
-export const paneShell = (windows = onWindows()): Shell => (windows ? 'cmd' : 'posix')
+/** The shell of a pane the app just spawned and has not read yet. On Windows, the kind of shell a
+ *  new pane starts (`pty_shells`), and cmd until the app has asked: `%COMSPEC%`, what a pane
+ *  starts with no choice made, is cmd on every install. */
+export const paneShell = (windows = onWindows(), kind = newPaneKind()): Shell => (windows ? (kind ?? 'cmd') : 'posix')
 
 /** Lines of screen, from the bottom, a prompt is looked for in. */
 const SCREEN_ROWS = 40
 
-/** The shell a pane shows, by its prompt: PowerShell's starts with `PS `. */
-export function shellOf(lines: string[], windows: boolean): Shell {
+/** The shell a pane shows, by its prompt: PowerShell's starts with `PS `, cmd's is a folder and
+ *  `>`. Any other is the kind new panes start (Git Bash's `$ `, a prompt of the person's own),
+ *  cmd when that is unknown. */
+export function shellOf(lines: string[], windows: boolean, kind = newPaneKind()): Shell {
   if (!windows) return 'posix'
   let end = lines.length
   while (end > 0 && lines[end - 1].trim() === '') end--
   const last = lines.slice(Math.max(0, end - SCREEN_ROWS), end).at(-1) ?? ''
-  return /^PS /.test(last) ? 'powershell' : 'cmd'
+  if (/^PS /.test(last)) return 'powershell'
+  if (/^([A-Za-z]:|\\\\)[^>]*>\s*$/.test(last)) return 'cmd'
+  return kind ?? 'cmd'
 }
 
 /** `s` as one POSIX shell word: bare when it is only safe characters, else single-quoted. */
@@ -71,9 +78,10 @@ export function thenLeave(cmd: string, shell: Shell): string {
   }
 }
 
-/** Enter at a shell's prompt. A Windows console takes `\r`. A POSIX terminal takes either (its
- *  line discipline turns `\r` into `\n`), and each place keeps the one it always typed. */
-export const enter = (shell: Shell, posix: '\n' | '\r' = '\n') => (shell === 'posix' ? posix : '\r')
+/** Enter at a shell's prompt. A Windows console takes `\r`, Git Bash's too. A POSIX terminal
+ *  takes either (its line discipline turns `\r` into `\n`), and each place keeps the one it
+ *  always typed. */
+export const enter = (shell: Shell, posix: '\n' | '\r' = '\n', windows = onWindows()) => (shell === 'posix' && !windows ? posix : '\r')
 
 /** `cmd` and Enter, as typed into a pane running `shell`. */
 export const typed = (cmd: string, shell: Shell = paneShell(), posix: '\n' | '\r' = '\n') => cmd + enter(shell, posix)
