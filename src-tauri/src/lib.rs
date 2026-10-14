@@ -129,6 +129,13 @@ pub mod crash;
 // -- console (src/console.rs) --
 pub mod console;
 
+// -- single instance (src/single_instance.rs) --
+// One app per state dir: a second launch brings the running window forward.
+pub mod single_instance;
+
+// -- newer release (src/newer_release.rs) --
+pub mod newer_release;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -168,6 +175,27 @@ pub fn run() {
     crash::init_log();
     crash::install_panic_hook();
     crash::starting();
+    // Before any window: a second launch on the same state brings the first one forward and
+    // ends here, with nothing opened or restored (#366).
+    let instance = match single_instance::claim(&app_dir::app_dir(), std::time::Duration::from_secs(5)) {
+        Ok(single_instance::Claim::First(primary)) => Some(primary),
+        Ok(single_instance::Claim::HandedOff) => {
+            log::info!("mnemo is already running on {}: brought it forward", app_dir::app_dir().display());
+            return;
+        }
+        Ok(single_instance::Claim::Silent) => {
+            crash::failed_start(&format!(
+                "mnemo is already running on {}, and it did not come forward. Close it (or end it in the task manager) and start mnemo again.",
+                app_dir::app_dir().display()
+            ));
+            std::process::exit(1);
+        }
+        // A dir or loopback socket the app cannot use: it runs as it did before the check.
+        Err(e) => {
+            log::warn!("could not check for a running mnemo ({e}); starting anyway");
+            None
+        }
+    };
     let ran = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PtyState(pty::PtyManager::new()))
@@ -348,6 +376,7 @@ pub fn run() {
 
             // -- build info commands --
             build_info::app_build_info,
+            newer_release::app_newer_release,
 
             // -- usage commands --
             usage::usage_log,
@@ -494,6 +523,18 @@ pub fn run() {
                 app.on_menu_event(|app, event| {
                     if let Some(id) = event.id().as_ref().strip_prefix(PREFIX) {
                         let _ = app.emit_to("main", "app://action", serde_json::json!({ "id": id }));
+                    }
+                });
+            }
+
+            // -- single instance --
+            if let Some(primary) = instance {
+                let handle = app.handle().clone();
+                primary.serve(move || {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
                 });
             }

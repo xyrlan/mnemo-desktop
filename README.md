@@ -34,6 +34,26 @@ On Linux and Windows `pnpm tauri build` makes the bundle. On Windows, set MSVC's
 
 An installed app keeps a log, warnings, errors and any crash with where it happened, in `~/.mnemo-desktop/app.log` (`%USERPROFILE%\.mnemo-desktop\app.log` on Windows). A start that fails says so in a dialog that names it. A dev build logs to the terminal that ran it.
 
+### From a release
+
+[Releases](https://github.com/xyrlan/mnemo-desktop/releases) carry a `.dmg` for macOS, a `.deb`, `.rpm` and `.AppImage` for Linux, and one installer for Windows: `mnemo_<version>_x64-setup.exe`, per user, into `%LOCALAPPDATA%\mnemo`, no administrator needed. Releases up to v0.5.3 also had an `.msi`, which installs per machine under Program Files; the `setup.exe` finds that install and offers to remove it first, so take that offer rather than keep both.
+
+The app has no updater. At each start it asks GitHub for the latest release, and when that is newer than itself it says so once per version, with the link; after that the command palette's about line names it. Being offline says nothing.
+
+Starting the app while it runs brings the running window forward instead of opening a second app on the same state (`instance.lock` and `instance.port` in the state dir, below). A dev build, with its own state dir, runs beside the installed app.
+
+### Where it keeps its state, and removing it
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Settings, layout, accounts, logs, the managed `mnemo`, voice models | `~/.mnemo-desktop` | `~/.mnemo-desktop` | `%USERPROFILE%\.mnemo-desktop` |
+| A dev build's own (debug build) | `~/.mnemo-desktop-dev` | `~/.mnemo-desktop-dev` | `%USERPROFILE%\.mnemo-desktop-dev` |
+| Browser panes' logins and cache | `~/Library/WebKit/sh.mnemo.desktop`, `~/Library/Caches/sh.mnemo.desktop` | `~/.local/share/sh.mnemo.desktop` | `%LOCALAPPDATA%\sh.mnemo.desktop` |
+
+Outside those, only what you asked for or what Claude Code reads: the app's hook entries in `~/.claude/settings.json` (each runs `…/mnemo-desktop-hook`), the `desktop` MCP server it registered with `claude mcp add --scope user`, and, if you pressed *Add to PATH* in setup, a marked block (`# >>> mnemo-desktop: put mnemo and claude on PATH >>>`) in your shell's rc file, or on Windows an entry in your user `Path` (`HKCU\Environment`).
+
+To remove mnemo-desktop: quit it, delete the app (`/Applications/mnemo.app`; the package on Linux; *Settings → Apps → mnemo* on Windows, whose uninstaller's *Delete the application data* box removes `%LOCALAPPDATA%\sh.mnemo.desktop` and nothing else), then delete the state dir and the others above you want gone, run `claude mcp remove --scope user desktop`, delete the hook entries that run `mnemo-desktop-hook` from `~/.claude/settings.json`, and remove the PATH block or entry.
+
 ## Test
 
     pnpm test                                        # front-end

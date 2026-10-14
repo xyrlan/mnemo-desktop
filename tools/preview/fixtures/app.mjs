@@ -31,6 +31,8 @@ export const BASE = {
   mission_looked: () => null,
   mission_snapshot: () => ({ repos: [], errors: [], at: '2026-09-24T12:00:00Z' }),
   app_build_info: () => ({ version: '0.2.0', sha: 'preview', built_at: 'unknown' }),
+  // Nothing newer on GitHub: no release toast over the shots (#366).
+  app_newer_release: () => null,
   workspace_read: () => ({}),
   workspace_write: () => null,
   home_snapshot: () => ({ repos: [], clone_base: `${HOME}/code`, errors: [], protected: 0 }),
