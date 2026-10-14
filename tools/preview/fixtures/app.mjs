@@ -11,6 +11,8 @@ const tool = (name, version) => ({ name, path: `/opt/homebrew/bin/${name}`, vers
 export const BASE = {
   settings_read: () => ({}),
   settings_write: () => null,
+  // A first run with no saved dictation language sets the one the system's languages suggest (#357).
+  voice_set_language: () => null,
   tools_status: () => [tool('git', 'git version 2.50.1'), tool('claude', '2.4.0 (Claude Code)'), tool('mnemo', 'mnemo 0.9.0'), tool('gh', 'gh version 2.80.0')],
   mcp_socket_path: () => `${HOME}/.mnemo-desktop/mcp.sock`,
   pulse_start: () => null,
