@@ -15,8 +15,9 @@ export interface BrowserClient {
   back(id: number): Promise<void>
   forward(id: number): Promise<void>
   reload(id: number): Promise<void>
-  /** URL of the open PR for the branch in `cwd`, or null (no `gh`, no PR). */
-  prUrl(cwd?: string): Promise<string | null>
+  /** URL of the open PR for the branch in `cwd`. Rejects with which reason it found none: `gh`
+   *  missing, not logged in, GitHub unreachable, or no PR for this branch. */
+  prUrl(cwd?: string): Promise<string>
   /** Opens `url` in Google Chrome, else the default browser. */
   openExternal(url: string): Promise<void>
   dataStore(): Promise<DataStore>
@@ -50,7 +51,7 @@ export function makeBrowserClient(invoke: Invoke, listen: Listen): BrowserClient
     back: (id) => queued(id, 'browser_back'),
     forward: (id) => queued(id, 'browser_forward'),
     reload: (id) => queued(id, 'browser_reload'),
-    prUrl: (cwd) => invoke<string | null>('browser_pr_url', { cwd: cwd ?? null }),
+    prUrl: (cwd) => invoke<string>('browser_pr_url', { cwd: cwd ?? null }),
     openExternal: (url) => invoke<void>('browser_open_external', { url }),
     dataStore: () => invoke<DataStore>('browser_data_store'),
     onState: (id, cb) => listen<PageState>(`browser://state/${id}`, cb),

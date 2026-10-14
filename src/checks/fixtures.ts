@@ -74,6 +74,7 @@ export const WINDOWS_DETAILS: CheckDetails = {
     { path: '.github', line: 7, level: 'warning', title: null, message: 'Node.js 20 is deprecated.' },
   ],
   logTail: TAIL,
+  annotationsError: null,
   logError: null,
 }
 

@@ -2455,19 +2455,21 @@ dependencies = [
 
 [[package]]
 name = "mnemo-desktop"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "base64 0.22.1",
  "block2",
  "cpal",
  "env_logger",
  "flate2",
+ "gdk",
  "hound",
  "libc",
  "log",
  "notify",
  "objc2",
  "portable-pty",
+ "rfd",
  "serde",
  "serde_json",
  "sha2",
@@ -2478,7 +2480,11 @@ dependencies = [
  "tauri-plugin-notification",
  "ureq",
  "vt100",
+ "webkit2gtk",
+ "webview2-com",
  "whisper-rs",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
  "windows-sys 0.61.2",
 ]
 

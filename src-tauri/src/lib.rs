@@ -24,6 +24,8 @@ pub mod tools;
 
 // -- browser (src/browser.rs) --
 pub mod browser;
+// What a key does in a browser pane and in the app's own webview, on Windows (src/browser_keys.rs).
+pub mod browser_keys;
 
 // -- settings (src/settings.rs) --
 pub mod settings;
@@ -120,6 +122,20 @@ pub mod install_review;
 // -- plan-usage (src/plan_usage.rs) --
 pub mod plan_usage;
 
+// -- crash (src/crash.rs) --
+// The log, a panic written into it, and a start that fails said in a dialog.
+pub mod crash;
+
+// -- console (src/console.rs) --
+pub mod console;
+
+// -- single instance (src/single_instance.rs) --
+// One app per state dir: a second launch brings the running window forward.
+pub mod single_instance;
+
+// -- newer release (src/newer_release.rs) --
+pub mod newer_release;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -162,39 +178,32 @@ fn run_smoke(app: &tauri::App) -> Result<(), String> {
     Ok(())
 }
 
-/// The log a release build on Windows keeps, in the app dir.
-const LOG_FILE: &str = "app.log";
-/// Past this at a start, the log starts over.
-const LOG_MAX: u64 = 1024 * 1024;
-
-/// The log goes to stderr, errors only unless `RUST_LOG` says more. A release build on Windows
-/// has no console (`windows_subsystem = "windows"`) and so no stderr anyone can read: there it
-/// goes to `LOG_FILE`, warnings included (#311).
-fn init_log() {
-    let mut log = env_logger::Builder::new();
-    log.filter_level(log::LevelFilter::Error);
-    if cfg!(all(windows, not(debug_assertions))) {
-        if let Ok(file) = log_file(&app_dir::app_dir().join(LOG_FILE), LOG_MAX) {
-            log.filter_level(log::LevelFilter::Warn).target(env_logger::Target::Pipe(Box::new(file)));
-        }
-    }
-    log.parse_default_env().init();
-}
-
-/// `path` open to be added to, started over when it has passed `max` bytes.
-fn log_file(path: &std::path::Path, max: u64) -> std::io::Result<std::fs::File> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > max) {
-        std::fs::remove_file(path)?;
-    }
-    std::fs::OpenOptions::new().create(true).append(true).open(path)
-}
-
 pub fn run() {
-    init_log();
-    tauri::Builder::default()
+    crash::init_log();
+    crash::install_panic_hook();
+    crash::starting();
+    // Before any window: a second launch on the same state brings the first one forward and
+    // ends here, with nothing opened or restored (#366).
+    let instance = match single_instance::claim(&app_dir::app_dir(), std::time::Duration::from_secs(5)) {
+        Ok(single_instance::Claim::First(primary)) => Some(primary),
+        Ok(single_instance::Claim::HandedOff) => {
+            log::info!("mnemo is already running on {}: brought it forward", app_dir::app_dir().display());
+            return;
+        }
+        Ok(single_instance::Claim::Silent) => {
+            crash::failed_start(&format!(
+                "mnemo is already running on {}, and it did not come forward. Close it (or end it in the task manager) and start mnemo again.",
+                app_dir::app_dir().display()
+            ));
+            std::process::exit(1);
+        }
+        // A dir or loopback socket the app cannot use: it runs as it did before the check.
+        Err(e) => {
+            log::warn!("could not check for a running mnemo ({e}); starting anyway");
+            None
+        }
+    };
+    let ran = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
@@ -208,6 +217,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
+            pty::shells::pty_shells,
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
@@ -249,6 +259,7 @@ pub fn run() {
             browser::browser_open_external,
             browser::browser_data_store,
             browser::browser_save_shot,
+            browser_keys::browser_chords,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
@@ -372,6 +383,7 @@ pub fn run() {
 
             // -- build info commands --
             build_info::app_build_info,
+            newer_release::app_newer_release,
 
             // -- usage commands --
             usage::usage_log,
@@ -398,8 +410,11 @@ pub fn run() {
             plan_usage::plan_usage,
         ])
         .setup(|app| {
-            if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
-                run_smoke(app)?;
+            match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
+                // A picture of the window instead of the shell (mcp.rs).
+                Some(v) if v == "snapshot" => mcp::smoke_snapshot(app.handle().clone()),
+                Some(_) => run_smoke(app)?,
+                None => {}
             }
 
             // -- accounts --
@@ -413,6 +428,12 @@ pub fn run() {
             // -- voice --
             // Loads the dictation model in the background if it is on disk (src/voice.rs).
             voice::warm(app.handle());
+
+            // -- app webview --
+            // The app, not a web page: on Windows F5 does not reload it (src/browser_keys.rs).
+            if let Some(main) = app.get_webview("main") {
+                browser_keys::no_browser_keys(&main);
+            }
 
             // -- menu --
             // App chords as native menu accelerators, so they reach the app while a browser
@@ -516,6 +537,19 @@ pub fn run() {
                 });
             }
 
+            // -- single instance --
+            if let Some(primary) = instance {
+                let handle = app.handle().clone();
+                primary.serve(move || {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                });
+            }
+
+            crash::started();
             Ok(())
         })
         // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
@@ -531,8 +565,13 @@ pub fn run() {
             tauri::WindowEvent::Destroyed => window.state::<PtyState>().0.release(),
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running mnemo-desktop");
+        .run(tauri::generate_context!());
+    // `build` failing (a plugin, the event loop) is the one failed start Tauri returns rather
+    // than panics on (`crash::install_panic_hook`).
+    if let Err(e) = ran {
+        crash::failed_start(&e.to_string());
+        std::process::exit(1);
+    }
 }
 
 /// Asks `question` over a window that was asked to close, and closes it on a yes. One question
@@ -559,23 +598,6 @@ fn ask_to_close(window: &tauri::Window, question: String) {
                 let _ = closing.destroy();
             }
         });
-}
-
-#[cfg(test)]
-mod log_tests {
-    use std::io::Write;
-
-    #[test]
-    fn the_log_file_is_added_to_and_starts_over_once_too_long() {
-        let path = crate::testutil::temp_dir("log").join("app/app.log");
-        super::log_file(&path, 8).unwrap().write_all(b"one\n").unwrap();
-        super::log_file(&path, 8).unwrap().write_all(b"two\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\n");
-        super::log_file(&path, 8).unwrap().write_all(b"three\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\nthree\n");
-        super::log_file(&path, 8).unwrap().write_all(b"four\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "four\n");
-    }
 }
 
 #[cfg(test)]

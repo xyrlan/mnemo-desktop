@@ -2,10 +2,14 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 
+const invoked = vi.hoisted(() => [] as { cmd: string; args?: unknown }[])
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string) =>
-    cmd === 'app_build_info' ? { version: '0.1.0', sha: '9f3ab21', built_at: '2026-09-15 13:49 UTC' } : {},
-  ),
+  invoke: vi.fn(async (cmd: string, args?: unknown) => {
+    invoked.push({ cmd, args })
+    if (cmd === 'app_build_info') return { version: '0.1.0', sha: '9f3ab21', built_at: '2026-09-15 13:49 UTC' }
+    if (cmd === 'app_newer_release') return { version: '0.1.1', url: 'https://github.com/xyrlan/mnemo-desktop/releases/tag/v0.1.1', told: true }
+    return {}
+  }),
 }))
 
 import Palette, { shortcutKeys } from './Palette'
@@ -58,7 +62,14 @@ const item = (title: string) => [...document.querySelectorAll<HTMLElement>('[cmd
 
 test('the about line says which build is running, so a stale bundle reads as stale', async () => {
   await render()
-  expect(document.querySelector('.palette-about')?.textContent).toBe('mnemo 0.1.0 · 9f3ab21 · built 2026-09-15 13:49 UTC')
+  expect(document.querySelector('.palette-about')?.textContent).toBe('mnemo 0.1.0 · 9f3ab21 · built 2026-09-15 13:49 UTC · 0.1.1 is out')
+})
+
+test('a newer release stays named beside the version after it was announced, and opens its page', async () => {
+  await render()
+  invoked.length = 0
+  await act(async () => document.querySelector<HTMLElement>('.palette-newer')?.click())
+  expect(invoked).toEqual([{ cmd: 'browser_open_external', args: { url: 'https://github.com/xyrlan/mnemo-desktop/releases/tag/v0.1.1' } }])
 })
 
 test('every action is listed with its shortcut as keycaps, except the palette itself', async () => {

@@ -33,7 +33,34 @@ test('without the accounts commands nothing is shown and nothing more is asked',
   store.getState().start()
   await settle()
   expect(store.getState().state).toBeNull()
+  expect(store.getState().listError).toBeNull()
   expect(fake.calls.map((c) => c[0])).toEqual(['list'])
+})
+
+test('a list that cannot be read says why, and a retry reads it and starts the rest (#367)', async () => {
+  const { fake, client } = fakeClient({ state: two(), usage: {} })
+  fake.refuse.list = '/Users/me/Library/Application Support/mnemo-desktop/accounts.json: expected value at line 1 column 1'
+  const store = createAccountsStore(client)
+  store.getState().start()
+  await settle()
+  expect(store.getState().state).toBeNull()
+  expect(store.getState().listError).toBe(fake.refuse.list)
+
+  // Still unreadable: still says so.
+  await store.getState().retryList()
+  expect(store.getState().listError).toBe(fake.refuse.list)
+
+  delete fake.refuse.list
+  await Promise.all([store.getState().retryList(), store.getState().retryList()])
+  await settle()
+  expect(store.getState().listError).toBeNull()
+  expect(store.getState().state?.accounts.map((a) => a.id)).toEqual(['default', 'work'])
+  expect(fake.called('list')).toHaveLength(3)
+  expect(fake.called('panes')).toHaveLength(1)
+  expect(fake.called('usage')).toHaveLength(2)
+  // Known now: a retry asks nothing.
+  await store.getState().retryList()
+  expect(fake.called('list')).toHaveLength(3)
 })
 
 test('a usage that cannot be read says why, and keeps the reading it had', async () => {
@@ -94,6 +121,40 @@ test('usage is read again every poll', async () => {
   } finally {
     vi.useRealTimers()
   }
+})
+
+test('usage is not read on the poll while the window is hidden, and is read when it shows', async () => {
+  vi.useFakeTimers()
+  const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  try {
+    const { fake, client } = fakeClient({ state: two(), usage: {} })
+    const store = createAccountsStore(client, { pollMs: 1000 })
+    store.getState().start()
+    await vi.advanceTimersByTimeAsync(0)
+    const before = fake.called('usage').length
+    state.mockReturnValue('hidden')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fake.called('usage').length).toBe(before)
+    state.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fake.called('usage').length).toBe(before + 2)
+  } finally {
+    state.mockRestore()
+    vi.useRealTimers()
+  }
+})
+
+test('the first usage read waits for firstUsage: the launch’s burst is over by then', async () => {
+  const { fake, client } = fakeClient({ state: two(), usage: {} })
+  let go!: () => void
+  const store = createAccountsStore(client, { pollMs: 1e9, firstUsage: () => new Promise<void>((r) => (go = r)) })
+  store.getState().start()
+  await settle()
+  expect(fake.called('usage')).toEqual([])
+  go()
+  await settle()
+  expect(fake.called('usage')).toHaveLength(2)
 })
 
 test('adding opens a login terminal on the new account, then switches back', async () => {

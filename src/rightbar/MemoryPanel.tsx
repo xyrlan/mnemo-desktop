@@ -7,6 +7,7 @@ import { cn } from '@/ui/cn'
 import type { MemoryFeed } from '../memory/types'
 import { Section } from './Section'
 import { ago, type MemoryStore, type MemoryTarget } from './memory'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** How often the panel reads again while it is on screen: a rule can fire at any moment. */
 export const REFRESH_MS = 30_000
@@ -44,11 +45,15 @@ export function MemoryPanel({ store, target, stamp }: { store: MemoryStore; targ
   }, [store, stamp])
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setNow(Date.now())
-      void store.getState().refresh()
-    }, REFRESH_MS)
-    return () => clearInterval(id)
+    // Not while the window is hidden: the ages and the feed are for whoever looks.
+    return pollWhileShown(
+      () => {
+        setNow(Date.now())
+        return store.getState().refresh()
+      },
+      REFRESH_MS,
+      { wait: true },
+    )
   }, [store])
   // The ages count from the read they came with.
   useEffect(() => setNow(Date.now()), [feed])

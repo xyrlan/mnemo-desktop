@@ -234,6 +234,8 @@ pub async fn browser_create<R: Runtime>(
     if !visible(w, h) {
         webview.hide().map_err(|e| e.to_string())?;
     }
+    // The app's chords reach the app while this page has focus (src/browser_keys.rs).
+    crate::browser_keys::take_chords(&webview);
     Ok(())
 }
 
@@ -290,7 +292,7 @@ pub fn browser_data_store() -> String {
 #[tauri::command]
 pub async fn browser_open_external(url: String) -> Result<(), String> {
     let target = external(&url)?;
-    let launches = external_launches(&target, std::env::consts::OS);
+    let launches = external_launches(&target, std::env::consts::OS, |k| std::env::var(k).ok());
     tauri::async_runtime::spawn_blocking(move || run_launches(&launches))
         .await
         .map_err(|e| e.to_string())?
@@ -311,22 +313,33 @@ pub fn external(url: &str) -> Result<Url, String> {
 /// the others become the browser process, so they only fail when the program cannot start.
 #[derive(Debug, PartialEq)]
 pub struct Launch {
-    pub program: &'static str,
+    pub program: String,
     pub args: Vec<String>,
     pub wait: bool,
 }
 
-pub fn external_launches(url: &Url, os: &str) -> Vec<Launch> {
+/// Where Windows installs Chrome: for every user, then for this one. Not on PATH, and
+/// `CreateProcess` does not read the App Paths registry that `start chrome` uses.
+const WINDOWS_CHROME: [&str; 3] = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
+
+/// `env` reads an environment variable (Windows' install folders).
+pub fn external_launches(url: &Url, os: &str, env: impl Fn(&str) -> Option<String>) -> Vec<Launch> {
     let url = url.to_string();
-    let launch = |program, args: &[&str], wait| Launch {
-        program,
+    let launch = |program: &str, args: &[&str], wait| Launch {
+        program: program.to_string(),
         args: args.iter().map(|a| a.to_string()).chain([url.clone()]).collect(),
         wait,
     };
     match os {
         // Absolute path: apps started from Finder or the Dock get a bare PATH.
         "macos" => vec![launch("/usr/bin/open", &["-a", "Google Chrome"], true), launch("/usr/bin/open", &[], true)],
-        "windows" => vec![launch("rundll32", &["url.dll,FileProtocolHandler"], false)],
+        // Chrome first, as the button says, then whatever the default browser is.
+        "windows" => WINDOWS_CHROME
+            .iter()
+            .filter_map(|var| env(var))
+            .map(|dir| launch(&format!("{dir}\\Google\\Chrome\\Application\\chrome.exe"), &[], false))
+            .chain([launch("rundll32", &["url.dll,FileProtocolHandler"], false)])
+            .collect(),
         _ => vec![launch("google-chrome", &[], false), launch("xdg-open", &[], false)],
     }
 }
@@ -335,7 +348,7 @@ fn run_launches(launches: &[Launch]) -> Result<(), String> {
     use std::process::Stdio;
     let mut failures = Vec::new();
     for l in launches {
-        let mut cmd = crate::proc::command(l.program);
+        let mut cmd = crate::proc::command(&l.program);
         cmd.args(&l.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         if l.wait {
             match cmd.status() {
@@ -411,33 +424,40 @@ pub async fn browser_save_shot(id: BrowserId, data: String) -> Result<String, St
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// The open PR for the branch checked out in `cwd`, via `gh pr view`. `None` when `gh` is
-/// missing, unauthenticated, or the branch has no PR: the palette action skips silently.
-/// Runs through a login shell because apps launched from Finder/Dock get a bare PATH.
+/// The open PR for the branch checked out in `cwd`, via `gh pr view`. When there is none, a
+/// sentence saying which reason it hit: `gh` missing, not logged in, GitHub unreachable, or no
+/// PR for this branch (#367). `gh` runs with the login shell's PATH (`checks::run`): apps
+/// launched from Finder/Dock get a bare one.
 #[tauri::command]
-pub async fn browser_pr_url(cwd: Option<String>) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || pr_url(cwd)).await.ok().flatten()
+pub async fn browser_pr_url(cwd: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || pr_url(cwd, &crate::checks::run)).await.map_err(|e| e.to_string())?
 }
 
-fn pr_url(cwd: Option<String>) -> Option<String> {
-    const GH: &str = "gh pr view --json url --jq .url";
-    let mut cmd = if cfg!(windows) {
-        let mut c = crate::proc::command("gh");
-        c.args(["pr", "view", "--json", "url", "--jq", ".url"]);
-        c
-    } else {
-        let mut c = crate::proc::command(crate::pty::default_shell());
-        c.args(["-l", "-c", GH]);
-        c
+fn pr_url(cwd: Option<String>, run: crate::checks::Run) -> Result<String, String> {
+    let dir = match cwd.map(std::path::PathBuf::from).filter(|d| d.is_dir()) {
+        Some(d) => d,
+        None => std::env::current_dir().map_err(|e| e.to_string())?,
     };
-    if let Some(dir) = cwd.filter(|d| std::path::Path::new(d).is_dir()) {
-        cmd.current_dir(dir);
+    let out = run("gh", &["pr", "view", "--json", "url", "--jq", ".url"], &dir).map_err(|e| no_pr_reason(&e))?;
+    last_url(&out).ok_or_else(|| format!("gh answered without a pull request link: {}", out.trim()))
+}
+
+/// Why `gh pr view` found no PR, from what it said, in words that say what to do.
+fn no_pr_reason(e: &str) -> String {
+    let low = e.to_lowercase();
+    if e == crate::checks::GH_MISSING {
+        "The GitHub CLI (gh) is not installed, or not on the PATH: install it from https://cli.github.com and try again.".into()
+    } else if low.contains("gh auth login") || low.contains("not logged in") || low.contains("authentication") || low.contains("http 401") {
+        format!("gh is not logged in to GitHub: run `gh auth login` in a terminal, then try again. ({e})")
+    } else if low.contains("no pull requests found") || low.contains("no open pull requests") {
+        "This branch has no pull request yet.".into()
+    } else if ["error connecting", "could not resolve", "dial tcp", "no such host", "network is unreachable", "timeout", "gave no answer"].iter().any(|n| low.contains(n)) {
+        format!("GitHub could not be reached: check the connection and try again. ({e})")
+    } else if low.contains("not a git repository") {
+        format!("This folder is not in a git repository, so it has no branch to look up. ({e})")
+    } else {
+        format!("gh could not find the pull request: {e}")
     }
-    let out = cmd.stdin(std::process::Stdio::null()).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    last_url(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// A login shell may print banners before `gh`'s output; take the last line that parses.
@@ -526,32 +546,62 @@ mod tests {
     #[test]
     fn chrome_first_then_the_default_browser() {
         let url = Url::parse("https://github.com/o/r/pull/4?x=1&y=2").unwrap();
-        let mac = external_launches(&url, "macos");
+        let none = |_: &str| None;
+        let mac = external_launches(&url, "macos", none);
         assert_eq!(
             mac,
             vec![
                 Launch {
-                    program: "/usr/bin/open",
+                    program: "/usr/bin/open".into(),
                     args: vec!["-a".into(), "Google Chrome".into(), url.to_string()],
                     wait: true
                 },
-                Launch { program: "/usr/bin/open", args: vec![url.to_string()], wait: true },
+                Launch { program: "/usr/bin/open".into(), args: vec![url.to_string()], wait: true },
             ]
         );
-        let linux = external_launches(&url, "linux");
-        assert_eq!(linux.iter().map(|l| l.program).collect::<Vec<_>>(), ["google-chrome", "xdg-open"]);
+        let linux = external_launches(&url, "linux", none);
+        assert_eq!(linux.iter().map(|l| l.program.as_str()).collect::<Vec<_>>(), ["google-chrome", "xdg-open"]);
         assert!(linux.iter().all(|l| !l.wait && l.args == [url.to_string()]));
-        assert_eq!(external_launches(&url, "windows").len(), 1);
+        // On Windows "Open in Chrome" opened the default browser, Edge on a stock install.
+        let env = |k: &str| match k {
+            "ProgramFiles" => Some(r"C:\Program Files".to_string()),
+            "LOCALAPPDATA" => Some(r"C:\Users\you\AppData\Local".to_string()),
+            _ => None,
+        };
+        let windows = external_launches(&url, "windows", env);
+        assert_eq!(
+            windows.iter().map(|l| l.program.as_str()).collect::<Vec<_>>(),
+            [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Users\you\AppData\Local\Google\Chrome\Application\chrome.exe",
+                "rundll32"
+            ]
+        );
+        assert_eq!(windows[0].args, [url.to_string()]);
+        assert_eq!(windows[2].args, ["url.dll,FileProtocolHandler".to_string(), url.to_string()]);
+        assert!(windows.iter().all(|l| !l.wait));
+        assert_eq!(external_launches(&url, "windows", none).len(), 1);
+    }
+
+    /// The paths above are where a real Windows puts Chrome: CI's `windows-latest` image has it
+    /// installed for every user. Fails there if the image ever drops Chrome.
+    #[cfg(windows)]
+    #[test]
+    fn chrome_is_found_where_windows_installed_it() {
+        let url = Url::parse("https://example.com/").unwrap();
+        let launches = external_launches(&url, "windows", |k| std::env::var(k).ok());
+        let found: Vec<_> = launches.iter().filter(|l| std::path::Path::new(&l.program).is_file()).collect();
+        assert!(!found.is_empty(), "no chrome.exe among {launches:?}");
     }
 
     #[test]
     fn a_failed_launch_falls_through_and_reports_every_attempt() {
-        let missing = |p| Launch { program: p, args: vec![], wait: false };
+        let missing = |p: &str| Launch { program: p.into(), args: vec![], wait: false };
         let err = run_launches(&[missing("/nonexistent/chrome"), missing("/nonexistent/open")]).unwrap_err();
         assert!(err.contains("/nonexistent/chrome") && err.contains("/nonexistent/open"), "{err}");
         #[cfg(unix)]
         {
-            let exits = |p| Launch { program: p, args: vec![], wait: true };
+            let exits = |p: &str| Launch { program: p.into(), args: vec![], wait: true };
             assert!(run_launches(&[exits("/usr/bin/false"), exits("/usr/bin/true")]).is_ok());
         }
     }
@@ -597,5 +647,25 @@ mod tests {
         );
         assert_eq!(last_url("no pull requests found for branch \"x\"\n"), None);
         assert_eq!(last_url(""), None);
+    }
+
+    /// #367: each reason the PR action finds no PR is told apart.
+    #[test]
+    fn no_pr_says_which_reason_it_hit() {
+        let said = |answer: Result<&str, &str>| {
+            let answer = answer.map(String::from).map_err(String::from);
+            pr_url(Some(".".into()), &move |p, a, _| {
+                assert_eq!((p, a), ("gh", &["pr", "view", "--json", "url", "--jq", ".url"][..]));
+                answer.clone()
+            })
+        };
+        assert_eq!(said(Ok("https://github.com/o/r/pull/4\n")).as_deref(), Ok("https://github.com/o/r/pull/4"));
+        assert!(said(Err(crate::checks::GH_MISSING)).unwrap_err().contains("not installed"));
+        assert!(said(Err("To get started with GitHub CLI, please run:  gh auth login")).unwrap_err().contains("not logged in"));
+        assert_eq!(said(Err("no pull requests found for branch \"x\"")), Err("This branch has no pull request yet.".into()));
+        assert!(said(Err("error connecting to api.github.com")).unwrap_err().contains("could not be reached"));
+        assert!(said(Err("fatal: not a git repository (or any of the parent directories): .git")).unwrap_err().contains("not in a git repository"));
+        assert!(said(Err("something else")).unwrap_err().contains("something else"));
+        assert!(said(Ok("")).is_err());
     }
 }

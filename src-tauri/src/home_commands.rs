@@ -1,10 +1,11 @@
 use crate::home::{self, HomeSnapshot};
 
+/// A read that panicked is a snapshot that says so in `errors`, not an empty one (#364).
 #[tauri::command]
 pub async fn home_snapshot(here: Vec<String>, pinned: Vec<String>, hidden: Vec<String>, extra_roots: Vec<String>) -> HomeSnapshot {
-    tauri::async_runtime::spawn_blocking(move || home::collect_home(&here, &pinned, &hidden, &extra_roots))
+    crate::crash::read("The Home snapshot", move || home::collect_home(&here, &pinned, &hidden, &extra_roots))
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| HomeSnapshot { errors: vec![e], ..Default::default() })
 }
 
 #[tauri::command]

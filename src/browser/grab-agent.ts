@@ -1,6 +1,7 @@
 import type { AgentNode, RepoNode } from '../fleet/types'
 import type { ChildSession } from '../mission/types'
 import { dropText } from '../terminal/drop'
+import { basename, norm, within } from '../path/path'
 
 /** Where Design Mode's write-up goes: the agent of the worktree on screen. A Claude session in
  *  one of its terminal panes is typed into; a dispatched child, which has no pane here, gets
@@ -18,13 +19,6 @@ export type Where = {
   children: ChildSession[]
 }
 
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const within = (cwd: string, path: string) => {
-  const c = norm(cwd)
-  const p = norm(path)
-  return c === p || c.startsWith(p === '/' ? p : `${p}/`)
-}
-
 /** Keys typed into a session waiting on a dialog answer the dialog (Enter picks "Yes"). */
 const waiting = (a: AgentNode) => a.state === 'needs-you'
 
@@ -32,7 +26,7 @@ export function resolveAgent(w: Where): AgentTarget {
   if (!w.worktree) return { kind: 'none', reason: 'no worktree is open' }
   const path = norm(w.worktree)
   const node = w.repos.flatMap((r) => r.worktrees).find((t) => norm(t.path) === path)
-  const name = node?.name ?? path.split('/').pop() ?? path
+  const name = node?.name ?? basename(path)
 
   const live = (id: number | null) => {
     const p = id === null ? undefined : w.panes[id]

@@ -1,9 +1,7 @@
 import type { Pane, State } from '../layout/store'
 import { leaves } from '../layout/tree'
 import { allChildren, type RepoGroup, type Snapshot } from './types'
-
-const dirname = (p: string) => p.replace(/\/+[^/]*$/, '') || '/'
-const under = (path: string, dir: string) => path === dir || path.startsWith(dir.endsWith('/') ? dir : dir + '/')
+import { dirname, isAbsolute, norm, samePath, within } from '../path/path'
 
 /** The directory a pane is working in: a terminal's OSC 7 cwd, an editor's tree root (else
  *  its file's folder), a mission pane's child worktree. Other views have none. */
@@ -13,7 +11,7 @@ export function paneCwd(pane: Pane | undefined, snap: Snapshot): string | undefi
   const props = pane.props ?? {}
   if (pane.view === 'editor') {
     if (typeof props.root === 'string' && props.root) return props.root
-    if (typeof props.path === 'string' && props.path.startsWith('/')) return dirname(props.path)
+    if (typeof props.path === 'string' && isAbsolute(props.path)) return dirname(props.path)
     return undefined
   }
   if (pane.view === 'mission') {
@@ -48,8 +46,9 @@ export function repoOfCwd(snap: Snapshot, cwd: string | undefined): RepoGroup | 
       ...repo.missions.flatMap((m) => m.pieces.map((p) => p.child?.cwd)),
     ]
     for (const d of dirs) {
-      if (!d || !under(cwd, d)) continue
-      if (!best || d.length > best.depth) best = { repo, depth: d.length }
+      if (!d || !within(cwd, d)) continue
+      const depth = norm(d).length
+      if (!best || depth > best.depth) best = { repo, depth }
     }
   }
   return best?.repo
@@ -57,6 +56,6 @@ export function repoOfCwd(snap: Snapshot, cwd: string | undefined): RepoGroup | 
 
 /** Every repo, the focused one first: the sidebar and the cockpit group by repo, not by a scope. */
 export function focusedFirst(snap: Snapshot, focusedRoot: string | undefined): RepoGroup[] {
-  const i = focusedRoot ? snap.repos.findIndex((r) => r.root === focusedRoot) : -1
+  const i = focusedRoot ? snap.repos.findIndex((r) => samePath(r.root, focusedRoot)) : -1
   return i <= 0 ? snap.repos : [snap.repos[i], ...snap.repos.slice(0, i), ...snap.repos.slice(i + 1)]
 }

@@ -15,6 +15,7 @@ import DropZoneOverlay from './DropZoneOverlay'
 import { PaneAccount } from '../accounts/PaneAccount'
 import './chrome.css'
 import { shortcutLabel } from '../actions/chords'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** How often a visible bar asks git again (a `git switch` in the pane shows up this late). */
 export const POLL_MS = 5000
@@ -32,11 +33,12 @@ function useGit(cwd: string | undefined, client: ChromeClient, bar: React.RefObj
         if (live) setGit({ cwd, repo, branch })
       })
     ask()
-    // Hidden tabs are `display: none`, which leaves the bar without an offsetParent.
-    const timer = setInterval(() => bar.current?.offsetParent && ask(), POLL_MS)
+    // Hidden tabs are `display: none`, which leaves the bar without an offsetParent; a hidden
+    // window shows no bar at all.
+    const stop = pollWhileShown(() => bar.current?.offsetParent && ask(), POLL_MS, { wait: true })
     return () => {
       live = false
-      clearInterval(timer)
+      stop()
     }
   }, [cwd, client, bar])
   // A stale answer for the previous cwd would label the pane with the wrong branch.

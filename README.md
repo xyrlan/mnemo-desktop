@@ -32,6 +32,28 @@ On Linux and Windows `pnpm tauri build` makes the bundle. On Windows, set MSVC's
     $env:CMAKE_C_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
     $env:CMAKE_CXX_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
 
+An installed app keeps a log, warnings, errors and any crash with where it happened, in `~/.mnemo-desktop/app.log` (`%USERPROFILE%\.mnemo-desktop\app.log` on Windows). A start that fails says so in a dialog that names it. A dev build logs to the terminal that ran it.
+
+### From a release
+
+[Releases](https://github.com/xyrlan/mnemo-desktop/releases) carry a `.dmg` for macOS, a `.deb`, `.rpm` and `.AppImage` for Linux, and one installer for Windows: `mnemo_<version>_x64-setup.exe`, per user, into `%LOCALAPPDATA%\mnemo`, no administrator needed. Releases up to v0.5.3 also had an `.msi`, which installs per machine under Program Files; the `setup.exe` finds that install and offers to remove it first, so take that offer rather than keep both.
+
+The app has no updater. At each start it asks GitHub for the latest release, and when that is newer than itself it says so once per version, with the link; after that the command palette's about line names it. Being offline says nothing.
+
+Starting the app while it runs brings the running window forward instead of opening a second app on the same state (`instance.lock` and `instance.port` in the state dir, below). A dev build, with its own state dir, runs beside the installed app.
+
+### Where it keeps its state, and removing it
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Settings, layout, accounts, logs, the managed `mnemo`, voice models | `~/.mnemo-desktop` | `~/.mnemo-desktop` | `%USERPROFILE%\.mnemo-desktop` |
+| A dev build's own (debug build) | `~/.mnemo-desktop-dev` | `~/.mnemo-desktop-dev` | `%USERPROFILE%\.mnemo-desktop-dev` |
+| Browser panes' logins and cache | `~/Library/WebKit/sh.mnemo.desktop`, `~/Library/Caches/sh.mnemo.desktop` | `~/.local/share/sh.mnemo.desktop` | `%LOCALAPPDATA%\sh.mnemo.desktop` |
+
+Outside those, only what you asked for or what Claude Code reads: the app's hook entries in `~/.claude/settings.json` (each runs `…/mnemo-desktop-hook`), the `desktop` MCP server it registered with `claude mcp add --scope user`, and, if you pressed *Add to PATH* in setup, a marked block (`# >>> mnemo-desktop: put mnemo and claude on PATH >>>`) in your shell's rc file, or on Windows an entry in your user `Path` (`HKCU\Environment`).
+
+To remove mnemo-desktop: quit it, delete the app (`/Applications/mnemo.app`; the package on Linux; *Settings → Apps → mnemo* on Windows, whose uninstaller's *Delete the application data* box removes `%LOCALAPPDATA%\sh.mnemo.desktop` and nothing else), then delete the state dir and the others above you want gone, run `claude mcp remove --scope user desktop`, delete the hook entries that run `mnemo-desktop-hook` from `~/.claude/settings.json`, and remove the PATH block or entry.
+
 ## Test
 
     pnpm test                                        # front-end
@@ -64,6 +86,9 @@ The app serves the Claude Code sessions it hosts an MCP server named `desktop`, 
 - `desktop_terminal_read(pane, lines)`: the last `lines` (default 100) of a terminal, scrollback included.
 - `desktop_browser_read(pane)`: a browser pane's page as text (title, url, visible content as light markdown), logins included.
 - `desktop_pane_snapshot(pane)`: a screenshot of a browser pane (macOS).
+- `desktop_app_snapshot`: a screenshot of the app's own window (macOS).
+
+What works where: on macOS, every tool. On Linux, every tool but the two snapshots, which are not listed there. On Windows, none: the server needs a Unix socket and Windows has no server for it yet, so the app registers nothing, sets no `MNEMO_DESKTOP_MCP_SOCKET` in its panes, and says so once when it first starts; `mnemo-desktop-mcp.exe`, registered by hand, refuses to start with that reason (`/mcp` shows it failed).
 
 The server is a second binary, `mnemo-desktop-mcp`, that Claude Code starts over stdio; it relays each call to the running app over `~/.mnemo-desktop/mcp.sock` (owner-only). On start the app links the binary of the build you launched to `~/.mnemo-desktop/bin/mnemo-desktop-mcp`, writes `~/.mnemo-desktop/mcp.json`, and, if your Claude config has no user-scope server named `desktop`, runs the one-time equivalent of:
 
@@ -71,7 +96,7 @@ The server is a second binary, `mnemo-desktop-mcp`, that Claude Code starts over
 
 New sessions then have the tools; `/mcp` in a session shows it. That happens once (`~/.mnemo-desktop/mcp-registered` remembers it), so `claude mcp remove --scope user desktop` sticks. To add it by hand instead, or for one project only (`--scope local`), run that line yourself; to try it without touching your Claude config, `claude --mcp-config ~/.mnemo-desktop/mcp.json`. With the app closed the tools answer "the mnemo desktop app is not running"; with several apps open, the one started last serves. `tauri dev` builds only the app binary, so run `cargo build --manifest-path src-tauri/Cargo.toml --bin mnemo-desktop-mcp` (same target dir) before trying it from a dev build.
 
-A debug build (`tauri dev`) keeps all of this in `~/.mnemo-desktop-dev/` instead: its own workspace, settings, usage log, marketplace, shell integration, `mcp.sock` and `mcp.json`, so it never restores, overwrites or serves over the installed app's. Only the downloads are shared (`tools/`, voice `models/`). Every pane gets `MNEMO_DESKTOP_MCP_SOCKET` set to its own app's socket, so a session reaches the app it runs in, whichever build's binary it started. On restore, a saved session that a running `claude` already holds (`claude agents --json` gives it a pid) is not resumed: the pane keeps the session id and opens a plain shell. When the lookup fails, no session is resumed.
+A debug build (`tauri dev`) keeps all of this in `~/.mnemo-desktop-dev/` instead: its own workspace, settings, usage log, marketplace, shell integration, `mcp.sock` and `mcp.json`, so it never restores, overwrites or serves over the installed app's. Only the downloads are shared (`tools/`, voice `models/`). Every pane (on macOS and Linux) gets `MNEMO_DESKTOP_MCP_SOCKET` set to its own app's socket, so a session reaches the app it runs in, whichever build's binary it started. On restore, a saved session that a running `claude` already holds (`claude agents --json` gives it a pid) is not resumed: the pane keeps the session id and opens a plain shell. When the lookup fails, no session is resumed.
 
 ## Shell integration
 

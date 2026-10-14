@@ -4,11 +4,14 @@ import { vi } from 'vitest'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const fleet = { repos: [{ root: '/a', name: 'a', worktrees: [{ path: '/a', name: 'a', branch: null, kind: 'main', pr: null, unread: false, agents: [{ state: 'working' }, { state: 'needs-you' }] }] }] }
+const fleet = { repos: [] as unknown[] }
+const ONE_REPO = [{ root: '/a', name: 'a', worktrees: [{ path: '/a', name: 'a', branch: null, kind: 'main', pr: null, unread: false, agents: [{ state: 'working' }, { state: 'needs-you' }] }] }]
+fleet.repos = ONE_REPO
+const mission = { errors: [] as string[] }
 vi.mock('../fleet/store', () => ({ useFleet: (sel: (f: unknown) => unknown) => sel(fleet) }))
 vi.mock('../layout/app-store', () => ({ useApp: (sel: (s: unknown) => unknown) => sel({ tabs: [{ id: 't', root: { kind: 'leaf', pane: 1 }, focused: 1 }], activeTab: 't', panes: { 1: { id: 1, view: 'terminal', sessionId: 's1', cwd: '/a' } } }) }))
 vi.mock('../mission/app-store', () => ({
-  useMission: (sel: (s: unknown) => unknown) => sel({ snapshot: { repos: [{ name: 'a', parents: [{ session_id: 's1', cwd: '/a', tokens: 210000, children_tokens: 640000 }], missions: [], children: [] }] } }),
+  useMission: (sel: (s: unknown) => unknown) => sel({ snapshot: { repos: [{ name: 'a', parents: [{ session_id: 's1', cwd: '/a', tokens: 210000, children_tokens: 640000 }], missions: [], children: [] }], errors: mission.errors } }),
 }))
 vi.mock('../pulse/app-store', () => ({ usePulse: (sel: (s: unknown) => unknown) => sel({ counts: { 1: 3 } }) }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
@@ -28,4 +31,42 @@ test('shows tokens, pulse count, agents by state and the vault level', async () 
   expect(text('sb-agents')).toContain('1 need you')
   expect(text('sb-agents')).toContain('1 working')
   expect(text('sb-level')).toBe('lv 0')
+})
+
+test('with the sessions unlisted, no agent reads as unknown, not as none (#367)', async () => {
+  fleet.repos = []
+  const host = document.createElement('div')
+  const render = () => act(async () => void createRoot(host).render(<StatusBar client={client} />))
+  await render()
+  expect(host.querySelector('[data-testid="sb-agents"]')!.textContent).toBe('no agents')
+  mission.errors.push('claude: No such file or directory (os error 2)')
+  await render()
+  const agents = host.querySelector<HTMLElement>('[data-testid="sb-agents"]')!
+  expect(agents.textContent).toBe('agents unknown')
+  expect(agents.querySelector('span')!.title).toContain('`claude` was not found')
+  mission.errors.length = 0
+  fleet.repos = ONE_REPO
+})
+
+test('the vault level is not read while the window is hidden, and is read again when it shows', async () => {
+  vi.useFakeTimers()
+  const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  try {
+    let reads = 0
+    const counting = { ...client, level: () => (reads++, client.level()) }
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    await act(async () => root.render(<StatusBar client={counting} />))
+    expect(reads).toBe(1)
+    state.mockReturnValue('hidden')
+    await act(async () => void (await vi.advanceTimersByTimeAsync(10 * 30_000)))
+    expect(reads).toBe(1)
+    state.mockReturnValue('visible')
+    await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+    expect(reads).toBe(2)
+    act(() => root.unmount())
+  } finally {
+    state.mockRestore()
+    vi.useRealTimers()
+  }
 })

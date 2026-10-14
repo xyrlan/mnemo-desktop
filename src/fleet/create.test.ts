@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HomeRepo, HomeSnapshot } from '../home/types'
 import type { ChildSession, ParentSession, Snapshot } from '../mission/types'
 import { child, parent } from '../mission/fixtures'
-import { createFleet, PRS_EVERY, type FleetSources } from './create'
+import { createFleet, PRS_EVERY, type FleetSources, type PolledMove } from './create'
+import type { Shown } from '../shell/while-shown'
 import { HOOK_TRUST_MS } from './model'
 import type { AgentEvent, WorktreeInfo } from './upstream'
 import type { Fleet, WorktreeNode } from './types'
@@ -34,7 +35,7 @@ const missionOf = (parents: ParentSession[], children: ChildSession[] = [], erro
 
 const EMPTY_MISSION: Snapshot = { repos: [], errors: [], at: '' }
 
-function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInfo[] | Error> } = {}) {
+function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInfo[] | Error>; pollMs?: number; shown?: Shown } = {}) {
   const s = {
     t: 1_000_000,
     home: opts.home ?? homeOf(repo(ROOT)),
@@ -69,7 +70,7 @@ function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInf
     reload,
     now: () => s.t,
   }
-  const fleet = createFleet(src, { pollMs: 1e9 })
+  const fleet = createFleet(src, { pollMs: opts.pollMs ?? 1e9, shown: opts.shown })
   const stop = fleet.connect()
   stops.push(stop)
   const fire = () => changed.forEach((cb) => cb())
@@ -343,6 +344,58 @@ describe('state from hooks', () => {
   })
 })
 
+describe('polled moves', () => {
+  const watch = (h: ReturnType<typeof harness>) => {
+    const seen: PolledMove[] = []
+    stops.push(h.fleet.onPolledMove((m) => void seen.push(m)))
+    return seen
+  }
+
+  it('tells what a poll saw move, once the fleet shows it, and nothing of the first snapshot', async () => {
+    const h = harness()
+    await h.settle()
+    const seen = watch(h)
+    let shown: string | undefined
+    stops.push(h.fleet.onPolledMove(() => void (shown = h.wt(ROOT).agents[0]?.state)))
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'permission prompt', cwd: ROOT }), parent({ session_id: 'b', status: 'busy', cwd: WT })])
+    expect(seen).toEqual([])
+    h.later(30_000)
+    h.poll([parent({ session_id: 'a', status: 'busy', cwd: ROOT }), parent({ session_id: 'b', status: 'idle', cwd: WT })])
+    expect(seen).toEqual([
+      { sessionId: 'a', cwd: ROOT, child: false, state: 'working', waitingFor: null, ask: null, at: 1_030_000 },
+      { sessionId: 'b', cwd: WT, child: false, state: 'done', waitingFor: null, ask: null, at: 1_030_000 },
+    ])
+    expect(shown).toBe('working')
+    h.later(30_000)
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'input needed', cwd: ROOT }), parent({ session_id: 'b', status: 'idle', cwd: WT })])
+    expect(seen.slice(2)).toMatchObject([{ sessionId: 'a', state: 'needs-you', waitingFor: 'question' }])
+  })
+
+  it('tells of a child that appears asking, with what it asks', async () => {
+    const h = harness()
+    await h.settle()
+    h.poll([])
+    const seen = watch(h)
+    h.poll([], [child({ id: 'c1', session_id: 'c1-full', cwd: KID, tempo: 'blocked', needs: 'approve Bash: rm -rf dist' })])
+    expect(seen).toEqual([{ sessionId: 'c1-full', cwd: KID, child: true, state: 'needs-you', waitingFor: 'permission', ask: 'Bash: rm -rf dist', at: 1_000_000 }])
+  })
+
+  it('tells nothing a hook already moved', async () => {
+    const h = harness()
+    await h.settle()
+    h.poll([parent({ session_id: 'a', status: 'busy', cwd: ROOT })])
+    const seen = watch(h)
+    h.emit({ sessionId: 'a', kind: 'notification', message: 'Claude needs your permission to use Bash' })
+    h.later(HOOK_TRUST_MS)
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'permission prompt', cwd: ROOT })])
+    h.emit({ sessionId: 'a', kind: 'prompt' })
+    h.emit({ sessionId: 'a', kind: 'stop' })
+    h.later(HOOK_TRUST_MS)
+    h.poll([parent({ session_id: 'a', status: 'idle', cwd: ROOT })])
+    expect(seen).toEqual([])
+  })
+})
+
 describe('unread', () => {
   it('lights a worktree when an agent finishes or asks, until it is marked read', async () => {
     const h = harness()
@@ -455,6 +508,45 @@ describe('polling', () => {
     await h.get().refresh()
     expect(h.reload).toHaveBeenCalledWith({ withPrs: true, home: true })
     expect(h.get().repos[0].worktrees.map((w) => w.name)).toContain('new')
+  })
+
+  it('waits while the window is hidden, and polls the moment it shows again', async () => {
+    vi.useFakeTimers()
+    try {
+      let hidden = false
+      let onShow = () => {}
+      const h = harness({ pollMs: 30_000, shown: { hidden: () => hidden, onShow: (cb) => ((onShow = cb), () => {}) } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.reload).toHaveBeenCalledTimes(1)
+      hidden = true
+      await vi.advanceTimersByTimeAsync(10 * 30_000)
+      expect(h.reload).toHaveBeenCalledTimes(1)
+      hidden = false
+      onShow()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.reload).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(h.reload).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still takes each mission snapshot while hidden: the agents move and nothing waits for the fleet poll', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness({ pollMs: 30_000, shown: { hidden: () => true, onShow: () => () => {} } })
+      await vi.advanceTimersByTimeAsync(0)
+      // The mission poll (shell/mission-poll.ts) refreshes the snapshot every 15 s while hidden.
+      for (const status of ['busy', 'idle', 'busy'] as const) {
+        await vi.advanceTimersByTimeAsync(15_000)
+        h.poll([parent({ session_id: 'a', status, cwd: ROOT })])
+        expect(h.wt(ROOT).agents.map((a) => a.state)).toEqual([status === 'busy' ? 'working' : 'done'])
+      }
+      expect(h.reload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stops listening when disconnected', async () => {

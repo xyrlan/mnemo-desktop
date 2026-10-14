@@ -233,9 +233,8 @@ pub fn fetch_and_install(dest: &Path, target: &str, exe: &str, say: &dyn Fn(Stri
 /// exit and the last thing it said.
 fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
     say("Running mnemo init…".into());
-    let mut cmd = crate::proc::command(exe);
+    let mut cmd = crate::proc::tool(exe, &crate::mission::login_path());
     cmd.args(["init", "--yes"])
-        .env("PATH", crate::mission::login_path())
         // A pipe on Windows gets the ANSI code page, and mnemo prints emoji.
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
@@ -312,7 +311,10 @@ pub fn install(say: &(dyn Fn(String) + Sync)) -> Result<String, String> {
     let tag = fetch_and_install(&dest, target, exe, say)?;
     crate::tools::refresh();
     say(format!("mnemo {tag} is installed in {}.", dest.display()));
-    run_init(&dest.join(exe), say).map_err(|e| format!("mnemo {tag} is installed, but {e}"))?;
+    let init = run_init(&dest.join(exe), say);
+    // `mnemo init` made the vault, or tried: the "no vault" read before it is stale either way.
+    crate::vault::forget_no_vault();
+    init.map_err(|e| format!("mnemo {tag} is installed, but {e}"))?;
     say(format!("mnemo {tag} is ready."));
     Ok(tag)
 }

@@ -167,6 +167,9 @@ pub struct CheckDetails {
     pub steps: Vec<Step>,
     /// Failures first.
     pub annotations: Vec<Annotation>,
+    /// Why the annotations could not be read; `annotations` is then empty for want of them,
+    /// not because there are none.
+    pub annotations_error: Option<String>,
     /// The failed log's last lines, up to its last error; None when the job did not fail.
     pub log_tail: Option<String>,
     /// Why the log could not be read (expired, still being written, …).
@@ -424,6 +427,7 @@ pub fn parse_job(json: &str) -> Result<CheckDetails, String> {
         completed_at: time(&v, "completed_at"),
         steps,
         annotations: vec![],
+        annotations_error: None,
         log_tail: None,
         log_error: None,
     })
@@ -565,10 +569,9 @@ pub fn gate(json: &str, sha: &str) -> Result<(), String> {
 /// Runs `program` in `cwd` with the login PATH, never prompting, killed after `GH_TIMEOUT`.
 /// stdout on success; otherwise the first line it said.
 pub fn run(program: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
-    let mut cmd = crate::proc::command(program);
+    let mut cmd = crate::proc::tool(program, &login_path());
     cmd.args(args)
         .current_dir(cwd)
-        .env("PATH", login_path())
         .env("GH_PROMPT_DISABLED", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("NO_COLOR", "1")
@@ -691,7 +694,8 @@ fn details_cache() -> &'static Mutex<HashMap<String, CheckDetails>> {
 const DETAILS_KEPT: usize = 64;
 
 /// The Actions job behind the check at `url`: its steps, annotations and, when it failed, its
-/// log's tail. A failed annotation or log read leaves the rest; a finished job is read once.
+/// log's tail. A failed annotation or log read leaves the rest and says why; a finished job is
+/// read once, unless a part of it could not be read.
 pub fn read_details(worktree: &str, url: &str, run: Run) -> Result<CheckDetails, String> {
     let (repo, job) = actions_job(url).ok_or("This check did not run on GitHub Actions: its details are on the page it links to.")?;
     if let Some(d) = details_cache().lock().unwrap().get(url) {
@@ -708,13 +712,16 @@ pub fn read_details(worktree: &str, url: &str, run: Run) -> Result<CheckDetails,
         let log = failed(details.conclusion.as_deref()).then(|| run("gh", &["api", &format!("{base}/actions/jobs/{job}/logs")], dir));
         (annotations.join().unwrap_or_else(|_| Err("annotations: the read panicked".into())), log)
     });
-    details.annotations = annotations.map(|j| parse_annotations(&j)).unwrap_or_default();
+    match annotations {
+        Ok(j) => details.annotations = parse_annotations(&j),
+        Err(e) => details.annotations_error = Some(e),
+    }
     match log {
         Some(Ok(text)) => details.log_tail = Some(log_tail(&text)).filter(|t| !t.is_empty()),
         Some(Err(e)) => details.log_error = Some(e),
         None => {}
     }
-    if details.status == "completed" && details.log_error.is_none() {
+    if details.status == "completed" && details.log_error.is_none() && details.annotations_error.is_none() {
         let mut cache = details_cache().lock().unwrap();
         if cache.len() >= DETAILS_KEPT {
             cache.clear();
@@ -1115,7 +1122,7 @@ mod tests {
             Ok("[]".into())
         });
         let d = read_details(DIR, url, &|p, a, c| ok.run(p, a, c)).unwrap();
-        assert_eq!((d.log_tail, d.log_error), (None, None));
+        assert_eq!((d.log_tail, d.log_error, d.annotations_error), (None, None, None));
         assert!(!ok.calls().iter().any(|c| c.ends_with("/logs")));
 
         let url = "https://github.com/o/r/actions/runs/1/job/6";
@@ -1131,8 +1138,23 @@ mod tests {
         let d = read_details(DIR, url, &|p, a, c| gone.run(p, a, c)).unwrap();
         assert_eq!(d.log_error.as_deref(), Some("gh: Not Found (HTTP 404)"));
         assert!(d.annotations.is_empty());
+        assert_eq!(d.annotations_error.as_deref(), Some("gh: annotations unavailable"));
         read_details(DIR, url, &|p, a, c| gone.run(p, a, c)).unwrap();
         assert_eq!(gone.calls().iter().filter(|c| c.ends_with("jobs/6")).count(), 2);
+
+        // #367: annotations that could not be read say why, and are not kept as none: a passing
+        // job (no log to read) is asked again.
+        let url = "https://github.com/o/r/actions/runs/1/job/7";
+        let offline = Script::new(|line| {
+            if line == "gh api repos/o/r/actions/jobs/7" {
+                return Ok(JOB.replace("107723124603", "7").replace(r#""conclusion":"failure""#, r#""conclusion":"success""#));
+            }
+            Err("error connecting to api.github.com".into())
+        });
+        let d = read_details(DIR, url, &|p, a, c| offline.run(p, a, c)).unwrap();
+        assert_eq!((d.annotations.len(), d.annotations_error.as_deref(), d.log_error), (0, Some("error connecting to api.github.com"), None));
+        read_details(DIR, url, &|p, a, c| offline.run(p, a, c)).unwrap();
+        assert_eq!(offline.calls().iter().filter(|c| c.contains("/annotations")).count(), 2);
 
         assert!(read_details(DIR, "https://vercel.com/x", &|p, a, c| gone.run(p, a, c)).unwrap_err().contains("did not run on GitHub Actions"));
     }

@@ -120,11 +120,27 @@ describe('useLiveChanges', () => {
     const d = deps()
     await act(async () => root.render(<Probe worktree="/wt" d={d} />))
     expect(loads).toEqual(['/wt'])
-    await act(async () => void vi.advanceTimersByTime(3_000))
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3_000)))
     expect(loads).toHaveLength(4)
     await act(async () => root.unmount())
-    await act(async () => void vi.advanceTimersByTime(3_000))
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3_000)))
     expect(loads).toHaveLength(4)
+  })
+
+  it('reads on no clock while the window is hidden, and reads when it shows', async () => {
+    vi.useFakeTimers()
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    try {
+      watchFails = true
+      await act(async () => root.render(<Probe worktree="/wt" d={deps()} />))
+      await act(async () => void (await vi.advanceTimersByTimeAsync(30_000)))
+      expect(loads).toEqual(['/wt'])
+      state.mockReturnValue('visible')
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(loads).toEqual(['/wt', '/wt'])
+    } finally {
+      state.mockRestore()
+    }
   })
 
   it('does nothing with no worktree', async () => {

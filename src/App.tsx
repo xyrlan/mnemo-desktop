@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { toast } from '@/ui'
 import { store } from './layout/app-store'
 import Palette from './palette/Palette'
-import { installKeys } from './actions/keys'
+import { detectPlatform, installKeys } from './actions/keys'
+import { installNotAPage } from './actions/not-a-page'
 import { registerBuiltins } from './actions/registry'
 import { startWorkspace, type Workspace } from './layout/persist'
 import Shell from './shell/Shell'
 import { registerShellActions } from './shell/actions'
+import { tellNewerRelease } from './about/release'
 import { pollMission, refreshGithubEvery, reloadUnknownTitles, showFirstWorktree } from './shell/live'
 
 // Every `src/<view>/view.tsx` registers its pane view, or mounts its screen in a shell slot
@@ -26,10 +28,14 @@ export default function App() {
   const [boot, setBoot] = useState<{ ready: boolean; notice: string | null }>({ ready: false, notice: null })
 
   useEffect(() => installKeys(), [])
+  // A dev build keeps the webview's context menu, for Inspect.
+  useEffect(() => installNotAPage(detectPlatform(), { keepMenu: import.meta.env.DEV }), [])
   // What the mission sidebar ran while it was mounted: the snapshot poll, and Home's titles.
   useEffect(() => pollMission(), [])
   useEffect(() => reloadUnknownTitles(), [])
   useEffect(() => refreshGithubEvery(), [])
+  // A newer release on GitHub is said once per version (#366).
+  useEffect(() => void tellNewerRelease(toast), [])
   useEffect(() => {
     workspace ??= startWorkspace(store, undefined, undefined, (why) =>
       toast.error('Could not save the workspace layout', { id: 'workspace-save', description: why }),

@@ -13,6 +13,7 @@ import type { Row } from './model'
 import { PrLine, rowLook, type ListActions } from './list'
 import { setDetail, useUi, type DetailTab } from './store'
 import { ChildChecks } from './checks'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** The tab's right side (spec decision 5): the selected child, with Conversation | Diff | Checks,
  *  and Take over, Stop and Open workspace. */
@@ -43,11 +44,10 @@ function useMarkers(id: string, live: boolean) {
       // The file only grows: an unchanged length keeps the array, so the markers keep theirs.
       if (alive && t) setLines((prev) => (prev.length === t.lines.length ? prev : t.lines))
     }
-    void load()
-    const timer = window.setInterval(load, 3000)
+    const stop = pollWhileShown(load, 3000)
     return () => {
       alive = false
-      window.clearInterval(timer)
+      stop()
     }
   }, [id, live])
   return useMemo(() => statusMarkers(lines), [lines])

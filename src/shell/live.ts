@@ -7,6 +7,7 @@ import { fleetStore } from '../fleet/store'
 import { startMissionPoll } from './mission-poll'
 import { keepAWorktreeShown } from './first-worktree'
 import { startTitleReload } from './title-reload'
+import { pollWhileShown } from './while-shown'
 
 /** The shell's background work, wired to the app's stores. The logic lives beside, in modules
  *  tests drive without Tauri. */
@@ -59,6 +60,6 @@ export function refreshGithubEvery(ms = 5 * 60_000): () => void {
     .getState()
     .load()
     .then(refresh)
-  const timer = setInterval(refresh, ms)
-  return () => clearInterval(timer)
+  // Not while the window is hidden: the badges and Tasks it feeds are not on screen.
+  return pollWhileShown(refresh, ms, { wait: true })
 }

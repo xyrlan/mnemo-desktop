@@ -1,5 +1,6 @@
 import type { HomeSnapshot } from '../home/types'
-import { allChildren, needKind, type ChildSession, type ParentSession, type Pr as MissionPr, type Snapshot } from '../mission/types'
+import { basename, norm, within } from '../path/path'
+import { allChildren, needKind, permissionAsk, type ChildSession, type ParentSession, type Pr as MissionPr, type Snapshot } from '../mission/types'
 import type { AgentEvent, WorktreeInfo } from './upstream'
 import type { AgentNode, AgentState, PrNode, RepoNode, WaitingFor, WorktreeNode } from './types'
 
@@ -24,21 +25,13 @@ export const HOOK_TRUST_MS = 8_000
 
 export type Next = { state: AgentState; waitingFor: WaitingFor }
 
-export const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const base = (p: string) => norm(p).split('/').pop() || p
-
-/** `cwd` is `path` or somewhere under it. */
-export const within = (cwd: string, path: string) => {
-  const c = norm(cwd)
-  const p = norm(path)
-  return c === p || c.startsWith(p === '/' ? p : `${p}/`)
-}
+export { norm, within }
 
 /** A card's name: the repo's own folder for the main checkout, else the tree's folder without
  *  the `<repo>-wt-` every sibling tree carries (`mnemo dispatch`'s convention, and ours). */
 export function worktreeName(info: Pick<WorktreeInfo, 'path' | 'isMain'>, root: string): string {
-  const name = base(info.path)
-  const prefix = `${base(root)}-wt-`
+  const name = basename(info.path)
+  const prefix = `${basename(root)}-wt-`
   return !info.isMain && name.startsWith(prefix) && name.length > prefix.length ? name.slice(prefix.length) : name
 }
 
@@ -142,16 +135,17 @@ export function keyFor(agents: ReadonlyMap<string, Tracked>, sessionId: string):
   return agents.has(short) ? short : sessionId
 }
 
-export type Polled = { key: string; cwd: string; name: string | null; next: (prev: Tracked | undefined) => Next }
+/** `child`: a dispatched child, from `mnemo sessions`. `ask`: what it asks, when mnemo knows. */
+export type Polled = { key: string; cwd: string; name: string | null; child: boolean; ask: string | null; next: (prev: Tracked | undefined) => Next }
 
 /** Every agent the mission snapshot knows. A session listed both ways is the child. */
 export function polledAgents(snap: Snapshot): Polled[] {
   const out = new Map<string, Polled>()
   for (const r of snap.repos)
-    for (const p of r.parents) out.set(p.session_id, { key: p.session_id, cwd: p.cwd, name: p.name, next: (prev) => parentNext(p, prev) })
+    for (const p of r.parents) out.set(p.session_id, { key: p.session_id, cwd: p.cwd, name: p.name, child: false, ask: null, next: (prev) => parentNext(p, prev) })
   for (const c of allChildren(snap)) {
     const key = childKey(c)
-    out.set(key, { key, cwd: c.cwd, name: c.name ?? c.intent, next: () => childNext(c) })
+    out.set(key, { key, cwd: c.cwd, name: c.name ?? c.intent, child: true, ask: permissionAsk(c), next: () => childNext(c) })
   }
   return [...out.values()]
 }

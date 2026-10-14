@@ -63,13 +63,17 @@ jobs:
         run: pnpm tauri build --ci --bundles deb,appimage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
-      # The installer a release ships for Windows (`tauri-action` builds every target there).
+      # Bundled with what the release bundles (tauri.windows.conf.json): one installer, the
+      # per-user NSIS setup.exe, and no MSI beside it to install mnemo a second time (#366).
       - if: runner.os == 'Windows'
-        run: pnpm tauri build --ci --bundles nsis
-      - name: the installer is built
+        run: pnpm tauri build --ci
+      - name: one Windows installer
         if: runner.os == 'Windows'
         shell: bash
-        run: ls -l src-tauri/target/release/bundle/nsis/*-setup.exe
+        run: |
+          ls -R src-tauri/target/release/bundle
+          test "$(ls src-tauri/target/release/bundle)" = nsis
+          ls src-tauri/target/release/bundle/nsis/*-setup.exe
       - name: helpers in the bundle
         if: runner.os != 'Windows'
         run: node scripts/bundle-helpers.mjs
@@ -99,3 +103,13 @@ jobs:
           # The app by its name: the helpers are installed beside it, and one of them would pass too.
           test -f "$dir/mnemo-desktop.exe"
           MNEMO_DESKTOP_SMOKE=1 "$dir/mnemo-desktop.exe"
+      # Design Mode's crop and desktop_pane_snapshot take a picture of a real webview (#363):
+      # WKWebView, WebView2 and WebKitGTK each have their own call. The built app takes one of its
+      # own window, and fails when it gets no image.
+      - name: smoke (snapshot of the built app's webview)
+        if: runner.os == 'Linux'
+        run: MNEMO_DESKTOP_SMOKE=snapshot xvfb-run -a src-tauri/target/release/mnemo-desktop
+      - name: smoke (snapshot of the built app's webview)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: MNEMO_DESKTOP_SMOKE=snapshot src-tauri/target/release/mnemo-desktop

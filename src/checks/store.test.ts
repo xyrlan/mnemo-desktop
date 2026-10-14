@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import type { CheckDetails, ChecksClient, ChecksView, MergeMethod, Merged } from './client'
 import { GREEN, PR, UBUNTU, VIEW, WINDOWS, WINDOWS_DETAILS, WT, check } from './fixtures'
 import { createChecksStore, FIX_JOBS } from './store'
+import { detailsKey } from './model'
 
 type Calls = string[]
 
@@ -119,6 +120,22 @@ test('a failed details read says why and is tried again on the next ask', async 
   await f.refuse(`details ${WINDOWS.url}`, 'gh: Not Found (HTTP 404)')
   expect(await a).toEqual({ loading: false, details: null, error: 'gh: Not Found (HTTP 404)' })
   void store.getState().loadDetails(WT, WINDOWS)
+  expect(f.calls.length).toBe(2)
+})
+
+test('annotations that could not be read are not kept as none: the next ask reads again, showing the last meanwhile (#367)', async () => {
+  const f = fake()
+  const store = createChecksStore(f.client)
+  const blind = { ...WINDOWS_DETAILS, annotations: [], annotationsError: 'error connecting to api.github.com' }
+  const a = store.getState().loadDetails(WT, WINDOWS)
+  await f.answer(`details ${WINDOWS.url}`, blind)
+  expect((await a).details?.annotationsError).toBe('error connecting to api.github.com')
+  const b = store.getState().loadDetails(WT, WINDOWS)
+  expect(f.calls.length).toBe(2)
+  expect(store.getState().details[detailsKey(WINDOWS)]).toMatchObject({ loading: true, details: blind })
+  await f.answer(`details ${WINDOWS.url}`, WINDOWS_DETAILS)
+  expect((await b).details).toEqual(WINDOWS_DETAILS)
+  await store.getState().loadDetails(WT, WINDOWS)
   expect(f.calls.length).toBe(2)
 })
 

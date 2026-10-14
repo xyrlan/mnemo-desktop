@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VoiceClient } from './client'
-import { createVoice, nextLanguage, type VoiceDeps } from './controller'
+import { createVoice, firstLanguage, LANGUAGES, type VoiceDeps } from './controller'
 import type { Target } from './route'
 
 function deferred<T>() {
@@ -14,10 +14,11 @@ const PTY: Target = { kind: 'pty', pane: 1 }
 
 function setup(overrides: Partial<VoiceClient> = {}, landed = true) {
   const client: VoiceClient = {
-    start: vi.fn(async () => {}),
+    start: vi.fn(async () => 'MacBook Pro Microphone'),
     stop: vi.fn(async () => 'hello world'),
     setLanguage: vi.fn(async () => {}),
     onProgress: vi.fn(async () => () => {}),
+    onLost: vi.fn(async () => () => {}),
     ...overrides,
   }
   const deps: VoiceDeps = { client, target: vi.fn(() => PTY), insert: vi.fn(async () => landed), linger: 2000 }
@@ -34,7 +35,7 @@ describe('voice controller', () => {
     voice.begin()
     expect(phase()).toEqual({ kind: 'starting' })
     expect(deps.target).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening' }))
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening', device: 'MacBook Pro Microphone' }))
     await voice.end()
     expect(client.stop).toHaveBeenCalledOnce()
     expect(deps.insert).toHaveBeenCalledWith(PTY, 'hello world')
@@ -44,14 +45,14 @@ describe('voice controller', () => {
   })
 
   it('a release before the microphone opens still stops after it does', async () => {
-    const opening = deferred<void>()
+    const opening = deferred<string | null>()
     const { voice, client, phase } = setup({ start: vi.fn(() => opening.promise) })
     voice.begin()
     const ending = voice.end()
     expect(client.stop).not.toHaveBeenCalled()
     const seen: string[] = []
     const unsub = voice.store.subscribe((s) => seen.push(s.phase.kind))
-    opening.resolve()
+    opening.resolve(null)
     await ending
     unsub()
     expect(client.stop).toHaveBeenCalledOnce()
@@ -77,7 +78,7 @@ describe('voice controller', () => {
   })
 
   it('shows a failed start and lets the next press try again', async () => {
-    const start = vi.fn().mockRejectedValueOnce('no microphone found').mockResolvedValue(undefined)
+    const start = vi.fn().mockRejectedValueOnce('no microphone found').mockResolvedValue(null)
     const { voice, client, phase } = setup({ start })
     voice.begin()
     await vi.waitFor(() => expect(phase()).toEqual({ kind: 'error', message: 'no microphone found' }))
@@ -88,12 +89,12 @@ describe('voice controller', () => {
   })
 
   it('discards a take a reloaded webview left open', async () => {
-    const start = vi.fn().mockRejectedValueOnce('already recording').mockResolvedValue(undefined)
+    const start = vi.fn().mockRejectedValueOnce('already recording').mockResolvedValue(null)
     const { voice, client, phase } = setup({ start })
     voice.begin()
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(2))
     expect(client.stop).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening' }))
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening', device: null }))
   })
 
   it('reports silence and failures without inserting', async () => {
@@ -145,9 +146,84 @@ describe('voice controller', () => {
     expect(voice.store.getState()).toEqual({ phase: { kind: 'error', message: 'model download: offline' }, download: null })
   })
 
-  it('cycles languages auto → pt → en → auto', () => {
-    expect(nextLanguage('auto')).toBe('pt')
-    expect(nextLanguage('pt')).toBe('en')
-    expect(nextLanguage('en')).toBe('auto')
+  it('keeps an error, whole, until it is dismissed or the next take begins', async () => {
+    const long = 'dictation is not available on this CPU: it lacks f16c, fma, bmi2, avx2'
+    const { voice, phase } = setup({ start: vi.fn().mockRejectedValueOnce(long).mockResolvedValue(null) })
+    voice.begin()
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'error', message: long }))
+    vi.advanceTimersByTime(60_000)
+    expect(phase()).toEqual({ kind: 'error', message: long })
+    voice.dismiss()
+    expect(phase()).toEqual({ kind: 'idle' })
+
+    const broken = setup({ stop: vi.fn(async () => Promise.reject('whisper: boom')) })
+    broken.voice.begin()
+    await broken.voice.end()
+    vi.advanceTimersByTime(60_000)
+    expect(broken.phase()).toEqual({ kind: 'error', message: 'whisper: boom' })
+    broken.voice.begin()
+    expect(broken.phase()).toEqual({ kind: 'starting' })
+  })
+
+  it('dismiss leaves anything but an error alone', async () => {
+    const { voice, phase } = setup()
+    voice.begin()
+    await vi.waitFor(() => expect(phase().kind).toBe('listening'))
+    voice.dismiss()
+    expect(phase().kind).toBe('listening')
+  })
+
+  it('a microphone lost mid-take ends the take and says so, not "no speech heard"', async () => {
+    const said = 'the microphone (USB Mic) stopped during the take: Device disconnected. Nothing was transcribed.'
+    const { voice, client, deps, phase } = setup({ start: vi.fn(async () => 'USB Mic'), stop: vi.fn(async () => Promise.reject(said)) })
+    voice.begin()
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening', device: 'USB Mic' }))
+    voice.lost('Device disconnected')
+    await vi.waitFor(() => expect(phase()).toEqual({ kind: 'error', message: said }))
+    expect(client.stop).toHaveBeenCalledOnce()
+    expect(deps.insert).not.toHaveBeenCalled()
+    // The key's release, after: nothing more to stop.
+    await voice.end()
+    expect(client.stop).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(60_000)
+    expect(phase().kind).toBe('error')
+  })
+
+  it('a lost signal with no take open does nothing', async () => {
+    const { voice, client, phase } = setup()
+    voice.lost('Device disconnected')
+    await Promise.resolve()
+    expect(client.stop).not.toHaveBeenCalled()
+    expect(phase()).toEqual({ kind: 'idle' })
+  })
+})
+
+describe('dictation language', () => {
+  it('offers the three values, Portuguese and English before detection', () => {
+    expect(LANGUAGES).toEqual(['pt', 'en', 'auto'])
+  })
+
+  it('a saved choice wins, for each of the three values', () => {
+    for (const l of LANGUAGES) {
+      expect(firstLanguage(l, ['pt-BR'])).toBe(l)
+      expect(firstLanguage(l, ['en-US'])).toBe(l)
+      expect(firstLanguage(l, [])).toBe(l)
+    }
+  })
+
+  it('a first run goes by the system languages, not by detection among 99', () => {
+    expect(firstLanguage(null, ['pt-BR', 'en-US'])).toBe('pt')
+    expect(firstLanguage(null, ['en-US', 'pt-BR'])).toBe('en')
+    expect(firstLanguage(null, ['de-DE', 'pt-PT'])).toBe('pt')
+    expect(firstLanguage(null, ['EN_gb'])).toBe('en')
+    expect(firstLanguage(null, ['pt'])).toBe('pt')
+    // Neither Portuguese nor English among them: only detection can hear their language.
+    expect(firstLanguage(null, ['fr-FR', 'de-DE'])).toBe('auto')
+    expect(firstLanguage(null, [])).toBe('auto')
+  })
+
+  it('a saved value that is not one of the three is a first run', () => {
+    expect(firstLanguage('fr', ['pt-BR'])).toBe('pt')
+    expect(firstLanguage('', ['en'])).toBe('en')
   })
 })

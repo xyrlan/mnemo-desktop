@@ -1,6 +1,7 @@
 import type { Agent, PageInfo } from './types'
+import { norm } from '../path/path'
 
-const segments = (cwd: string) => cwd.split('/').filter(Boolean)
+const segments = (cwd: string) => norm(cwd).split('/').filter(Boolean)
 
 /** The agent a working directory belongs to: the deepest path segment that names a repo
  *  agent, trying a worktree's repo (`mnemo-desktop-wt-x` → `mnemo-desktop`) too. */

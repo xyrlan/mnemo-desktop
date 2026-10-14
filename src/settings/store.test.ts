@@ -12,7 +12,7 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
+  expect(written).toEqual([{ outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
 })
 
 test('a sidebarScope left in an old settings file is dropped, not written back', async () => {
@@ -21,11 +21,47 @@ test('a sidebarScope left in an old settings file is dropped, not written back',
   await s.getState().load()
   expect('sidebarScope' in s.getState()).toBe(false)
   await s.getState().set('outgoing', 'en')
-  expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
+  expect(written).toEqual([{ outgoing: 'en', outgoingChosen: true, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
 })
 
-const WHOLE = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }
+const WHOLE = { outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }
 const WHY = '/home/u/.mnemo-desktop/settings.json: trailing comma at line 3 column 1'
+
+// #391, expected 1.
+test('a fresh install sends what is typed', async () => {
+  const s = createSettingsStore({ read: async () => ({}), write: async () => {} })
+  await s.getState().load()
+  expect(s.getState().outgoing).toBe('as-typed')
+})
+
+// #391, expected 2: every file saved before #391 holds 'en' whether or not anyone chose it.
+test("an 'en' inherited from the old default loads as typed, and the next write says so", async () => {
+  const written: unknown[] = []
+  const s = createSettingsStore({ read: async () => ({ outgoing: 'en', replyLanguage: 'pt', skipPermissions: false }), write: async (v) => void written.push(v) })
+  await s.getState().load()
+  expect(s.getState().outgoing).toBe('as-typed')
+  expect(s.getState().replyLanguage).toBe('pt')
+  await s.getState().set('projects', ['/gh/a'])
+  expect(written).toEqual([{ ...WHOLE, replyLanguage: 'pt', skipPermissions: false, projects: ['/gh/a'] }])
+})
+
+// #391, expected 3.
+test("English rewriting turned on after #391 survives a restart, and turns off again", async () => {
+  let file: object = { outgoing: 'en' }
+  const client = { read: async () => file, write: async (v: object) => void (file = v) }
+  const before = createSettingsStore(client)
+  await before.getState().load()
+  expect(before.getState().outgoing).toBe('as-typed')
+  await before.getState().set('outgoing', 'en')
+  const after = createSettingsStore(client)
+  await after.getState().load()
+  expect(after.getState().outgoing).toBe('en')
+  await after.getState().set('outgoing', 'as-typed')
+  const again = createSettingsStore(client)
+  await again.getState().load()
+  expect(again.getState().outgoing).toBe('as-typed')
+  expect(file).toMatchObject({ outgoing: 'as-typed', outgoingChosen: true })
+})
 
 // #336, expected 1: what `settings_read` now answers for a file that is there and does not parse.
 test('a settings file that cannot be read is never written over, and the store says which file and why', async () => {
@@ -48,7 +84,7 @@ test('a settings file that cannot be read is never written over, and the store s
   file = 'mended'
   await s.getState().set('outgoing', 'as-typed')
   expect(s.getState().unreadable).toBeNull()
-  expect(written).toEqual([{ ...WHOLE, outgoing: 'as-typed', skipPermissions: false, projects: ['/gh/a'] }])
+  expect(written).toEqual([{ ...WHOLE, outgoingChosen: true, skipPermissions: false, projects: ['/gh/a'] }])
 })
 
 // #336, expected 2.
@@ -89,7 +125,7 @@ test('a save that fails is an error the caller sees', async () => {
   expect(s.getState().skipPermissions).toBe(false)
   refuse = false
   await s.getState().set('outgoing', 'as-typed')
-  expect(written).toEqual([{ ...WHOLE, skipPermissions: false, outgoing: 'as-typed' }])
+  expect(written).toEqual([{ ...WHOLE, skipPermissions: false, outgoingChosen: true }])
 })
 
 // #336, expected 4: `settings_read` answers `{}` for a file that is not there.
@@ -202,4 +238,19 @@ test('quickCommands keep each repo\'s valid commands in order and drop junk', as
   const junk = createSettingsStore({ read: async () => ({ quickCommands: [] as unknown as Record<string, never> }), write: async () => {} })
   await junk.getState().load()
   expect(junk.getState().quickCommands).toEqual({})
+})
+
+test('windowsShell keeps a chosen id across a write and reads junk as no choice', async () => {
+  let written: unknown = null
+  const s = createSettingsStore({ read: async () => ({ windowsShell: 'pwsh' }), write: async (v) => { written = v } })
+  await s.getState().load()
+  expect(s.getState().windowsShell).toBe('pwsh')
+  // Another setting written keeps the choice in the file, where the Rust side reads it.
+  await s.getState().set('outgoing', 'as-typed')
+  expect((written as { windowsShell: unknown }).windowsShell).toBe('pwsh')
+  for (const junk of [3, '', ['cmd']]) {
+    const j = createSettingsStore({ read: async () => ({ windowsShell: junk as never }), write: async () => {} })
+    await j.getState().load()
+    expect(j.getState().windowsShell).toBeNull()
+  }
 })

@@ -8,15 +8,17 @@ import type { PaneViewProps } from '../panes/registry'
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from '@/ui'
 import { cn } from '@/ui/cn'
 import { homeStore, useHome } from '../home/app-store'
-import { childSession, relTime, type HomeRepo, type Pr } from '../home/types'
+import { childSession, otherErrors, relTime, type HomeRepo, type Pr } from '../home/types'
 import PrPane from '../home/pr-pane'
 import { useMission } from '../mission/app-store'
+import { SnapshotErrors } from '../mission/SnapshotErrors'
 import { selectionStore, useSelection } from '../github/app-store'
 import { dispatchIssue, dispatchIssues, openIssue, openUrl } from '../github/actions'
 import { linkIssues, linkWord, type Issue, type IssueLink } from '../github/types'
 import { checksOf, dispatchable, EFFORTS, MAY, MODELS, taskRepos, totals, type TaskRepo } from './model'
 import { openNewWorkspace } from '../new-workspace/open'
 import '../home/home.css'
+import { basename } from '../path/path'
 
 const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~')
 
@@ -249,7 +251,7 @@ function BatchDialog({ root, ns, open, onOpenChange }: { root: string; ns: numbe
             Dispatch {sorted.length} issue{sorted.length === 1 ? '' : 's'}
           </DialogTitle>
           <DialogDescription>
-            {sorted.map((n) => `#${n}`).join(', ')} in {root.split('/').pop()}, one child each.
+            {sorted.map((n) => `#${n}`).join(', ')} in {basename(root)}, one child each.
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-3 gap-2">
@@ -276,7 +278,7 @@ function BatchBar({ root, ns, onDispatch }: { root: string; ns: number[]; onDisp
   return (
     <div className="absolute bottom-3 left-1/2 z-20 flex h-10 -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-popover pr-1 pl-3 text-sm text-popover-foreground shadow-floating" role="toolbar" aria-label="batch dispatch">
       <span className="whitespace-nowrap text-muted-foreground">
-        <span className="font-medium text-foreground">{ns.length}</span> selected in {root.split('/').pop()}
+        <span className="font-medium text-foreground">{ns.length}</span> selected in {basename(root)}
       </span>
       <Button type="button" size="sm" onClick={onDispatch}>
         <Send />
@@ -379,6 +381,9 @@ export default function Tasks(_: PaneViewProps) {
           </Button>
         </header>
         <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* `gh`'s per-repo reasons are in their groups; what is left is why the projects
+              themselves may be missing (Claude's history unreadable). */}
+          <SnapshotErrors errors={otherErrors(snap.errors)} sources={['history', 'other']} className="mx-3 mt-2" />
           {body}
           {batch && <BatchBar root={batch.root} ns={batch.ns} onDispatch={() => setBatchOpen(true)} />}
         </div>

@@ -1,5 +1,6 @@
+import { invoke } from '@tauri-apps/api/core'
 import { listen as tauriListen } from '@tauri-apps/api/event'
-import { actionForChord, detectPlatform, type Platform } from './chords'
+import { actionForChord, boundActions, chordFor, detectPlatform, type Chord, type Platform } from './chords'
 import { run } from './registry'
 
 export { detectPlatform, type Platform } from './chords'
@@ -51,9 +52,26 @@ export function makeDedupe(windowMs = 50, now: () => number = () => performance.
 type Listen = <T>(event: string, cb: (payload: T) => void) => Promise<() => void>
 const listenPayload: Listen = (event, cb) => tauriListen(event, (e) => cb(e.payload as never))
 
+export type PageChord = Chord & { id: string }
+
+/** Every chord with its action, as `src-tauri/src/browser_keys.rs` matches a key pressed in a
+ *  browser pane against it. */
+export function pageChords(platform: Platform): PageChord[] {
+  return boundActions().flatMap((id) => {
+    const c = chordFor(id, platform)
+    return c ? [{ id, ...c }] : []
+  })
+}
+
+const sendToHost = (chords: PageChord[]) => invoke('browser_chords', { chords })
+
 export function installKeys(
   platform: Platform = detectPlatform(),
-  { listen = listenPayload, runAction = run }: { listen?: Listen; runAction?: (id: string) => void } = {},
+  {
+    listen = listenPayload,
+    runAction = run,
+    sendChords = sendToHost,
+  }: { listen?: Listen; runAction?: (id: string) => void; sendChords?: (chords: PageChord[]) => Promise<unknown> } = {},
 ): () => void {
   const fire = makeDedupe()
   const handler = (e: KeyboardEvent) => {
@@ -64,6 +82,16 @@ export function installKeys(
     if (fire(id, 'key')) runAction(id)
   }
   window.addEventListener('keydown', handler, true)
+  // A browser pane is a webview of its own, out of this handler's reach. On a Mac the native
+  // menu carries the chords past it (lib.rs); on Windows the host takes them from the page by
+  // this table, and they come back as `app://action` like the menu's.
+  if (platform !== 'mac') {
+    try {
+      void sendChords(pageChords(platform)).catch(() => {})
+    } catch {
+      // Outside Tauri there is no host to tell.
+    }
+  }
   // Outside Tauri (plain Vite in a browser) there is no event bus: the keydown path stays.
   let unlisten: Promise<(() => void) | undefined>
   try {

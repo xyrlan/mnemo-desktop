@@ -3,8 +3,9 @@
 //! outside any repo costs one `git` spawn per TTL, not one per render.
 //!
 //! It also learns which Claude Code session a terminal pane runs when `claude` was typed by
-//! hand: the pids of every account's `claude agents --json` matched against the process tree
-//! under the pane's shell.
+//! hand: the pids of every account's `claude agents` matched against the process tree under the
+//! pane's shell. That answer is the app's one per account, shared with the mission poll and Home
+//! (`mission::agents_of`).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -40,16 +41,6 @@ impl<T: Clone> Cache<T> {
         entries.retain(|_, (at, _)| now.saturating_duration_since(*at) < self.ttl);
         entries.insert(key.to_string(), (now, v.clone()));
         v
-    }
-
-    /// The value last computed for `key` and when, however old it is.
-    pub fn last(&self, key: &str) -> Option<(Instant, T)> {
-        self.entries.lock().unwrap().get(key).cloned()
-    }
-
-    /// Keeps `v` as `key`'s value computed at `now`.
-    pub fn put(&self, key: &str, now: Instant, v: T) {
-        self.entries.lock().unwrap().insert(key.to_string(), (now, v));
     }
 }
 
@@ -99,15 +90,16 @@ pub fn parse_agent_pids(json: &str) -> HashMap<u32, (String, u64)> {
         .collect()
 }
 
-/// Every account's `claude agents --json`, asked at once. Each account keeps its own
-/// `sessions/`, so a `claude` started in a pane on another account is listed by that account's
-/// answer only. A failed answer names its account.
-pub fn ask_agents() -> Vec<Result<String, String>> {
-    ask_agents_on(&crate::mission::account_dirs::accounts())
+/// Every account's `claude agents` answer asked at or after `not_before`, shared with every other
+/// caller (`mission::agents_since`). Each account keeps its own `sessions/`, so a `claude` started
+/// in a pane on another account is listed by that account's answer only. A failed answer names
+/// its account.
+pub fn ask_agents(not_before: Instant) -> Vec<Result<String, String>> {
+    ask_agents_on(&crate::mission::account_dirs::accounts(), not_before)
 }
 
-fn ask_agents_on(accounts: &crate::mission::account_dirs::Accounts) -> Vec<Result<String, String>> {
-    crate::mission::claude_on_every(accounts, &["agents", "--json"])
+fn ask_agents_on(accounts: &crate::mission::account_dirs::Accounts, not_before: Instant) -> Vec<Result<String, String>> {
+    crate::mission::agents_since(accounts, not_before)
         .into_iter()
         .map(|(a, got)| got.map_err(|e| crate::mission::on_account_error(a, e)))
         .collect()
@@ -122,8 +114,11 @@ pub fn merge_agents(answers: impl IntoIterator<Item = Result<String, String>>) -
     })
 }
 
+/// The live Claude processes on every account, from a `claude agents` answer at most
+/// `AGENTS_FRESH` old.
 fn live_agents() -> Option<HashMap<u32, (String, u64)>> {
-    merge_agents(ask_agents())
+    let now = Instant::now();
+    merge_agents(ask_agents(now.checked_sub(crate::mission::AGENTS_FRESH).unwrap_or(now)))
 }
 
 /// The session of the Claude process nearest below `root` (or `root` itself), walking the tree
@@ -159,7 +154,7 @@ fn children_of() -> Result<impl FnMut(&[u32]) -> Vec<u32>, String> {
 /// The Claude Code session running under a pane's shell, None when there is none (or `claude`
 /// is not installed). An error when the process tree could not be walked.
 pub fn session_of(pane_pid: u32) -> Result<Option<String>, String> {
-    let Some(agents) = agents().get_or("", Instant::now(), live_agents) else { return Ok(None) };
+    let Some(agents) = live_agents() else { return Ok(None) };
     if agents.is_empty() {
         return Ok(None);
     }
@@ -169,8 +164,7 @@ pub fn session_of(pane_pid: u32) -> Result<Option<String>, String> {
 /// The pids of the live Claude Code sessions on every account, from `claude agents --json` at most
 /// a few seconds old; empty when `claude` cannot say.
 pub fn claude_pids() -> Vec<u32> {
-    let agents = agents().get_or("", Instant::now(), live_agents);
-    agents.map(|a| a.into_keys().collect()).unwrap_or_default()
+    live_agents().map(|a| a.into_keys().collect()).unwrap_or_default()
 }
 
 /// Whether `pid` is alive and is `root` or sits below it, at most `MAX_DEPTH` levels down, walking
@@ -220,12 +214,6 @@ pub fn claude_running<W: FnMut(&[u32]) -> Vec<u32>>(
     }
 }
 
-/// Every pane asks on its own poll; one `claude agents` per account answers them all.
-fn agents() -> &'static Cache<Option<HashMap<u32, (String, u64)>>> {
-    static C: std::sync::OnceLock<Cache<Option<HashMap<u32, (String, u64)>>>> = std::sync::OnceLock::new();
-    C.get_or_init(|| Cache::new(Duration::from_secs(3)))
-}
-
 fn branches() -> &'static Cache<Option<String>> {
     static C: std::sync::OnceLock<Cache<Option<String>>> = std::sync::OnceLock::new();
     C.get_or_init(|| Cache::new(TTL))
@@ -261,12 +249,11 @@ pub async fn chrome_session(pane_pid: u32) -> Result<Option<String>, String> {
 pub async fn chrome_claude_running(pane_pid: u32) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let now = Instant::now();
-        let fresh = || {
-            let found = live_agents();
-            agents().put("", Instant::now(), found.clone());
-            found
-        };
-        claude_running(pane_pid, agents().last(""), now, crate::procs::parents(), fresh, children_of)
+        let accounts = crate::mission::account_dirs::accounts();
+        let cached = crate::mission::agents_last(&accounts).map(|(at, answers)| (at, merge_agents(answers)));
+        // Asked after this call began; a caller asking at the same moment shares it.
+        let fresh = || merge_agents(ask_agents_on(&accounts, Instant::now()));
+        claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -544,7 +531,7 @@ mod tests {
         let home = crate::app_dir::home();
         let file = crate::app_dir::shared_dir_in(&home).join("accounts.json");
         let accounts = crate::mission::account_dirs::Accounts::parse(&std::fs::read_to_string(&file).unwrap(), &home);
-        let all = merge_agents(ask_agents_on(&accounts)).expect("claude agents");
+        let all = merge_agents(ask_agents_on(&accounts, Instant::now())).expect("claude agents");
         let mut seen = 0;
         for (a, got) in crate::mission::claude_on_every(&accounts, &["agents", "--json"]) {
             if a.is_default {

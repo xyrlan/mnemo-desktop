@@ -55,9 +55,11 @@ fn extra_dirs_in(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Forget the cached `login_path()`, so the next call reads PATH again: after an install, or
-/// when the user asks to check again.
+/// when the user asks to check again. A remembered "no vault" goes with it: the mnemo found now
+/// may name one.
 pub fn refresh() {
     crate::mission::forget_login_path();
+    crate::vault::forget_no_vault();
 }
 
 /// This platform's `PATH` separator.
@@ -100,10 +102,20 @@ fn add_dirs(path: &str, sep: char, extra: &[PathBuf]) -> String {
 /// needs the app's dirs added to what the app inherited.
 pub fn pane_path() -> String {
     if cfg!(windows) {
-        crate::mission::read_login_path()
+        windows_pane_path(system_path(), &std::env::var("PATH").unwrap_or_default(), &extra_dirs())
     } else {
         with_extra_dirs(&std::env::var("PATH").unwrap_or_default(), separator())
     }
+}
+
+/// A Windows pane's `PATH`: the registry's, as a terminal opened from the Start menu gets it,
+/// then the app's dirs. Not what the app inherited (#371): whatever started the app may have
+/// grown it past what `cmd` can search, and `cmd` then finds nothing on it, `System32`'s
+/// `where` included, even with `System32` first. Under `cargo` it is 18 000 characters, one
+/// entry per native build dir. The inherited `PATH` stands in only when the registry cannot be
+/// read.
+fn windows_pane_path(registry: Option<String>, inherited: &str, extra: &[PathBuf]) -> String {
+    add_dirs(&registry.unwrap_or_else(|| inherited.to_string()), ';', extra)
 }
 
 // ------------------------------------------------------------- windows PATH --
@@ -262,6 +274,11 @@ impl Lookup {
         }
     }
 
+    /// Resolves names through `PATHEXT`.
+    pub fn is_windows(&self) -> bool {
+        self.sep == ';'
+    }
+
     /// The first executable called `name` in `path`, as an absolute path.
     pub fn find(&self, name: &str, path: &str) -> Option<PathBuf> {
         let names: Vec<String> =
@@ -314,9 +331,8 @@ fn is_under(path: &Path, dir: &Path) -> bool {
 /// `exe --version` with `PATH` set to `path_env`, its first line when it exits 0 within
 /// `timeout`. A tool that hangs is killed rather than holding up the setup screen.
 fn version_of(exe: &Path, path_env: &str, timeout: Duration) -> Option<String> {
-    let mut child = crate::proc::command(exe)
+    let mut child = crate::proc::tool(exe, path_env)
         .arg("--version")
-        .env("PATH", path_env)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -475,6 +491,24 @@ mod tests {
         );
         assert_eq!(windows_path(Some(r"C:\Windows"), None, env), r"C:\Windows");
         assert_eq!(windows_path(None, Some(""), env), "");
+    }
+
+    #[test]
+    fn a_windows_pane_gets_the_registrys_path_not_the_apps() {
+        let (tools, local) = (r"C:\Users\u\.mnemo-desktop\tools\mnemo", r"C:\Users\u\.local\bin");
+        // What `extra_dirs` gives on Windows; spelled out, as `C:\` is not absolute elsewhere.
+        let extra = [PathBuf::from(tools), PathBuf::from(local)];
+        let built = format!(r"D:\a\target\debug\build\out;{}", "D:\\a\\target\\x;".repeat(2000));
+        assert_eq!(
+            windows_pane_path(Some(r"C:\Windows\system32;C:\Windows".into()), &built, &extra),
+            format!(r"{tools};C:\Windows\system32;C:\Windows;{local}"),
+            "nothing the app inherited, however long"
+        );
+        assert_eq!(
+            windows_pane_path(None, r"C:\Windows\system32", &extra),
+            format!(r"{tools};C:\Windows\system32;{local}"),
+            "no registry: what the app inherited"
+        );
     }
 
     #[cfg(not(windows))]

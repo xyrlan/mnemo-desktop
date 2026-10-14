@@ -26,6 +26,10 @@ const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
 const APP_DIR: &str = if cfg!(debug_assertions) { ".mnemo-desktop-dev" } else { ".mnemo-desktop" };
 /// Sent back when a client asks for a version this server has not seen.
 const LATEST_PROTOCOL: &str = "2025-06-18";
+/// Keep in step with `mnemo_desktop_lib::mcp::UNAVAILABLE`: no app serves on Windows, so no tool
+/// is offered there and every start says why.
+const UNAVAILABLE: &str =
+    "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn socket_path() -> PathBuf {
@@ -40,12 +44,21 @@ fn socket_path_from(exported: Option<std::ffi::OsString>, home: Option<std::ffi:
 }
 
 fn tools() -> Value {
-    tools_for(cfg!(debug_assertions))
+    tools_for(cfg!(debug_assertions), std::env::consts::OS)
 }
 
-/// The tools this build offers: `desktop_app_drive` only in a debug build, the one kind of
-/// app that serves it (`mnemo_desktop_lib::mcp::DEV_TOOLS`).
-fn tools_for(debug: bool) -> Value {
+/// Why nothing works on `os` (`std::env::consts::OS`), where nothing does.
+fn unavailable_on(os: &str) -> Option<&'static str> {
+    (os == "windows").then_some(UNAVAILABLE)
+}
+
+/// The tools this build offers on `os`, each only where it can work: `desktop_app_drive` only
+/// in a debug build, the one kind of app that serves it (`mnemo_desktop_lib::mcp::DEV_TOOLS`);
+/// nothing on Windows (`unavailable_on`).
+fn tools_for(debug: bool, os: &str) -> Value {
+    if unavailable_on(os).is_some() {
+        return json!([]);
+    }
     let pane = json!({ "type": "integer", "description": "Pane id from desktop_list_panes (browser and other non-terminal panes have negative ids)." });
     let mut list = json!([
         {
@@ -108,6 +121,9 @@ fn tools_for(debug: bool) -> Value {
     list
 }
 
+/// What `initialize` tells the model.
+const INSTRUCTIONS: &str = "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window.";
+
 /// Asks the app one question. `Ok` carries MCP content; `Err` a message for the model.
 fn call_app(method: &str, params: Value) -> Result<Value, String> {
     #[cfg(unix)]
@@ -130,12 +146,19 @@ fn call_app(method: &str, params: Value) -> Result<Value, String> {
     #[cfg(not(unix))]
     {
         let _ = (method, params);
-        Err("the desktop MCP needs unix sockets".into())
+        Err(UNAVAILABLE.into())
     }
 }
 
 /// The response to one JSON-RPC message, or `None` for notifications.
 fn handle(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>) -> Option<Value> {
+    handle_on(msg, call, std::env::consts::OS)
+}
+
+/// `handle` as it answers on `os`. Where nothing works, `initialize` itself fails with the
+/// reason: Claude Code shows the server as failed in `/mcp`, rather than connected with tools
+/// that all fail.
+fn handle_on(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>, os: &str) -> Option<Value> {
     let id = msg.get("id").cloned();
     let method = msg.get("method").and_then(Value::as_str);
     let (Some(id), Some(method)) = (id, method) else {
@@ -145,17 +168,20 @@ fn handle(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>) -> O
     };
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result = match method {
+        "initialize" if unavailable_on(os).is_some() => Err((-32603, unavailable_on(os).unwrap_or_default().to_owned())),
         "initialize" => Ok(json!({
             "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(LATEST_PROTOCOL),
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "mnemo-desktop", "version": env!("CARGO_PKG_VERSION") },
-            "instructions": "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window."
+            "instructions": INSTRUCTIONS
         })),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": tools() })),
+        "tools/list" => Ok(json!({ "tools": tools_for(cfg!(debug_assertions), os) })),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-            if !known(name) {
+            if let Some(why) = unavailable_on(os) {
+                Err((-32602, why.to_owned()))
+            } else if !known_on(name, os) {
                 Err((-32602, format!("unknown tool {name:?}")))
             } else {
                 let args = params.get("arguments").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
@@ -205,8 +231,8 @@ examples:
     )
 }
 
-fn known(tool: &str) -> bool {
-    tools().as_array().is_some_and(|t| t.iter().any(|t| t["name"] == tool))
+fn known_on(tool: &str, os: &str) -> bool {
+    tools_for(cfg!(debug_assertions), os).as_array().is_some_and(|t| t.iter().any(|t| t["name"] == tool))
 }
 
 #[derive(Debug, PartialEq)]
@@ -216,8 +242,11 @@ struct Call {
     out: Option<PathBuf>,
 }
 
-/// `<tool> [<json-args>] [--out <file>]`, the words after `call`.
-fn parse_call(words: &[String]) -> Result<Call, String> {
+/// `<tool> [<json-args>] [--out <file>]`, the words after `call`, for a binary on `os`.
+fn parse_call(words: &[String], os: &str) -> Result<Call, String> {
+    if let Some(why) = unavailable_on(os) {
+        return Err(why.to_owned());
+    }
     let (mut rest, mut out) = (Vec::new(), None);
     let mut it = words.iter();
     while let Some(w) = it.next() {
@@ -238,8 +267,11 @@ fn parse_call(words: &[String]) -> Result<Call, String> {
     if !args.is_object() {
         return Err("<json-args> must be a JSON object".into());
     }
-    if !known(tool) {
-        let hint = if tool == "desktop_app_drive" { " (only a debug build has it: use target/debug/mnemo-desktop-mcp)" } else { "" };
+    if !known_on(tool, os) {
+        let hint = match tool {
+            "desktop_app_drive" => " (only a debug build has it: use target/debug/mnemo-desktop-mcp)",
+            _ => "",
+        };
         return Err(format!("unknown tool {tool:?}{hint}"));
     }
     Ok(Call { tool: tool.to_owned(), args, out })
@@ -278,10 +310,14 @@ fn render(content: &Value, out: Option<&Path>, write: WriteFile) -> Result<Value
     Ok(if shown.len() == 1 { shown.remove(0) } else { Value::Array(shown) })
 }
 
-/// Runs `call …` against `call` and returns the exit code.
-fn cli(words: &[String], call: &dyn Fn(&str, Value) -> Result<Value, String>, write: WriteFile, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    let c = match parse_call(words) {
+/// Runs `call …` on `os` against `call` and returns the exit code.
+fn cli(words: &[String], os: &str, call: &dyn Fn(&str, Value) -> Result<Value, String>, write: WriteFile, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let c = match parse_call(words, os) {
         Ok(c) => c,
+        Err(e) if unavailable_on(os).is_some() => {
+            let _ = writeln!(stderr, "{BIN}: {e}");
+            return 1;
+        }
         Err(e) => {
             let _ = writeln!(stderr, "{BIN}: {e}\n\n{}", usage());
             return 2;
@@ -316,7 +352,7 @@ fn main() {
         None => {}
         Some("call") => {
             let mut write = |path: &Path, bytes: &[u8]| std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()));
-            let code = cli(&args[1..], &call_app, &mut write, &mut std::io::stdout(), &mut std::io::stderr());
+            let code = cli(&args[1..], std::env::consts::OS, &call_app, &mut write, &mut std::io::stdout(), &mut std::io::stderr());
             std::process::exit(code);
         }
         Some("-h" | "--help" | "help") => {
@@ -327,6 +363,10 @@ fn main() {
             eprintln!("{BIN}: unknown command {other:?}\n\n{}", usage());
             std::process::exit(2);
         }
+    }
+    if let Some(why) = unavailable_on(std::env::consts::OS) {
+        // Claude Code keeps a server's stderr in its MCP log; `initialize` answers it as well.
+        eprintln!("{BIN}: {why}");
     }
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -358,8 +398,9 @@ mod tests {
         }
     }
 
+    /// The answer of a server on macOS, where every tool works (Linux too).
     fn req(v: Value) -> Value {
-        handle(&v, &app).expect("a response")
+        handle_on(&v, &app, "macos").expect("a response")
     }
 
     #[test]
@@ -404,13 +445,58 @@ mod tests {
 
     #[test]
     fn a_release_build_offers_no_drive() {
-        let names = |debug| tools_for(debug).as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |debug| tools_for(debug, "macos").as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(true).contains(&"desktop_app_drive".to_owned()));
         assert!(!names(false).contains(&"desktop_app_drive".to_owned()));
         assert!(names(false).contains(&"desktop_app_snapshot".to_owned()));
-        let drive = tools_for(true).as_array().unwrap().iter().find(|t| t["name"] == "desktop_app_drive").cloned().unwrap();
+        let drive = tools_for(true, "macos").as_array().unwrap().iter().find(|t| t["name"] == "desktop_app_drive").cloned().unwrap();
         assert_eq!(drive["inputSchema"]["properties"]["action"]["enum"], json!(["click", "type", "key", "eval"]));
         assert_eq!(drive["inputSchema"]["required"], json!(["action"]));
+    }
+
+    fn names(tools: Value) -> Vec<String> {
+        tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect()
+    }
+
+    #[test]
+    fn a_tool_is_listed_only_where_it_can_work() {
+        let all = ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot"];
+        assert_eq!(names(tools_for(false, "linux")), all, "snapshots through WebKitGTK's own");
+        assert_eq!(names(tools_for(true, "linux")), [&all[..], &["desktop_app_drive"]].concat());
+        assert_eq!(names(tools_for(false, "macos")), all);
+        assert!(names(tools_for(true, "windows")).is_empty(), "no socket, no tool");
+
+        // This system, as CI runs it on each of the three.
+        let here = names(tools());
+        let want: &[&str] = if cfg!(windows) {
+            &[]
+        } else {
+            &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]
+        };
+        assert_eq!(here, want);
+        let r = handle(&json!({ "id": 1, "method": "tools/list" }), &app).unwrap();
+        assert_eq!(names(r["result"]["tools"].clone()), want);
+    }
+
+    #[test]
+    fn where_nothing_works_the_server_says_why_at_once() {
+        let on = |os, v: Value| handle_on(&v, &app, os).expect("a response");
+        let r = on("windows", json!({ "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-03-26" } }));
+        assert_eq!(r["error"]["message"], UNAVAILABLE);
+        assert!(r.get("result").is_none());
+        let r = on("windows", json!({ "id": 1, "method": "tools/call", "params": { "name": "desktop_list_panes" } }));
+        assert_eq!(r["error"]["message"], UNAVAILABLE);
+        assert_eq!(parse_call(&words(&["desktop_list_panes"]), "windows").unwrap_err(), UNAVAILABLE);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = cli(&words(&["desktop_list_panes"]), "windows", &app, &mut |_: &Path, _: &[u8]| Ok(()), &mut out, &mut err);
+        assert_eq!(code, 1);
+        assert_eq!(String::from_utf8(err).unwrap(), format!("{BIN}: {UNAVAILABLE}\n"));
+        assert!(on("linux", json!({ "id": 0, "method": "initialize" }))["result"].is_object());
+        assert_eq!(parse_call(&words(&["desktop_app_snapshot"]), "linux").unwrap().tool, "desktop_app_snapshot");
+
+        // This system: Windows refuses at once, the others start.
+        let r = handle(&json!({ "id": 0, "method": "initialize" }), &app).unwrap();
+        assert_eq!(r["error"]["message"].as_str(), cfg!(windows).then_some(UNAVAILABLE));
     }
 
     #[test]
@@ -448,12 +534,12 @@ mod tests {
 
     #[test]
     fn call_reads_a_tool_its_args_and_an_out_file_anywhere() {
-        let c = parse_call(&words(&["desktop_app_snapshot", "--out", "/tmp/a.png"])).unwrap();
+        let c = parse_call(&words(&["desktop_app_snapshot", "--out", "/tmp/a.png"]), "macos").unwrap();
         assert_eq!(c, Call { tool: "desktop_app_snapshot".into(), args: json!({}), out: Some("/tmp/a.png".into()) });
-        let c = parse_call(&words(&["--out=/x.png", "desktop_app_drive", r#"{"action":"eval","js":"1"}"#])).unwrap();
+        let c = parse_call(&words(&["--out=/x.png", "desktop_app_drive", r#"{"action":"eval","js":"1"}"#]), "macos").unwrap();
         assert_eq!((c.args["js"].as_str(), c.out), (Some("1"), Some("/x.png".into())));
 
-        let err = |w: &[&str]| parse_call(&words(w)).unwrap_err();
+        let err = |w: &[&str]| parse_call(&words(w), "macos").unwrap_err();
         assert_eq!(err(&[]), "which tool?");
         assert_eq!(err(&["desktop_app_snapshot", "--out"]), "--out needs a file");
         assert!(err(&["desktop_app_drive", "{nope"]).starts_with("<json-args> is not JSON"));
@@ -494,7 +580,7 @@ mod tests {
 
     fn run(w: &[&str], call: &dyn Fn(&str, Value) -> Result<Value, String>) -> (i32, String, String) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = cli(&words(w), call, &mut |_: &Path, _: &[u8]| Ok(()), &mut out, &mut err);
+        let code = cli(&words(w), "macos", call, &mut |_: &Path, _: &[u8]| Ok(()), &mut out, &mut err);
         (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
     }
 
