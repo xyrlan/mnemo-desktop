@@ -1,6 +1,7 @@
 import type { AgentEvent } from '../agents/events'
 import { notificationKind } from '../fleet/model'
 import type { RepoNode } from '../fleet/types'
+import { basename, norm, within } from '../path/path'
 
 /** What an agent did that is worth telling you: its turn is `done`, or it waits on a `permission`
  *  or a `question`. */
@@ -21,13 +22,9 @@ export type Alert = {
 
 export type Place = { path: string; name: string; repo: string }
 
-const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
-
 /** `cwd` is `root` or inside it; `/a/bc` is not inside `/a/b`. */
 export function inside(cwd: string, root: string): boolean {
-  const c = norm(cwd)
-  const r = norm(root)
-  return c === r || c.startsWith(r === '/' ? '/' : `${r}/`)
+  return within(cwd, root)
 }
 
 /** The deepest fleet worktree `cwd` is in — a tree under `.claude/worktrees/` wins over the
@@ -49,8 +46,6 @@ export function shownWorktree(active: string | null, repos: readonly RepoNode[])
   return first?.find((w) => w.kind === 'main')?.path ?? first?.[0]?.path ?? null
 }
 
-const baseName = (p: string) => norm(p).split('/').pop() || p
-
 /** What `e` is worth telling, before asking whether you are looking: a `stop` is a finished turn,
  *  a `notification` a permission or a question. The rest — and a notification that is not an ask
  *  (the idle nudge a minute after a stop, a login notice) — is `null`. */
@@ -70,7 +65,7 @@ export function alertFor(e: AgentEvent, repos: readonly RepoNode[]): Alert | nul
     sessionId: e.sessionId,
     kind,
     worktree: place?.path ?? null,
-    name: place?.name ?? baseName(e.cwd),
+    name: place?.name ?? basename(e.cwd),
     repo: place?.repo ?? null,
     message,
     at: e.at,

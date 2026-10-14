@@ -12,10 +12,9 @@ import { useArm } from './useArm'
 import { confidenceTone } from './rules'
 import { Dot, EMPTY, Loading } from './ui'
 import type { Page } from './types'
+import { basename, dirname } from '../path/path'
 
 export const short = (path: string) => path.replace(/^\/Users\/[^/]+/, '~')
-const basename = (p: string) => p.split('/').pop() ?? p
-const dirname = (p: string) => p.replace(/\/[^/]*$/, '') || '/'
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
 function ActionBar({ page, cwd }: { page: Page; cwd: string | undefined }) {

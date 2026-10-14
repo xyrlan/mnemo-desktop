@@ -14,12 +14,10 @@ import { foldKey, select, setFold, useUi } from './store'
 import { WaveList } from './list'
 import { Detail, type DetailActions } from './detail'
 import './dispatch.css'
+import { basename, norm, within } from '../path/path'
 
 /** A title this tab gave itself, which it may change again; any other is the user's. */
 const OWN_TITLE = /^Dispatch( · \d+ needs? you)?$/
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
-const within = (path: string, dir: string) => path === dir || path.startsWith(dir === '/' ? dir : `${dir}/`)
 
 /** Whether the pane's tab is the one its group shows. Hidden panes of parked workspaces stay
  *  mounted; they poll nothing. */
@@ -103,7 +101,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
     }
   }, [repos, open])
 
-  const name = parent.split('/').pop() || parent
+  const name = basename(parent)
   return (
     <div className="dispatch-pane" data-pane={id} data-dispatch={parent} data-picked={row?.child ? '' : undefined}>
       <div className="dispatch-body">

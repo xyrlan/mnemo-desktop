@@ -1,9 +1,10 @@
 import type { AgentNode, AgentState, PrNode, RepoNode, WorktreeNode } from '../fleet/types'
 import { accentHue } from '../home/repo-color'
+import { norm } from '../path/path'
 import type { WaveLine } from './dispatch'
 
-/** A path as the fleet spells it: no trailing slash. */
-export const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
+/** A path as the fleet spells it (`src/path/path.ts`). */
+export { norm }
 
 /** A worktree's status lane, from its agents. Orca's `WorktreeStatus` priority
  *  (`lib/worktree-status.ts`): an agent waiting on you wins, then one working, then one done. */

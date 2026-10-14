@@ -5,6 +5,7 @@ import type { HomeSnapshot } from '../home/types'
 import { paneCwd } from '../mission/scope'
 import { barInfo, paneParent } from '../chrome/info'
 import { dropPane, type Zone } from '../chrome/drag'
+import { basename, samePath } from '../path/path'
 
 /** What Claude Code in a tab is doing, from its parent row in the mission snapshot. */
 export type ClaudeState = 'working' | 'blocked' | 'idle'
@@ -19,8 +20,6 @@ export type TabLabel = {
 }
 
 export type Git = { repo?: string | null; branch?: string | null }
-
-const basename = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
 
 /** `claude agents` statuses: `busy` is working, anything waiting on the user is blocked. */
 export function claudeState(status: string): ClaudeState {
@@ -109,8 +108,6 @@ export function dropOnGroup(
   s.movePane(from, to, zone === 'center' ? 'right' : zone, dest.id)
 }
 
-const trimSlash = (p: string) => p.replace(/\/+$/, '') || '/'
-
 /** The pane of this window a session runs in: the terminal tagged with its session id, else the
  *  only terminal sitting in exactly its cwd, in any open worktree. `null` when it is not open (or ambiguous). */
 export function paneForSession(
@@ -122,6 +119,6 @@ export function paneForSession(
   const tagged = session.session_id ? open.find((p) => p.sessionId === session.session_id) : undefined
   if (tagged) return tagged.id
   if (!session.cwd) return null
-  const here = open.filter((p) => p.view === 'terminal' && p.cwd && trimSlash(p.cwd) === trimSlash(session.cwd))
+  const here = open.filter((p) => p.view === 'terminal' && p.cwd && samePath(p.cwd, session.cwd))
   return here.length === 1 ? here[0].id : null
 }
