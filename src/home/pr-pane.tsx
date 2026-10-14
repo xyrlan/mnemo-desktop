@@ -16,6 +16,10 @@ import { prView, relTime, stopCmd, takeOver, type HomeRepo, type HomeSession, ty
 import { useReview, type ReviewState } from './review/client'
 import DiffView, { FileList, type Focus } from './review/DiffView'
 import Merge, { StatePill } from './review/Merge'
+import { detectPlatform } from '../actions/chords'
+
+/** The breadcrumb's own key, ⌘← or Ctrl+←: no app action, so no row of the chord table. */
+const BACK_KEYS = detectPlatform() === 'mac' ? '⌘←' : 'Ctrl+←'
 
 /** The PR view's one webview. Layout panes are positive ids and its synthetic view ids start
  *  at -1 and count down (`src/layout/store.ts`), so this sits far below anything that counter
@@ -218,7 +222,7 @@ export default function PrPane({ opened }: { opened: OpenedPr }) {
     <div data-ui className="hm-pr-view absolute inset-0 z-30 flex flex-col overflow-hidden bg-background text-foreground">
       {/* Row 1: the breadcrumb strip. */}
       <header className="hm-pr-crumbs flex flex-none items-center gap-2 border-b border-border/60 bg-muted/30 px-6 py-2 text-[13px] text-muted-foreground">
-        <Button type="button" variant="ghost" size="sm" className="hm-pr-back -ml-2 h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" title="back to the stream (⌘←)" onClick={close}>
+        <Button type="button" variant="ghost" size="sm" className="hm-pr-back -ml-2 h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" title={`back to the stream (${BACK_KEYS})`} onClick={close}>
           <ChevronLeft className="size-4" />
           <span aria-hidden="true" className="size-2 shrink-0 rounded-[3px]" style={{ background: repoColor(opened.repo) }} />
           {repo?.name ?? opened.repo.split('/').pop()}

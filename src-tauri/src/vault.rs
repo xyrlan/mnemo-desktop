@@ -1281,14 +1281,33 @@ fn exec(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str)
     exec_within(program, path_env, action, args, cwd, None)
 }
 
+/// Where a command runs: `cwd`, or the home directory when no pane gave one. Never the
+/// root: with no home to name, the run is refused.
+fn run_dir(cwd: &str, home: &Path) -> Result<PathBuf, String> {
+    match cwd.trim() {
+        "" if home.as_os_str().is_empty() => Err("no folder to run in: the system names no home directory".into()),
+        "" => Ok(home.to_path_buf()),
+        d => Ok(PathBuf::from(d)),
+    }
+}
+
+/// `~/mnemo` when it holds a `mnemo.config.json`.
+fn home_vault(home: &Path) -> Option<PathBuf> {
+    if home.as_os_str().is_empty() {
+        return None;
+    }
+    let root = home.join("mnemo");
+    root.join("mnemo.config.json").is_file().then_some(root)
+}
+
 /// `exec`, killed once `timeout` passes. What it printed before then is dropped: a report
 /// cut off halfway reads as a whole one.
 fn exec_within(program: &str, path_env: &str, action: &str, args: &[String], cwd: &str, timeout: Option<std::time::Duration>) -> RunResult {
     use std::io::Read;
     let refuse = |stderr: String| RunResult { stderr, ..Default::default() };
-    let dir = match cwd.trim() {
-        "" => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")),
-        d => PathBuf::from(d),
+    let dir = match run_dir(cwd, &crate::app_dir::home()) {
+        Ok(d) => d,
+        Err(e) => return refuse(e),
     };
     if !dir.is_dir() {
         return refuse(format!("{}: not a directory", dir.display()));
@@ -1344,10 +1363,7 @@ pub fn vault_root() -> Option<PathBuf> {
         return Some(r);
     }
     let status = run_with("mnemo", &crate::mission::login_path(), "status", &[], "");
-    let found = parse_status_root(&status.stdout).filter(|p| p.is_dir()).or_else(|| {
-        let home = PathBuf::from(std::env::var_os("HOME")?).join("mnemo");
-        home.join("mnemo.config.json").is_file().then_some(home)
-    })?;
+    let found = parse_status_root(&status.stdout).filter(|p| p.is_dir()).or_else(|| home_vault(&crate::app_dir::home()))?;
     *ROOT.lock().ok()? = Some(found.clone());
     Some(found)
 }
@@ -1725,6 +1741,41 @@ mod tests {
         assert_eq!(parse_status_root(out), Some(PathBuf::from("/Users/x/my vault")));
         assert_eq!(parse_status_root("Vault: /v\n"), Some(PathBuf::from("/v")));
         assert_eq!(parse_status_root("no vault configured\n"), None);
+    }
+
+    /// Issue #332: with no pane open the page says "runs in your home directory", and Windows
+    /// names that in `USERPROFILE` alone.
+    #[test]
+    fn a_command_with_no_pane_runs_in_the_home_directory_and_never_at_the_root() {
+        let profile = crate::testutil::temp_dir("vault-home");
+        let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        let home = crate::app_dir::home_from(&|name| (name == var).then(|| profile.clone().into_os_string()));
+        assert_eq!(run_dir("", &home), Ok(profile.clone()));
+        assert_eq!(run_dir("  ", &home), Ok(profile.clone()));
+        assert_eq!(run_dir("/some/pane", &home), Ok(PathBuf::from("/some/pane")));
+        assert!(run_dir("", Path::new("")).unwrap_err().contains("no home directory"));
+        // The run itself: a program every platform has, asked where it is.
+        let (program, action, args) = if cfg!(windows) { ("cmd", "/c", strs(&["cd"])) } else { ("pwd", "-P", vec![]) };
+        let path_env = std::env::var("PATH").unwrap_or_default();
+        let dir = run_dir("", &home).unwrap();
+        let r = exec(program, &path_env, action, &args, &dir.to_string_lossy());
+        assert_eq!(r.code, Some(0), "{}", r.stderr);
+        assert_eq!(Path::new(r.stdout.trim()).canonicalize().unwrap(), profile.canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&profile);
+    }
+
+    #[test]
+    fn the_vault_falls_back_to_mnemo_under_the_home_directory() {
+        let profile = crate::testutil::temp_dir("vault-fallback");
+        let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        let home = crate::app_dir::home_from(&|name| (name == var).then(|| profile.clone().into_os_string()));
+        assert_eq!(home_vault(&home), None, "no ~/mnemo yet");
+        std::fs::create_dir_all(profile.join("mnemo")).unwrap();
+        assert_eq!(home_vault(&home), None, "a folder that is no vault");
+        std::fs::write(profile.join("mnemo").join("mnemo.config.json"), "{}").unwrap();
+        assert_eq!(home_vault(&home), Some(profile.join("mnemo")));
+        assert_eq!(home_vault(Path::new("")), None, "no home is no `mnemo` under the cwd");
+        let _ = std::fs::remove_dir_all(&profile);
     }
 
     #[cfg(unix)]

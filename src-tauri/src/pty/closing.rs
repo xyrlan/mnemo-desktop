@@ -13,17 +13,17 @@ pub struct Busy {
     pub programs: Vec<String>,
 }
 
-/// A running process: its pid, its parent's and its name.
-pub type Process = (u32, u32, String);
-
-/// Of `terminals`, those whose shell has a child among `processes`. A shell at its prompt has
-/// none, and closing it loses nothing.
-pub fn busy(terminals: &[PtyInfo], processes: &[Process]) -> Vec<Busy> {
+/// Of `terminals`, those whose shell has a child (`children` of its pid, as `procs::Table`
+/// answers), each child by the name `name` gives it. A shell at its prompt has none, and
+/// closing it loses nothing.
+pub fn busy(terminals: &[PtyInfo], children: impl Fn(u32) -> Vec<u32>, name: impl Fn(u32) -> Option<String>) -> Vec<Busy> {
     terminals
         .iter()
         .filter(|t| t.alive && t.pid > 0)
         .filter_map(|t| {
-            let programs: Vec<String> = processes.iter().filter(|(pid, parent, _)| *parent == t.pid && *pid != t.pid).map(|(_, _, name)| name.clone()).collect();
+            let mut below = children(t.pid);
+            below.sort_unstable();
+            let programs: Vec<String> = below.into_iter().map(|pid| name(pid).unwrap_or_else(|| format!("process {pid}"))).collect();
             (!programs.is_empty()).then(|| Busy { cwd: t.cwd.clone(), programs })
         })
         .collect()
@@ -43,53 +43,51 @@ pub fn question(busy: &[Busy]) -> Option<String> {
     Some(text)
 }
 
-/// Every running process. Empty when the system cannot say: then nothing is asked, as before.
-#[cfg(unix)]
-pub fn processes() -> Vec<Process> {
-    let out = crate::proc::command("ps").args(["-axo", "pid=,ppid=,comm="]).output();
-    out.map(|o| parse_ps(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+/// The name of the program process `pid` runs; `None` once it is gone, or where the system
+/// does not say.
+#[cfg(target_os = "macos")]
+pub fn name_of(pid: u32) -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: the call writes at most `buf.len()` bytes into `buf` and answers how many.
+    let n = unsafe { libc::proc_name(pid as libc::c_int, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
 }
 
-/// `ps -o pid=,ppid=,comm=`: the name is the program's path on macOS, and may hold spaces.
-#[cfg(unix)]
-fn parse_ps(text: &str) -> Vec<Process> {
-    text.lines()
-        .filter_map(|line| {
-            let line = line.trim_start();
-            let (pid, rest) = line.split_once(char::is_whitespace)?;
-            let (parent, name) = rest.trim_start().split_once(char::is_whitespace)?;
-            let name = name.trim();
-            let name = name.rsplit('/').next().unwrap_or(name).trim_start_matches('-');
-            Some((pid.parse().ok()?, parent.parse().ok()?, name.to_string()))
-        })
-        .collect()
+#[cfg(target_os = "linux")]
+pub fn name_of(pid: u32) -> Option<String> {
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(name.trim_end().to_string()).filter(|n| !n.is_empty())
 }
 
+/// The file its image was started from, without the folder or `.exe`.
 #[cfg(windows)]
-pub fn processes() -> Vec<Process> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
-    let mut all = Vec::new();
-    // SAFETY: `entry` is a plain C struct whose size field is set as the calls require, and the
-    // snapshot handle is closed once.
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == INVALID_HANDLE_VALUE {
-            return all;
+pub fn name_of(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: the handle is checked and closed once; the call writes at most `len` units into `buf`.
+    let ok = unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
         }
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut more = Process32FirstW(snapshot, &mut entry);
-        while more != 0 {
-            let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
-            let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
-            let name = if name.to_ascii_lowercase().ends_with(".exe") { name[..name.len() - 4].to_string() } else { name };
-            all.push((entry.th32ProcessID, entry.th32ParentProcessID, name));
-            more = Process32NextW(snapshot, &mut entry);
-        }
-        CloseHandle(snapshot);
+        let ok = QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(process);
+        ok
+    };
+    if ok == 0 {
+        return None;
     }
-    all
+    let path = String::from_utf16_lossy(&buf[..len as usize]);
+    let file = path.rsplit('\\').next().unwrap_or(&path);
+    let stem = if file.to_ascii_lowercase().ends_with(".exe") { &file[..file.len() - 4] } else { file };
+    Some(stem.to_string()).filter(|n| !n.is_empty())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub fn name_of(_pid: u32) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -100,25 +98,26 @@ mod tests {
         PtyInfo { id, cwd: cwd.into(), pid, alive }
     }
 
-    fn table() -> Vec<Process> {
-        vec![
-            (1, 0, "init".into()),
-            (100, 1, "zsh".into()),
-            (101, 100, "claude".into()),
-            (102, 101, "node".into()),
-            (103, 100, "vite".into()),
-            (200, 1, "zsh".into()),
-            (300, 1, "zsh".into()),
-            (301, 300, "sleep".into()),
-        ]
+    /// pid, parent, name.
+    const ROWS: [(u32, u32, &str); 8] =
+        [(1, 0, "init"), (100, 1, "zsh"), (101, 100, "claude"), (102, 101, "node"), (103, 100, "vite"), (200, 1, "zsh"), (300, 1, "zsh"), (301, 300, "sleep")];
+
+    fn children(parent: u32) -> Vec<u32> {
+        ROWS.iter().filter(|r| r.1 == parent).map(|r| r.0).collect()
+    }
+
+    fn name(pid: u32) -> Option<String> {
+        ROWS.iter().find(|r| r.0 == pid).map(|r| r.2.to_string())
     }
 
     #[test]
     fn a_terminal_is_busy_when_its_shell_has_a_child() {
         let terminals = [terminal(1, 100, "/work/app", true), terminal(2, 200, "/work/idle", true), terminal(3, 300, "/work/ended", false)];
         // The shell's own children, not theirs: `node` under `claude` is `claude`'s business.
-        assert_eq!(busy(&terminals, &table()), vec![Busy { cwd: "/work/app".into(), programs: vec!["claude".into(), "vite".into()] }]);
-        assert!(busy(&terminals, &[]).is_empty(), "a system that cannot list its processes asks nothing");
+        assert_eq!(busy(&terminals, children, name), vec![Busy { cwd: "/work/app".into(), programs: vec!["claude".into(), "vite".into()] }]);
+        // A child the system will not name is still something running.
+        assert_eq!(busy(&terminals, children, |_| None)[0].programs, vec!["process 101".to_string(), "process 103".to_string()]);
+        assert!(busy(&terminals, |_| Vec::new(), name).is_empty());
     }
 
     #[test]
@@ -130,17 +129,10 @@ mod tests {
         assert!(two.contains("these 2 terminals") && two.contains("claude  in  /a") && two.contains("node  in  /b"), "{two}");
     }
 
-    #[cfg(unix)]
+    /// Asked of the real system: this test's own process has a name.
     #[test]
-    fn ps_rows_keep_the_program_name() {
-        let rows = parse_ps("    1     0 /sbin/launchd\n  812   640 -zsh\n 9001   812 /Applications/Some App.app/Contents/MacOS/Some App\n garbage\n");
-        assert_eq!(rows, vec![(1, 0, "launchd".to_string()), (812, 640, "zsh".to_string()), (9001, 812, "Some App".to_string())]);
-    }
-
-    /// The real table: this test's own process is in it, under its parent.
-    #[test]
-    fn the_system_lists_this_process() {
-        let me = std::process::id();
-        assert!(processes().iter().any(|(pid, parent, name)| *pid == me && *parent > 0 && !name.is_empty()));
+    fn the_system_names_this_process() {
+        let name = name_of(std::process::id()).expect("a name");
+        assert!(name.starts_with("mnemo_desktop"), "{name}");
     }
 }

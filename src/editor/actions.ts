@@ -2,6 +2,7 @@ import type { Store, Place } from '../layout/store'
 import type { Action } from '../actions/registry'
 import type { FsClient } from './client'
 import { basename, defaultRoot, resolvePath } from './paths'
+import { detectPlatform } from '../actions/chords'
 
 export type PromptResult = { value: string; place: Place }
 export type PromptFn = (opts: { initial: string; hint: string }) => Promise<PromptResult | null>
@@ -28,7 +29,7 @@ export function registerEditorActions({ app, fs, prompt, register }: Deps) {
       const root = defaultRoot(app.getState(), home)
       const got = await prompt({
         initial: root === '/' ? '/' : `${root}/`,
-        hint: 'Enter: to the side · ⌘Enter: tab in this group · relative paths resolve from the current root',
+        hint: `Enter: to the side · ${detectPlatform() === 'mac' ? '⌘' : 'Ctrl+'}Enter: tab in this group · relative paths resolve from the current root`,
       })
       if (!got || !got.value.trim()) return
       openEditor(app, resolvePath(got.value, root, home), root, got.place)

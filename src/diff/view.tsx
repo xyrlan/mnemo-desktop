@@ -71,4 +71,4 @@ export function openDiff(worktree: string | null = currentWorktree()) {
   else st.openView('diff', { worktree: worktree ?? '' }, 'tab', 'Changes')
 }
 
-register({ id: 'diff.open', title: 'Changes (diff with notes for the agent)', shortcut: '⌘⇧G', run: () => openDiff() })
+register({ id: 'diff.open', title: 'Changes (diff with notes for the agent)', run: () => openDiff() })

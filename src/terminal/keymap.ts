@@ -1,5 +1,7 @@
-/** macOS editing chords translated to what the shell (and Claude Code's prompt) already
- *  understand. Returns bytes to write, a clipboard verb, or null to let xterm handle it. */
+import type { Platform } from '../actions/chords'
+
+/** Editing chords translated to what the shell (and Claude Code's prompt) already understand.
+ *  Returns bytes to write, a clipboard verb, or null to let xterm handle it. */
 export type ChordResult = { write: string } | { clipboard: 'copy' | 'paste' } | null
 
 export type KeyLike = { key: string; metaKey: boolean; altKey: boolean; ctrlKey: boolean; shiftKey: boolean; type?: string }
@@ -22,6 +24,32 @@ export function macChord(e: KeyLike): ChordResult {
     case 'v': case 'V': return { clipboard: 'paste' }
     default: return null
   }
+}
+
+/** Off a Mac the clipboard is on Ctrl, as Windows terminals have it: Ctrl+C and Ctrl+V, and
+ *  Ctrl+Shift+C / Ctrl+Shift+V. Never with Alt: AltGr arrives as Ctrl+Alt and types a letter. */
+export function terminalChord(e: KeyLike, platform: Platform): ChordResult {
+  if (platform === 'mac') return macChord(e)
+  if (e.key === 'Enter' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return { write: '\x1b\r' }
+  if (!e.ctrlKey || e.altKey || e.metaKey) return null
+  const k = e.key.toLowerCase()
+  return k === 'c' ? { clipboard: 'copy' } : k === 'v' ? { clipboard: 'paste' } : null
+}
+
+/** What the pane does with a keydown. `pass`: xterm handles it. `drop`: nothing does. */
+export type KeyVerdict = { pass: true } | { drop: true } | { write: string } | { copy: string } | { paste: true }
+
+/** `selection` is the pane's selected text. A copy chord with nothing selected is the shell's:
+ *  Ctrl+C interrupts, and ⌘C reaches it as nothing (matches Terminal.app). Ctrl+Shift+C is
+ *  copy alone, so with nothing selected it does nothing rather than interrupt. */
+export function terminalKey(e: KeyLike, platform: Platform, selection: string): KeyVerdict {
+  if (e.type !== undefined && e.type !== 'keydown') return { pass: true }
+  const r = terminalChord(e, platform)
+  if (!r) return { pass: true }
+  if ('write' in r) return r
+  if (r.clipboard === 'paste') return { paste: true }
+  if (selection) return { copy: selection }
+  return platform !== 'mac' && e.shiftKey ? { drop: true } : { pass: true }
 }
 
 /** The parts of `navigator.clipboard` a paste needs, so the decision is testable. */

@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
+import { shortcutLabel } from '../actions/chords'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
@@ -178,9 +179,9 @@ test('"+" is a menu of a terminal or a browser, each through its chord\'s action
   // It asks which; a click alone opens nothing (the open menu is shot, not driven: Popper hangs jsdom).
   await fire(plus, 'click')
   expect(onNew).not.toHaveBeenCalled()
-  expect(NEW_TAB_ITEMS.map((i) => [i.label, i.shortcut])).toEqual([
-    ['New Terminal', '⌘T'],
-    ['New Browser Tab', '⌘⇧B'],
+  expect(NEW_TAB_ITEMS.map((i) => [i.label, shortcutLabel(i.action, 'mac'), shortcutLabel(i.action, 'other')])).toEqual([
+    ['New Terminal', '⌘T', 'Ctrl+Shift+T'],
+    ['New Browser Tab', '⌘⇧B', 'Alt+Shift+B'],
   ])
   const ran: string[] = []
   newTab('terminal', (id) => ran.push(id))

@@ -740,7 +740,7 @@ pub fn extract_marked_path(out: &str) -> Option<String> {
 
 /// Tool dirs an app must find even when the shell probe missed them.
 fn well_known_dirs() -> Vec<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::app_dir::home().to_string_lossy().to_string();
     ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         .iter()
         .map(|d| d.to_string())
@@ -836,7 +836,7 @@ pub fn may_probe(path: &str) -> bool {
     if !cfg!(target_os = "macos") {
         return true;
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::app_dir::home().to_string_lossy().to_string();
     !is_protected(path, &home) || unlock_covers(path)
 }
 
@@ -967,22 +967,9 @@ pub fn roster_pids(json: &str) -> Option<HashMap<String, u32>> {
     Some(workers.iter().filter_map(|(k, w)| Some((k.clone(), u32::try_from(w.get("pid")?.as_u64()?).ok()?))).collect())
 }
 
-/// Whether `pid` is a running process. On Windows a pid the roster lists is taken as running.
+/// Whether `pid` is a running process, asked of the system (`procs::alive`).
 pub fn pid_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(pid) = i32::try_from(pid) else { return false };
-        if pid <= 0 {
-            return false;
-        }
-        // Signal 0 asks without signalling; EPERM is a process that exists and is not ours.
-        // SAFETY: kill with signal 0 has no effect on the target.
-        unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
-    }
-    #[cfg(not(unix))]
-    {
-        pid > 0
-    }
+    crate::procs::alive(pid)
 }
 
 /// The background children in one account's `jobs/`, as `mnemo sessions --json --all` lists
@@ -1904,10 +1891,8 @@ pub fn roster_pid(roster_json: &str, id: &str) -> Option<u32> {
 }
 
 fn child_pids(pid: u32) -> Vec<u32> {
-    // `run` already carries the login PATH, so pgrep resolves from the Dock too.
-    run("pgrep", &["-P", &pid.to_string()], None)
-        .map(|s| s.lines().filter_map(|l| l.trim().parse().ok()).collect())
-        .unwrap_or_default()
+    // A table that cannot be read leaves the host itself to try (`inbox_socket`).
+    crate::procs::table().map(|t| t.children(&[pid])).unwrap_or_default()
 }
 
 pub fn socket_dirs() -> Vec<PathBuf> {

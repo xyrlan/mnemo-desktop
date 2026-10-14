@@ -9,8 +9,18 @@
 //!
 //! Every `Command` in `src/` comes from here; the test below fails on a `Command::new`
 //! anywhere else, so a new call site cannot bring the flashing back.
+//!
+//! It is also where `git` is told to take no optional lock (#340). The app polls `git status`
+//! in every worktree, and a plain `git status` that meets stale stat data rewrites
+//! `.git/index` under `index.lock`: a `git add` or `git commit` by the person or an agent in
+//! that window fails with "Unable to create '…/index.lock': File exists". With
+//! `GIT_OPTIONAL_LOCKS=0` git skips that refresh and nothing else: a command that has to write
+//! (`add`, `commit`, `worktree add`) takes its lock as before. Set here and not per caller, so
+//! the same test keeps a new `git` call from polling without it. A terminal's shell is not
+//! started here, and the person's own `git` there is untouched.
 
 use std::ffi::OsStr;
+use std::path::Path;
 use std::process::Command;
 
 /// `CREATE_NO_WINDOW`, from `winbase.h`.
@@ -19,14 +29,22 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// `Command::new(program)`, with no console window on Windows.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    #[allow(unused_mut)]
+    let is_git = is_git(program.as_ref());
     let mut cmd = Command::new(program);
+    if is_git {
+        cmd.env("GIT_OPTIONAL_LOCKS", "0");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// `git`, `git.exe` or a path to either.
+fn is_git(program: &OsStr) -> bool {
+    Path::new(program).file_stem().map_or(false, |s| s.eq_ignore_ascii_case("git"))
 }
 
 #[cfg(test)]
@@ -73,5 +91,23 @@ mod tests {
         let out = super::command("git").arg("--version").output().unwrap();
         assert!(out.status.success());
         assert!(String::from_utf8_lossy(&out.stdout).starts_with("git version"));
+    }
+
+    #[test]
+    fn git_is_started_with_no_optional_locks_and_nothing_else_is() {
+        let locks = |program: &str| {
+            let cmd = super::command(program);
+            let set = cmd.get_envs().find(|(k, _)| *k == "GIT_OPTIONAL_LOCKS").map(|(_, v)| v.map(|v| v.to_string_lossy().to_string()));
+            set.flatten()
+        };
+        for git in ["git", "git.exe", "GIT.EXE", "/usr/bin/git", r"C:\Program Files\Git\cmd\git.exe"] {
+            if cfg!(not(windows)) && git.contains('\\') {
+                continue;
+            }
+            assert_eq!(locks(git).as_deref(), Some("0"), "{git}");
+        }
+        for other in ["gh", "mnemo", "claude", "sh", "git-lfs", "/opt/git/bin/gh"] {
+            assert_eq!(locks(other), None, "{other}");
+        }
     }
 }

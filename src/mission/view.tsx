@@ -15,7 +15,7 @@ import { AgentStateDot, type DotState } from '../dashboard/AgentStateDot'
 import { estimateUsd, fmtUsd } from './cost'
 import { statusMarkers } from './timeline'
 import { ConversationView } from '../conversation/ConversationView'
-import { settingsStore } from '../settings/app-store'
+import { saveSetting, settingsStore } from '../settings/app-store'
 import { MemoryPanel } from './memory/MemoryPanel'
 import { memoryClient } from './memory/client'
 import type { ChildMemory } from './memory/types'
@@ -168,12 +168,12 @@ registerProvider(() => {
     {
       id: 'settings.outgoing',
       title: `Outgoing text: ${s.outgoing === 'en' ? 'rewrite in English' : 'send as typed'} (toggle)`,
-      run: () => settingsStore.getState().set('outgoing', s.outgoing === 'en' ? 'as-typed' : 'en'),
+      run: () => saveSetting('outgoing', s.outgoing === 'en' ? 'as-typed' : 'en'),
     },
     {
       id: 'settings.reply-language',
       title: `Children answer in: ${s.replyLanguage} (cycle)`,
-      run: () => settingsStore.getState().set('replyLanguage', s.replyLanguage === 'unchanged' ? 'pt' : s.replyLanguage === 'pt' ? 'en' : 'unchanged'),
+      run: () => saveSetting('replyLanguage', s.replyLanguage === 'unchanged' ? 'pt' : s.replyLanguage === 'pt' ? 'en' : 'unchanged'),
     },
   ]
 })

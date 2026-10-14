@@ -8,7 +8,8 @@ import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7 } from './osc7'
-import { macChord, pasteBytes } from './keymap'
+import { pasteBytes, terminalKey } from './keymap'
+import { detectPlatform } from '../actions/chords'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
 import { resizeRequest } from './reattach'
@@ -19,6 +20,8 @@ import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { openUrl } from '../github/actions'
 import { openTerminalLink } from './links'
 import ConversationFace from '../conversation/Face'
+
+const platform = detectPlatform()
 
 export default function TerminalPane({ id }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -86,25 +89,25 @@ export default function TerminalPane({ id }: PaneViewProps) {
     // The desktop MCP reads what this pane shows (`desktop_terminal_read`).
     const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
+    // Off a Mac the clipboard is on Ctrl+C / Ctrl+V and Ctrl+Shift+C / Ctrl+Shift+V.
     // App chords (⌘K, ⌘W…) are handled by the window listener in the capture phase before
     // xterm sees them.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown') return true
-      const r = macChord(e)
-      if (!r) return true
-      if ('write' in r) {
-        void tauriPty.write(id, r.write)
-        return false
+      const v = terminalKey(e, platform, term.getSelection())
+      if ('pass' in v) return true
+      // xterm does not cancel a key it is told to leave, and off a Mac the webview's own
+      // Ctrl+V would then paste a second time through the textarea's paste event.
+      if (platform !== 'mac') e.preventDefault()
+      if ('write' in v) void tauriPty.write(id, v.write)
+      else if ('copy' in v) {
+        void navigator.clipboard.writeText(v.copy)
+        // Ctrl+C is the interrupt again once the copy is taken, as in Windows Terminal.
+        if (platform !== 'mac') term.clearSelection()
+      } else if ('paste' in v) {
+        void pasteBytes(navigator.clipboard).then((b) => {
+          if (b) void tauriPty.write(id, b)
+        })
       }
-      if (r.clipboard === 'copy') {
-        const sel = term.getSelection()
-        if (!sel) return true // no selection: let ⌘C reach the shell as nothing (matches Terminal.app)
-        void navigator.clipboard.writeText(sel)
-        return false
-      }
-      void pasteBytes(navigator.clipboard).then((b) => {
-        if (b) void tauriPty.write(id, b)
-      })
       return false
     })
     const data = term.onData((d) => {

@@ -24,10 +24,82 @@ test('a sidebarScope left in an old settings file is dropped, not written back',
   expect(written).toEqual([{ outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }])
 })
 
-test('a failing read still marks loaded', async () => {
-  const s = createSettingsStore({ read: async () => { throw new Error('x') }, write: async () => {} })
+const WHOLE = { outgoing: 'en', replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {} }
+const WHY = '/home/u/.mnemo-desktop/settings.json: trailing comma at line 3 column 1'
+
+// #336, expected 1: what `settings_read` now answers for a file that is there and does not parse.
+test('a settings file that cannot be read is never written over, and the store says which file and why', async () => {
+  const written: unknown[] = []
+  let file: 'broken' | 'mended' = 'broken'
+  const s = createSettingsStore({
+    read: async () => {
+      if (file === 'broken') throw WHY
+      return { skipPermissions: false, projects: ['/gh/a'] }
+    },
+    write: async (v) => void written.push(v),
+  })
   await s.getState().load()
   expect(s.getState().loaded).toBe(true)
+  expect(s.getState().unreadable).toBe(WHY)
+  await expect(s.getState().set('outgoing', 'as-typed')).rejects.toThrow(WHY)
+  await expect(s.getState().set('skipPermissions', true)).rejects.toThrow(WHY)
+  expect(written).toEqual([])
+  // Mended by hand while the app runs: the next change reads it, and what was in it is kept.
+  file = 'mended'
+  await s.getState().set('outgoing', 'as-typed')
+  expect(s.getState().unreadable).toBeNull()
+  expect(written).toEqual([{ ...WHOLE, outgoing: 'as-typed', skipPermissions: false, projects: ['/gh/a'] }])
+})
+
+// #336, expected 2.
+test('a set made before the load has returned waits for it, so the defaults never reach the file', async () => {
+  const written: unknown[] = []
+  let answer!: (v: object) => void
+  const s = createSettingsStore({ read: () => new Promise((r) => (answer = r)), write: async (v) => void written.push(v) })
+  const loading = s.getState().load()
+  const setting = s.getState().set('replyLanguage', 'pt')
+  await new Promise((r) => setTimeout(r, 5))
+  expect(written).toEqual([])
+  answer({ skipPermissions: false, quickCommands: { '/gh/a': [{ label: 'Dev', command: 'pnpm dev' }] } })
+  await Promise.all([loading, setting])
+  expect(written).toEqual([{ ...WHOLE, replyLanguage: 'pt', skipPermissions: false, quickCommands: { '/gh/a': [{ label: 'Dev', command: 'pnpm dev' }] } }])
+})
+
+test('a set with no load made yet loads first', async () => {
+  const written: unknown[] = []
+  const s = createSettingsStore({ read: async () => ({ skipPermissions: false }), write: async (v) => void written.push(v) })
+  await s.getState().set('replyLanguage', 'pt')
+  expect(written).toEqual([{ ...WHOLE, replyLanguage: 'pt', skipPermissions: false }])
+})
+
+// #336, expected 3.
+test('a save that fails is an error the caller sees', async () => {
+  let refuse = true
+  const written: unknown[] = []
+  const s = createSettingsStore({
+    read: async () => ({}),
+    write: async (v) => {
+      if (refuse) throw new Error('settings.json: Access is denied. (os error 5)')
+      written.push(v)
+    },
+  })
+  await s.getState().load()
+  await expect(s.getState().set('skipPermissions', false)).rejects.toThrow('Access is denied')
+  // Kept for this run, and the next save that works carries it.
+  expect(s.getState().skipPermissions).toBe(false)
+  refuse = false
+  await s.getState().set('outgoing', 'as-typed')
+  expect(written).toEqual([{ ...WHOLE, skipPermissions: false, outgoing: 'as-typed' }])
+})
+
+// #336, expected 4: `settings_read` answers `{}` for a file that is not there.
+test('a missing settings file is a first run: the defaults, no complaint, and the first change is saved', async () => {
+  const written: unknown[] = []
+  const s = createSettingsStore({ read: async () => ({}), write: async (v) => void written.push(v) })
+  await s.getState().load()
+  expect(s.getState()).toMatchObject({ ...WHOLE, loaded: true, unreadable: null })
+  await s.getState().set('skipPermissions', false)
+  expect(written).toEqual([{ ...WHOLE, skipPermissions: false }])
 })
 
 test('reply footers', () => {

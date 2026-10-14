@@ -410,7 +410,9 @@ impl PtyManager {
             #[cfg(unix)]
             Hosting::Daemon { fallback, .. } => fallback.get(),
         };
-        here.map(|h| closing::busy(&h.list(), &closing::processes())).unwrap_or_default()
+        let Some(host) = here else { return Vec::new() };
+        // A table that cannot be read says nothing of what runs: nothing is asked, as before.
+        crate::procs::table().map(|table| closing::busy(&host.list(), |pid| table.children(&[pid]), closing::name_of)).unwrap_or_default()
     }
 
     /// The app is going away: terminals held in-process go with it (they would anyway); the
@@ -502,7 +504,8 @@ mod closing_tests {
             }
             if Instant::now() >= deadline {
                 let (held, said) = (manager.list(), String::from_utf8_lossy(&printed.lock().unwrap()).into_owned());
-                let below: Vec<_> = closing::processes().into_iter().filter(|(pid, parent, _)| held.iter().flatten().any(|t| t.pid == *parent || t.pid == *pid)).collect();
+                let table = crate::procs::table().unwrap_or_default();
+                let below: Vec<_> = held.iter().flatten().map(|t| (t.pid, table.children(&[t.pid]))).collect();
                 panic!("{program} never showed under a shell: busy {busy:?}, held {held:?}, processes {below:?}, printed {said:?}");
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -906,7 +909,7 @@ mod tests {
         let m = app(&socket);
         let (id, _out) = sh(&m, "sleep 60; :");
         let pid = m.pid(id).expect("a running shell");
-        eventually("the shell to start its program", || closing::processes().iter().any(|(_, parent, _)| *parent == pid));
+        eventually("the shell to start its program", || crate::procs::table().is_ok_and(|t| !t.children(&[pid]).is_empty()));
         assert!(m.busy().is_empty(), "the daemon keeps it: nothing to ask");
         assert_eq!(closing::question(&m.busy()), None);
         m.kill(id);

@@ -26,8 +26,9 @@ export const listWorktrees = (repo: string): Promise<WorktreeInfo[]> => invoke<W
 export const createWorktree = (repo: string, name: string, opts: { base?: string; setup?: string } = {}): Promise<WorktreeInfo> =>
   invoke<WorktreeInfo>('worktree_create', { repo, name, base: opts.base ?? null, setup: opts.setup ?? null })
 
-/** Removes a worktree, keeping its branch. Rejects for the main checkout, while setup runs, and
- *  (without `force`) for a dirty tree. */
+/** Removes a worktree, keeping its branch. Rejects for the main checkout, while setup runs,
+ *  (without `force`) for a dirty tree, and while a program holds its folder (Windows): close its
+ *  terminals first. A rejected tree is left whole. */
 export const removeWorktree = (path: string, force = false): Promise<void> => invoke<void>('worktree_remove', { path, force })
 
 /** A tree other than the main checkout, as cleaning up sees it. */

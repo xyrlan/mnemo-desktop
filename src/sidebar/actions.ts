@@ -38,7 +38,6 @@ export function registerSidebarActions() {
     register({
       id: `worktree.go.${n}`,
       title: `Go to workspace ${n}`,
-      shortcut: `⌘${n}`,
       run: () => {
         const w = sidebarOrder(fleetStore.getState().repos, sidebarStore.getState().collapsed, dispatchRoutes !== null)[n - 1]
         if (w) activateWorktree(w.path)

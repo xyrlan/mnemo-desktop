@@ -7,6 +7,7 @@ import type { AgentState } from '../fleet/types'
 import { AgentQuestionIcon } from './agent-glyphs'
 import { countByState } from './model'
 import { run, useFleet } from './upstream'
+import { shortcutKeys } from '../actions/chords'
 
 const IS_MAC = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 
@@ -81,7 +82,7 @@ export const SidebarNav = React.memo(function SidebarNav() {
         <Search className="size-4 shrink-0 text-worktree-sidebar-foreground/30" strokeWidth={1.75} />
         <span className="flex-1">Search</span>
         <span className="pointer-events-none hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
-          <ShortcutKeyCombo keys={[IS_MAC ? '⌘' : 'Ctrl', 'J']} />
+          <ShortcutKeyCombo keys={shortcutKeys('worktree.jump')} />
         </span>
       </button>
       <NavEntry icon={ListTodo} label="Tasks" onClick={() => run('tasks.open')} />

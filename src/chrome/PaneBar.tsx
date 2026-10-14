@@ -14,6 +14,7 @@ import Overlay from '../pulse/Overlay'
 import DropZoneOverlay from './DropZoneOverlay'
 import { PaneAccount } from '../accounts/PaneAccount'
 import './chrome.css'
+import { shortcutLabel } from '../actions/chords'
 
 /** How often a visible bar asks git again (a `git switch` in the pane shows up this late). */
 export const POLL_MS = 5000
@@ -145,7 +146,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
         {pane?.view === 'terminal' && (
           <button
             className={`pane-bar-face${pane.face === 'conversation' ? ' on' : ''}`}
-            title="Toggle conversation (⌘⇧C)"
+            title={`Toggle conversation (${shortcutLabel('pane.toggle-face')})`}
             aria-pressed={pane.face === 'conversation'}
             onMouseDown={(e) => {
               e.preventDefault()
@@ -158,7 +159,7 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
         )}
         <button
           className="pane-close"
-          title="Close pane (⌘W)"
+          title={`Close pane (${shortcutLabel('pane.close')})`}
           onMouseDown={(e) => {
             e.preventDefault()
             e.stopPropagation()

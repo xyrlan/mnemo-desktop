@@ -298,8 +298,9 @@ fn home_sessions(mut ss: Vec<KnownSession>) -> Vec<HomeSession> {
         .collect()
 }
 
-/// Where clones go by default: the parent directory most repos share, else `<home>/github`.
-pub fn clone_base(roots: &[String], home: &str) -> String {
+/// Where clones go by default: the parent directory most repos share, else `<home>/github`;
+/// nothing when there is neither, so the dialog offers no folder rather than one at the root.
+pub fn clone_base(roots: &[String], home: &Path) -> String {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for r in roots {
         if let Some(p) = Path::new(r).parent() {
@@ -310,7 +311,8 @@ pub fn clone_base(roots: &[String], home: &str) -> String {
         .into_iter()
         .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
         .map(|(p, _)| p)
-        .unwrap_or_else(|| format!("{home}/github"))
+        .or_else(|| (!home.as_os_str().is_empty()).then(|| home.join("github").to_string_lossy().to_string()))
+        .unwrap_or_default()
 }
 
 /// Fill `live`, `kind`, `transcript`. The title stays the history prompt; the agent's `name`
@@ -367,21 +369,35 @@ fn live_of(accounts: &Accounts, errors: &mut Vec<String>) -> HashMap<String, Liv
     live
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+fn history_path(home: &Path) -> PathBuf {
+    home.join(".claude").join("history.jsonl")
 }
 
-fn history_path() -> PathBuf {
-    home_dir().join(".claude").join("history.jsonl")
+/// Claude's prompt history under `home`. No file is no history yet; a file that is there and
+/// cannot be read, or no home to look under, is an error for the snapshot to carry.
+pub fn read_history(home: &Path) -> Result<String, String> {
+    if home.as_os_str().is_empty() {
+        return Err("history: the system names no home directory to read Claude's history from".into());
+    }
+    let path = history_path(home);
+    match std::fs::read(&path) {
+        // One bad byte costs its own line (`parse_history` skips it), not the whole list.
+        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("history ({}): {e}", path.display())),
+    }
 }
 
 /// The whole Home snapshot. `here` = session ids the desktop itself is running;
 /// `extra_roots` = repos the user opened/cloned that may have no history yet.
 pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra_roots: &[String]) -> HomeSnapshot {
     let mut errors = Vec::new();
-    let text = std::fs::read_to_string(history_path()).unwrap_or_default();
+    let home = crate::app_dir::home();
+    let text = read_history(&home).unwrap_or_else(|e| {
+        errors.push(e);
+        String::new()
+    });
     let sessions = sessions_from_history(&parse_history(&text));
-    let home = home_dir().to_string_lossy().to_string();
     let mut repos = group_repos(
         sessions.into_values().collect(),
         &crate::mission::repo_root,
@@ -687,8 +703,46 @@ mod tests {
     #[test]
     fn clone_base_is_most_common_parent() {
         let roots = ["/a/gh/one", "/a/gh/two", "/b/three"].map(String::from);
-        assert_eq!(clone_base(&roots, "/home/x"), "/a/gh");
-        assert_eq!(clone_base(&[], "/home/x"), "/home/x/github");
+        assert_eq!(clone_base(&roots, Path::new("/home/x")), "/a/gh");
+        assert_eq!(PathBuf::from(clone_base(&[], Path::new("/home/x"))), Path::new("/home/x").join("github"));
+        assert_eq!(clone_base(&[], Path::new("")), "", "no home is no folder to offer, not `/github`");
+    }
+
+    /// Issue #332: Windows started from the Start menu sets `USERPROFILE` and no `HOME`.
+    #[test]
+    fn history_and_the_clone_folder_are_found_under_the_home_the_system_names() {
+        let profile = crate::testutil::temp_dir("home-history");
+        std::fs::create_dir_all(profile.join(".claude")).unwrap();
+        let row = serde_json::json!({ "display": "fix the tailer", "timestamp": 5, "project": profile.join("repo"), "sessionId": "aaaa-1" });
+        std::fs::write(history_path(&profile), format!("{row}\n")).unwrap();
+        let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        let home = crate::app_dir::home_from(&|name| (name == var).then(|| profile.clone().into_os_string()));
+        let sessions = sessions_from_history(&parse_history(&read_history(&home).unwrap()));
+        assert_eq!(sessions["aaaa-1"].title, "fix the tailer");
+        let base = PathBuf::from(clone_base(&[], &home));
+        assert!(base.is_absolute() && base.starts_with(&profile), "{}", base.display());
+        let _ = std::fs::remove_dir_all(&profile);
+    }
+
+    #[test]
+    fn a_history_that_cannot_be_read_is_an_error_and_a_missing_one_is_not() {
+        let home = crate::testutil::temp_dir("home-unreadable");
+        assert_eq!(read_history(&home), Ok(String::new()), "Claude has not run here yet");
+        // A directory where the file belongs: there, and unreadable, on every platform.
+        std::fs::create_dir_all(history_path(&home)).unwrap();
+        let err = read_history(&home).unwrap_err();
+        assert!(err.starts_with(&format!("history ({}): ", history_path(&home).display())), "{err}");
+        assert!(read_history(Path::new("")).unwrap_err().starts_with("history: "), "no home is said, not read as `.claude` under the cwd");
+        // Bytes that are not UTF-8 lose their own line only.
+        let other = crate::testutil::temp_dir("home-bad-bytes");
+        std::fs::create_dir_all(other.join(".claude")).unwrap();
+        let mut bytes = b"\xff\xfe not a line\n".to_vec();
+        bytes.extend_from_slice(br#"{"display":"kept","timestamp":7,"project":"/p","sessionId":"bbbb-2"}"#);
+        std::fs::write(history_path(&other), bytes).unwrap();
+        assert_eq!(parse_history(&read_history(&other).unwrap()).len(), 1);
+        for d in [home, other] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

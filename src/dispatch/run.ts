@@ -1,6 +1,4 @@
 import { store as layout } from '../layout/app-store'
-import { PROMPT_DELAY_MS } from '../layout/store'
-import { tauriPty } from '../pty/client'
 import type { ChildSession } from '../mission/types'
 import { attachCmd, stopCmd } from '../mission/account'
 
@@ -14,7 +12,7 @@ export async function runBelow(cmd: string, cwd: string) {
   const pane = Object.keys(layout.getState().panes)
     .map(Number)
     .find((p) => p > 0 && !before.has(String(p)))
-  if (pane !== undefined) setTimeout(() => void tauriPty.write(pane, `${cmd}\n`), PROMPT_DELAY_MS)
+  if (pane !== undefined) layout.getState().typeCommand(pane, cmd)
 }
 
 /** Take over: `claude attach` to the child on its own account, under the tab. */

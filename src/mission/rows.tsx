@@ -8,6 +8,7 @@ import { childWord, permissionAsk, splitAsk, type ChildSession } from './types'
 import { childStatus, setRoute, useRoute, type Route } from './agent'
 import { answerPrompt, useAnswer, type Choice } from '../cockpit/approve'
 import { accountOf, idOf, onAccount, type Target } from './account'
+import { onWindows } from '../pty/typed'
 import { ChatComposer } from '../chat-input/Composer'
 import { ApprovalCard } from '../chat-input/ApprovalCard'
 import type { ComposerProps } from '../conversation/chat-input'
@@ -104,6 +105,13 @@ const ROUTES: { route: Route; label: string; title: string }[] = [
   { route: 'message', label: 'Message', title: 'Arrives as a message from another session: the child reads it, but it cannot approve anything' },
 ]
 
+/** Why `route` cannot be taken on this machine, null when it can. A message goes to the child's
+ *  inbox, a Unix socket: on Windows there is none (`mission.rs`, `post_message`), and the send
+ *  would end in an error about it (#331). */
+export function routeOff(route: Route, windows = onWindows()): string | null {
+  return route === 'message' && windows ? 'Off on Windows: a message goes through a Unix socket, which Claude Code does not open here. Reply as you instead.' : null
+}
+
 /** The child the composer in a `ChildConversation` answers. */
 export const ChildContext = createContext<ChildSession | null>(null)
 
@@ -150,7 +158,15 @@ export function ChildComposer({ onSend, cwd }: ComposerProps) {
                 <span className="ms-suggested min-w-0 truncate" title={c.suggested_reply}>
                   Suggested: {c.suggested_reply}
                 </span>
-                <Button type="button" variant="outline" size="xs" className="ms-send-suggested" title="Sent as a message: the child's own suggestion is not your consent" disabled={busy || !c.live} onClick={sendSuggested}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="ms-send-suggested"
+                  title={routeOff('message') ?? "Sent as a message: the child's own suggestion is not your consent"}
+                  disabled={busy || !c.live || routeOff('message') !== null}
+                  onClick={sendSuggested}
+                >
                   Send it
                 </Button>
               </div>
@@ -162,20 +178,24 @@ export function ChildComposer({ onSend, cwd }: ComposerProps) {
       {/* The composer pads itself; its bottom padding is this row's gap. */}
       <div className="-mt-3 flex flex-wrap items-center gap-2 px-3 text-[11px] text-muted-foreground">
         <div className="ms-route inline-flex rounded-md border border-border p-0.5" role="radiogroup" aria-label="Send as">
-          {ROUTES.map((r) => (
-            <button
-              key={r.route}
-              type="button"
-              role="radio"
-              aria-checked={route === r.route}
-              data-route={r.route}
-              title={r.title}
-              className={cn('rounded-sm px-2 py-0.5 transition-colors hover:text-foreground', route === r.route && 'bg-accent text-foreground')}
-              onClick={() => setRoute(c.id, r.route)}
-            >
-              {r.label}
-            </button>
-          ))}
+          {ROUTES.map((r) => {
+            const off = routeOff(r.route)
+            return (
+              <button
+                key={r.route}
+                type="button"
+                role="radio"
+                aria-checked={route === r.route}
+                aria-disabled={off !== null}
+                data-route={r.route}
+                title={off ?? r.title}
+                className={cn('rounded-sm px-2 py-0.5 transition-colors', off ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground', route === r.route && 'bg-accent text-foreground')}
+                onClick={() => off === null && setRoute(c.id, r.route)}
+              >
+                {r.label}
+              </button>
+            )
+          })}
         </div>
         <span className="ms-route-note min-w-0 flex-1 truncate">{ROUTES.find((r) => r.route === route)!.title}</span>
         {typing && <span>typing into its terminal…</span>}

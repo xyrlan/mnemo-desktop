@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { toast } from '@/ui'
 import { store as layout, useApp } from '../layout/app-store'
 import { fleetStore, useFleet } from '../fleet/store'
 import { missionStore, useMission } from '../mission/app-store'
 import { tauriMission } from '../mission/client'
 import { allChildren } from '../mission/types'
-import { ptyPid, tauriPty } from '../pty/client'
+import { paneRunsClaude } from '../chrome/running'
+import { tauriPty } from '../pty/client'
 import type { Where } from '../browser/grab-agent'
 import { tauriChecks } from '../checks/client'
 import { ChecksPanel, type Notify } from '../checks/ChecksPanel'
@@ -32,10 +32,7 @@ const agent: AgentDeps = {
   sinks: {
     writePty: (pane, data) => tauriPty.write(pane, data),
     reply: (id, t) => tauriMission.reply(id, t),
-    paneRunsClaude: async (pane) => {
-      const pid = await ptyPid(pane).catch(() => null)
-      return pid !== null && (await invoke<boolean>('chrome_claude_running', { panePid: pid }).catch(() => false))
-    },
+    paneRunsClaude,
     goToPane: (pane) => layout.getState().goToPane(pane),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   },

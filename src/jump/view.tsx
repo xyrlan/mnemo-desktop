@@ -1,6 +1,6 @@
 /** The worktree jump palette. It has no pane view: it lives in `view.tsx` because App imports
  *  every `src/*\/view.tsx`, and that import is where it registers `worktree.jump` (the keymap
- *  binds Mod+J to it) and mounts itself in the shell's overlay slot. */
+ *  binds ⌘J, or Ctrl+Shift+J off a Mac, to it) and mounts itself in the shell's overlay slot. */
 import type React from 'react'
 import { register } from '../actions/registry'
 import { useFleet } from '../fleet/store'
@@ -17,6 +17,6 @@ function ConnectedJumpPalette(): React.JSX.Element | null {
   return <JumpPalette open={open} onOpenChange={setOpen} repos={repos} activeWorktree={activeWorktree} onJump={(path) => void layout.getState().switchWorktree(path)} />
 }
 
-register({ id: 'worktree.jump', title: 'Jump to worktree', shortcut: '⌘J', run: () => jumpStore.getState().toggle() })
+register({ id: 'worktree.jump', title: 'Jump to worktree', run: () => jumpStore.getState().toggle() })
 
 mountInSlot('overlay', ConnectedJumpPalette)

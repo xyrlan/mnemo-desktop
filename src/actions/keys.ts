@@ -1,36 +1,13 @@
 import { listen as tauriListen } from '@tauri-apps/api/event'
+import { actionForChord, detectPlatform, type Platform } from './chords'
 import { run } from './registry'
 
-export type Platform = 'mac' | 'other'
+export { detectPlatform, type Platform } from './chords'
 
+/** The action a keydown runs, from the chord table (`./chords`). Off a Mac no chord is plain
+ *  Ctrl, which is the shell's, and none holds Ctrl with Alt, which is how AltGr arrives. */
 export function actionForKey(e: KeyboardEvent, platform: Platform): string | null {
-  const k = e.key.toLowerCase()
-  // Tabs sit on Ctrl+1…9 where ⌘ is free for worktrees (mac); elsewhere Ctrl is the modifier, so tabs take Alt.
-  if (/^[1-9]$/.test(k) && !e.shiftKey) {
-    if (platform === 'mac' && e.ctrlKey && !e.metaKey && !e.altKey) return `tab.go.${k}`
-    if (platform === 'other' && e.altKey && !e.ctrlKey && !e.metaKey) return `tab.go.${k}`
-  }
-  const mod = platform === 'mac' ? e.metaKey : e.ctrlKey
-  if (!mod) return null
-  if (e.altKey && !e.shiftKey) {
-    const m: Record<string, string> = {
-      arrowleft: 'focus.left',
-      arrowright: 'focus.right',
-      arrowup: 'focus.up',
-      arrowdown: 'focus.down',
-      a: 'floating-terminal.toggle',
-    }
-    // ⌥A types "å" on a Mac, so the physical key decides.
-    return m[e.code === 'KeyA' ? 'a' : k] ?? null
-  }
-  if (e.altKey) return null
-  if (e.shiftKey) {
-    const m: Record<string, string> = { d: 'pane.split.col', w: 'tab.close', b: 'tab.new-browser', g: 'diff.open', c: 'pane.toggle-face', '[': 'tab.prev', '{': 'tab.prev', ']': 'tab.next', '}': 'tab.next' }
-    return m[k] ?? null
-  }
-  if (/^[1-9]$/.test(k)) return `worktree.go.${k}`
-  const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', e: 'dictation.toggle', k: 'palette.open', j: 'worktree.jump', n: 'workspace.new', b: 'sidebar.toggle-left', l: 'sidebar.toggle-right' }
-  return m[k] ?? null
+  return actionForChord(e, platform)
 }
 
 export type ListKey = 'up' | 'down' | 'open' | 'reply' | 'attach' | 'close'
@@ -48,10 +25,6 @@ export function listKey(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | '
   if (k === 'enter' && (tag === 'BUTTON' || tag === 'A')) return null
   const m: Record<string, ListKey> = { arrowup: 'up', arrowdown: 'down', enter: 'open', r: 'reply', a: 'attach', escape: 'close' }
   return m[k] ?? null
-}
-
-export function detectPlatform(): Platform {
-  return navigator.platform.toLowerCase().includes('mac') ? 'mac' : 'other'
 }
 
 /** The action id carried by an `app://action` event (emitted by the native menu), or null. */

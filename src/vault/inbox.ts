@@ -1,5 +1,10 @@
-/** `mnemo inbox` has no `--json`: this parses the plain text the CLI already prints
- *  (`docs/contracts/round18.md`, inbox-review). */
+/** Parses the plain text `mnemo inbox` prints (`docs/contracts/round18.md`, inbox-review).
+ *  Its `--json` listing carries no reason, age, header or other-projects count, and `--stats`
+ *  has no JSON at all, so the text is what the pane reads. */
+
+/** `mnemo` is Python: piped on Windows its stdout ends every line in `\r\n`, and `.` in a
+ *  row regex does not match `\r`. Nothing below sees how a line ended. */
+const linesOf = (stdout: string) => stdout.split(/\r?\n/)
 
 export type InboxRow = { key: string; reason: string; ageDays: number; description: string }
 
@@ -20,7 +25,7 @@ const OTHER = /\((\d+) more staged for other projects/
 /** Rows plus the header line; a queue with nothing staged has no rows and the empty line
  *  as its summary. Unrecognised output (no vault, a refusal) is an empty listing. */
 export function parseInboxListing(stdout: string): InboxListing {
-  const lines = stdout.split('\n')
+  const lines = linesOf(stdout)
   const header = lines.find((l) => HEADER.test(l))
   if (!header) {
     const empty = lines.find((l) => l.trim().startsWith('nothing staged'))
@@ -61,7 +66,7 @@ const STATS_DECISION = /^median offer → decision: (?:(-?\d+(?:\.\d+)?)d|no pag
 
 /** `null` when the text does not look like `mnemo inbox --stats` (a refusal, no vault). */
 export function parseInboxStats(stdout: string): InboxStats | null {
-  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+  const lines = linesOf(stdout).map((l) => l.trim()).filter(Boolean)
   const head = lines.find((l) => STATS_HEAD.test(l))
   const window = lines.find((l) => STATS_WINDOW.test(l))
   if (!head || !window) return null
@@ -86,11 +91,12 @@ export function parseInboxStats(stdout: string): InboxStats | null {
   }
 }
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
+const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/
 
 /** `--show KEY` prints the staged file raw: frontmatter block (verbatim) and body. No
  *  frontmatter block is not an error — a page that somehow lost its `---` fence still reads. */
 export function splitFrontmatter(raw: string): { frontmatter: string; body: string } {
-  const m = FRONTMATTER.exec(raw)
-  return m ? { frontmatter: m[1], body: m[2] } : { frontmatter: '', body: raw }
+  const text = linesOf(raw).join('\n')
+  const m = FRONTMATTER.exec(text)
+  return m ? { frontmatter: m[1], body: m[2] } : { frontmatter: '', body: text }
 }

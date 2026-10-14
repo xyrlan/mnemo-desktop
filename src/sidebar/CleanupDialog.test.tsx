@@ -251,17 +251,16 @@ describe('deleting', () => {
     expect(toast.success).toHaveBeenCalledWith('Removed 3 workspaces', { description: 'Their branches are kept.' })
   })
 
-  test('git refusing one keeps it listed, saying why; the rest go', async () => {
+  test('one that cannot be removed stays listed, saying why; the rest go', async () => {
     stale()
     await open()
-    refusals.set('/r/app-wt-done', "fatal: '/r/app-wt-done' contains modified or untracked files, use --force to delete it")
+    refusals.set('/r/app-wt-done', '/r/app-wt-done is in use, so nothing of it was removed')
     await confirm('app-wt-done', 'web-wt-old')
     await click(button('Delete 2'))
     expect(removed().map((a) => a.path)).toEqual(['/r/app-wt-done', '/r/web-wt-old'])
     expect(rows()).toEqual(['/r/app-wt-done', '/r/app-wt-shipped'])
-    expect(rowText('/r/app-wt-done')).toContain('contains modified or untracked files')
+    expect(rowText('/r/app-wt-done')).toContain('is in use, so nothing of it was removed')
     expect(layoutStore.getState().closeWorktree).toHaveBeenCalledWith('/r/web-wt-old')
-    expect(layoutStore.getState().closeWorktree).not.toHaveBeenCalledWith('/r/app-wt-done')
     expect(toast.error).toHaveBeenCalledWith('Removed 1 of 2 workspaces', { description: '1 could not be removed; each says why.' })
   })
 

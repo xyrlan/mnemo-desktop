@@ -40,9 +40,11 @@ On Linux and Windows `pnpm tauri build` makes the bundle. On Windows, set MSVC's
 
 ## Shortcuts
 
-⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌘⇧B cockpit · ⌥Space hold to dictate (Ctrl on Linux/Windows)
+⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌘⇧B cockpit · ⌥Space hold to dictate
 
-In a terminal: ⌘←/⌘→ line start/end, ⌘⌫ kill line, ⌥⌫ kill word, ⌘C/⌘V clipboard, Shift+Enter newline (Claude Code).
+On Windows and Linux plain Ctrl is the shell's, so the app's chords are Ctrl+Shift where a Mac has ⌘ (Ctrl+Shift+T new tab · Ctrl+Shift+W close pane · Ctrl+Shift+D split right · Ctrl+Shift+K palette · Ctrl+Shift+1-9 workspace), Alt+Shift for split down, close tab, browser tab, the conversation face (D, W, B, C) and for focus (arrows), Alt+1-9 for tabs, Alt+Space to dictate. The palette prints each action's chord; `src/actions/chords.ts` is the table.
+
+In a terminal: ⌘←/⌘→ line start/end, ⌘⌫ kill line, ⌥⌫ kill word, ⌘C/⌘V clipboard, Shift+Enter newline (Claude Code). On Windows and Linux: Ctrl+C copies a selection and interrupts without one, Ctrl+V pastes, Ctrl+Shift+C / Ctrl+Shift+V copy and paste.
 
 Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), cockpit (all repos), vault (mnemo rules with the native actions as buttons), marketplace (shared rule sets). Open them from ⌘K.
 

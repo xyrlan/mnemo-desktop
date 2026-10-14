@@ -1,5 +1,6 @@
 import { promptOptions } from '../cockpit/prompt'
 import { CONFIG_DIR_VAR, shellWord } from '../mission/account'
+import { shellOf, type Shell } from '../pty/typed'
 import { inputBox } from '../mission/as-me'
 import { tail } from '../terminal/buffer'
 import type { Account } from './types'
@@ -95,14 +96,8 @@ export function modeFlags(lines: string[]): string {
   return ''
 }
 
-/** The shell the pane fell back to, by its prompt: PowerShell's starts with `PS `. */
-export type Shell = 'posix' | 'cmd' | 'powershell'
-
-export function shellOf(lines: string[], windows: boolean): Shell {
-  if (!windows) return 'posix'
-  const last = tail(lines, SCREEN_ROWS).at(-1) ?? ''
-  return /^PS /.test(last) ? 'powershell' : 'cmd'
-}
+/** The shell the pane fell back to, by its prompt (`src/pty/typed.ts`). */
+export { shellOf, type Shell }
 
 /** The line that moves a shell to `a`: a `claude` typed there afterwards runs on it. On POSIX
  *  shells and fish alike: `export` is a fish function too, and `unset` succeeds wherever it exists,

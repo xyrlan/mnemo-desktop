@@ -6,6 +6,7 @@ import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
 import { addProject } from './actions'
 import { openCleanup } from './archive'
 import { run } from './upstream'
+import { shortcutLabel } from '../actions/chords'
 
 function HeaderAction({ label, shortcut, children, ...props }: React.ComponentProps<typeof Button> & { label: string; shortcut?: string }) {
   return (
@@ -55,7 +56,7 @@ export const SidebarHeader = React.memo(function SidebarHeader() {
           <HeaderAction label="Add project" onClick={() => void add()} disabled={adding}>
             {adding ? <Loader2 className="size-3.5 animate-spin" /> : <FolderPlus className="size-3.5" strokeWidth={2.25} />}
           </HeaderAction>
-          <HeaderAction label="New workspace" shortcut="⌘N" onClick={() => run('workspace.new')}>
+          <HeaderAction label="New workspace" shortcut={shortcutLabel('workspace.new')} onClick={() => run('workspace.new')}>
             <Plus className="size-3.5" strokeWidth={2.25} />
           </HeaderAction>
         </div>

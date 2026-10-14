@@ -22,7 +22,7 @@ test('mac bindings', () => {
   expect(actionForKey(ev('H', { metaKey: true, shiftKey: true }), 'mac')).toBeNull()
   // Orca's new-browser chord.
   expect(actionForKey(ev('B', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.new-browser')
-  expect(actionForKey(ev('B', { ctrlKey: true, shiftKey: true }), 'other')).toBe('tab.new-browser')
+  expect(actionForKey(ev('B', { altKey: true, shiftKey: true }), 'other')).toBe('tab.new-browser')
   expect(actionForKey(ev('e', { metaKey: true }), 'mac')).toBe('dictation.toggle')
   expect(actionForKey(ev('G', { metaKey: true, shiftKey: true }), 'mac')).toBe('diff.open')
   expect(actionForKey(ev('a', { metaKey: true, altKey: true }), 'mac')).toBe('floating-terminal.toggle')
@@ -32,11 +32,30 @@ test('mac bindings', () => {
   expect(actionForKey(ev('c', { metaKey: true }), 'mac')).toBeNull()
 })
 
-test('other platforms use ctrl', () => {
-  expect(actionForKey(ev('t', { ctrlKey: true }), 'other')).toBe('tab.new')
-  expect(actionForKey(ev('t', { metaKey: true }), 'other')).toBeNull()
-  expect(actionForKey(ev('2', { ctrlKey: true }), 'other')).toBe('worktree.go.2')
+test('other platforms leave plain Ctrl to the shell and bind Ctrl+Shift (#329)', () => {
+  const ctrl = { ctrlKey: true }
+  const ctrlShift = { ctrlKey: true, shiftKey: true }
+  const altShift = { altKey: true, shiftKey: true }
+  // The shell's keys: delete word, EOF, kill line, clear, end of line, history, tmux's prefix.
+  for (const k of ['w', 'd', 'k', 'l', 'e', 'n', 'b', 't', 'j', 'c', 'v', '1', '9']) expect([k, actionForKey(ev(k, ctrl), 'other')]).toEqual([k, null])
+  expect(actionForKey(ev('T', ctrlShift), 'other')).toBe('tab.new')
+  expect(actionForKey(ev('W', ctrlShift), 'other')).toBe('pane.close')
+  expect(actionForKey(ev('D', ctrlShift), 'other')).toBe('pane.split.row')
+  expect(actionForKey(ev('K', ctrlShift), 'other')).toBe('palette.open')
+  expect(actionForKey(ev('@', { ...ctrlShift, code: 'Digit2' }), 'other')).toBe('worktree.go.2')
   expect(actionForKey(ev('2', { altKey: true }), 'other')).toBe('tab.go.2')
+  // What sat on Ctrl+Shift and would now collide moved to Alt+Shift.
+  expect(actionForKey(ev('D', altShift), 'other')).toBe('pane.split.col')
+  expect(actionForKey(ev('W', altShift), 'other')).toBe('tab.close')
+  expect(actionForKey(ev('C', altShift), 'other')).toBe('pane.toggle-face')
+  expect(actionForKey(ev('ArrowLeft', altShift), 'other')).toBe('focus.left')
+  // The terminal's copy and paste, not the app's.
+  expect(actionForKey(ev('C', ctrlShift), 'other')).toBeNull()
+  expect(actionForKey(ev('V', ctrlShift), 'other')).toBeNull()
+  // AltGr arrives as Ctrl+Alt: the letter it types on A is typed.
+  expect(actionForKey(ev('ą', { ctrlKey: true, altKey: true, code: 'KeyA' }), 'other')).toBeNull()
+  expect(actionForKey(ev('ArrowLeft', { ctrlKey: true, altKey: true }), 'other')).toBeNull()
+  expect(actionForKey(ev('t', { metaKey: true }), 'other')).toBeNull()
 })
 
 test('list keys: plain arrows, Enter, r, a and Esc; nothing with a modifier or while typing', () => {
@@ -149,6 +168,18 @@ describe('installKeys', () => {
     expect(press('t')).toBe(true)
     expect(ran).toEqual([])
     expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  test('off a Mac a plain Ctrl key is neither run nor cancelled, so the terminal under it gets it', () => {
+    const ran: string[] = []
+    const uninstall = installKeys('other', { listen: (() => Promise.resolve(() => {})) as never, runAction: (id) => ran.push(id) })
+    const press = (key: string, o: KeyboardEventInit) => window.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true, ...o }))
+    // dispatchEvent answers true when nothing cancelled the key.
+    for (const key of ['w', 'd', 'k', 'c', 'v', '1']) expect([key, press(key, { ctrlKey: true })]).toEqual([key, true])
+    expect(ran).toEqual([])
+    expect(press('W', { ctrlKey: true, shiftKey: true })).toBe(false)
+    expect(ran).toEqual(['pane.close'])
+    uninstall()
   })
 
   test('without a Tauri event bus the keydown path still works', () => {

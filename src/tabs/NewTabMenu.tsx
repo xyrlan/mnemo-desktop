@@ -3,13 +3,14 @@
 import { Globe, Plus, SquareTerminal } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/ui'
 import { run } from '../actions/registry'
+import { shortcutLabel } from '../actions/chords'
 
 export type NewTabKind = 'terminal' | 'browser'
 
 /** What the "+" offers, in order, with the action each runs and Orca's chords. */
-export const NEW_TAB_ITEMS: readonly { kind: NewTabKind; label: string; action: string; shortcut: string }[] = [
-  { kind: 'terminal', label: 'New Terminal', action: 'tab.new', shortcut: '⌘T' },
-  { kind: 'browser', label: 'New Browser Tab', action: 'tab.new-browser', shortcut: '⌘⇧B' },
+export const NEW_TAB_ITEMS: readonly { kind: NewTabKind; label: string; action: string }[] = [
+  { kind: 'terminal', label: 'New Terminal', action: 'tab.new' },
+  { kind: 'browser', label: 'New Browser Tab', action: 'tab.new-browser' },
 ]
 
 /** Opens a tab of `kind` through its action, so the menu, the chord and ⌘K do the same thing. */
@@ -41,13 +42,13 @@ export default function NewTabMenu({ onNew = newTab }: { onNew?: (kind: NewTabKi
         // Radix would hand focus back to the "+", taking it from the tab just opened.
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        {NEW_TAB_ITEMS.map(({ kind, label, shortcut }) => {
+        {NEW_TAB_ITEMS.map(({ kind, label, action }) => {
           const Icon = ICONS[kind]
           return (
             <DropdownMenuItem key={kind} data-new-tab={kind} onSelect={() => onNew(kind)} className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium">
               <Icon className="size-4 text-muted-foreground" />
               {label}
-              <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>
+              <DropdownMenuShortcut>{shortcutLabel(action)}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )
         })}

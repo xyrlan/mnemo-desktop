@@ -22,6 +22,7 @@ import {
   withTab,
 } from './groups'
 import type { PtyClient } from '../pty/client'
+import { notTyped, typed } from '../pty/typed'
 import { providedSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
 
 /** `name`: what the user renamed the tab to; it wins over the name its focused pane gives it.
@@ -140,6 +141,9 @@ export type Actions = {
   /** New terminal tab in the active group, in `cwd`, that types `cmd` once the shell prompt is up;
    *  `sessionId` marks the pane as running that Claude session so Home can focus it instead of forking. */
   openCommandTab(cwd: string | undefined, cmd: string, sessionId?: string): Promise<void>
+  /** Types `cmd` and Enter into terminal pane `id`, just spawned, once its shell prompt is up. A
+   *  command that could not be written is said in the pane. */
+  typeCommand(id: PaneId, cmd: string): void
   /** ⌘D (`row`) and ⌘⇧D (`col`). In a terminal tab: split its focused pane. In any other tab: a new
    *  terminal tab in the group to the right (below), made when there is none. cwd: where the new
    *  shell starts; defaults to the focused pane's OSC 7 cwd. */
@@ -411,6 +415,16 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       } else pending.get(id)?.push(b) ?? pending.set(id, [b])
     }
 
+    /** Types `cmd` and Enter into the fresh shell of terminal `id`, once its prompt is up. A write
+     *  the PTY refuses is said in the pane (#331): nothing else would tell the command never ran. */
+    function typeCommand(id: PaneId, cmd: string) {
+      setTimeout(() => {
+        pty.write(id, typed(cmd)).catch((e) => {
+          if (get().panes[id]) route(id, notTyped(cmd, e))
+        })
+      }, PROMPT_DELAY_MS)
+    }
+
     /** Hands new props to an open pane: its view's handler decides, else they replace the old ones. */
     function reuse(id: PaneId, view: string, props: Record<string, unknown>, title?: string): boolean {
       const handler = reuseHandler(view)
@@ -535,7 +549,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
                 // Kept on the pane even when not resumed, so the saved layout keeps it too.
                 get().setSessionId(id, p.sessionId)
                 const resumable = !back && running !== 'unknown' && !running.has(p.sessionId)
-                if (id > 0 && resumable) setTimeout(() => void pty.write(id, `claude --resume ${p.sessionId}\n`), PROMPT_DELAY_MS)
+                if (id > 0 && resumable) typeCommand(id, `claude --resume ${p.sessionId}`)
               }
             } else {
               const id = synthetic--
@@ -649,8 +663,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const pane = await spawnPane(cwd ?? where ?? undefined)
         set((s) => ({ panes: { ...s.panes, [pane]: { ...s.panes[pane], id: pane, sessionId } } }))
         land(where, { id: tabId(pane), root: leaf(pane), focused: pane }, { group })
-        if (pane > 0) setTimeout(() => void pty.write(pane, cmd + '\n'), PROMPT_DELAY_MS)
+        if (pane > 0) typeCommand(pane, cmd)
       },
+
+      typeCommand,
 
       async split(dir, cwd) {
         const tab = active()
