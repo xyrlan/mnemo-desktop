@@ -197,12 +197,21 @@ pub(crate) mod testing {
     use std::process::{Child, Stdio};
     use std::time::{Duration, Instant};
 
+    /// Windows PowerShell, by its path: it needs no network and no console to sleep.
+    #[cfg(windows)]
+    fn powershell() -> String {
+        format!(r"{}\System32\WindowsPowerShell\v1.0\powershell.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+    }
+
+    #[cfg(windows)]
+    const SLEEP: [&str; 6] = ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep", "-Seconds", "30"];
+
     /// A program that stays up for half a minute and starts nothing.
     pub fn sleeper() -> Child {
         #[cfg(windows)]
         let mut cmd = {
-            let mut c = crate::proc::command("ping");
-            c.args(["-n", "30", "127.0.0.1"]);
+            let mut c = crate::proc::command(powershell());
+            c.args(SLEEP);
             c
         };
         #[cfg(not(windows))]
@@ -219,7 +228,7 @@ pub(crate) mod testing {
         #[cfg(windows)]
         let mut cmd = {
             let mut c = crate::proc::command("cmd");
-            c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
+            c.args(["/C", &format!("{} {}", powershell(), SLEEP.join(" "))]);
             c
         };
         #[cfg(not(windows))]
@@ -231,16 +240,21 @@ pub(crate) mod testing {
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
     }
 
-    /// What `shell` has started, once it has started something. On Windows that can be more than
-    /// the program: a console program with no console to inherit is given a `conhost.exe`.
+    /// What `shell` has started, once it has started something and is still running it a moment
+    /// later. On Windows that can be more than the program: a console program with no console to
+    /// inherit is given a `conhost.exe`.
     pub fn started_by(shell: u32) -> Vec<u32> {
         let deadline = Instant::now() + Duration::from_secs(20);
+        let children = || super::table().unwrap().children(&[shell]);
         loop {
-            let found = super::table().unwrap().children(&[shell]);
-            if !found.is_empty() {
-                return found;
+            if !children().is_empty() {
+                std::thread::sleep(Duration::from_millis(300));
+                let found = children();
+                if !found.is_empty() && super::alive(shell) {
+                    return found;
+                }
             }
-            assert!(Instant::now() < deadline, "{shell} started nothing");
+            assert!(Instant::now() < deadline, "{shell} runs nothing (alive: {})", super::alive(shell));
             std::thread::sleep(Duration::from_millis(20));
         }
     }
