@@ -94,7 +94,8 @@ jobs:
         run: |
           # `//S`: Git Bash would turn a lone `/S` into a path.
           src-tauri/target/release/bundle/nsis/*-setup.exe //S
-          app=$(find "$(cygpath "$LOCALAPPDATA")/mnemo" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' | head -n 1)
-          echo "installed: $app"
-          test -n "$app"
-          MNEMO_DESKTOP_SMOKE=1 "$app"
+          dir="$(cygpath "$LOCALAPPDATA")/mnemo"
+          ls -l "$dir"
+          # The app by its name: the helpers are installed beside it, and one of them would pass too.
+          test -f "$dir/mnemo-desktop.exe"
+          MNEMO_DESKTOP_SMOKE=1 "$dir/mnemo-desktop.exe"
