@@ -314,9 +314,12 @@ impl PtyManager {
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         cmd.env("MNEMO_DESKTOP", "1");
         // A session in this pane reaches this app's MCP socket, whichever build registered the
-        // binary, and never an instance whose pane started this app (#168).
-        let (var, socket) = crate::mcp::pane_env();
-        cmd.env(var, socket);
+        // binary, and never an instance whose pane started this app (#168). Where no socket is
+        // served (Windows) a pane gets none, not even one inherited.
+        match crate::mcp::pane_env() {
+            Some((var, socket)) => cmd.env(var, socket),
+            None => cmd.env_remove(crate::mcp::SOCKET_ENV),
+        }
         cmd
     }
 
@@ -538,6 +541,25 @@ mod closing_tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         m.kill(idle);
+    }
+}
+
+/// The MCP socket a pane is pointed at, on every platform (#362).
+#[cfg(test)]
+mod mcp_env_tests {
+    use super::*;
+
+    #[test]
+    fn a_pane_gets_the_mcp_socket_only_where_one_is_served() {
+        // An app started from another app's pane inherits that app's socket.
+        // SAFETY: nothing else in this binary reads this variable.
+        unsafe { std::env::set_var(crate::mcp::SOCKET_ENV, "inherited.sock") };
+        let program = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+        let opts = SpawnOptions { program: Some(program.into()), args: vec![], cwd: None, cols: 80, rows: 24, login: false };
+        let cmd = PtyManager::with_shell_dir(None).command(opts, program.into());
+        let socket = crate::mcp::socket_path();
+        let want = if cfg!(windows) { None } else { Some(socket.as_os_str()) };
+        assert_eq!(cmd.get_env(crate::mcp::SOCKET_ENV), want);
     }
 }
 
