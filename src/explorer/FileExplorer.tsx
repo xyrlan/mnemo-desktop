@@ -13,6 +13,7 @@ import { isPathIgnored, relativeTo } from './paths'
 import { createRowProjection, filteredRows, flattenTree, nameFilterTokens, openFolders, type Visibility } from './rows'
 import { DEFAULT_PREFS, gitOf, type ExplorerStore } from './store'
 import type { TreeNode } from './types'
+import { pollWhileShown } from '../shell/while-shown'
 import './explorer.css'
 
 /** How often the tree, while drawn, reads the disk and git again: nothing here watches files. */
@@ -60,10 +61,11 @@ function FileExplorerFiles({ store, root, repoName, activeFile, stamp, onOpenFil
 
   useEffect(() => {
     const again = () => void store.getState().refresh(root)
-    const id = setInterval(again, REFRESH_MS)
+    // Not while the window is hidden: a listing and git state nobody sees.
+    const stop = pollWhileShown(() => store.getState().refresh(root), REFRESH_MS, { wait: true })
     window.addEventListener('focus', again)
     return () => {
-      clearInterval(id)
+      stop()
       window.removeEventListener('focus', again)
     }
   }, [store, root])

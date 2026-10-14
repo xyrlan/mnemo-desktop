@@ -3,6 +3,7 @@ import type { HomeRepo, HomeSnapshot } from '../home/types'
 import type { ChildSession, ParentSession, Snapshot } from '../mission/types'
 import { child, parent } from '../mission/fixtures'
 import { createFleet, PRS_EVERY, type FleetSources, type PolledMove } from './create'
+import type { Shown } from '../shell/while-shown'
 import { HOOK_TRUST_MS } from './model'
 import type { AgentEvent, WorktreeInfo } from './upstream'
 import type { Fleet, WorktreeNode } from './types'
@@ -34,7 +35,7 @@ const missionOf = (parents: ParentSession[], children: ChildSession[] = [], erro
 
 const EMPTY_MISSION: Snapshot = { repos: [], errors: [], at: '' }
 
-function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInfo[] | Error> } = {}) {
+function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInfo[] | Error>; pollMs?: number; shown?: Shown } = {}) {
   const s = {
     t: 1_000_000,
     home: opts.home ?? homeOf(repo(ROOT)),
@@ -69,7 +70,7 @@ function harness(opts: { home?: HomeSnapshot; trees?: Record<string, WorktreeInf
     reload,
     now: () => s.t,
   }
-  const fleet = createFleet(src, { pollMs: 1e9 })
+  const fleet = createFleet(src, { pollMs: opts.pollMs ?? 1e9, shown: opts.shown })
   const stop = fleet.connect()
   stops.push(stop)
   const fire = () => changed.forEach((cb) => cb())
@@ -507,6 +508,45 @@ describe('polling', () => {
     await h.get().refresh()
     expect(h.reload).toHaveBeenCalledWith({ withPrs: true, home: true })
     expect(h.get().repos[0].worktrees.map((w) => w.name)).toContain('new')
+  })
+
+  it('waits while the window is hidden, and polls the moment it shows again', async () => {
+    vi.useFakeTimers()
+    try {
+      let hidden = false
+      let onShow = () => {}
+      const h = harness({ pollMs: 30_000, shown: { hidden: () => hidden, onShow: (cb) => ((onShow = cb), () => {}) } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.reload).toHaveBeenCalledTimes(1)
+      hidden = true
+      await vi.advanceTimersByTimeAsync(10 * 30_000)
+      expect(h.reload).toHaveBeenCalledTimes(1)
+      hidden = false
+      onShow()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.reload).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(h.reload).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still takes each mission snapshot while hidden: the agents move and nothing waits for the fleet poll', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness({ pollMs: 30_000, shown: { hidden: () => true, onShow: () => () => {} } })
+      await vi.advanceTimersByTimeAsync(0)
+      // The mission poll (shell/mission-poll.ts) refreshes the snapshot every 15 s while hidden.
+      for (const status of ['busy', 'idle', 'busy'] as const) {
+        await vi.advanceTimersByTimeAsync(15_000)
+        h.poll([parent({ session_id: 'a', status, cwd: ROOT })])
+        expect(h.wt(ROOT).agents.map((a) => a.state)).toEqual([status === 'busy' ? 'working' : 'done'])
+      }
+      expect(h.reload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stops listening when disconnected', async () => {

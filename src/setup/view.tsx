@@ -15,6 +15,7 @@ import { ghInstall, installGh } from '../github/actions'
 import { setup, useSetup } from './app-store'
 import { onboarding } from '../onboarding/app-store'
 import { afterRestore, openIfMissing } from './launch'
+import { afterStartup } from '../shell/after-startup'
 import type { Run } from './store'
 import { currentOs, ESSENTIAL, installRoute, TOOLS, WHAT, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
 
@@ -209,7 +210,8 @@ if (!hot?.setupChecked) {
   if (hot) hot.setupChecked = true
   void openIfMissing({
     restored: afterRestore(store),
-    check: () => setup.getState().check(),
+    // After the launch's first burst: it is four `--version` runs nobody waits on.
+    check: () => afterStartup().then(() => setup.getState().check()),
     open: () => onboarding.getState().show('setup'),
   })
 }

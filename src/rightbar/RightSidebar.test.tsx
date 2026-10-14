@@ -200,6 +200,24 @@ describe('the Memory panel', () => {
     expect(calls.filter((c) => c[0] === 'refresh')).toHaveLength(3)
     expect(calls.filter((c) => c[0] === 'show')).toHaveLength(1)
   })
+
+  it('reads nothing on the timer while the window is hidden, and reads again when it shows', async () => {
+    vi.useFakeTimers()
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    try {
+      const { store, calls } = fakeStore()
+      const root = createRoot(document.body.appendChild(document.createElement('div')))
+      await act(async () => root.render(<MemoryPanel store={store} target={T} />))
+      await act(async () => void (await vi.advanceTimersByTimeAsync(REFRESH_MS * 10)))
+      expect(calls.filter((c) => c[0] === 'refresh')).toHaveLength(0)
+      state.mockReturnValue('visible')
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(calls.filter((c) => c[0] === 'refresh')).toHaveLength(1)
+      act(() => root.unmount())
+    } finally {
+      state.mockRestore()
+    }
+  })
 })
 
 test('the live store and panel read a real feed end to end', async () => {
