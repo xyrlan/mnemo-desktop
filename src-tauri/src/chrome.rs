@@ -497,6 +497,9 @@ mod tests {
         assert_eq!(claude_running(pane, None, now, |_| None, || Some(agents.clone()), children_of), Ok(true));
 
         end(sh);
+        // The shell leaves the table first. What it started can outlive it by a moment, and on
+        // Windows it then still names the dead shell as its parent: nothing below waits for it.
+        eventually("the ended shell is still in the table", || crate::procs::table().unwrap().parent(pane).is_none());
         eventually("an exited program is still under its shell", || {
             let parent = crate::procs::parents();
             !pids.iter().any(|&pid| under(pane, pid, &parent))

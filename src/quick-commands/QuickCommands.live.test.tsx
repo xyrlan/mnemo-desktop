@@ -108,9 +108,16 @@ test('a save the disk refuses says "Could not save the command" and why', async 
   act(() => set(document.querySelector<HTMLInputElement>('#quick-command-label')!, 'Test'))
   act(() => set(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Command"]')!, 'pnpm test'))
   disk.refuses = 'C:\\Users\\u\\.mnemo-desktop\\settings.json: Access is denied. (os error 5)'
+  const refusal = `Could not save the command: ${disk.refuses}`
   await act(async () => {
     ;[...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Save'))!.click()
-    await new Promise((r) => setTimeout(r, 20))
   })
-  expect(document.body.textContent).toContain(`Could not save the command: ${disk.refuses}`)
+  // The line arrives after the store's load, the refused write and a render. Waited for, not
+  // slept for: 20 ms was not always enough on the Windows runner.
+  for (let i = 0; i < 250 && !document.body.textContent?.includes(refusal); i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+  }
+  expect(document.body.textContent).toContain(refusal)
 })

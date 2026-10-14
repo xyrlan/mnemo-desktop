@@ -17,9 +17,12 @@ impl Table {
         self.0.get(&pid).copied()
     }
 
-    /// Every pid whose parent is one of `parents`, as `pgrep -P a,b,c` answered.
+    /// Every pid whose parent is one of `parents`, as `pgrep -P a,b,c` answered. A parent that is
+    /// not running has no children: Windows leaves a dead parent's pid on what it started, where
+    /// macOS and Linux hand an orphan to another process at once. Without this a pane whose shell
+    /// had just ended still read as running whatever outlived it by a moment.
     pub fn children(&self, parents: &[u32]) -> Vec<u32> {
-        self.0.iter().filter(|(pid, ppid)| pid != ppid && parents.contains(ppid)).map(|(pid, _)| *pid).collect()
+        self.0.iter().filter(|(pid, ppid)| pid != ppid && parents.contains(ppid) && self.0.contains_key(ppid)).map(|(pid, _)| *pid).collect()
     }
 }
 
@@ -341,6 +344,19 @@ mod tests {
         }
         end(a);
         end(b);
+    }
+
+    /// What Windows shows for a moment after a shell is ended: the shell gone from the table,
+    /// and what it started still there, still naming it as the parent.
+    #[test]
+    fn what_a_dead_parent_started_is_not_its_child() {
+        let table = Table(HashMap::from([(100, 1), (200, 100), (300, 77), (301, 77)]));
+        assert_eq!(table.children(&[100]), [200]);
+        assert_eq!(table.parent(77), None, "77 has ended");
+        assert_eq!(table.children(&[77]), Vec::<u32>::new());
+        assert_eq!(table.children(&[77, 100]), [200]);
+        // The orphans are still running, and still say who started them.
+        assert_eq!(table.parent(300), Some(77));
     }
 
     #[test]
