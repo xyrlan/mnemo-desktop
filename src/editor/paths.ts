@@ -1,41 +1,44 @@
 import type { State } from '../layout/store'
 import type { Entry } from './client'
+import { basename, dirname, isAbsolute, isWindowsPath, norm } from '../path/path'
 
-/** POSIX-style path helpers. The Rust side is the authority on what may be read;
- *  these only shape what the user typed into an absolute path. */
+/** What the user typed, shaped into an absolute path. The Rust side is the authority on what may
+ *  be read. Comparing and naming paths is `src/path/path.ts`'s; a Windows path (`C:\…`, `C:/…`,
+ *  `\\?\C:\…`) comes out in git's spelling, `C:/Users/me/a.ts`, which Windows reads as well. */
 
-export function basename(p: string): string {
-  const trimmed = p.replace(/\/+$/, '')
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || '/'
-}
-
-export function dirname(p: string): string {
-  const trimmed = p.replace(/\/+$/, '')
-  const i = trimmed.lastIndexOf('/')
-  return i <= 0 ? '/' : trimmed.slice(0, i)
-}
+export { basename, dirname }
 
 export function join(dir: string, name: string): string {
-  return dir.endsWith('/') ? dir + name : `${dir}/${name}`
+  return (isWindowsPath(dir) ? /[\\/]$/ : /\/$/).test(dir) ? dir + name : `${dir}/${name}`
 }
 
-/** Collapses `.`, `..` and repeated slashes of an absolute path. */
+/** Collapses `.`, `..` and repeated separators of an absolute path; `..` stops at the root. */
 export function normalize(p: string): string {
+  const win = isWindowsPath(p)
+  const n = win ? norm(p) : p
+  // A drive (`C:`) or a share (`//server/share`) is the root a Windows path cannot climb out of.
+  const root = win ? (/^[A-Z]:/.test(n) ? n.slice(0, 2) : n.split('/').slice(0, 4).join('/')) : ''
   const out: string[] = []
-  for (const seg of p.split('/')) {
+  for (const seg of n.slice(root.length).split('/')) {
     if (seg === '' || seg === '.') continue
     if (seg === '..') out.pop()
     else out.push(seg)
   }
-  return '/' + out.join('/')
+  return root + '/' + out.join('/')
 }
 
 /** `~` expands to home, an absolute path stays, anything else is relative to `base`. */
 export function resolvePath(input: string, base: string, home: string): string {
   const s = input.trim()
-  if (s === '~' || s.startsWith('~/')) return normalize(home + s.slice(1))
-  if (s.startsWith('/')) return normalize(s)
+  if (s === '~' || s.startsWith('~/') || (isWindowsPath(home) && s.startsWith('~\\'))) return normalize(join(home, s.slice(2)))
+  if (isAbsolute(s)) return normalize(s)
   return normalize(join(base, s))
+}
+
+/** What "Open file…" offers to type on: the root and a separator, in the root's own spelling. */
+export function prefill(root: string): string {
+  if (/[\\/]$/.test(root)) return root
+  return isWindowsPath(root) && root.includes('\\') ? `${root}\\` : `${root}/`
 }
 
 export type LanguageInfo = { id: string; extensions?: string[]; filenames?: string[] }

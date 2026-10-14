@@ -2,6 +2,7 @@
 // (and the shared run-sentence, tool-icon and run-outcome rules it reads, which are not vendored)
 import type { DiffHunk, ToolOutcome } from './types'
 import type { ToolCard } from './stream'
+import { norm, relativeTo as pathFrom } from '../path/path'
 
 /** What kind of work a call is: the run's sentence counts calls by it, and its glyph shows it. */
 export type ToolCategory = 'read' | 'search' | 'list' | 'command' | 'edit' | 'web' | 'mcp' | 'todo' | 'other'
@@ -113,9 +114,8 @@ export function runOutcome(tools: readonly ToolCard[]): { succeeded: boolean; fa
 
 /** `path` from inside `cwd` as the worktree names it (`src/app.ts`); anything else as it is. */
 export function relativeTo(path: string, cwd: string | null | undefined): string {
-  if (!cwd) return path
-  const root = cwd.replace(/\/+$/, '')
-  return root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path
+  if (!cwd || norm(cwd) === '/') return path
+  return pathFrom(path, cwd) || path
 }
 
 /** What a call is doing, for the live line: `Running git status`, `Reading src/app.ts`. */

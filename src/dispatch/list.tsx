@@ -6,6 +6,7 @@ import { childWord, needKind, permissionAsk, type ChildSession, type Pr } from '
 import type { Row, Wave } from './model'
 import { foldKey, select, setFold, useUi } from './store'
 import { RowAnswer } from './answer'
+import { basename } from '../path/path'
 
 /** The tab's left side (spec decision 5): one section per wave, the children's rows in it. */
 
@@ -116,7 +117,7 @@ function WaveMeta({ wave, actions }: { wave: Wave; actions: ListActions }) {
         </span>
       )}
       {wave.contract && (
-        <button type="button" className="rounded p-0.5 hover:bg-accent hover:text-foreground" title={`Open the contract: ${wave.contract.split('/').pop()}`} aria-label="Open the contract" onClick={() => actions.openFile(wave.contract)}>
+        <button type="button" className="rounded p-0.5 hover:bg-accent hover:text-foreground" title={`Open the contract: ${basename(wave.contract)}`} aria-label="Open the contract" onClick={() => actions.openFile(wave.contract)}>
           <FileText className="size-3.5" aria-hidden />
         </button>
       )}
