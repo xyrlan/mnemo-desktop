@@ -1,6 +1,11 @@
 /** A Claude Code account: a config dir with its own login (spec 2026-10-07-claude-accounts, decision 1).
- *  `problem` says what is wrong with it in a sentence, or is null. */
-export type Account = { id: string; label: string; configDir: string; isDefault: boolean; email: string | null; problem: string | null }
+ *  `problem` says what is wrong with it in a sentence, or is null. `unshared` names what it holds
+ *  of its own where the default account's should be linked (`problem` says so too): sharing puts
+ *  it back. */
+export type Account = { id: string; label: string; configDir: string; isDefault: boolean; email: string | null; problem: string | null; unshared: string[] }
+/** What sharing answers: the accounts now, and where each copy of the account's own that differed
+ *  from the default account's was kept. */
+export type Shared = { state: AccountsState; kept: string[] }
 /** Every account, and the one panes opened from now on run in. */
 export type AccountsState = { active: string; accounts: Account[] }
 

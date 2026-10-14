@@ -86,6 +86,21 @@ test("an account's problem is said", async () => {
   expect(card('default').querySelector('[data-problem]')).toBeNull()
 })
 
+test("an account holding its own copies offers to share them, and says where what differed went", async () => {
+  const init = state()
+  init.accounts[1] = account('work', { problem: "settings.json is this account's own.", unshared: ['settings.json'] })
+  await mount(<AccountsPanel now={NOW} />, { state: init, usage: usage() })
+  expect(button('Share with the default account', card('default'))).toBeUndefined()
+  fake.kept = ['/Users/me/.claude-work/unshared/1/settings.json']
+  await click(button('Share with the default account', card('work')))
+  expect(fake.called('share')).toEqual([['share', 'work']])
+  expect(card('work').querySelector('[data-problem]')).toBeNull()
+  expect(button('Share with the default account')).toBeUndefined()
+  expect(host.querySelector('[role="status"]')!.textContent).toContain('/Users/me/.claude-work/unshared/1/settings.json')
+  await click(button('Dismiss note'))
+  expect(host.querySelector('[role="status"]')).toBeNull()
+})
+
 test('every limit shows: named, a bar by severity, the percent and the reset; an unknown kind too', async () => {
   await mount(<AccountsPanel now={NOW} />)
   const rows = [...card('default').querySelectorAll('[data-limit]')]

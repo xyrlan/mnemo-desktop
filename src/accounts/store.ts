@@ -22,8 +22,10 @@ export type Accounts = {
   /** The account each terminal pane was spawned on. A pane missing here was spawned after the last
    *  switch, so it runs on the active account. */
   panes: Record<number, string>
-  /** What the last add, rename, remove or switch said when it failed. */
+  /** What the last add, rename, remove, share or switch said when it failed. */
   error: string | null
+  /** What the last share left to say: where the copies that differed were kept. */
+  note: string | null
   /** Reads the list, the panes and the usage, follows `accounts://changed` and polls the usage.
    *  Once: later calls do nothing. */
   start(): void
@@ -35,7 +37,10 @@ export type Accounts = {
   add(label: string): Promise<Account | null>
   rename(id: string, label: string): Promise<boolean>
   remove(id: string): Promise<boolean>
+  /** Puts back what account `id` holds of its own in place of the default account's. */
+  share(id: string): Promise<boolean>
   clearError(): void
+  clearNote(): void
 }
 
 export type AccountsStore = StoreApi<Accounts>
@@ -107,7 +112,7 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
 
     /** Runs `act`; a failure lands in `error` and answers `fallback`. */
     async function attempt<T>(act: () => Promise<T>, fallback: T): Promise<T> {
-      set({ error: null })
+      set({ error: null, note: null })
       try {
         return await act()
       } catch (e) {
@@ -121,6 +126,7 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       usage: {},
       panes: {},
       error: null,
+      note: null,
 
       start() {
         if (started) return
@@ -196,7 +202,16 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
           return true
         }, false),
 
+      share: (id) =>
+        attempt(async () => {
+          const { state, kept } = await client.share(id)
+          apply(state)
+          if (kept.length) set({ note: `Shared with the default account. What differed from the default account's was not merged and is kept in ${kept.join(', ')}.` })
+          return true
+        }, false),
+
       clearError: () => set({ error: null }),
+      clearNote: () => set({ note: null }),
     }
   })
 }

@@ -10,6 +10,7 @@ export const account = (id: string, more: Partial<Account> = {}): Account => ({
   isDefault: id === 'default',
   email: `${id}@example.com`,
   problem: null,
+  unshared: [],
   ...more,
 })
 
@@ -37,6 +38,8 @@ export function fakeClient(init: { state: AccountsState; usage?: Record<string, 
     usage: init.usage ?? {},
     panes: init.panes ?? {},
     refuse: {} as Record<string, string>,
+    /** What `share` answers as kept apart. */
+    kept: [] as string[],
     calls,
     /** Emits `accounts://changed`. */
     emit(state: AccountsState) {
@@ -64,6 +67,11 @@ export function fakeClient(init: { state: AccountsState; usage?: Record<string, 
     rename: (id, label) => answer('rename', [id, label], () => (f.state = { ...f.state, accounts: f.state.accounts.map((a) => (a.id === id ? { ...a, label } : a)) })),
     remove: (id) =>
       answer('remove', [id], () => (f.state = { active: f.state.active === id ? 'default' : f.state.active, accounts: f.state.accounts.filter((a) => a.id !== id) })),
+    share: (id) =>
+      answer('share', [id], () => {
+        f.state = { ...f.state, accounts: f.state.accounts.map((a) => (a.id === id ? { ...a, problem: null, unshared: [] } : a)) }
+        return { state: f.state, kept: f.kept }
+      }),
     panes: () => answer('panes', [], () => f.panes),
     movePane: (pane, id) => answer('move', [pane, id], () => void (f.panes = { ...f.panes, [pane]: id })),
     usage: (a, refresh) =>
