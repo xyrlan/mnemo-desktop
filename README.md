@@ -32,6 +32,8 @@ On Linux and Windows `pnpm tauri build` makes the bundle. On Windows, set MSVC's
     $env:CMAKE_C_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
     $env:CMAKE_CXX_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
 
+An installed app keeps a log, warnings, errors and any crash with where it happened, in `~/.mnemo-desktop/app.log` (`%USERPROFILE%\.mnemo-desktop\app.log` on Windows). A start that fails says so in a dialog that names it. A dev build logs to the terminal that ran it.
+
 ## Test
 
     pnpm test                                        # front-end

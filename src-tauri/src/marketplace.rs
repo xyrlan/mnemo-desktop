@@ -1113,17 +1113,16 @@ pub fn import_new_with(program: &str, path_env: &str, cwd: &str, vault: &Path) -
 
 // ------------------------------------------------------------ commands --
 
+/// A listing that panicked rejects (`listError` in the store), rather than listing nothing (#364).
 #[tauri::command]
-pub async fn marketplace_list() -> Vec<RuleSet> {
-    tauri::async_runtime::spawn_blocking(|| Marketplace::at_home().list(None)).await.unwrap_or_default()
+pub async fn marketplace_list() -> Result<Vec<RuleSet>, String> {
+    crate::crash::read("The rules listing", || Marketplace::at_home().list(None)).await
 }
 
 /// Fetches one source (or all, with `url` null) and lists again.
 #[tauri::command]
-pub async fn marketplace_refresh(url: Option<String>) -> Vec<RuleSet> {
-    tauri::async_runtime::spawn_blocking(move || Marketplace::at_home().list(Some(url.as_deref())))
-        .await
-        .unwrap_or_default()
+pub async fn marketplace_refresh(url: Option<String>) -> Result<Vec<RuleSet>, String> {
+    crate::crash::read("The rules listing", move || Marketplace::at_home().list(Some(url.as_deref()))).await
 }
 
 #[tauri::command]
@@ -1144,13 +1143,12 @@ pub async fn marketplace_import(path: String, cwd: String) -> Result<String, Str
 }
 
 #[tauri::command]
-pub async fn marketplace_repo(cwd: String) -> RepoRules {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn marketplace_repo(cwd: String) -> Result<RepoRules, String> {
+    crate::crash::read("The repo's rules", move || {
         let vault = crate::vault::vault_root();
         repo_with(&crate::mission::login_path(), &cwd, vault.as_deref())
     })
     .await
-    .unwrap_or_default()
 }
 
 #[tauri::command]
