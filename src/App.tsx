@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { toast } from '@/ui'
 import { store } from './layout/app-store'
 import Palette from './palette/Palette'
-import { installKeys } from './actions/keys'
+import { detectPlatform, installKeys } from './actions/keys'
+import { installNotAPage } from './actions/not-a-page'
 import { registerBuiltins } from './actions/registry'
 import { startWorkspace, type Workspace } from './layout/persist'
 import Shell from './shell/Shell'
@@ -26,6 +27,8 @@ export default function App() {
   const [boot, setBoot] = useState<{ ready: boolean; notice: string | null }>({ ready: false, notice: null })
 
   useEffect(() => installKeys(), [])
+  // A dev build keeps the webview's context menu, for Inspect.
+  useEffect(() => installNotAPage(detectPlatform(), { keepMenu: import.meta.env.DEV }), [])
   // What the mission sidebar ran while it was mounted: the snapshot poll, and Home's titles.
   useEffect(() => pollMission(), [])
   useEffect(() => reloadUnknownTitles(), [])

@@ -1,5 +1,6 @@
 import libRs from '../../src-tauri/src/lib.rs?raw'
-import { actionForKey, actionFromMenu, installKeys, listKey, makeDedupe } from './keys'
+import { boundActions } from './chords'
+import { actionForKey, actionFromMenu, installKeys, listKey, makeDedupe, pageChords, type PageChord } from './keys'
 
 const ev = (key: string, o: Partial<KeyboardEvent> = {}) =>
   ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...o }) as KeyboardEvent
@@ -182,6 +183,27 @@ describe('installKeys', () => {
     uninstall()
   })
 
+  test('off a Mac the chord table goes to the host, which takes the chords from a browser pane', () => {
+    const sent: PageChord[][] = []
+    const quiet = { listen: (() => Promise.resolve(() => {})) as never, runAction: () => {} }
+    const off = installKeys('other', { ...quiet, sendChords: (c) => (sent.push(c), Promise.resolve()) })
+    off()
+    expect(sent).toEqual([pageChords('other')])
+    expect(sent[0]).toContainEqual({ id: 'palette.open', ctrl: true, shift: true, key: 'k' })
+    // A Mac's menu carries them; nothing is sent there.
+    installKeys('mac', { ...quiet, sendChords: (c) => (sent.push(c), Promise.resolve()) })()
+    expect(sent).toHaveLength(1)
+  })
+
+  test('a host that refuses the table leaves the keys working', async () => {
+    const ran: string[] = []
+    const off = installKeys('other', { listen: (() => Promise.resolve(() => {})) as never, runAction: (id) => ran.push(id), sendChords: () => Promise.reject('no host') })
+    await Promise.resolve()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'K', ctrlKey: true, shiftKey: true }))
+    expect(ran).toEqual(['palette.open'])
+    off()
+  })
+
   test('without a Tauri event bus the keydown path still works', () => {
     const ran: string[] = []
     const listen = () => {
@@ -221,4 +243,16 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
     ].sort(),
   )
   for (const [id, accel] of items) expect([accel, actionForKey(toEvent(accel), 'mac')]).toEqual([accel, id])
+})
+
+test('every chord a browser pane hands over is one WebView2 offers the host and browser_keys.rs can name', () => {
+  // WebView2 raises AcceleratorKeyPressed only for a key held with Ctrl or Alt (or one that
+  // types nothing); browser_keys.rs names letters, digits, arrows and one-character keys.
+  const chords = pageChords('other')
+  expect(chords.map((c) => c.id).sort()).toEqual(boundActions().sort())
+  for (const c of chords) {
+    expect([c.id, !!(c.ctrl || c.alt)]).toEqual([c.id, true])
+    expect([c.id, /^([a-z0-9]|arrow(left|right|up|down)|[^a-z0-9])$/.test(c.key)]).toEqual([c.id, true])
+    expect(Object.keys(c).every((k) => ['id', 'ctrl', 'alt', 'shift', 'meta', 'key', 'code'].includes(k))).toBe(true)
+  }
 })
