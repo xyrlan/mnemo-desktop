@@ -17,17 +17,27 @@ export const SAVE_DEBOUNCE_MS = 500
 export type Workspace = {
   /** Settles once the saved layout is back (or could not be): `notice` is the one line Home
    *  shows when the restore failed. Saving starts only then, so a boot never overwrites the
-   *  file with an empty layout. */
+   *  file with an empty layout; after a failed restore it never starts, so the file that could
+   *  not be read is still there to mend. */
   ready: Promise<{ notice: string | null }>
   stop(): void
 }
 
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 /** Restores `~/.mnemo-desktop/workspace.json` into the store, then writes it back on every layout
- *  change (a switch of worktree included), debounced. Writes only when what would be saved differs from the last write. */
-export function startWorkspace(store: Store, client: WorkspaceClient = tauriWorkspace, debounceMs = SAVE_DEBOUNCE_MS): Workspace {
+ *  change (a switch of worktree included), debounced. Writes only when what would be saved differs from the last write.
+ *  `onSaveError` hears a write that failed, once until a write succeeds again. */
+export function startWorkspace(
+  store: Store,
+  client: WorkspaceClient = tauriWorkspace,
+  debounceMs = SAVE_DEBOUNCE_MS,
+  onSaveError: (why: string) => void = () => {},
+): Workspace {
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let last = ''
+  let failing = false
   let unsubscribe = () => {}
 
   const save = () => {
@@ -36,20 +46,27 @@ export function startWorkspace(store: Store, client: WorkspaceClient = tauriWork
     const text = JSON.stringify(value)
     if (text === last) return
     last = text
-    // The file is a convenience: a failed write is retried by the next change.
-    void client.write(value).catch(() => {
-      last = ''
-    })
+    // A failed write is retried by the next change, and said once.
+    client.write(value).then(
+      () => {
+        failing = false
+      },
+      (e) => {
+        last = ''
+        if (!failing) onSaveError(message(e))
+        failing = true
+      },
+    )
   }
 
   const ready = (async () => {
-    let notice: string | null = null
     try {
       await store.getState().restore(await client.read())
     } catch (e) {
-      notice = `could not restore the last workspace: ${e instanceof Error ? e.message : String(e)}`
+      // Whatever the file holds was not restored, so nothing of this run goes over it.
+      return { notice: `could not restore the last workspace (left as it is, this run's layout is not saved): ${message(e)}` }
     }
-    if (stopped) return { notice }
+    if (stopped) return { notice: null }
     // What is on screen now is what the file says (or should say): no write until it changes.
     last = JSON.stringify(store.getState().snapshotForSave())
     unsubscribe = store.subscribe((s, prev) => {
@@ -59,7 +76,7 @@ export function startWorkspace(store: Store, client: WorkspaceClient = tauriWork
       if (timer !== undefined) clearTimeout(timer)
       timer = setTimeout(save, debounceMs)
     })
-    return { notice }
+    return { notice: null }
   })()
 
   return {

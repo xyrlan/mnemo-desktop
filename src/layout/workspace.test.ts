@@ -409,21 +409,105 @@ describe('startWorkspace', () => {
     }
   })
 
-  test('a failed restore settles with a notice and still saves what happens next', async () => {
+  // #336, expected 1.
+  test('a workspace file that cannot be restored is never written over, and the notice says which file and why', async () => {
+    vi.useFakeTimers()
+    try {
+      // What `workspace_read` answers for a file that is there and does not parse.
+      const why = '/home/u/.mnemo-desktop/workspace.json: expected value at line 1 column 3'
+      for (const read of [() => Promise.reject(why), async () => ({ tabs: [{ root: 'nope' }] }), async () => [1, 2]]) {
+        const s = createStore(fakePty().pty, { workspace: () => null })
+        const { c, written } = client(read)
+        const ws = startWorkspace(s, c, 500)
+        const { notice } = await ws.ready
+        expect(notice).toContain('could not restore the last workspace')
+        expect(notice).toContain('left as it is')
+        expect(notice).toContain('workspace.json')
+        await s.getState().newTab('/b')
+        await s.getState().switchWorktree('/a')
+        vi.advanceTimersByTime(5000)
+        expect(written).toEqual([])
+        ws.stop()
+      }
+      const s = createStore(fakePty().pty, { workspace: () => null })
+      const ws = startWorkspace(s, client(() => Promise.reject(why)).c, 500)
+      expect((await ws.ready).notice).toBe(`could not restore the last workspace (left as it is, this run's layout is not saved): ${why}`)
+      ws.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // #336, expected 2.
+  test('nothing is written before the read and the restore have finished', async () => {
     vi.useFakeTimers()
     try {
       const s = createStore(fakePty().pty, { workspace: () => null })
-      const { c, written } = client({ tabs: [{ root: 'nope' }] })
+      let answer!: (v: unknown) => void
+      const { c, written } = client(() => new Promise((r) => (answer = r)))
       const ws = startWorkspace(s, c, 500)
-      expect((await ws.ready).notice).toBe('could not restore the last workspace: workspace.json: no tab could be read')
+      await s.getState().switchWorktree('/a')
+      vi.advanceTimersByTime(5000)
+      expect(written).toEqual([])
+      answer({})
+      expect(await ws.ready).toEqual({ notice: null })
+      vi.advanceTimersByTime(5000)
+      expect(written).toEqual([])
+      ws.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // #336, expected 3.
+  test('a save that fails is said once, retried by the next change, and said again after one that worked', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = createStore(fakePty().pty, { workspace: () => null })
+      let refuse = true
+      const written: unknown[] = []
+      const said: string[] = []
+      const c: WorkspaceClient = {
+        read: async () => ({}),
+        write: async (v) => {
+          if (refuse) throw 'workspace.json: Access is denied. (os error 5)'
+          written.push(v)
+        },
+      }
+      const ws = startWorkspace(s, c, 500, (why) => void said.push(why))
+      await ws.ready
+      await s.getState().switchWorktree('/a')
+      await vi.advanceTimersByTimeAsync(500)
+      await s.getState().switchWorktree('/b')
+      await vi.advanceTimersByTimeAsync(500)
+      expect(said).toEqual(['workspace.json: Access is denied. (os error 5)'])
+      expect(written).toEqual([])
+      refuse = false
+      await s.getState().switchWorktree('/a')
+      await vi.advanceTimersByTimeAsync(500)
+      expect(written).toHaveLength(1)
+      refuse = true
+      await s.getState().switchWorktree('/b')
+      await vi.advanceTimersByTimeAsync(500)
+      expect(said).toHaveLength(2)
+      ws.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // #336, expected 4: `workspace_read` answers `{}` for a file that is not there.
+  test('a missing workspace file is a first run: no notice, and the first change is saved', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = createStore(fakePty().pty, { workspace: () => null })
+      const { c, written } = client({})
+      const ws = startWorkspace(s, c, 500)
+      expect(await ws.ready).toEqual({ notice: null })
       await s.getState().newTab('/b')
       vi.advanceTimersByTime(500)
       expect(loose(written[0] as Saved).panes).toEqual({ '1': { view: 'terminal', cwd: '/b' } })
       ws.stop()
-
-      const failing = startWorkspace(createStore(fakePty().pty), { read: async () => Promise.reject(new Error('io')), write: async () => {} })
-      expect((await failing.ready).notice).toContain('io')
-      failing.stop()
     } finally {
       vi.useRealTimers()
     }

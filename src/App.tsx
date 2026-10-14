@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from '@/ui'
 import { store } from './layout/app-store'
 import Palette from './palette/Palette'
 import { installKeys } from './actions/keys'
@@ -30,7 +31,9 @@ export default function App() {
   useEffect(() => reloadUnknownTitles(), [])
   useEffect(() => refreshGithubEvery(), [])
   useEffect(() => {
-    workspace ??= startWorkspace(store)
+    workspace ??= startWorkspace(store, undefined, undefined, (why) =>
+      toast.error('Could not save the workspace layout', { id: 'workspace-save', description: why }),
+    )
     let live = true
     void workspace.ready.then(({ notice }) => live && setBoot({ ready: true, notice }))
     return () => {

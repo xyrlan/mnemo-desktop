@@ -131,7 +131,7 @@ export default function Workbench({ ready, notice, onDismissNotice, lead, trail,
           onClick={onDismissNotice}
           className="absolute top-12 left-1/2 z-10 flex max-w-[80%] -translate-x-1/2 items-center gap-2 rounded-md border border-status-warning-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-floating animate-in fade-in-0 slide-in-from-top-1"
         >
-          <span className="truncate">{notice}</span>
+          <span className="truncate" title={notice}>{notice}</span>
           <X className="size-3 shrink-0 text-muted-foreground" />
         </button>
       )}
