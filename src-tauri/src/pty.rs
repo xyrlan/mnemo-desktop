@@ -1174,7 +1174,7 @@ mod windows_integration_tests {
 
         // Git Bash is bash: the same rc file, and the login files through it.
         let bash = m.command(opts(&dir), r"C:\Program Files\Git\bin\bash.exe".into());
-        assert_eq!(bash.get_argv()[1..], ["--rcfile".as_ref(), dir.join("bash/mnemo.bashrc").as_os_str()]);
+        assert_eq!(bash.get_argv()[1..], ["--rcfile".as_ref(), dir.join("bash").join("mnemo.bashrc").as_os_str()]);
         assert_eq!(bash.get_env("MNEMO_BASH_LOGIN"), Some("1".as_ref()));
 
         // Integration off, or a program asked for by name: run as given.

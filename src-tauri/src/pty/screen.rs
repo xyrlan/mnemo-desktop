@@ -387,7 +387,8 @@ mod tests {
     #[test]
     fn osc7_reads_like_the_front_does() {
         assert_eq!(parse_osc7(b"file://host/a%20b/c").as_deref(), Some("/a%20b/c".replace("%20", " ").as_str()));
-        assert_eq!(parse_osc7(b"file:///x").as_deref(), Some("/x"));
+        // On Windows `/x` is drive X (`windows_reports_read_as_a_drive_in_every_spelling`).
+        assert_eq!(osc7_on(b"file:///x", false).as_deref(), Some("/x"));
         assert_eq!(parse_osc7(b"file://host"), None);
         assert_eq!(parse_osc7(b"http://host/x"), None);
         assert_eq!(parse_osc7(b"file://h/%zz"), None);
