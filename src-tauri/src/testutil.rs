@@ -15,6 +15,38 @@ pub fn temp_dir(tag: &str) -> PathBuf {
     d
 }
 
+/// A stand-in for a program called `name`, in `dir`, and its path: `sh`, a `/bin/sh` script with
+/// no `#!` line, or on Windows `cmd`, the lines of a batch file `name.cmd`. A test that starts a
+/// program by its path runs on every OS with one: Windows' real `mnemo` is an `.exe`, which no
+/// test can write, and a batch file is what `std::process::Command` runs in its place.
+pub fn stand_in(dir: &std::path::Path, name: &str, sh: &str, cmd: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let _ = sh;
+        let path = dir.join(format!("{name}.cmd"));
+        std::fs::write(&path, format!("@echo off\r\n{}\r\n", cmd.trim_end().replace('\n', "\r\n"))).unwrap();
+        path
+    }
+    #[cfg(unix)]
+    {
+        let _ = cmd;
+        let path = dir.join(name);
+        write_script(&path, &format!("#!/bin/sh\n{sh}"));
+        path
+    }
+}
+
+/// `dir` as a program started in it names its folder: macOS reaches a temp dir through a link
+/// (`/var` → `/private/var`), and `pwd -P` says where it leads. Windows' `%CD%` says the path it
+/// was given, with no `\\?\` in front of it as `canonicalize` puts there.
+pub fn dir_as_named(dir: &std::path::Path) -> PathBuf {
+    if cfg!(windows) {
+        dir.to_path_buf()
+    } else {
+        dir.canonicalize().unwrap()
+    }
+}
+
 /// Writes an executable shell script and returns once it can be exec'd.
 ///
 /// On Linux a thread forking a child while our write fd is open leaks that fd into

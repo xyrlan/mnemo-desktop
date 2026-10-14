@@ -86,6 +86,23 @@ jobs:
       - name: smoke (shell round-trip inside the built app)
         if: runner.os == 'macOS'
         run: MNEMO_DESKTOP_SMOKE=1 src-tauri/target/release/mnemo-desktop
+      # bash waits for the app (PowerShell would not: it is a GUI program) and gets its exit code.
+      - name: smoke (shell round-trip inside the built app)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: MNEMO_DESKTOP_SMOKE=1 src-tauri/target/release/mnemo-desktop.exe
+      # The same round-trip in what the installer put in place, as a person would start it.
+      - name: smoke (installed by the NSIS installer, silently)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # `//S`: Git Bash would turn a lone `/S` into a path.
+          src-tauri/target/release/bundle/nsis/*-setup.exe //S
+          dir="$(cygpath "$LOCALAPPDATA")/mnemo"
+          ls -l "$dir"
+          # The app by its name: the helpers are installed beside it, and one of them would pass too.
+          test -f "$dir/mnemo-desktop.exe"
+          MNEMO_DESKTOP_SMOKE=1 "$dir/mnemo-desktop.exe"
       # Design Mode's crop and desktop_pane_snapshot take a picture of a real webview (#363):
       # WKWebView, WebView2 and WebKitGTK each have their own call. The built app takes one of its
       # own window, and fails when it gets no image.

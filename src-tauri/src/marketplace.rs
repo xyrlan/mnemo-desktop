@@ -1381,24 +1381,26 @@ mod tests {
         assert!(sets[0].error.as_deref().unwrap().contains(SHARE_DIR));
     }
 
-    #[cfg(unix)]
     #[test]
     fn import_runs_mnemo_in_the_cwd_and_reports_output_either_way() {
         let dir = temp("import");
         let project = dir.join("project");
         std::fs::create_dir_all(&project).unwrap();
         let tree = Path::new(FIXTURE).join(SHARE_DIR);
-        let fake = dir.join("mnemo");
-        crate::testutil::write_script(
-            &fake,
-            "#!/bin/sh\necho \"$1 $2 in $(pwd -P)\"\ncase \"$2\" in *react*) echo 'refused feedback/x: collision' >&2; exit 1;; esac\n",
+        let fake = crate::testutil::stand_in(
+            &dir,
+            "mnemo",
+            "echo \"$1 $2 in $(pwd -P)\"\ncase \"$2\" in *react*) echo 'refused feedback/x: collision' >&2; exit 1;; esac\n",
+            // `findstr` by its full path: on windows-latest it was not found by name here (see #371).
+            // Its "no match" is exit 1, which would be the batch file's: hence `exit /b 0`.
+            "echo %1 %2 in %CD%\necho %2| \"%SystemRoot%\\System32\\findstr.exe\" /c:react >nul && (>&2 echo refused feedback/x: collision& exit /b 1)\nexit /b 0",
         );
         let fake = fake.to_string_lossy().to_string();
         let path_env = std::env::var("PATH").unwrap_or_default();
         let cwd = project.to_string_lossy().to_string();
 
         let ok = import_with(&fake, &path_env, &tree.to_string_lossy(), &cwd).unwrap();
-        let canon = project.canonicalize().unwrap();
+        let canon = crate::testutil::dir_as_named(&project);
         assert_eq!(ok, format!("import {} in {}", tree.display(), canon.display()));
 
         let react = Path::new(FIXTURE).join("sets/react").join(SHARE_DIR);
@@ -1587,6 +1589,8 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
+    /// Unix only: `mnemo` and `gh` are found by name here, which on Windows finds only an `.exe`,
+    /// and no test can write one (`testutil::stand_in`).
     #[cfg(unix)]
     #[test]
     fn publish_then_open_pr_branches_from_the_default_branch_and_commits_only_the_tree() {
@@ -1683,19 +1687,21 @@ mod tests {
         assert_eq!(git_out(&["rev-parse", "main"], &work), main_tip);
     }
 
-    #[cfg(unix)]
     #[test]
     fn import_all_new_hands_mnemo_a_tree_of_only_the_new_rules() {
         let repo = fixture_repo("import-new");
         let dir = repo.parent().unwrap().to_path_buf();
-        let fake = dir.join("mnemo");
-        script(&fake, "#!/bin/sh\necho \"$2\"\ncd \"$2\" && find . -name '*.md' | sort\n");
+        // The tree it was handed, then every rule in it.
+        let fake = crate::testutil::stand_in(&dir, "mnemo", "echo \"$2\"\nfind \"$2\" -name '*.md' | sort\n", "echo %~2\nfor /r \"%~2\" %%f in (*.md) do @echo %%f");
         let path_env = std::env::var("PATH").unwrap_or_default();
         let cwd = repo.join("sets").to_string_lossy().to_string();
         let out = import_new_with(&fake.to_string_lossy(), &path_env, &cwd, Path::new(VAULT)).unwrap();
         let mut lines = out.lines();
         let scratch = PathBuf::from(lines.next().unwrap());
-        assert_eq!(lines.collect::<Vec<_>>(), vec!["./feedback/no-silent-contract-changes.md"]);
+        let rules: Vec<String> = lines
+            .map(|l| Path::new(l).strip_prefix(&scratch).unwrap_or_else(|_| panic!("{l} is not in {}", scratch.display())).iter().map(|c| c.to_string_lossy()).collect::<Vec<_>>().join("/"))
+            .collect();
+        assert_eq!(rules, vec!["feedback/no-silent-contract-changes.md"]);
         assert!(!scratch.exists(), "the scratch tree is removed");
 
         let nothing_new = dir.join("vault");

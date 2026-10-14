@@ -578,13 +578,16 @@ mod tests {
         assert_eq!(parse_checksum(&hex[1..]), None);
     }
 
-    #[cfg(unix)]
     #[test]
     fn init_output_is_said_line_by_line_and_a_failure_names_its_last_line() {
         let root = temp_dir("mnemo-install-init");
-        let exe = root.join("mnemo");
         // stdout speaks again after the error, so a "last line" shared by both streams names the wrong one.
-        crate::testutil::write_script(&exe, "#!/bin/sh\necho \"args: $*\"\necho 'settings.json is locked' >&2\nsleep 0.2\necho 'vault ready'\nexit 3\n");
+        let exe = crate::testutil::stand_in(
+            &root,
+            "mnemo",
+            "echo \"args: $*\"\necho 'settings.json is locked' >&2\nsleep 0.2\necho 'vault ready'\nexit 3\n",
+            "echo args: %*\n>&2 echo settings.json is locked\n\"%SystemRoot%\\System32\\PING.EXE\" -n 2 127.0.0.1 >nul\necho vault ready\nexit /b 3",
+        );
         let said = std::sync::Mutex::new(Vec::new());
         let err = run_init(&exe, &|l| said.lock().unwrap().push(l)).unwrap_err();
         let said = said.into_inner().unwrap();
@@ -594,12 +597,10 @@ mod tests {
         assert_eq!(err, "mnemo init stopped with code 3: settings.json is locked");
     }
 
-    #[cfg(unix)]
     #[test]
     fn init_that_succeeds_is_ok() {
         let root = temp_dir("mnemo-install-init-ok");
-        let exe = root.join("mnemo");
-        crate::testutil::write_script(&exe, "#!/bin/sh\necho done\n");
+        let exe = crate::testutil::stand_in(&root, "mnemo", "echo done\n", "echo done");
         assert_eq!(run_init(&exe, &|_| {}), Ok(()));
     }
 

@@ -1873,19 +1873,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&profile);
     }
 
-    #[cfg(unix)]
     fn fake_mnemo(dir: &Path) -> String {
-        let bin = dir.join("mnemo");
-        crate::testutil::write_script(&bin, "#!/bin/sh\necho \"ran $* in $(pwd)\"\necho oops >&2\nexit 3\n");
+        let bin = crate::testutil::stand_in(dir, "mnemo", "echo \"ran $* in $(pwd)\"\necho oops >&2\nexit 3\n", "echo ran %* in %CD%\n>&2 echo oops\nexit /b 3");
         bin.to_string_lossy().to_string()
     }
 
-    #[cfg(unix)]
     #[test]
     fn run_passes_allowed_args_in_cwd_and_returns_both_streams_and_code() {
         let dir = crate::testutil::temp_dir("vault-run");
         let bin = fake_mnemo(&dir);
-        let cwd = dir.canonicalize().unwrap();
+        let cwd = crate::testutil::dir_as_named(&dir);
         let r = run_with(&bin, "/usr/bin:/bin", "why", &strs(&["--json"]), &cwd.to_string_lossy());
         // One comparison, so a spawn failure shows its stderr instead of an empty stdout.
         assert_eq!(
@@ -1895,7 +1892,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn run_refuses_before_spawning() {
         let dir = crate::testutil::temp_dir("vault-refuse");
@@ -1912,12 +1908,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_run_past_its_timeout_is_stopped_and_says_so() {
         let dir = crate::testutil::temp_dir("vault-timeout");
-        let bin = dir.join("mnemo");
-        crate::testutil::write_script(&bin, "#!/bin/sh\necho started\nexec sleep 30\n");
+        // By its full path: the run's PATH is the one given here.
+        let bin = crate::testutil::stand_in(&dir, "mnemo", "echo started\nexec sleep 30\n", "echo started\n\"%SystemRoot%\\System32\\PING.EXE\" -n 30 127.0.0.1 >nul");
         let bin = bin.to_string_lossy().to_string();
         let started = std::time::Instant::now();
         let r = exec_within(&bin, "/usr/bin:/bin", "doctor", &[], &dir.to_string_lossy(), Some(std::time::Duration::from_millis(300)));

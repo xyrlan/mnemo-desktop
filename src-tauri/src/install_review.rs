@@ -325,21 +325,27 @@ mod tests {
         assert_eq!(run_args("p").join(" "), "backfill --project p --yes --extract --progress-json");
     }
 
-    #[cfg(unix)]
     #[test]
     fn keys_go_to_stdin_one_per_line_and_the_call_runs_in_the_root() {
         let dir = temp_dir("install-review-run");
-        let bin = dir.join("mnemo");
-        crate::testutil::write_script(&bin, "#!/bin/sh\necho \"$* in $(pwd)\"\ncat\necho warn >&2\nexit 0\n");
-        let root = dir.canonicalize().unwrap();
-        let r = run_step_with(&bin.to_string_lossy(), "/usr/bin:/bin", Step::Promote, "p", &root.to_string_lossy(), &strs(&["project/a", "feedback/b"]));
+        // `findstr "^"` is `cat`: every line it reads. By its full path: the run's PATH is the one given here.
+        let bin = crate::testutil::stand_in(
+            &dir,
+            "mnemo",
+            "echo \"$* in $(pwd)\"\ncat\necho warn >&2\nexit 0\n",
+            "echo %* in %CD%\n\"%SystemRoot%\\System32\\findstr.exe\" \"^\"\n>&2 echo warn\nexit /b 0",
+        );
+        let root = crate::testutil::dir_as_named(&dir);
+        let mut r = run_step_with(&bin.to_string_lossy(), "/usr/bin:/bin", Step::Promote, "p", &root.to_string_lossy(), &strs(&["project/a", "feedback/b"]));
+        // A batch file's `echo` ends its lines with CRLF, as Windows programs do.
+        r.stdout = r.stdout.replace("\r\n", "\n");
         assert_eq!(
             (r.stdout.as_str(), r.stderr.trim(), r.code),
             (format!("inbox --promote --keys-stdin --json in {}\nproject/a\nfeedback/b\n", root.display()).as_str(), "warn", Some(0))
         );
         // A step without keys reads nothing: stdin is closed, so `cat` ends at once.
         let l = run_step_with(&bin.to_string_lossy(), "/usr/bin:/bin", Step::List, "p", &root.to_string_lossy(), &[]);
-        assert_eq!(l.stdout, format!("inbox --origin backfill --project p --json in {}\n", root.display()));
+        assert_eq!(l.stdout.replace("\r\n", "\n"), format!("inbox --origin backfill --project p --json in {}\n", root.display()));
         let refused = run_step_with(&bin.to_string_lossy(), "/usr/bin:/bin", Step::Drop, "p", &root.to_string_lossy(), &strs(&["--all"]));
         assert_eq!((refused.code, refused.stdout.as_str()), (None, ""));
         let _ = std::fs::remove_dir_all(&dir);
