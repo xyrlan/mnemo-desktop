@@ -19,6 +19,7 @@ import { saveSetting, settingsStore } from '../settings/app-store'
 import { MemoryPanel } from './memory/MemoryPanel'
 import { memoryClient } from './memory/client'
 import type { ChildMemory } from './memory/types'
+import { basename } from '../path/path'
 import { pollWhileShown } from '../shell/while-shown'
 
 function MissionPane({ id: paneId, props }: PaneViewProps) {
@@ -80,7 +81,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
   }
 
   const word = child ? childWord(child) : 'stopped'
-  const folder = child?.cwd.split('/').pop()
+  const folder = child && basename(child.cwd)
   return (
     <div className="ms-pane" data-pane={paneId}>
       <div className="ms-head flex items-start gap-3 border-b border-border px-3 py-2" data-ui>

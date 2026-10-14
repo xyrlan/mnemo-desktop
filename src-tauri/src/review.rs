@@ -310,10 +310,9 @@ pub fn parse_view(json: &str) -> Result<Review, String> {
 // ------------------------------------------------------------- running --
 
 fn run_gh(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let out = crate::proc::command("gh")
+    let out = crate::proc::tool("gh", &login_path())
         .args(args)
         .current_dir(cwd)
-        .env("PATH", login_path())
         .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GH_MISSING.to_string() } else { e.to_string() })?;

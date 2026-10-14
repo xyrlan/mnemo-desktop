@@ -1,7 +1,6 @@
 import type { State } from '../layout/store'
 import { leaves } from '../layout/tree'
-
-const dirname = (p: string) => p.replace(/\/+[^/]*$/, '') || '/'
+import { dirname, isAbsolute } from '../path/path'
 
 /** Where `mnemo import` runs, which decides the project the rules are staged for:
  *  a terminal's cwd in the active tab (the focused pane first), else the tree root of
@@ -19,7 +18,7 @@ export function importCwd(s: Pick<State, 'tabs' | 'activeTab' | 'panes'>): strin
     if (pane?.view !== 'editor') continue
     const { root, path } = pane.props ?? {}
     if (typeof root === 'string' && root) return root
-    if (typeof path === 'string' && path.startsWith('/')) return dirname(path)
+    if (typeof path === 'string' && isAbsolute(path)) return dirname(path)
   }
   return Object.values(s.panes).find((p) => p.view === 'terminal' && p.cwd)?.cwd
 }

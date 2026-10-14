@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HomeRepo, HomeSnapshot } from '../home/types'
 import type { ChildSession, ParentSession, Snapshot } from '../mission/types'
 import { child, parent } from '../mission/fixtures'
-import { createFleet, PRS_EVERY, type FleetSources } from './create'
+import { createFleet, PRS_EVERY, type FleetSources, type PolledMove } from './create'
 import type { Shown } from '../shell/while-shown'
 import { HOOK_TRUST_MS } from './model'
 import type { AgentEvent, WorktreeInfo } from './upstream'
@@ -341,6 +341,58 @@ describe('state from hooks', () => {
     h.emit({ sessionId: 'c1c1c1c1-2222-3333', kind: 'stop', cwd: KID })
     expect(h.wt(KID).agents).toHaveLength(1)
     expect(h.wt(KID).agents[0]).toMatchObject({ sessionId: 'c1c1c1c1', state: 'done' })
+  })
+})
+
+describe('polled moves', () => {
+  const watch = (h: ReturnType<typeof harness>) => {
+    const seen: PolledMove[] = []
+    stops.push(h.fleet.onPolledMove((m) => void seen.push(m)))
+    return seen
+  }
+
+  it('tells what a poll saw move, once the fleet shows it, and nothing of the first snapshot', async () => {
+    const h = harness()
+    await h.settle()
+    const seen = watch(h)
+    let shown: string | undefined
+    stops.push(h.fleet.onPolledMove(() => void (shown = h.wt(ROOT).agents[0]?.state)))
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'permission prompt', cwd: ROOT }), parent({ session_id: 'b', status: 'busy', cwd: WT })])
+    expect(seen).toEqual([])
+    h.later(30_000)
+    h.poll([parent({ session_id: 'a', status: 'busy', cwd: ROOT }), parent({ session_id: 'b', status: 'idle', cwd: WT })])
+    expect(seen).toEqual([
+      { sessionId: 'a', cwd: ROOT, child: false, state: 'working', waitingFor: null, ask: null, at: 1_030_000 },
+      { sessionId: 'b', cwd: WT, child: false, state: 'done', waitingFor: null, ask: null, at: 1_030_000 },
+    ])
+    expect(shown).toBe('working')
+    h.later(30_000)
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'input needed', cwd: ROOT }), parent({ session_id: 'b', status: 'idle', cwd: WT })])
+    expect(seen.slice(2)).toMatchObject([{ sessionId: 'a', state: 'needs-you', waitingFor: 'question' }])
+  })
+
+  it('tells of a child that appears asking, with what it asks', async () => {
+    const h = harness()
+    await h.settle()
+    h.poll([])
+    const seen = watch(h)
+    h.poll([], [child({ id: 'c1', session_id: 'c1-full', cwd: KID, tempo: 'blocked', needs: 'approve Bash: rm -rf dist' })])
+    expect(seen).toEqual([{ sessionId: 'c1-full', cwd: KID, child: true, state: 'needs-you', waitingFor: 'permission', ask: 'Bash: rm -rf dist', at: 1_000_000 }])
+  })
+
+  it('tells nothing a hook already moved', async () => {
+    const h = harness()
+    await h.settle()
+    h.poll([parent({ session_id: 'a', status: 'busy', cwd: ROOT })])
+    const seen = watch(h)
+    h.emit({ sessionId: 'a', kind: 'notification', message: 'Claude needs your permission to use Bash' })
+    h.later(HOOK_TRUST_MS)
+    h.poll([parent({ session_id: 'a', status: 'waiting', waiting_for: 'permission prompt', cwd: ROOT })])
+    h.emit({ sessionId: 'a', kind: 'prompt' })
+    h.emit({ sessionId: 'a', kind: 'stop' })
+    h.later(HOOK_TRUST_MS)
+    h.poll([parent({ session_id: 'a', status: 'idle', cwd: ROOT })])
+    expect(seen).toEqual([])
   })
 })
 

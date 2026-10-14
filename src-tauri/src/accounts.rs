@@ -767,18 +767,25 @@ impl PaneAccounts {
     }
 
     pub fn spawned(&self, id: PaneId, account: String) {
-        let mut panes = self.panes.lock().unwrap_or_else(|e| e.into_inner());
-        panes.insert(id, account);
-        self.persist(&panes);
+        if let Err(e) = self.record(id, account) {
+            log::warn!("accounts: which account each pane runs on is not kept: {e}");
+        }
     }
 
-    /// `id` now runs on `account`: its session moved there. Refuses an account not in the list.
+    /// `id` now runs on `account`: its session moved there. Refuses an account not in the list,
+    /// and says so when the record could not be written: this launch knows it, the next would not.
     pub fn moved(&self, id: PaneId, account: &str) -> Result<(), String> {
         if !self.place.state()?.accounts.iter().any(|a| a.id == account) {
             return Err(format!("no account `{account}`"));
         }
-        self.spawned(id, account.to_string());
-        Ok(())
+        self.record(id, account.to_string())
+            .map_err(|e| format!("pane {id} moved to account `{account}`, but that could not be written, so a relaunch would place it on its old account: {e}"))
+    }
+
+    fn record(&self, id: PaneId, account: String) -> Result<(), String> {
+        let mut panes = self.panes.lock().unwrap_or_else(|e| e.into_inner());
+        panes.insert(id, account);
+        self.persist(&panes)
     }
 
     /// The account of each pane in `live`; the others are forgotten.
@@ -787,17 +794,17 @@ impl PaneAccounts {
         let before = panes.len();
         panes.retain(|id, _| live.contains(id));
         if panes.len() != before {
-            self.persist(&panes);
+            if let Err(e) = self.persist(&panes) {
+                log::warn!("accounts: which account each pane runs on is not kept: {e}");
+            }
         }
         panes.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
-    fn persist(&self, panes: &BTreeMap<PaneId, String>) {
-        if let Some(file) = &self.file {
-            let written = serde_json::to_value(panes).map_err(|e| e.to_string()).and_then(|v| write_json(file, &v));
-            if let Err(e) = written {
-                log::warn!("accounts: which account each pane runs on is not kept: {e}");
-            }
+    fn persist(&self, panes: &BTreeMap<PaneId, String>) -> Result<(), String> {
+        match &self.file {
+            Some(file) => serde_json::to_value(panes).map_err(|e| e.to_string()).and_then(|v| write_json(file, &v)),
+            None => Ok(()),
         }
     }
 }
@@ -1298,6 +1305,22 @@ mod tests {
         assert_eq!(PaneAccounts::new(p.clone(), Some(file)).of(&[1]), HashMap::from([(1, "work".to_string())]), "kept across launches");
         assert_eq!(panes.moved(1, "gone"), Err("no account `gone`".into()));
         assert_eq!(panes.of(&[1]), HashMap::from([(1, "work".to_string())]));
+    }
+
+    /// #367: a move whose record cannot be written is reported, not answered `Ok`.
+    #[test]
+    fn a_moved_pane_whose_record_cannot_be_written_says_so() {
+        let p = place("moved-unwritable");
+        p.add("Work").unwrap();
+        // The file's folder is a file: no platform can write under it.
+        let blocker = p.app.join("blocker");
+        std::fs::create_dir_all(&p.app).unwrap();
+        std::fs::write(&blocker, "").unwrap();
+        let panes = PaneAccounts::new(p.clone(), Some(blocker.join(PANES_FILE)));
+        panes.spawned(1, "default".into());
+        let e = panes.moved(1, "work").unwrap_err();
+        assert!(e.contains("pane 1 moved to account `work`") && e.contains("could not be written"), "{e}");
+        assert_eq!(panes.of(&[1]), HashMap::from([(1, "work".to_string())]), "this launch still knows where it runs");
     }
 
     #[test]

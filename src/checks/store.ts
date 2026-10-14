@@ -99,14 +99,16 @@ export function createChecksStore(client: ChecksClient, now: () => number = Date
       loadDetails(worktree, check) {
         const key = detailsKey(check)
         const have = get().details[key]
-        if (have?.details) return Promise.resolve(have)
+        // Annotations that could not be read are not kept as none: they are asked for again.
+        if (have?.details && !have.details.annotationsError) return Promise.resolve(have)
         const running = inflight.get(key)
         if (running) return running
         const put = (d: DetailState) => {
           set((s) => ({ details: { ...s.details, [key]: d } }))
           return d
         }
-        put({ loading: true, details: null, error: null })
+        // What was read stays shown while it is read again.
+        put({ loading: true, details: have?.details ?? null, error: null })
         const p = (check.url ? client.details(worktree, check.url) : Promise.reject(new Error('This check links nowhere')))
           .then(
             (details) => put({ loading: false, details, error: null }),

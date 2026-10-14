@@ -70,9 +70,17 @@ libc = "0.2"
 
 # An account's shared dirs are junctions, which need no privilege to make (accounts.rs). The
 # process table and a pid's exit code are read from the system (procs.rs), and a process's name
-# for what a closing window would end (pty/closing.rs).
+# for what a closing window would end (pty/closing.rs). The time zone the Memory panel's times are
+# read in (memory_feed.rs). `--version` prints into the terminal's console (console.rs), and a
+# start that fails says so in a message box (crash.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
+
+# A start that fails says so in a dialog (crash.rs): before the app, or after it failed, there
+# is no AppHandle for the dialog plugin to show one with. The plugin's own rfd, no new crate;
+# Windows uses user32's message box instead.
+[target.'cfg(not(windows))'.dependencies]
+rfd = { version = "0.16", default-features = false }
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -11,6 +11,7 @@ import { parentOf, waveLines, wavesOf, type Wave, type WaveLine } from './model'
 import { placeDispatch } from './open'
 import { seenStore } from './seen'
 import { reveal, select } from './store'
+import { norm } from '../path/path'
 
 /** The model on the app's live stores: the mission snapshot, the fleet's worktrees, the open
  *  workspaces and the waves seen. */
@@ -26,8 +27,6 @@ export function knownWorktrees(repos: readonly RepoNode[], open: readonly string
 export function parentWorktree(childId: string): string | null {
   return parentOf(missionStore.getState().snapshot, childId, knownWorktrees(fleetStore.getState().repos, layout.getState().worktrees))
 }
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 
 /** The terminal of this app that `child`'s parent session runs in, if one does. */
 export function parentPaneOf(child: ChildSession): PaneId | null {

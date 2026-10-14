@@ -1,6 +1,6 @@
 import { subscribeAgentEvents } from '../agents/events'
 import { notifyAgent } from '../agents/notify'
-import { fleetStore } from '../fleet/store'
+import { fleetStore, subscribePolledMoves } from '../fleet/store'
 import { store as layout } from '../layout/app-store'
 import { leaves } from '../layout/tree'
 import { missionStore } from '../mission/app-store'
@@ -16,6 +16,7 @@ let focused = typeof document !== 'undefined' && document.hasFocus()
 
 export const notifier = createNotifier({
   subscribe: subscribeAgentEvents,
+  polled: subscribePolledMoves,
   repos: () => fleetStore.getState().repos,
   active: () => layout.getState().activeWorktree,
   shownPanes: () => layout.getState().tabs.flatMap((t) => leaves(t.root)),

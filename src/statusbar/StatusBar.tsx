@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useFleet } from '../fleet/store'
 import { useApp } from '../layout/app-store'
 import { useMission } from '../mission/app-store'
+import { explainErrors } from '../mission/errors'
 import { usePulse } from '../pulse/app-store'
 import { makeLevelClient, type LevelClient } from '../vaultlevel/client'
 import { levelOf, xpOf } from '../vaultlevel/level'
@@ -60,6 +61,8 @@ export default function StatusBar({ client = liveClient }: { client?: LevelClien
   const pulses = usePulse((s) => (active ? s.counts[active.id] ?? 0 : 0))
   const repos = useFleet((f) => f.repos)
   const agents = agentSummary(countAgents(repos))
+  // With the sessions unlisted, none is not known to be none (#367).
+  const unlisted = explainErrors(snap.errors, ['sessions'])
   const level = useVaultLevel(client)
 
   return (
@@ -72,7 +75,12 @@ export default function StatusBar({ client = liveClient }: { client?: LevelClien
       )}
       <span className="flex-1" />
       <span className="flex items-center gap-2" data-testid="sb-agents" aria-label="Agents by state">
-        {agents.length === 0 && <span>no agents</span>}
+        {agents.length === 0 && !unlisted.length && <span>no agents</span>}
+        {agents.length === 0 && unlisted.length > 0 && (
+          <span className="text-status-warning" title={unlisted.map((e) => e.text).join('\n')}>
+            agents unknown
+          </span>
+        )}
         {agents.map((a) => (
           <span key={a.state} className="flex items-center gap-1">
             <span className={`size-1.5 rounded-full ${DOT[a.state]}`} aria-hidden />

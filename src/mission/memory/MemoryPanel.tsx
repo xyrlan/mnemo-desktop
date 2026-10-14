@@ -3,6 +3,7 @@ import { BookOpen, Brain, ChevronRight, FileText, ShieldAlert, Zap } from 'lucid
 import { cn } from '@/ui/cn'
 import type { ChildMemory } from './types'
 import { groupHits, since } from './derive'
+import { basename } from '../../path/path'
 
 /** What the vault gave this child and what it pushed back against — visible on the
  *  mission pane itself, not only on the vault screen (round18 · child-memory). A strip under
@@ -40,7 +41,7 @@ export function MemoryPanel({ memory, hasSession }: { memory: ChildMemory | null
           <Group icon={FileText} label="Briefing">
             {memory.briefing ? (
               <div className="cmem-briefing truncate text-xs text-foreground" title={memory.briefing.path}>
-                {memory.briefing.path.split('/').pop()} <Since at={memory.briefing.at} />
+                {basename(memory.briefing.path)} <Since at={memory.briefing.at} />
               </div>
             ) : (
               <None>not recorded</None>

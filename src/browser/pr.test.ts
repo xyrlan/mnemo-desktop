@@ -1,4 +1,4 @@
-import { terminalCwd } from './pr'
+import { openBranchPr, terminalCwd } from './pr'
 import type { Node } from '../layout/tree'
 
 const split = (a: number, b: number): Node => ({
@@ -34,4 +34,16 @@ test('undefined when nothing reported a cwd', () => {
   }
   expect(terminalCwd(s)).toBeUndefined()
   expect(terminalCwd({ tabs: [], activeTab: '', panes: {} })).toBeUndefined()
+})
+
+test('the PR action opens the PR, or says which reason kept it from opening (#367)', async () => {
+  const opened: string[] = []
+  const told: string[] = []
+  const run = (answer: () => Promise<string>) => openBranchPr({ prUrl: answer, cwd: '/r', open: (u) => void opened.push(u), tell: (w) => void told.push(w) })
+  await run(async () => 'https://github.com/o/r/pull/4')
+  // Tauri rejects a command's `Err` with the bare string.
+  await run(() => Promise.reject('This branch has no pull request yet.'))
+  await run(() => Promise.reject(new Error('gh is not logged in to GitHub')))
+  expect(opened).toEqual(['https://github.com/o/r/pull/4'])
+  expect(told).toEqual(['This branch has no pull request yet.', 'gh is not logged in to GitHub'])
 })

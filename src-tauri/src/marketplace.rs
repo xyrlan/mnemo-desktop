@@ -711,8 +711,8 @@ impl Marketplace {
     }
 
     fn git(&self, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
-        let mut cmd = crate::proc::command("git");
-        cmd.args(args).env("PATH", &self.path_env).env("GIT_TERMINAL_PROMPT", "0").stdin(std::process::Stdio::null());
+        let mut cmd = crate::proc::tool("git", &self.path_env);
+        cmd.args(args).env("GIT_TERMINAL_PROMPT", "0").stdin(std::process::Stdio::null());
         if let Some(d) = cwd {
             cmd.current_dir(d);
         }
@@ -836,10 +836,9 @@ pub fn import_with(program: &str, path_env: &str, path: &str, cwd: &str) -> Resu
     if cwd.trim().is_empty() || !Path::new(cwd).is_dir() {
         return Err(format!("no project to import into: {cwd:?} is not a directory"));
     }
-    let out = crate::proc::command(program)
+    let out = crate::proc::tool(program, path_env)
         .args(["import", path])
         .current_dir(cwd)
-        .env("PATH", path_env)
         .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("{program}: {e}"))?;
@@ -866,10 +865,9 @@ fn combined(out: &std::process::Output) -> String {
 /// up), no stdin, no colour, no credential prompts. Ok with stdout on exit 0, Err
 /// with what it said otherwise.
 fn run_in(program: &str, args: &[&str], cwd: &Path, path_env: &str) -> Result<String, String> {
-    let out = crate::proc::command(program)
+    let out = crate::proc::tool(program, path_env)
         .args(args)
         .current_dir(cwd)
-        .env("PATH", path_env)
         .env("NO_COLOR", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GH_PROMPT_DISABLED", "1")
@@ -971,10 +969,9 @@ pub fn repo_with(path_env: &str, cwd: &str, vault: Option<&Path>) -> RepoRules {
 /// exit 0 (and whether the tree now has something to commit), Err with it otherwise.
 pub fn publish_with(program: &str, path_env: &str, root: &str) -> Result<Published, String> {
     let root = checked_root(root, path_env)?;
-    let out = crate::proc::command(program)
+    let out = crate::proc::tool(program, path_env)
         .arg("publish")
         .current_dir(&root)
-        .env("PATH", path_env)
         .env("NO_COLOR", "1")
         .stdin(std::process::Stdio::null())
         .output()
@@ -1116,17 +1113,16 @@ pub fn import_new_with(program: &str, path_env: &str, cwd: &str, vault: &Path) -
 
 // ------------------------------------------------------------ commands --
 
+/// A listing that panicked rejects (`listError` in the store), rather than listing nothing (#364).
 #[tauri::command]
-pub async fn marketplace_list() -> Vec<RuleSet> {
-    tauri::async_runtime::spawn_blocking(|| Marketplace::at_home().list(None)).await.unwrap_or_default()
+pub async fn marketplace_list() -> Result<Vec<RuleSet>, String> {
+    crate::crash::read("The rules listing", || Marketplace::at_home().list(None)).await
 }
 
 /// Fetches one source (or all, with `url` null) and lists again.
 #[tauri::command]
-pub async fn marketplace_refresh(url: Option<String>) -> Vec<RuleSet> {
-    tauri::async_runtime::spawn_blocking(move || Marketplace::at_home().list(Some(url.as_deref())))
-        .await
-        .unwrap_or_default()
+pub async fn marketplace_refresh(url: Option<String>) -> Result<Vec<RuleSet>, String> {
+    crate::crash::read("The rules listing", move || Marketplace::at_home().list(Some(url.as_deref()))).await
 }
 
 #[tauri::command]
@@ -1147,13 +1143,12 @@ pub async fn marketplace_import(path: String, cwd: String) -> Result<String, Str
 }
 
 #[tauri::command]
-pub async fn marketplace_repo(cwd: String) -> RepoRules {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn marketplace_repo(cwd: String) -> Result<RepoRules, String> {
+    crate::crash::read("The repo's rules", move || {
         let vault = crate::vault::vault_root();
         repo_with(&crate::mission::login_path(), &cwd, vault.as_deref())
     })
     .await
-    .unwrap_or_default()
 }
 
 #[tauri::command]

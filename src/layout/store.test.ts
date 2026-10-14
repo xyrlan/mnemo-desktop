@@ -1115,6 +1115,25 @@ describe('terminals that outlived the page', () => {
     expect(pty.spawned).toEqual([])
   })
 
+  test('on Windows a shell comes back in its worktree whichever spelling its folder came in (#355)', async () => {
+    const src = createStore(fakePty(), { workspace: () => null })
+    await src.getState().switchWorktree('C:/r')
+    await src.getState().newTab()
+    await src.getState().switchWorktree('C:/r-wt')
+    await src.getState().newTab()
+    await src.getState().switchWorktree('C:/r')
+    const saved = JSON.parse(JSON.stringify(src.getState().snapshotForSave()))
+
+    const orphans = [live(50, 'C:\\r-wt\\src'), live(51, '\\\\?\\C:\\r\\src\\'), live(52, 'c:\\r-wtx')]
+    const core = fakeSessions([live(1, 'C:/r'), live(2, 'C:/r-wt'), ...orphans])
+    const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
+    await s.getState().restore(saved)
+
+    expect(s.getState().worktreeTabs('C:/r-wt').map((t) => t.id)).toEqual(['tab-2', 'tab-50'])
+    expect(s.getState().tabs.map((t) => t.id)).toEqual(['tab-1', 'tab-51'])
+    expect(s.getState().worktreeTabs(ELSEWHERE).map((t) => t.id)).toEqual(['tab-52'])
+  })
+
   test('a workspace file that cannot be read still brings the shells back, and still says so', async () => {
     const core = fakeSessions([live(7, '/x')])
     const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })

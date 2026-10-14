@@ -3,7 +3,8 @@
 //! shell — is drawn as it was left, and not as an empty terminal.
 //!
 //! vt100 does the emulation. This adds what vt100 does not keep and a fresh xterm needs back:
-//! the title, the folder the shell last reported (OSC 7), focus reporting and the cursor shape.
+//! the title, the folder the shell last reported (OSC 7, or OSC 9;9 on Windows), focus reporting
+//! and the cursor shape.
 //!
 //! Shared by the app and the daemon binary, which includes this file by path: it names nothing
 //! outside `std` and its crates.
@@ -30,10 +31,13 @@ impl vt100::Callbacks for Extras {
 
     fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
         // vt100 splits on `;`, which a folder may hold.
-        if let [b"7", rest @ ..] = params {
-            if let Some(path) = parse_osc7(&rest.join(&b';')) {
-                self.cwd = Some(path);
-            }
+        let path = match params {
+            [b"7", rest @ ..] => parse_osc7(&rest.join(&b';')),
+            [b"9", b"9", rest @ ..] => parse_osc9_9(&rest.join(&b';')),
+            _ => None,
+        };
+        if let Some(path) = path {
+            self.cwd = Some(path);
         }
     }
 
@@ -48,8 +52,13 @@ impl vt100::Callbacks for Extras {
 }
 
 /// `file://host/path` → the path, percent-decoded; `None` when it is not a file URL or not UTF-8.
-/// The same reading as `src/terminal/osc7.ts`.
+/// On Windows the path is a drive's however it was spelled (`windows_path`). The same reading
+/// as `src/terminal/osc7.ts`.
 pub fn parse_osc7(data: &[u8]) -> Option<String> {
+    osc7_on(data, cfg!(windows))
+}
+
+fn osc7_on(data: &[u8], windows: bool) -> Option<String> {
     let rest = data.strip_prefix(b"file://")?;
     let path = &rest[rest.iter().position(|&b| b == b'/')?..];
     let mut out = Vec::with_capacity(path.len());
@@ -64,7 +73,31 @@ pub fn parse_osc7(data: &[u8]) -> Option<String> {
             i += 1;
         }
     }
-    String::from_utf8(out).ok()
+    let path = String::from_utf8(out).ok()?;
+    Some(if windows { windows_path(&path) } else { path })
+}
+
+/// A Windows folder as a POSIX-spelled report names it, as `C:/rest`: a file URL's `/C:/rest`,
+/// Git Bash's (MSYS) `/c/rest`, Cygwin's `/cygdrive/c/rest`. Anything else is kept as it came.
+fn windows_path(path: &str) -> String {
+    let p = path.strip_prefix("/cygdrive").filter(|r| r.starts_with('/')).unwrap_or(path);
+    let b = p.as_bytes();
+    let drive = |rest: &str| format!("{}:/{}", (b[1] as char).to_ascii_uppercase(), rest.trim_start_matches('/'));
+    match b {
+        [b'/', l, b':', ..] if l.is_ascii_alphabetic() => drive(&p[3..]),
+        [b'/', l] if l.is_ascii_alphabetic() => drive(""),
+        [b'/', l, b'/', ..] if l.is_ascii_alphabetic() => drive(&p[3..]),
+        _ => path.to_string(),
+    }
+}
+
+/// OSC 9;9's folder (ConEmu's, read by Windows Terminal; sent by cmd's and PowerShell's prompt
+/// here, by WSL and starship there): the path as the shell spells it, maybe in double quotes.
+/// The same reading as `src/terminal/osc7.ts`.
+pub fn parse_osc9_9(data: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(data).ok()?;
+    let s = s.strip_prefix('"').and_then(|r| r.strip_suffix('"')).unwrap_or(s);
+    (!s.is_empty()).then(|| s.to_string())
 }
 
 pub struct Screen {
@@ -320,9 +353,42 @@ mod tests {
     }
 
     #[test]
+    fn windows_reports_read_as_a_drive_in_every_spelling() {
+        assert_eq!(osc7_on(b"file://pc/C:/Users/me/a%20b", true).as_deref(), Some("C:/Users/me/a b"));
+        assert_eq!(osc7_on(b"file:///c:/x", true).as_deref(), Some("C:/x"));
+        // Git Bash, as the bash integration sends `$PWD` there.
+        assert_eq!(osc7_on(b"file://pc/c/Users/me/repo", true).as_deref(), Some("C:/Users/me/repo"));
+        assert_eq!(osc7_on(b"file://pc/d", true).as_deref(), Some("D:/"));
+        assert_eq!(osc7_on(b"file://pc/cygdrive/e/w", true).as_deref(), Some("E:/w"));
+        // Not a drive: as it came. On macOS and Linux `/c/x` is a folder like any other.
+        assert_eq!(osc7_on(b"file://pc/home/me", true).as_deref(), Some("/home/me"));
+        assert_eq!(osc7_on(b"file://pc/c/Users", false).as_deref(), Some("/c/Users"));
+        assert_eq!(osc7_on(b"file://pc/C:/x", false).as_deref(), Some("/C:/x"));
+
+        assert_eq!(parse_osc9_9(br"C:\Users\me").as_deref(), Some(r"C:\Users\me"));
+        assert_eq!(parse_osc9_9(br#""C:\Program Files""#).as_deref(), Some(r"C:\Program Files"));
+        assert_eq!(parse_osc9_9(br"\\wsl.localhost\Ubuntu\home\me").as_deref(), Some(r"\\wsl.localhost\Ubuntu\home\me"));
+        assert_eq!(parse_osc9_9(b""), None);
+        assert_eq!(parse_osc9_9(br#""""#), None);
+    }
+
+    #[test]
+    fn the_screen_keeps_the_folder_of_either_report() {
+        let mut s = Screen::new(5, 40);
+        s.feed(b"\x1b]9;9;C:\\a;b\x1b\\PS C:\\a;b> ");
+        assert_eq!(s.cwd(), Some(r"C:\a;b"));
+        s.feed(b"\x1b]7;file://h/tmp/x\x07");
+        assert_eq!(s.cwd(), Some("/tmp/x"));
+        // OSC 9 alone is a notification, not a folder.
+        s.feed(b"\x1b]9;done\x07");
+        assert_eq!(s.cwd(), Some("/tmp/x"));
+    }
+
+    #[test]
     fn osc7_reads_like_the_front_does() {
         assert_eq!(parse_osc7(b"file://host/a%20b/c").as_deref(), Some("/a%20b/c".replace("%20", " ").as_str()));
-        assert_eq!(parse_osc7(b"file:///x").as_deref(), Some("/x"));
+        // On Windows `/x` is drive X (`windows_reports_read_as_a_drive_in_every_spelling`).
+        assert_eq!(osc7_on(b"file:///x", false).as_deref(), Some("/x"));
         assert_eq!(parse_osc7(b"file://host"), None);
         assert_eq!(parse_osc7(b"http://host/x"), None);
         assert_eq!(parse_osc7(b"file://h/%zz"), None);

@@ -1,14 +1,13 @@
 import type { State, Store } from '../layout/store'
 import { leaves, type PaneId } from '../layout/tree'
 import { groupOf } from '../layout/groups'
+import { norm } from '../path/path'
 
 /** Where the Dispatch tab goes (spec decision 4): one per parent workspace, "to the side" of the
  *  terminal of the session that dispatched it. */
 
 /** The pane view the tab registers (`view.tsx`). */
 export const VIEW = 'dispatch'
-
-const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 
 /** The Dispatch tab of `parent` in the shown worktree: its pane and its tab. */
 export function dispatchPane(s: Pick<State, 'tabs' | 'panes'>, parent: string): { pane: PaneId; tab: string } | null {

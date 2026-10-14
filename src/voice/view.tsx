@@ -1,17 +1,17 @@
 /** Voice dictation (issue #10). Voice has no pane view: it lives in `view.tsx` because
  *  App imports every `src/*\/view.tsx`, and that import is where it installs the ⌥Space
- *  chord, registers `dictation.toggle` (Mod+E, bound by the keymap) and the language action,
+ *  chord, registers `dictation.toggle` (Mod+E, bound by the keymap) and the language actions,
  *  and mounts Orca's indicator in the shell's overlay slot. */
 import { store } from '../layout/app-store'
 import { tauriPty } from '../pty/client'
 import { register, registerProvider } from '../actions/registry'
-import { shortcutKeys } from '../actions/chords'
+import { detectPlatform, shortcutKeys } from '../actions/chords'
 import { tauriVoice, type Language } from './client'
-import { createVoice, LANGUAGES, nextLanguage } from './controller'
+import { createVoice, firstLanguage, LANGUAGE_NAMES, LANGUAGES } from './controller'
 import { insert, resolveTarget, withSeparator } from './route'
 import { settingsStore } from '../settings/app-store'
 import { tauriMission } from '../mission/client'
-import { installChord } from './chord'
+import { holdKeys, installChord } from './chord'
 import { mountInSlot } from '../shell/slots'
 import { Indicator } from './Indicator'
 
@@ -46,21 +46,22 @@ const voice = createVoice({
 })
 
 const LANGUAGE_KEY = 'mnemo.voice.language'
-let language: Language = 'auto'
+let saved: string | null = null
 try {
-  const saved = localStorage.getItem(LANGUAGE_KEY) as Language | null
-  if (saved && LANGUAGES.includes(saved)) language = saved
+  saved = localStorage.getItem(LANGUAGE_KEY)
 } catch {
-  // Storage unavailable: stay on auto.
+  // Storage unavailable: go by the system's languages.
 }
+let language: Language = firstLanguage(saved, typeof navigator === 'undefined' ? [] : navigator.languages ?? [navigator.language])
 
-async function setLanguage(l: Language) {
+async function setLanguage(l: Language, persist: boolean) {
   try {
     await tauriVoice.setLanguage(l)
   } catch (e) {
     return voice.note(`language: ${e}`)
   }
   language = l
+  if (!persist) return
   try {
     localStorage.setItem(LANGUAGE_KEY, l)
   } catch {
@@ -68,29 +69,47 @@ async function setLanguage(l: Language) {
   }
 }
 
-const toggleKeys = shortcutKeys('dictation.toggle')
-register({ id: 'dictation.toggle', title: 'Dictate (start / stop)', run: () => voice.toggle() })
-registerProvider(() => [
-  {
-    id: 'voice.language',
-    title: `Voice language: ${language} → ${nextLanguage(language)}`,
+const platform = detectPlatform()
+const toggleKeys = shortcutKeys('dictation.toggle', platform)
+const hold = holdKeys(platform)
+register({
+  id: 'dictation.toggle',
+  title: `Dictate (start / stop) · or hold ${hold.join(platform === 'mac' ? '' : '+')} and speak`,
+  run: () => voice.toggle(),
+})
+// One entry per language, the current one marked: found by typing "dictation" or "language".
+registerProvider(() =>
+  LANGUAGES.map((l) => ({
+    id: `voice.language.${l}`,
+    title: `Dictation language: ${LANGUAGE_NAMES[l]}${l === language ? ' (current)' : ''}`,
     run: async () => {
-      await setLanguage(nextLanguage(language))
-      voice.note(`voice language: ${language}`)
+      await setLanguage(l, true)
+      voice.note(`dictation language: ${LANGUAGE_NAMES[language]}`)
     },
-  },
-])
+  })),
+)
 
-if (language !== 'auto') void setLanguage(language)
+// The backend starts on `auto`; tell it what this run starts on, without saving a guess.
+if (language !== 'auto') void setLanguage(language, saved === language)
 const uninstallChord = installChord(voice)
 const unlistenProgress = tauriVoice.onProgress(voice.progress)
+const unlistenLost = tauriVoice.onLost(voice.lost)
 function DictationIndicator() {
-  return <Indicator store={voice.store} shortcut={toggleKeys} onStop={() => void voice.end()} />
+  return (
+    <Indicator
+      store={voice.store}
+      shortcut={toggleKeys}
+      hold={hold}
+      onStop={() => void voice.end()}
+      onDismiss={voice.dismiss}
+    />
+  )
 }
 const unmount = mountInSlot('overlay', DictationIndicator)
 
 import.meta.hot?.dispose(() => {
   uninstallChord()
   void unlistenProgress.then((u) => u())
+  void unlistenLost.then((u) => u())
   unmount()
 })

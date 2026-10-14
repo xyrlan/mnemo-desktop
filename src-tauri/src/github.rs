@@ -352,8 +352,8 @@ enum Gh {
 }
 
 fn gh(args: &[&str], cwd: Option<&Path>) -> Gh {
-    let mut cmd = crate::proc::command("gh");
-    cmd.args(args).env("PATH", login_path()).stdin(std::process::Stdio::null());
+    let mut cmd = crate::proc::tool("gh", &login_path());
+    cmd.args(args).stdin(std::process::Stdio::null());
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }
@@ -465,10 +465,11 @@ fn project_cache() -> &'static Ttl<Option<Board>> {
 // ------------------------------------------------------------ commands --
 
 /// Only a logged-in answer is cached: after `gh auth login` in a terminal tab the next
-/// call must see it.
+/// call must see it. A read that panicked rejects (the store keeps its last answer) rather
+/// than answering "gh is not installed" (#364).
 #[tauri::command]
-pub async fn gh_auth() -> Auth {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn gh_auth() -> Result<Auth, String> {
+    crate::crash::read("The GitHub login check", || {
         auth_cache()
             .get_or("github.com", Instant::now(), || {
                 let a = read_auth();
@@ -477,7 +478,6 @@ pub async fn gh_auth() -> Auth {
             .unwrap_or_else(|a| a)
     })
     .await
-    .unwrap_or_default()
 }
 
 /// Open issues carrying any of `labels` (all of them when empty).

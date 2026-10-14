@@ -13,22 +13,25 @@ let root: Root
 let voice: Voice
 let stop: () => Promise<string>
 const onStop = vi.fn()
+const onDismiss = vi.fn()
+const client = (): VoiceClient => ({
+  start: async () => 'MacBook Pro Microphone',
+  stop: () => stop(),
+  setLanguage: async () => {},
+  onProgress: async () => () => {},
+  onLost: async () => () => {},
+})
 
 beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
   stop = async () => 'hello world'
-  const client: VoiceClient = {
-    start: async () => {},
-    stop: () => stop(),
-    setLanguage: async () => {},
-    onProgress: async () => () => {},
-  }
   // The real controller's live zustand store: a selector that built a new object each read
   // would loop here (#212).
-  voice = createVoice({ client, target: () => ({ kind: 'pty', pane: 1 }), insert: async () => true, linger: 60_000 })
+  voice = createVoice({ client: client(), target: () => ({ kind: 'pty', pane: 1 }), insert: async () => true, linger: 60_000 })
   onStop.mockReset()
+  onDismiss.mockReset()
 })
 
 afterEach(() => {
@@ -42,7 +45,7 @@ async function draw() {
   await act(async () => {
     root.render(
       <TooltipProvider>
-        <Indicator store={voice.store} shortcut={['⌘', 'E']} onStop={onStop} />
+        <Indicator store={voice.store} shortcut={['⌘', 'E']} hold={['⌥', 'Space']} onStop={onStop} onDismiss={onDismiss} />
       </TooltipProvider>,
     )
   })
@@ -53,6 +56,8 @@ async function draw() {
 const indicator = () => host.querySelector<HTMLElement>('[data-testid="dictation-indicator"]')
 const stopButton = () => host.querySelector<HTMLButtonElement>('button[aria-label="Stop dictation"]')
 const status = () => host.querySelector('[role="status"]')?.textContent
+const alert = () => host.querySelector('[role="alert"]')?.textContent
+const dismissButton = () => host.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')
 const set = (phase: Phase, download: number | null = null) => act(() => voice.store.setState({ phase, download }))
 
 describe('dictation indicator', () => {
@@ -65,7 +70,8 @@ describe('dictation indicator', () => {
     await draw()
     await act(async () => voice.begin())
     expect(indicator()?.dataset.phase).toBe('listening')
-    expect(status()).toBe('Listening')
+    expect(status()).toBe('Listening: MacBook Pro Microphone')
+    expect(host.querySelector('[data-testid="dictation-device"]')?.textContent).toBe('MacBook Pro Microphone')
     expect(indicator()!.className).toContain('rounded-full')
     expect(indicator()!.hasAttribute('data-ui')).toBe(true)
 
@@ -109,7 +115,52 @@ describe('dictation indicator', () => {
     expect(indicator()!.className).not.toContain('text-destructive')
 
     set({ kind: 'error', message: 'no microphone found' })
-    expect(status()).toBe('no microphone found')
+    expect(alert()).toBe('no microphone found')
     expect(indicator()!.className).toContain('text-destructive')
+  })
+
+  it('a listening take with no device name says only Listening', async () => {
+    await draw()
+    set({ kind: 'listening', device: null })
+    expect(status()).toBe('Listening')
+    expect(host.querySelector('[data-testid="dictation-device"]')).toBeNull()
+  })
+
+  it('shows an error whole, wrapped, with a Dismiss that keeps focus', async () => {
+    const long = 'microphone Realtek(R) Audio: Failed to initialize audio client: The audio endpoint device has been unplugged'
+    await draw()
+    set({ kind: 'error', message: long })
+    const text = host.querySelector<HTMLElement>('[data-testid="dictation-text"]')!
+    expect(text.textContent).toBe(long)
+    expect(text.className).not.toContain('truncate')
+    expect(text.className).toContain('whitespace-normal')
+    expect(indicator()!.className).toContain('rounded-xl')
+    expect(stopButton()).toBeNull()
+    const button = dismissButton()!
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    button.dispatchEvent(down)
+    expect(down.defaultPrevented).toBe(true)
+    act(() => button.click())
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
+
+  it('has no Dismiss but on an error', async () => {
+    await draw()
+    set({ kind: 'note', text: 'no speech heard' })
+    expect(dismissButton()).toBeNull()
+    set({ kind: 'done', text: 'x', landed: true })
+    expect(dismissButton()).toBeNull()
+  })
+
+  it('an error from the real controller stays past the linger and goes on Dismiss', async () => {
+    stop = async () => Promise.reject('model download: stalled, nothing arrived in 30 s')
+    voice = createVoice({ client: client(), target: () => ({ kind: 'pty', pane: 1 }), insert: async () => true, linger: 10 })
+    await draw()
+    await act(async () => voice.begin())
+    await act(async () => voice.end())
+    await act(() => new Promise((r) => setTimeout(r, 50)))
+    expect(alert()).toBe('model download: stalled, nothing arrived in 30 s')
+    await act(async () => voice.dismiss())
+    expect(indicator()).toBeNull()
   })
 })
