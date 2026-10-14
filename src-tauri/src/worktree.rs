@@ -181,12 +181,24 @@ fn copy_included(root: &Path, tree: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The setup command's argv: the user's own line, handed to a shell as a whole.
-fn setup_argv(setup: &str) -> Vec<String> {
-    if cfg!(windows) {
-        vec!["cmd".into(), "/C".into(), setup.into()]
-    } else {
-        vec!["sh".into(), "-c".into(), setup.into()]
+/// The setup command: the user's own line, handed to a shell as a whole, and the shell's name.
+///
+/// On Windows the line goes to `cmd` as typed. As one argument it would be quoted the C
+/// runtime's way (`"` as `\"`), which `cmd` does not read: `echo "a b"` would run as
+/// `echo \"a b\"`. `/S /C "<line>"` has `cmd` drop the outer quotes and run the rest verbatim.
+fn setup_command(setup: &str) -> (&'static str, std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = crate::proc::tool("cmd", &crate::mission::login_path());
+        cmd.raw_arg("/S /C").raw_arg(format!("\"{setup}\""));
+        ("cmd", cmd)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut sh = crate::proc::tool("sh", &crate::mission::login_path());
+        sh.arg("-c").arg(setup);
+        ("sh", sh)
     }
 }
 
@@ -201,7 +213,8 @@ fn start_setup(tree: &str, setup: &str, sink: Arc<dyn Fn(JobEvent) + Send + Sync
         }
         sink(e);
     });
-    if let Err(e) = job::run(&id, tree, &setup_argv(setup), forward) {
+    let (program, command) = setup_command(setup);
+    if let Err(e) = job::start(&id, tree, program, command, forward) {
         setups().remove(tree);
         return Err(e);
     }
@@ -892,6 +905,27 @@ mod tests {
         assert_eq!(code, Some(4));
         assert_eq!(lines, [made.path.clone()]);
         assert_eq!(list(&s(&root)).unwrap()[1].setup_job, None);
+        remove(&made.path, false).unwrap();
+    }
+
+    /// A setup line runs as typed, quotes included: on Windows as `cmd` reads it, not as the C
+    /// runtime would quote one argument (`echo \"a b\"`).
+    #[test]
+    fn a_setup_line_with_quotes_runs_as_typed() {
+        let root = repo("wt-setup-quotes");
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let sink: Arc<dyn Fn(JobEvent) + Send + Sync> = Arc::new(move |e| tx.lock().unwrap().send(e).unwrap());
+        let (cmd, said) = if cfg!(windows) { (r#"echo "a b" & echo "c"& exit /b 4"#, [r#""a b" "#, r#""c""#]) } else { (r#"echo "a b"; echo "c"; exit 4"#, ["a b", "c"]) };
+        let made = create(&s(&root), "quoted", None, Some(cmd), sink).unwrap();
+        let mut lines = vec![];
+        let code = loop {
+            match rx.recv_timeout(Duration::from_secs(10)).expect("setup ends") {
+                JobEvent::Line(l) => lines.push(l.line),
+                JobEvent::Exit(x) => break x.code,
+            }
+        };
+        assert_eq!((lines, code), (said.map(String::from).to_vec(), Some(4)));
         remove(&made.path, false).unwrap();
     }
 

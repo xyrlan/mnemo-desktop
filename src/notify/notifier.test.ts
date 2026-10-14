@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { AgentEvent } from '../agents/events'
+import type { PolledMove } from '../fleet/create'
 import { COALESCE_MS, createNotifier, DONE_TTL_MS, MAX_CARDS, SOUND_GAP_MS, type NotifierDeps } from './notifier'
 import { REPOS } from './test-fleet'
 
 let emit: (e: AgentEvent) => void
+let poll: (m: PolledMove) => void
 let look: () => void
 let world: { active: string | null; shownPanes: number[]; focused: boolean; now: number }
 let native: Array<[string, string]>
@@ -16,6 +18,10 @@ function make(over: Partial<NotifierDeps> = {}) {
   return createNotifier({
     subscribe(cb) {
       emit = cb
+      return () => void unsubscribed++
+    },
+    polled(cb) {
+      poll = cb
       return () => void unsubscribed++
     },
     repos: () => REPOS,
@@ -233,7 +239,7 @@ test('stop unsubscribes and clears', () => {
   const n = make()
   emit(stop('s-feat', FEAT))
   n.stop()
-  expect(unsubscribed).toBe(2)
+  expect(unsubscribed).toBe(3)
   expect(n.cards.getState().cards).toEqual([])
   vi.advanceTimersByTime(DONE_TTL_MS)
 })
@@ -342,4 +348,90 @@ test('two sessions in one checkout that is not a dispatched tree keep a card eac
   emit(stop('s-a', '/code/lib'))
   emit(stop('s-b', '/code/lib'))
   expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-a', 's-b'])
+})
+
+describe('from polled moves, where no hook is heard (Windows; a dispatched child anywhere)', () => {
+  const moved = (sessionId: string, cwd: string, state: PolledMove['state'], over: Partial<PolledMove> = {}): PolledMove => ({
+    sessionId, cwd, child: false, state, waitingFor: state === 'needs-you' ? 'permission' : null, ask: null, at: 1, ...over,
+  })
+
+  test('a finished turn and an ask notify as a hook’s would, and going back to work clears the card', () => {
+    world.focused = false
+    const n = make()
+    poll(moved('s-x', '/code/lib', 'done'))
+    expect(n.cards.getState().cards).toMatchObject([{ sessionId: 's-x', kind: 'done', name: 'lib', message: 'Claude finished its turn' }])
+    expect([sounds, native]).toEqual([1, [['lib', 'Claude finished its turn']]])
+
+    poll(moved('s-x', '/code/lib', 'working'))
+    expect(n.cards.getState().cards).toEqual([])
+    world.now += SOUND_GAP_MS
+    poll(moved('s-x', '/code/lib', 'needs-you', { waitingFor: 'question' }))
+    expect(n.cards.getState().cards).toMatchObject([{ kind: 'question', message: 'Claude has a question for you' }])
+    expect(native).toHaveLength(2)
+    // Back at work, then done: news again, however soon.
+    poll(moved('s-x', '/code/lib', 'working'))
+    world.now += SOUND_GAP_MS
+    poll(moved('s-x', '/code/lib', 'done'))
+    expect(native).toHaveLength(3)
+  })
+
+  test('nothing for the worktree you are looking at', () => {
+    const n = make()
+    poll(moved('s-main', '/code/app', 'done'))
+    poll(moved('s-main', '/code/app', 'needs-you'))
+    expect([n.cards.getState().cards, sounds]).toEqual([[], 0])
+  })
+
+  test('a dispatched child’s ask notifies with what it asks; its finish is its parent’s news', () => {
+    world.focused = false
+    const n = make()
+    poll(moved('s-feat', FEAT, 'needs-you', { child: true, ask: 'Bash: pnpm test' }))
+    expect(n.cards.getState().cards).toMatchObject([{ key: `tree:${FEAT}`, kind: 'permission', name: 'feat', pane: 7, message: 'Needs your permission: Bash: pnpm test' }])
+    expect(native).toEqual([['app · feat', 'Needs your permission: Bash: pnpm test']])
+    poll(moved('s-feat', FEAT, 'working', { child: true }))
+    poll(moved('s-feat', FEAT, 'done', { child: true }))
+    expect([n.cards.getState().cards, native.length]).toEqual([[], 1])
+  })
+})
+
+describe('from both sources at once: one notification per event', () => {
+  const moved = (sessionId: string, cwd: string, state: PolledMove['state'], waitingFor: PolledMove['waitingFor'] = null): PolledMove => ({
+    sessionId, cwd, child: false, state, waitingFor, ask: null, at: 1,
+  })
+
+  test('a poll landing just before the hook: the hook’s words replace the card, and nothing chimes twice', () => {
+    world.focused = false
+    const n = make()
+    poll(moved('s-x', '/code/lib', 'needs-you', 'permission'))
+    const { id } = n.cards.getState().cards[0]
+    world.now += SOUND_GAP_MS
+    emit(ask('s-x', '/code/lib'))
+    expect(n.cards.getState().cards).toMatchObject([{ id, kind: 'permission', message: 'Claude needs your permission to use Bash' }])
+    expect([sounds, native.length]).toEqual([1, 1])
+
+    emit(prompt('s-x', '/code/lib', 'go on'))
+    poll(moved('s-x', '/code/lib', 'done'))
+    world.now += SOUND_GAP_MS
+    emit(stop('s-x', '/code/lib'))
+    expect([sounds, native.length]).toEqual([2, 2])
+  })
+
+  test('a poll after the hook keeps the hook’s card and says nothing more', () => {
+    world.focused = false
+    const n = make()
+    emit(ask('s-x', '/code/lib'))
+    world.now += SOUND_GAP_MS
+    poll(moved('s-x', '/code/lib', 'needs-you', 'permission'))
+    expect(n.cards.getState().cards).toMatchObject([{ message: 'Claude needs your permission to use Bash' }])
+    expect([sounds, native.length]).toEqual([1, 1])
+  })
+
+  test('a turn a quiet prompt started stays quiet when a poll sees it end before its stop hook', () => {
+    world.focused = false
+    const n = make()
+    emit(prompt('s-x', '/code/lib', REPORT))
+    poll(moved('s-x', '/code/lib', 'done'))
+    emit(stop('s-x', '/code/lib'))
+    expect([n.cards.getState().cards, sounds, native]).toEqual([[], 0, []])
+  })
 })

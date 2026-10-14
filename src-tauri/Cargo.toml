@@ -70,11 +70,12 @@ libc = "0.2"
 
 # An account's shared dirs are junctions, which need no privilege to make (accounts.rs). The
 # process table and a pid's exit code are read from the system (procs.rs), and a process's name
-# for what a closing window would end (pty/closing.rs). `--version` prints into the terminal's
-# console (console.rs), and a start that fails says so in a message box (crash.rs). The keys held
-# while a browser pane has focus (browser_keys.rs).
+# for what a closing window would end (pty/closing.rs). The time zone the Memory panel's times are
+# read in (memory_feed.rs). `--version` prints into the terminal's console (console.rs), and a
+# start that fails says so in a message box (crash.rs). The keys held while a browser pane has
+# focus (browser_keys.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # WebView2's own interfaces, at the versions wry uses: the keys a browser pane hands the host
 # first, and the app webview's browser keys (browser_keys.rs).
 webview2-com = "0.38"
