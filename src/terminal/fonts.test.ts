@@ -1,4 +1,4 @@
-import { WEIGHTS, families, loadFaces, onFaces, redraw } from './fonts'
+import { WEIGHTS, families, loadFaces, onFaces, redraw, track } from './fonts'
 
 const MONO = "'JetBrains Mono', ui-monospace, Menlo, monospace"
 
@@ -93,4 +93,22 @@ test('redrawing measures again and then drops the kept glyphs, leaving the famil
   // The change is what makes xterm measure; clearing comes last, or the wrong glyphs come back.
   expect(steps).toEqual(['family: monospace', `family: ${MONO}`, 'glyphs dropped'])
   expect(term.options.fontFamily).toBe(MONO)
+})
+
+test('one terminal dropping the shared glyphs makes every open one forget them (#393)', () => {
+  const dropped: string[] = []
+  const terminal = (name: string) => ({
+    options: { fontFamily: MONO },
+    clearTextureAtlas: () => dropped.push(name),
+  })
+  const [a, b, c, closed] = ['a', 'b', 'c', 'closed'].map(terminal)
+  const untrack = [a, b, c, closed].map(track)
+  untrack[3]()
+  redraw(c)
+  // c clears first, while it is the one whose cells are measured again; the rest only forget.
+  expect(dropped).toEqual(['c', 'a', 'b'])
+  untrack.forEach((u) => u())
+  dropped.length = 0
+  redraw(a)
+  expect(dropped).toEqual(['a'])
 })
