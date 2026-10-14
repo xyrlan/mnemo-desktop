@@ -130,10 +130,27 @@ fn say_failed_start(reason: &str) {
     if smoke() || SAID.swap(true, Ordering::SeqCst) {
         return;
     }
+    show_error("mnemo could not start", &format!("{reason}\n\n{}", where_to_read()));
+}
+
+/// user32's message box, not rfd's: rfd's Windows dialog is comctl32 v6's `TaskDialogIndirect`,
+/// which only a binary carrying Tauri's manifest can load. Linked into the test binary, which
+/// has none, it stopped every test from starting (STATUS_ENTRYPOINT_NOT_FOUND).
+#[cfg(windows)]
+fn show_error(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND};
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (title, text) = (wide(title), wide(text));
+    // SAFETY: both strings are NUL-terminated and outlive the call; no owner window.
+    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR | MB_SETFOREGROUND) };
+}
+
+#[cfg(not(windows))]
+fn show_error(title: &str, text: &str) {
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
-        .set_title("mnemo could not start")
-        .set_description(format!("{reason}\n\n{}", where_to_read()))
+        .set_title(title)
+        .set_description(text)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
 }
