@@ -3,7 +3,7 @@ import type { HomeSnapshot } from '../home/types'
 import { pruneSnapshot, type Snapshot } from '../mission/types'
 import { advance, buildRepos, eventNext, HOOK_TRUST_MS, keyFor, knownRepos, norm, polledAgents, prIndex, type Tracked } from './model'
 import type { AgentEvent, WorktreeInfo } from './upstream'
-import type { Fleet } from './types'
+import type { AgentState, Fleet, WaitingFor } from './types'
 
 /** Everything the fleet reads, injected so tests never touch Tauri (`store.ts` wires the app's). */
 export type FleetSources = {
@@ -32,10 +32,28 @@ export const POLL_MS = 30_000
 /** PRs and checks are read through `gh`, a few seconds a repo: every this many polls. */
 export const PRS_EVERY = 10
 
+/** An agent a poll saw move without a hook having said so: into `working`, or — what lights its
+ *  worktree — into `done` or `needs-you`. Where hooks are heard they move the agent first, so a
+ *  poll sees no move; where none are (Windows, a dispatched child anywhere) this is the news.
+ *  `child`: a dispatched child; `ask`: what it asks, when mnemo knows. Published once the fleet
+ *  shows the move, so the fleet's tree already names the agent and its pane. */
+export type PolledMove = {
+  sessionId: string
+  cwd: string
+  child: boolean
+  state: AgentState
+  waitingFor: WaitingFor
+  ask: string | null
+  at: number
+}
+
 export type FleetHandle = {
   store: StoreApi<Fleet>
   /** Listens to the sources and polls; returns the way to stop. */
   connect(): () => void
+  /** Calls `cb` with each `PolledMove` from now on; the first snapshot moves nothing, as the
+   *  agents found then were not seen to move. Returns the way to stop. */
+  onPolledMove(cb: (m: PolledMove) => void): () => void
 }
 
 export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): FleetHandle {
@@ -46,12 +64,14 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
   const listing = new Set<string>()
   const readAt = new Map<string, number>()
   let lastPoll: Snapshot | null = null
+  const watchers = new Set<(m: PolledMove) => void>()
+  let moves: PolledMove[] = []
 
   const trusted = (a: Tracked | undefined, at: number) => a?.hookAt != null && at - a.hookAt < HOOK_TRUST_MS
 
   /** A mission snapshot, taken in once: each agent moves to what it says, unless a hook spoke
    *  of it just now, and an agent it no longer lists is gone — unless the read failed. */
-  function takePoll(snap: Snapshot, at: number) {
+  function takePoll(snap: Snapshot, at: number, first: boolean) {
     const listed = new Set<string>()
     for (const p of polledAgents(pruneSnapshot(snap, at))) {
       listed.add(p.key)
@@ -60,7 +80,11 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
         agents.set(p.key, { ...prev, cwd: p.cwd || prev.cwd, name: p.name ?? prev.name })
         continue
       }
-      agents.set(p.key, advance(prev, p.next(prev), at, { sessionId: p.key, cwd: p.cwd, name: p.name, hookAt: prev?.hookAt ?? null }))
+      const next = advance(prev, p.next(prev), at, { sessionId: p.key, cwd: p.cwd, name: p.name, hookAt: prev?.hookAt ?? null })
+      agents.set(p.key, next)
+      const news = next.flaggedAt !== (prev?.flaggedAt ?? null)
+      if (first || !(news || (prev && prev.state !== 'working' && next.state === 'working'))) continue
+      moves.push({ sessionId: p.key, cwd: next.cwd, child: p.child, state: next.state, waitingFor: next.waitingFor, ask: p.ask, at })
     }
     if (snap.errors.length) return
     for (const [k, a] of agents) if (!listed.has(k) && !trusted(a, at)) agents.delete(k)
@@ -88,8 +112,9 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
     const at = now()
     const mission = src.mission()
     if (mission !== lastPoll && mission.at) {
+      const first = lastPoll === null
       lastPoll = mission
-      takePoll(mission, at)
+      takePoll(mission, at, first)
     }
     const home = src.home()
     const repos = knownRepos(home, mission)
@@ -109,6 +134,9 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
     })
     // A mission snapshot lands every few seconds; most change nothing the fleet shows.
     if (JSON.stringify(next) !== JSON.stringify(store.getState().repos)) store.setState({ repos: next })
+    const told = moves
+    moves = []
+    for (const m of told) for (const cb of watchers) cb(m)
   }
 
   function onEvent(e: AgentEvent) {
@@ -160,5 +188,10 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
     }
   }
 
-  return { store, connect }
+  function onPolledMove(cb: (m: PolledMove) => void) {
+    watchers.add(cb)
+    return () => void watchers.delete(cb)
+  }
+
+  return { store, connect, onPolledMove }
 }

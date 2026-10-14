@@ -62,18 +62,24 @@ export function alertFor(e: AgentEvent, repos: readonly RepoNode[]): Alert | nul
     if (k === 'none' || k === null) return null
     kind = k
   } else return null
-  const place = placeOf(e.cwd, repos)
-  const title = agentTitle(e.sessionId, repos)
+  return alertOf({ sessionId: e.sessionId, cwd: e.cwd, kind, message: e.message, at: e.at }, repos)
+}
+
+/** The alert of `kind` about session `sessionId` in `cwd`, worded for the card: a finished turn by
+ *  the agent's title, an ask by what it asks (`message`), else by its kind. */
+export function alertOf(a: { sessionId: string; cwd: string; kind: AlertKind; message?: string | null; at: number }, repos: readonly RepoNode[]): Alert {
+  const place = placeOf(a.cwd, repos)
+  const title = agentTitle(a.sessionId, repos)
   const message =
-    kind === 'done' ? (title ? `Finished: ${title}` : 'Claude finished its turn') : e.message?.trim() || (kind === 'permission' ? 'Claude needs your permission' : 'Claude has a question for you')
+    a.kind === 'done' ? (title ? `Finished: ${title}` : 'Claude finished its turn') : a.message?.trim() || (a.kind === 'permission' ? 'Claude needs your permission' : 'Claude has a question for you')
   return {
-    sessionId: e.sessionId,
-    kind,
+    sessionId: a.sessionId,
+    kind: a.kind,
     worktree: place?.path ?? null,
-    name: place?.name ?? baseName(e.cwd),
+    name: place?.name ?? baseName(a.cwd),
     repo: place?.repo ?? null,
     message,
-    at: e.at,
+    at: a.at,
   }
 }
 
