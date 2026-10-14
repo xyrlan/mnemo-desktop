@@ -1,7 +1,7 @@
 // adapted from stablyai/orca components/sidebar/SidebarNav.tsx [88-152],
 // components/sidebar/AgentDashboardSidebarEntry.tsx and components/ShortcutKeyCombo.tsx (MIT, 122b8c25)
 import React, { useMemo } from 'react'
-import { LayoutDashboard, ListTodo, Search, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, ListTodo, Orbit, Search, type LucideIcon } from 'lucide-react'
 import { cn } from '@/ui/cn'
 import type { AgentState } from '../fleet/types'
 import { AgentQuestionIcon } from './agent-glyphs'
@@ -69,7 +69,7 @@ function DashboardBucketCounts(): React.JSX.Element | null {
   )
 }
 
-/** Search, Tasks and the Agent Dashboard: each hands off to the piece that owns it by action id. */
+/** Search, Tasks, the Agent Dashboard and the Nexus: each hands off to the piece that owns it by action id. */
 export const SidebarNav = React.memo(function SidebarNav() {
   return (
     <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
@@ -89,6 +89,7 @@ export const SidebarNav = React.memo(function SidebarNav() {
       <NavEntry icon={LayoutDashboard} label="Agent Dashboard" onClick={() => run('dashboard.toggle')}>
         <DashboardBucketCounts />
       </NavEntry>
+      <NavEntry icon={Orbit} label="Nexus" onClick={() => run('nexus.toggle')} />
     </div>
   )
 })

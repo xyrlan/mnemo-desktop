@@ -1,0 +1,18 @@
+Nexus sprites — licence
+
+The images in this directory (`src/nexus/sprites/*.png`) are NOT covered by the MIT licence that
+covers the rest of this repository.
+
+They were generated with Higgsfield (higgsfield.ai) and then cut, scaled and palette-mapped into
+pixel art by this project. Higgsfield's Terms of Use (version of 2026-07-26, section 5.2(iv)) bar
+using its outputs, or permitting any third party to use them, to train, fine-tune or distil any
+machine-learning model.
+
+Permission is granted, free of charge, to use, copy, modify and redistribute these images, alone or
+as part of other works, provided that:
+
+1. they, and works derived from them, are not used to train, fine-tune, distil or evaluate any
+   machine-learning model, and are not included in any dataset intended for such use; and
+2. this licence travels with every copy of the images or of works derived from them.
+
+THE IMAGES ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
