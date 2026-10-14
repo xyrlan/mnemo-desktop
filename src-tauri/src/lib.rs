@@ -508,13 +508,45 @@ pub fn run() {
         })
         // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
         // Only terminals the app held itself, with no daemon to hand them to, end here.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                window.state::<PtyState>().0.release();
+        .on_window_event(|window, event| match event {
+            // Where they do end with the window, it asks first when one is running something (#338).
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                if let Some(question) = pty::closing::question(&window.state::<PtyState>().0.busy()) {
+                    api.prevent_close();
+                    ask_to_close(window, question);
+                }
             }
+            tauri::WindowEvent::Destroyed => window.state::<PtyState>().0.release(),
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running mnemo-desktop");
+}
+
+/// Asks `question` over a window that was asked to close, and closes it on a yes. One question
+/// at a time: a second click on the close button while it is up asks nothing more.
+fn ask_to_close(window: &tauri::Window, question: String) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    static ASKING: AtomicBool = AtomicBool::new(false);
+    if ASKING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let closing = window.clone();
+    window
+        .dialog()
+        .message(question)
+        .title("Close mnemo?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("End them and close".into(), "Keep open".into()))
+        .parent(window)
+        .show(move |close| {
+            ASKING.store(false, Ordering::SeqCst);
+            if close {
+                // Past the question: `destroy` does not ask the window again.
+                let _ = closing.destroy();
+            }
+        });
 }
 
 #[cfg(test)]

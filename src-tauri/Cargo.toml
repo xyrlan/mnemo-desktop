@@ -70,8 +70,9 @@ libc = "0.2"
 
 # An account's shared dirs are junctions, which need no privilege to make (accounts.rs).
 [target.'cfg(windows)'.dependencies]
-# The host's tests ask Windows whether a process is still there (pty/host.rs).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading"] }
+# The process table, for what a closing window would end (pty/closing.rs); the host's tests ask
+# whether a process is still there (pty/host.rs).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading"] }
 
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
