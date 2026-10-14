@@ -480,6 +480,23 @@ describe('polling', () => {
     }
   })
 
+  it('still takes each mission snapshot while hidden: the agents move and nothing waits for the fleet poll', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness({ pollMs: 30_000, shown: { hidden: () => true, onShow: () => () => {} } })
+      await vi.advanceTimersByTimeAsync(0)
+      // The mission poll (shell/mission-poll.ts) refreshes the snapshot every 15 s while hidden.
+      for (const status of ['busy', 'idle', 'busy'] as const) {
+        await vi.advanceTimersByTimeAsync(15_000)
+        h.poll([parent({ session_id: 'a', status, cwd: ROOT })])
+        expect(h.wt(ROOT).agents.map((a) => a.state)).toEqual([status === 'busy' ? 'working' : 'done'])
+      }
+      expect(h.reload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops listening when disconnected', async () => {
     const h = harness()
     await h.settle()

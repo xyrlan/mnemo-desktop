@@ -146,8 +146,10 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number; shown?: 
   function connect() {
     const offs = [src.onChange(sync), src.subscribeAgentEvents(onEvent)]
     let tick = 0
-    // Hidden, it waits: the mission poll and the hooks keep the agents (and so the
-    // notifications) current; what this adds is worktree listings and PRs nobody sees.
+    // Hidden, it waits. The agents (and so the notifications) still move: `pollMission`
+    // (App.tsx → shell/mission-poll.ts) refreshes the mission snapshot every 3 s, 15 s while
+    // hidden, and `sync` takes each one through `onChange`; hooks move them sooner where heard.
+    // What this loop adds is the worktree listings, PRs and Home, which nobody sees then.
     const stop = pollWhileShown(
       () => poll({ withPrs: tick++ % PRS_EVERY === 0, home: src.home().repos.length === 0 }),
       opts.pollMs ?? POLL_MS,
