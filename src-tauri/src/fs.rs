@@ -41,7 +41,10 @@ impl Scope {
     }
 }
 
-/// Folders nothing is ever opened inside, as path segments from the root.
+/// Folders nothing is ever opened inside, as path segments from the root. They are the system
+/// folders of the platform the app runs on: `C:\dev` and `D:\lib` are ordinary folders on
+/// Windows, where a path's drive is not one of its segments (#333).
+#[cfg(not(windows))]
 const SYSTEM_TREES: &[&[&str]] = &[
     &["System"],
     &["Library"],
@@ -61,13 +64,14 @@ const SYSTEM_TREES: &[&[&str]] = &[
     &["usr", "lib"],
     &["usr", "libexec"],
     &["usr", "share"],
-    &["Windows"],
-    &["Program Files"],
-    &["Program Files (x86)"],
-    &["ProgramData"],
 ];
 
+/// On Windows, on any drive: a second installation on `D:` is no more a project than the first.
+#[cfg(windows)]
+const SYSTEM_TREES: &[&[&str]] = &[&["Windows"], &["Program Files"], &["Program Files (x86)"], &["ProgramData"]];
+
 /// Folders that hold other people's or other volumes' files: fine below, never as a whole.
+#[cfg(not(windows))]
 const SYSTEM_FOLDERS: &[&[&str]] = &[
     &["usr"],
     &["usr", "local"],
@@ -87,8 +91,11 @@ const SYSTEM_FOLDERS: &[&[&str]] = &[
     &["Applications"],
 ];
 
-/// Whether `root` (canonical) is too wide to open: a filesystem root, a system folder or one
-/// inside it, or a folder the home directory sits in.
+#[cfg(windows)]
+const SYSTEM_FOLDERS: &[&[&str]] = &[&["Users"]];
+
+/// Whether `root` (canonical) is too wide to open: a filesystem root (on Windows a drive or a
+/// share), a system folder or one inside it, or a folder the home directory sits in.
 fn too_wide(root: &Path, home: &Path) -> bool {
     let parts: Vec<String> = root
         .components()
