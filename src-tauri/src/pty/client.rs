@@ -5,7 +5,7 @@
 use super::wire::{frame, read_frame, Event, Message, Op, PaneId, Request, VERSION};
 use super::Sink;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ struct Book {
     /// with the reply of a spawn, and is known up front for an attach.
     install: HashMap<u64, (Option<PaneId>, Arc<Sink>)>,
     sinks: HashMap<PaneId, Arc<Sink>>,
+    /// Terminals whose exit this connection heard: a write to one fails as it does in process.
+    exited: HashSet<PaneId>,
     closed: bool,
 }
 
@@ -106,12 +108,30 @@ impl Conn {
         }
     }
 
-    /// Sends `op` with no reply to wait for (typing).
+    /// Sends `op` with no reply to wait for.
     pub fn tell(&self, op: Op, payload: &[u8]) -> Result<(), String> {
         if !self.is_open() {
             return Err("the terminal daemon went away".into());
         }
         self.send_frame(&Request { req: 0, op }, payload)
+    }
+
+    /// Types `data` into terminal `id`, with no reply to wait for: a keystroke costs no round
+    /// trip, and a daemon of an earlier version understands it. The daemon drops a write it
+    /// cannot deliver, so this refuses one to a terminal whose exit this connection heard, or
+    /// that it neither started nor attached to (and so would not hear the exit of), with the
+    /// reasons `Host::write` gives.
+    pub fn write(&self, id: PaneId, data: &[u8]) -> Result<(), String> {
+        {
+            let book = lock(&self.book);
+            if book.closed {
+                return Err("the terminal daemon went away".into());
+            }
+            if !book.sinks.contains_key(&id) {
+                return Err(if book.exited.contains(&id) { format!("pane {id} has exited") } else { format!("pane {id} not found") });
+            }
+        }
+        self.send_frame(&Request { req: 0, op: Op::Write { id } }, data)
     }
 
     fn send_frame(&self, req: &Request, payload: &[u8]) -> Result<(), String> {
@@ -149,6 +169,7 @@ fn read_all(stream: UnixStream, book: Arc<Mutex<Book>>) {
                 if let (Some((known, sink)), Ok(v)) = (b.install.remove(&req), &answer) {
                     let id = known.or_else(|| v.get("id").and_then(Value::as_u64).map(|id| id as PaneId));
                     if let Some(id) = id {
+                        b.exited.remove(&id);
                         b.sinks.insert(id, sink);
                     }
                 }
@@ -163,7 +184,11 @@ fn read_all(stream: UnixStream, book: Arc<Mutex<Book>>) {
                 }
             }
             Message::Exit { id, code } => {
-                let sink = lock(&book).sinks.remove(&id);
+                let sink = {
+                    let mut b = lock(&book);
+                    b.exited.insert(id);
+                    b.sinks.remove(&id)
+                };
                 if let Some(sink) = sink {
                     sink(Event::Exit(code));
                 }
