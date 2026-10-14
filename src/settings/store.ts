@@ -22,6 +22,10 @@ export type Settings = {
   projects: string[]
   /** The titlebar's saved commands, per repo root, in the order the user keeps them. */
   quickCommands: Record<string, Array<{ label: string; command: string }>>
+  /** Windows: the shell a new terminal pane starts, by `pty_shells` id (`cmd`, `powershell`,
+   *  `pwsh`, `git-bash`); null starts `%COMSPEC%`, as before there was a choice. Read by the
+   *  Rust side at each spawn (`pty/shells.rs`); macOS and Linux ignore it. */
+  windowsShell: string | null
 }
 
 export const DEFAULTS: Settings = {
@@ -35,6 +39,7 @@ export const DEFAULTS: Settings = {
   repoSetup: {},
   projects: [],
   quickCommands: {},
+  windowsShell: null,
 }
 
 export interface SettingsClient {
@@ -116,6 +121,7 @@ function pick(v: Partial<Settings>): Partial<Settings> {
       }),
     )
   }
+  if (typeof v.windowsShell === 'string' && v.windowsShell) out.windowsShell = v.windowsShell
   return out
 }
 
