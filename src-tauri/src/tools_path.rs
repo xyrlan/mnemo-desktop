@@ -350,72 +350,44 @@ mod registry {
     }
 }
 
-// The reader and writer as they were before #335, with the key they work on as a parameter
-// so the tests below can show what they do to a scratch key. Replaced in the next commit.
-
+/// Appends `dirs` to the `Path` value of an open key, `shown` being how the message names it.
+/// `Ok(false)` when they were all there already. The value keeps the name and type it is
+/// stored under; when there is none it is made as `Path`, expandable, as Windows makes it.
 #[cfg(windows)]
-fn parse_reg_query(output: &str) -> Option<(String, String)> {
-    output.lines().find_map(|line| {
-        let t = line.trim();
-        let rest = t.strip_prefix("Path")?;
-        if !rest.starts_with(char::is_whitespace) {
-            return None;
+fn add_to_path_in_key(key: &registry::Key, shown: &str, dirs: &[PathBuf]) -> Result<bool, String> {
+    use registry::{error, REG_EXPAND_SZ, REG_SZ};
+
+    let unread = |rc: i32| format!("Could not read your user Path ({shown}): {}. Nothing was changed.", error(rc));
+    let stored = match key.stored_name("Path").map_err(unread)? {
+        Some(name) => key.read(&name).map_err(unread)?.map(|(kind, data)| (name, kind, data)),
+        None => None,
+    };
+    let (name, kind, existing) = match stored {
+        None => (registry::wide("Path"), REG_EXPAND_SZ, Vec::new()),
+        Some((_, kind, _)) if kind != REG_SZ && kind != REG_EXPAND_SZ => {
+            return Err(format!("Your user Path ({shown}) is stored as registry type {kind}, not as text. Nothing was changed."));
         }
-        let rest = rest.trim_start();
-        let (ty, val) = rest.split_once(char::is_whitespace)?;
-        Some((ty.trim().to_string(), val.trim().to_string()))
-    })
-}
-
-#[cfg(windows)]
-fn merge_printed_path(existing: &str, dirs: &[PathBuf]) -> Option<String> {
-    let mut parts: Vec<String> = existing.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
-    let mut changed = false;
-    for d in dirs {
-        let d = d.to_string_lossy().to_string();
-        if !parts.iter().any(|p| p == &d) {
-            parts.push(d);
-            changed = true;
+        Some((name, kind, data)) => {
+            let units = path_units(&data).map_err(|why| format!("Your user Path ({shown}) cannot be added to: {why}. Nothing was changed."))?;
+            (name, kind, units)
         }
-    }
-    changed.then(|| parts.join(";"))
-}
-
-#[cfg(windows)]
-fn read_windows_user_path(key: &str) -> Result<(String, String), String> {
-    let out = crate::proc::command("reg").args(["query", key, "/v", "Path"]).output().map_err(|e| format!("reg query: {e}"))?;
-    if !out.status.success() {
-        // No user Path value yet: start from empty, default to the expandable type so a
-        // future %VAR% entry (ours or the user's) works as intended.
-        return Ok(("REG_EXPAND_SZ".to_string(), String::new()));
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    parse_reg_query(&text).ok_or_else(|| format!("reg query: unexpected output: {text}"))
-}
-
-#[cfg(windows)]
-fn write_windows_user_path(key: &str, reg_type: &str, value: &str) -> Result<(), String> {
-    let out = crate::proc::command("reg")
-        .args(["add", key, "/v", "Path", "/t", reg_type, "/d", value, "/f"])
-        .output()
-        .map_err(|e| format!("reg add: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("reg add: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    Ok(())
+    };
+    let Some(updated) = merge_windows_path(&existing, dirs) else {
+        return Ok(false);
+    };
+    let data: Vec<u8> = updated.iter().chain([&0]).flat_map(|u| u.to_le_bytes()).collect();
+    key.write(&name, kind, &data).map_err(|rc| format!("Could not write your user Path ({shown}): {}.", error(rc)))?;
+    Ok(true)
 }
 
 #[cfg(windows)]
 fn add_to_path_windows_at(sub_key: &str, dirs: &[PathBuf]) -> Result<bool, String> {
-    let key = format!("HKCU\\{sub_key}");
-    let (reg_type, existing) = read_windows_user_path(&key)?;
-    match merge_printed_path(&existing, dirs) {
-        None => Ok(false),
-        Some(updated) => {
-            write_windows_user_path(&key, &reg_type, &updated)?;
-            Ok(true)
-        }
-    }
+    use registry::{Key, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
+
+    let shown = format!("HKCU\\{sub_key}");
+    let key = Key::open(HKEY_CURRENT_USER, sub_key, KEY_QUERY_VALUE | KEY_SET_VALUE)
+        .map_err(|rc| format!("Could not open {shown}: {}. Nothing was changed.", registry::error(rc)))?;
+    add_to_path_in_key(&key, &shown, dirs)
 }
 
 #[cfg(windows)]
@@ -426,7 +398,12 @@ fn add_to_path_windows(dirs: &[PathBuf]) -> Result<String, String> {
     if !add_to_path_windows_at("Environment", dirs)? {
         return Ok("Already on your PATH (HKCU\\Environment); nothing to change.".into());
     }
-    Ok(format!("Added {} to your user PATH (HKCU\\Environment). New terminals will see it.", joined_dirs(dirs)))
+    let after = if registry::broadcast_environment_change() {
+        "A terminal opened from the Start menu or Explorer sees it from now on; a program that was already open has to be restarted before the terminals it starts do."
+    } else {
+        "Windows could not be told about the change: sign out and back in for new terminals to see it."
+    };
+    Ok(format!("Added {} to your user PATH (HKCU\\Environment). {after}", joined_dirs(dirs)))
 }
 
 // ------------------------------------------------------------------ command --
@@ -671,7 +648,7 @@ mod tests {
     #[cfg(windows)]
     mod in_the_registry {
         use super::super::registry::{wide, Hkey, Key, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_EXPAND_SZ, REG_SZ};
-        use super::super::{add_to_path_windows_at, registry};
+        use super::super::{add_to_path_in_key, add_to_path_windows_at, registry};
         use super::{dirs, w};
 
         const REG_DWORD: u32 = 4;
@@ -839,6 +816,19 @@ mod tests {
             let refused = add_to_path_windows_at(&scratch.sub_key, &dirs(&["C:\\new"])).unwrap_err();
             assert!(refused.contains("Nothing was changed"), "got: {refused}");
             assert_eq!(scratch.path(), Some(("Path".to_string(), REG_DWORD, vec![1, 0, 0, 0])));
+        }
+
+        #[test]
+        fn a_key_that_refuses_the_read_stops_the_write() {
+            let scratch = Scratch::made("no-read");
+            scratch.put("Path", REG_EXPAND_SZ, "C:\\Users\\José\\bin");
+            // Open for writing only: Windows refuses the read with "access is denied", and the
+            // write that would have followed is one this handle allows.
+            let write_only = scratch.key(KEY_SET_VALUE);
+
+            let refused = add_to_path_in_key(&write_only, "the scratch key", &dirs(&["C:\\new"])).unwrap_err();
+            assert!(refused.contains("Could not read"), "got: {refused}");
+            assert_eq!(scratch.path(), Some(("Path".to_string(), REG_EXPAND_SZ, stored("C:\\Users\\José\\bin"))));
         }
 
         /// The broadcast touches no key: it only has to go out without bringing the process down.
