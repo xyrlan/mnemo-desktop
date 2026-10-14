@@ -422,16 +422,37 @@ fn project_name(cwd: &str) -> Option<String> {
     Some(crate::install_review::sanitize(&name))
 }
 
-/// This machine's offset from UTC, read once: the learned ledger's times carry no zone. `date`
-/// is on every Unix; elsewhere, or when it fails, the times are read as UTC.
+/// This machine's offset from UTC, read once: the learned ledger's times carry no zone. When it
+/// cannot be read, the times are read as UTC.
 fn local_offset_ms() -> i64 {
     static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
-    *OFFSET.get_or_init(|| {
-        if cfg!(windows) {
-            return 0;
-        }
-        crate::proc::command("date").arg("+%z").output().ok().and_then(|o| parse_offset(&String::from_utf8_lossy(&o.stdout))).unwrap_or(0)
-    })
+    *OFFSET.get_or_init(|| read_offset_ms().unwrap_or(0))
+}
+
+/// This machine's offset from UTC now, in ms east of it: what `date` prints on every Unix.
+#[cfg(not(windows))]
+fn read_offset_ms() -> Option<i64> {
+    crate::proc::command("date").arg("+%z").output().ok().and_then(|o| parse_offset(&String::from_utf8_lossy(&o.stdout)))
+}
+
+/// This machine's offset from UTC now, in ms east of it: Windows has no `date +%z`, and its
+/// bias counts minutes west, summer time's added while it is in force.
+#[cfg(windows)]
+fn read_offset_ms() -> Option<i64> {
+    use windows_sys::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
+    // `winnt.h`'s, which windows-sys keeps under a far larger feature.
+    const TIME_ZONE_ID_UNKNOWN: u32 = 0;
+    const TIME_ZONE_ID_STANDARD: u32 = 1;
+    const TIME_ZONE_ID_DAYLIGHT: u32 = 2;
+    // SAFETY: a plain C struct of integers, filled in by the call.
+    let mut tz: TIME_ZONE_INFORMATION = unsafe { std::mem::zeroed() };
+    let bias = match unsafe { GetTimeZoneInformation(&mut tz) } {
+        TIME_ZONE_ID_UNKNOWN => tz.Bias,
+        TIME_ZONE_ID_STANDARD => tz.Bias + tz.StandardBias,
+        TIME_ZONE_ID_DAYLIGHT => tz.Bias + tz.DaylightBias,
+        _ => return None,
+    };
+    Some(-i64::from(bias) * 60_000)
 }
 
 fn feed(cwd: &str, session_id: Option<&str>) -> Result<MemoryFeed, String> {
@@ -486,6 +507,43 @@ mod tests {
         assert_eq!(time_ms("2026-09-24T12:40:49", -3 * HOUR), Some(ms("2026-09-24T15:40:49Z")));
         assert_eq!(time_ms("2026-09-24T12:40:49.500", 2 * HOUR), Some(ms("2026-09-24T10:40:49.500Z")));
         assert_eq!(time_ms("yesterday", 0), None);
+    }
+
+    #[test]
+    fn this_machine_s_offset_is_read() {
+        let off = read_offset_ms().expect("an offset");
+        assert!(off.abs() <= 14 * HOUR && off % (15 * 60_000) == 0, "{off}");
+    }
+
+    /// Windows reads the zone the system is set to, not UTC (#361). CI's runner is on UTC, which
+    /// proves nothing, so on CI only the test sets the machine to Brazil's zone (UTC−3, no summer
+    /// time since 2019) with `tzutil` and puts the runner's back after.
+    #[cfg(windows)]
+    #[test]
+    fn windows_reads_the_system_zone() {
+        if std::env::var_os("CI").is_none() {
+            eprintln!("skipped: sets the machine's time zone, so it runs on CI only");
+            return;
+        }
+        let tzutil = |args: &[&str]| {
+            let out = crate::proc::command("tzutil").args(args).output().unwrap();
+            assert!(out.status.success(), "tzutil {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        struct Restore<F: Fn()>(F);
+        impl<F: Fn()> Drop for Restore<F> {
+            fn drop(&mut self) {
+                (self.0)()
+            }
+        }
+        let was = tzutil(&["/g"]);
+        let _restore = Restore(|| {
+            tzutil(&["/s", &was]);
+        });
+        tzutil(&["/s", "E. South America Standard Time"]);
+        assert_eq!(read_offset_ms(), Some(-3 * HOUR));
+        tzutil(&["/s", "India Standard Time"]);
+        assert_eq!(read_offset_ms(), Some(5 * HOUR + 30 * 60_000));
     }
 
     #[test]

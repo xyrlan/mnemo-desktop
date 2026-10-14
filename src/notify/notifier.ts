@@ -1,7 +1,8 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { AgentEvent } from '../agents/events'
+import type { PolledMove } from '../fleet/create'
 import type { RepoNode } from '../fleet/types'
-import { alertFor, cardKey, looking, paneOf, placeOf, quietPrompt, shownWorktree, type Alert } from './decide'
+import { alertFor, alertOf, cardKey, looking, paneOf, placeOf, quietPrompt, shownWorktree, type Alert } from './decide'
 
 /** A card in the stack: one per `key` (a dispatched child's worktree, else a session), the newest
  *  alert about it. A newer alert keeps the card's `id`, so the stack updates it in place. */
@@ -12,6 +13,8 @@ export type Cards = { cards: Card[] }
 /** Everything the notifier reads or does outside itself, so tests drive it without Tauri. */
 export type NotifierDeps = {
   subscribe(cb: (e: AgentEvent) => void): () => void
+  /** What polling saw move that no hook told of: the only news where there are no hooks. */
+  polled(cb: (m: PolledMove) => void): () => void
   repos(): readonly RepoNode[]
   /** `activeWorktree` of the layout. */
   active(): string | null
@@ -57,6 +60,11 @@ export type Notifier = {
  * a background task of its own finishing) tells nothing when it ends: the sidebar still marks its
  * worktree unread. Those prompts leave the card alone too, since nobody answered it. An ask in
  * such a turn still tells you.
+ *
+ * Hooks are heard only on macOS and Linux, and never from a dispatched child; polling hears the
+ * rest, up to a poll late. Where both hear a move, the fleet passes on only the first: a poll
+ * finds the agent already where the hook put it. A poll that lands just before the hook is the
+ * one race, and the hook then only updates the card the poll made.
  */
 export function createNotifier(deps: NotifierDeps): Notifier {
   const cards = createStore<Cards>(() => ({ cards: [] }))
@@ -66,8 +74,9 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   // Per session, what started the running turn: a person (or someone unknown), or only prompts
   // nobody sent. No entry: the turn began before the app heard it, so it counts as a person's.
   const quiet = new Map<string, boolean>()
-  // Per card key, when it last chimed and what it said.
-  const told = new Map<string, { at: number; kind: Alert['kind']; message: string }>()
+  // Per card key, when it last chimed, what it said, and whether a poll (which has no words for an
+  // ask) said it.
+  const told = new Map<string, { at: number; kind: Alert['kind']; message: string; polled: boolean }>()
 
   // One store update per change: a card replaced in place never leaves the stack in between.
   const set = (next: Card[]) => {
@@ -108,19 +117,41 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       if (leave) return
     }
     const alert = alertFor(e, repos)
-    if (!alert) return
-    const pane = paneOf(e.sessionId, repos)
+    if (alert) tell(alert, key, false)
+  }
+
+  const onPolled = (m: PolledMove) => {
+    const repos = deps.repos()
+    const key = cardKey(m.sessionId, placeOf(m.cwd, repos)?.path ?? null, repos)
+    // Back at work: what its card said is no longer so, and its next finish is news again.
+    if (m.state === 'working') return told.delete(key), drop((c) => c.key !== key)
+    // A child's finish is its parent's news, in the report card it gets; a turn a quiet prompt
+    // started (a hook said so) tells nothing — its stop hook, still on its way, says the rest.
+    if (m.state === 'done' && (m.child || quiet.get(m.sessionId) === true)) return
+    // Done after an ask, with no work seen between: it was answered between two polls, as a
+    // person's prompt would have said.
+    if (m.state === 'done' && told.get(key)?.kind !== 'done') told.delete(key)
+    const kind = m.state === 'done' ? 'done' : (m.waitingFor ?? 'permission')
+    const message = m.ask && kind === 'permission' ? `Needs your permission: ${m.ask}` : m.ask
+    tell(alertOf({ sessionId: m.sessionId, cwd: m.cwd, kind, message, at: m.at }, repos), key, true)
+  }
+
+  const tell = (alert: Alert, key: string, polled: boolean) => {
+    const pane = paneOf(alert.sessionId, deps.repos())
     const where = at(pane)
     if (looking(alert, where)) return
     const before = cards.getState().cards.find((c) => c.key === key)
+    // A hook's card says more than a poll's about the same thing.
+    if (polled && before?.kind === alert.kind) return
     const card: Card = { ...alert, id: before?.id ?? nextId++, pane, key }
     const next = [...cards.getState().cards.filter((c) => c.key !== key), card].slice(-MAX_CARDS)
     set(next)
     if (card.kind === 'done') timers.set(card.id, setTimeout(() => dismiss(card.id), DONE_TTL_MS))
     const now = deps.now()
     const last = told.get(key)
-    if (last && now - last.at < COALESCE_MS && (card.kind === 'done' || (last.kind === card.kind && last.message === card.message))) return
-    told.set(key, { at: now, kind: card.kind, message: card.message })
+    const same = last?.kind === card.kind && (last.message === card.message || last.polled || polled)
+    if (last && now - last.at < COALESCE_MS && (card.kind === 'done' || same)) return
+    told.set(key, { at: now, kind: card.kind, message: card.message, polled })
     if (now - lastSound >= SOUND_GAP_MS) {
       lastSound = now
       deps.sound()
@@ -134,7 +165,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     drop((c) => !looking(c, { ...now, pane: c.pane }))
   }
 
-  const offs = [deps.subscribe(onEvent), deps.onLook(onLook)]
+  const offs = [deps.subscribe(onEvent), deps.polled(onPolled), deps.onLook(onLook)]
 
   return {
     cards,
