@@ -160,7 +160,7 @@ describe('the cleanup view', () => {
     expect(cleanup().step).toBe('confirm')
   })
 
-  test('the batch removes one at a time, never forced, closes each one’s panes, and refreshes once', async () => {
+  test('the batch removes one at a time, never forced, each one’s panes closed before git is asked, and refreshes once', async () => {
     twoRepos()
     await scanCleanup()
     selectAll(true)
@@ -176,7 +176,7 @@ describe('the cleanup view', () => {
     const run = removeSelected()
     expect(cleanup().progress).toEqual({ done: 0, failed: 0, total: 2 })
     await run
-    expect(order).toEqual(['refresh', 'remove /r/app-wt-done', 'close /r/app-wt-done', 'remove /r/app-wt-shipped', 'close /r/app-wt-shipped', 'refresh'])
+    expect(order).toEqual(['refresh', 'close /r/app-wt-done', 'remove /r/app-wt-done', 'close /r/app-wt-shipped', 'remove /r/app-wt-shipped', 'refresh'])
     expect(removeWorktree.calls).toEqual([
       ['/r/app-wt-done', false],
       ['/r/app-wt-shipped', false],
@@ -186,18 +186,17 @@ describe('the cleanup view', () => {
     expect(toast.success).toHaveBeenCalledWith('Removed 2 workspaces', { description: 'Their branches are kept.' })
   })
 
-  test('one git refuses stays listed and selected, saying why; its panes stay open', async () => {
+  test('one that cannot be removed stays listed and selected, saying why', async () => {
     twoRepos()
     await scanCleanup()
     selectAll(true)
     confirmCleanup()
-    refusals.set('/r/app-wt-done', "fatal: '/r/app-wt-done' contains modified or untracked files, use --force to delete it")
+    refusals.set('/r/app-wt-done', '/r/app-wt-done is in use, so nothing of it was removed')
     await removeSelected()
     expect(cleanup().candidates.map((c) => c.path)).toEqual(['/r/app-wt-done'])
     expect([...cleanup().selected]).toEqual(['/r/app-wt-done'])
-    expect(cleanup().failures['/r/app-wt-done']).toContain('contains modified or untracked files')
-    expect(layoutStore.getState().closeWorktree).toHaveBeenCalledTimes(1)
-    expect(layoutStore.getState().closeWorktree).toHaveBeenCalledWith('/r/app-wt-shipped')
+    expect(cleanup().failures['/r/app-wt-done']).toContain('is in use')
+    expect(layoutStore.getState().closeWorktree).toHaveBeenCalledTimes(2)
     expect(toast.error).toHaveBeenCalledWith('Removed 1 of 2 workspaces', expect.anything())
   })
 })
@@ -257,12 +256,33 @@ describe('a card’s Remove workspace', () => {
     expect(removeWorktree.calls).toEqual([])
   })
 
-  test('a refusal is a toast, and the tree’s panes stay open', async () => {
+  test('its panes are closed before git is asked to remove it', async () => {
     const t = one()
-    refusals.set(t.path, 'setup is still running in /r/app-wt-x')
+    const order: string[] = []
+    removeWorktree.impl = async (path) => void order.push(`remove ${path}`)
+    layoutStore.setState({ closeWorktree: vi.fn(async (path: string) => void order.push(`close ${path}`)) })
+    await requestRemove(t)
+    expect(order).toEqual(['close /r/app-wt-x', 'remove /r/app-wt-x'])
+  })
+
+  test('a tree still setting up is refused with a toast before its panes are closed', async () => {
+    const t = one({}, { setupJob: 'worktree-setup:/r/app-wt-x' })
     await requestRemove(t)
     expect(toast.error).toHaveBeenCalledWith('Could not remove app-wt-x', { description: 'setup is still running in /r/app-wt-x' })
     expect(layoutStore.getState().closeWorktree).not.toHaveBeenCalled()
+    expect(removeWorktree.calls).toEqual([])
+    expect(archiveStore.getState().removing.size).toBe(0)
+  })
+
+  test('one that is in use says so in a toast, and the fleet is read again', async () => {
+    const t = one()
+    refusals.set(t.path, '/r/app-wt-x is in use, so nothing of it was removed: node (812) still runs in it.')
+    await requestRemove(t)
+    expect(toast.error).toHaveBeenCalledWith('Could not remove app-wt-x', { description: '/r/app-wt-x is in use, so nothing of it was removed: node (812) still runs in it.' })
+    // Its panes are closed by then; the card stays, since the tree does.
+    expect(layoutStore.getState().closeWorktree).toHaveBeenCalledWith('/r/app-wt-x')
+    expect(fleetStore.getState().refresh).toHaveBeenCalledTimes(1)
+    expect(toast.success).not.toHaveBeenCalled()
     expect(archiveStore.getState().removing.size).toBe(0)
   })
 

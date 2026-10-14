@@ -224,6 +224,9 @@ pub fn create(repo: &str, name: &str, base: Option<&str>, setup: Option<&str>, s
         }
     }
     let tree_s = tree.to_string_lossy().to_string();
+    // A tree whose folder was deleted by hand is still on git's list, which refuses the name
+    // ("missing but already registered"). Nothing is at the path, so this only forgets it.
+    let _ = git(&["worktree", "remove", "--force", "--", &tree_s], &root);
     let exists = git(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{name}")], &root).is_ok();
     match (exists, base) {
         (true, Some(_)) => return Err(format!("branch {name} already exists; open it without a base")),
@@ -255,10 +258,49 @@ pub fn create(repo: &str, name: &str, base: Option<&str>, setup: Option<&str>, s
     Ok(made)
 }
 
+/// How long `remove` waits for a tree to be let go of: a terminal closed a moment ago may not
+/// have ended its shell yet.
+const LET_GO: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Moves `from` to `to`. Windows refuses while a program's working directory is in the folder
+/// or one of its files is open, so there it is tried again until `wait` has passed.
+fn set_aside(from: &Path, to: &Path, wait: std::time::Duration) -> std::io::Result<()> {
+    let until = std::time::Instant::now() + wait;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(_) if cfg!(windows) && std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(100)),
+            done => return done,
+        }
+    }
+}
+
+/// Why `tree` could not be set aside, with the programs known to run in it. Off macOS and Linux
+/// `programs::all` lists none yet, so there the holder goes unnamed.
+fn held(path: &str, tree: &Path, e: std::io::Error) -> String {
+    let all = crate::programs::all();
+    let inside = crate::programs::inside(&all, tree, &Default::default(), crate::chrome::parent_of);
+    let who = if inside.is_empty() {
+        "a program has it or a file in it open, and the app cannot tell which".to_string()
+    } else {
+        format!("{} still {} in it", inside.iter().map(|p| p.label()).collect::<Vec<_>>().join(", "), if inside.len() == 1 { "runs" } else { "run" })
+    };
+    format!("{path} is in use, so nothing of it was removed: {who}. Close it and remove the workspace again. ({e})")
+}
+
 /// Removes the worktree at `path`. Refused for the main checkout, for a folder that is not one
 /// of its repo's worktrees or lies outside the repo's parent folder, and while its setup runs.
-/// Without `force`, git refuses a tree with changes; the branch is kept either way.
+/// Without `force`, a tree with changes or submodules is refused as git refuses it; the branch
+/// is kept either way.
+///
+/// All or nothing: the folder is first moved aside in one rename, which Windows refuses while
+/// anything holds it, and only then does git forget the tree and the folder get deleted. Asked
+/// to remove a held folder itself, git deletes what it can and forgets the tree anyway: an
+/// empty folder nothing lists, its name taken.
 pub fn remove(path: &str, force: bool) -> Result<(), String> {
+    remove_within(path, force, LET_GO)
+}
+
+fn remove_within(path: &str, force: bool, wait: std::time::Duration) -> Result<(), String> {
     let root = main_root(path)?;
     let canon = |p: &Path| p.canonicalize().map_err(|e| format!("{}: {e}", p.display()));
     let target = canon(Path::new(path))?;
@@ -277,12 +319,27 @@ pub fn remove(path: &str, force: bool) -> Result<(), String> {
     if tree.setup_job.is_some() {
         return Err(format!("setup is still running in {path}"));
     }
-    let mut args = vec!["worktree", "remove"];
-    if force {
-        args.push("--force");
+    if !force {
+        // git's own two checks, made here: it cannot make them once the folder is aside.
+        let at = Path::new(&tree.path);
+        if git(&["ls-files", "--stage"], at)?.lines().any(|l| l.starts_with("160000 ")) {
+            return Err(format!("'{}' contains submodules: git removes it only when forced", tree.path));
+        }
+        if !git(&["status", "--porcelain", "--ignore-submodules=none"], at)?.trim().is_empty() {
+            return Err(format!("'{}' contains modified or untracked files, use --force to delete it", tree.path));
+        }
     }
-    args.extend(["--", tree.path.as_str()]);
-    git(&args, &root).map(|_| ())
+    let folder = target.file_name().ok_or_else(|| format!("{path} has no folder name"))?.to_string_lossy();
+    let aside = target.with_file_name(format!("{folder}.removing-{}", std::process::id()));
+    set_aside(&target, &aside, wait).map_err(|e| held(path, &target, e))?;
+    // The folder is gone from its path, so git only forgets the tree.
+    if let Err(e) = git(&["worktree", "remove", "--force", "--", tree.path.as_str()], &root) {
+        return Err(match std::fs::rename(&aside, &target) {
+            Ok(()) => e,
+            Err(back) => format!("{e}; its folder is now {} and could not be moved back ({back})", aside.display()),
+        });
+    }
+    std::fs::remove_dir_all(&aside).map_err(|e| format!("{path} is removed and its name is free again, but its files could not all be deleted: {} is left ({e})", aside.display()))
 }
 
 /// One tree as `cleanup_facts` reports it: `CleanupTree` in `src/worktrees/client.ts`.
@@ -581,6 +638,127 @@ mod tests {
         let again = create(&s(&root), "task", None, None, quiet()).unwrap();
         assert_eq!(again.branch.as_deref(), Some("task"));
         assert!(create(&s(&root), "task2", Some("task"), None, quiet()).is_ok());
+    }
+
+    /// `ping`, which runs for a minute or until killed, with its working directory at `dir`.
+    #[cfg(windows)]
+    fn program_in(dir: &Path) -> std::process::Child {
+        use std::process::Stdio;
+        crate::proc::command("ping").args(["-n", "60", "127.0.0.1"]).current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
+    }
+
+    #[cfg(windows)]
+    fn end(mut program: std::process::Child) {
+        program.kill().unwrap();
+        program.wait().unwrap();
+    }
+
+    /// Everything under `dir`, relative to it, sorted.
+    #[cfg(windows)]
+    fn files_in(dir: &Path) -> Vec<String> {
+        fn walk(at: &Path, base: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(at).unwrap() {
+                let p = e.unwrap().path();
+                out.push(p.strip_prefix(base).unwrap().to_string_lossy().to_string());
+                if p.is_dir() {
+                    walk(&p, base, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
+    }
+
+    // Windows refuses to delete or move a folder some program's working directory is in. This
+    // app's terminals are such programs, and they are closed just before `remove` is called:
+    // their shells may still be ending.
+    #[cfg(windows)]
+    #[test]
+    fn a_tree_whose_program_ends_while_remove_waits_is_removed_whole() {
+        let root = repo("wt-letgo");
+        let made = create(&s(&root), "pane", None, None, quiet()).unwrap();
+        let tree = PathBuf::from(&made.path);
+        let pane = program_in(&tree);
+        let closing = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(700));
+            end(pane);
+        });
+        remove(&made.path, false).unwrap();
+        closing.join().unwrap();
+        assert!(!tree.exists());
+        assert_eq!(list(&s(&root)).unwrap().len(), 1);
+        assert_eq!(std::fs::read_dir(root.parent().unwrap()).unwrap().count(), 1, "only the repo is left beside it");
+        // The name is free.
+        create(&s(&root), "pane", None, None, quiet()).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_tree_a_program_stays_in_is_refused_whole_and_goes_once_it_ends() {
+        let root = repo("wt-held");
+        let made = create(&s(&root), "held", None, None, quiet()).unwrap();
+        let tree = PathBuf::from(&made.path);
+        std::fs::create_dir(tree.join("sub")).unwrap();
+        std::fs::write(tree.join("sub/kept"), "x").unwrap();
+        let before = files_in(&tree);
+        assert!(before.contains(&"README".to_string()) && before.contains(&"sub\\kept".to_string()), "{before:?}");
+        // In the tree itself, as a terminal opened on it is, then in a folder inside it.
+        for dir in [tree.clone(), tree.join("sub")] {
+            let stranger = program_in(&dir);
+            let err = remove_within(&made.path, true, Duration::from_millis(600)).unwrap_err();
+            assert!(err.contains("is in use, so nothing of it was removed"), "{err}");
+            assert_eq!(files_in(&tree), before, "with a program in {}", dir.display());
+            assert_eq!(list(&s(&root)).unwrap().iter().map(|w| w.path.as_str()).collect::<Vec<_>>(), [git_form(&root).as_str(), made.path.as_str()]);
+            assert_eq!(std::fs::read_dir(root.parent().unwrap()).unwrap().count(), 2, "nothing was set aside");
+            end(stranger);
+        }
+        remove(&made.path, true).unwrap();
+        assert!(!tree.exists());
+        assert_eq!(list(&s(&root)).unwrap().len(), 1);
+        create(&s(&root), "held", None, None, quiet()).unwrap();
+    }
+
+    #[test]
+    fn remove_leaves_nothing_beside_the_repo_and_refuses_changes_itself() {
+        let root = repo("wt-whole");
+        let made = create(&s(&root), "gone", None, None, quiet()).unwrap();
+        let tree = PathBuf::from(&made.path);
+        std::fs::create_dir(tree.join("sub")).unwrap();
+        std::fs::write(tree.join("sub/new"), "x").unwrap();
+        let err = remove(&made.path, false).unwrap_err();
+        assert!(err.contains("contains modified or untracked files, use --force"), "{err}");
+        assert!(tree.join("sub/new").exists());
+        assert_eq!(list(&s(&root)).unwrap().len(), 2);
+        remove(&made.path, true).unwrap();
+        let left: Vec<_> = std::fs::read_dir(root.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["repo"]);
+        assert_eq!(list(&s(&root)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_tree_git_refuses_to_forget_is_put_back() {
+        let root = repo("wt-locked");
+        let made = create(&s(&root), "locked", None, None, quiet()).unwrap();
+        sh_git(&["worktree", "lock", &made.path], &root);
+        let err = remove(&made.path, true).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert!(Path::new(&made.path).join("README").exists());
+        assert_eq!(std::fs::read_dir(root.parent().unwrap()).unwrap().count(), 2);
+        sh_git(&["worktree", "unlock", &made.path], &root);
+        remove(&made.path, true).unwrap();
+        assert!(!Path::new(&made.path).exists());
+    }
+
+    #[test]
+    fn a_name_is_free_again_once_its_folder_is_deleted_by_hand() {
+        let root = repo("wt-byhand");
+        let made = create(&s(&root), "hand", None, None, quiet()).unwrap();
+        std::fs::remove_dir_all(&made.path).unwrap();
+        let again = create(&s(&root), "hand", None, None, quiet()).unwrap();
+        assert_eq!(again.path, made.path);
+        assert_eq!(list(&s(&root)).unwrap().len(), 2);
     }
 
     #[test]
