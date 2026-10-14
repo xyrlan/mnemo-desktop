@@ -92,7 +92,7 @@ mod tests {
         let known: &[(&str, usize)] = &[
             ("conversation.rs", 1), // a test that dumps the real ~/.claude/projects
             ("mission.rs", 1),      // `looked_marker_round_trips` saves and restores it
-            ("pty.rs", 2),          // tests of the Unix shell integration
+            ("pty.rs", 1),          // tests of the Unix shell integration
             ("tools_path.rs", 1),   // `add_to_path_unix`: the shell rc files, Unix only
         ];
         // Spelled in halves so this file does not count itself.

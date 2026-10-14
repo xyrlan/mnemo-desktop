@@ -63,8 +63,13 @@ jobs:
         run: pnpm tauri build --ci --bundles deb,appimage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
+      # The installer a release ships for Windows (`tauri-action` builds every target there).
       - if: runner.os == 'Windows'
-        run: pnpm tauri build --ci --no-bundle
+        run: pnpm tauri build --ci --bundles nsis
+      - name: the installer is built
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ls -l src-tauri/target/release/bundle/nsis/*-setup.exe
       - name: helpers in the bundle
         if: runner.os != 'Windows'
         run: node scripts/bundle-helpers.mjs
@@ -77,3 +82,19 @@ jobs:
       - name: smoke (shell round-trip inside the built app)
         if: runner.os == 'macOS'
         run: MNEMO_DESKTOP_SMOKE=1 src-tauri/target/release/mnemo-desktop
+      # bash waits for the app (PowerShell would not: it is a GUI program) and gets its exit code.
+      - name: smoke (shell round-trip inside the built app)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: MNEMO_DESKTOP_SMOKE=1 src-tauri/target/release/mnemo-desktop.exe
+      # The same round-trip in what the installer put in place, as a person would start it.
+      - name: smoke (installed by the NSIS installer, silently)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # `//S`: Git Bash would turn a lone `/S` into a path.
+          src-tauri/target/release/bundle/nsis/*-setup.exe //S
+          app=$(find "$(cygpath "$LOCALAPPDATA")/mnemo" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' | head -n 1)
+          echo "installed: $app"
+          test -n "$app"
+          MNEMO_DESKTOP_SMOKE=1 "$app"

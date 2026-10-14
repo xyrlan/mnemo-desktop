@@ -536,41 +536,40 @@ mod tests {
         assert_eq!(first_line("\r\n\r\n"), None);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_managed_tool_is_found_versioned_and_marked_managed() {
         let home = temp_dir("tools-status");
         let managed = managed_dir_in(&home, "mnemo");
         std::fs::create_dir_all(&managed).unwrap();
-        crate::testutil::write_script(&managed.join("mnemo"), "#!/bin/sh\necho\necho 'mnemo 1.6.0'\necho second\n");
-        let path = add_dirs("/usr/bin:/bin", ':', &extra_dirs_in(&home));
-        let row = status_of("mnemo", &path, &Lookup::unix(), &managed, VERSION_TIMEOUT);
+        let mnemo = crate::testutil::stand_in(&managed, "mnemo", "echo\necho 'mnemo 1.6.0'\necho second\n", "echo.\necho mnemo 1.6.0\necho second");
+        // Windows has no `/usr/bin`: git is wherever this test's own PATH has it.
+        let system = if cfg!(windows) { std::env::var("PATH").unwrap_or_default() } else { "/usr/bin:/bin".into() };
+        let path = add_dirs(&system, separator(), &extra_dirs_in(&home));
+        let lookup = Lookup::native();
+        let row = status_of("mnemo", &path, &lookup, &managed, VERSION_TIMEOUT);
         assert_eq!(
             row,
-            ToolStatus {
-                name: "mnemo",
-                path: Some(managed.join("mnemo").to_string_lossy().into_owned()),
-                version: Some("mnemo 1.6.0".into()),
-                managed: true,
-            }
+            ToolStatus { name: "mnemo", path: Some(mnemo.to_string_lossy().into_owned()), version: Some("mnemo 1.6.0".into()), managed: true }
         );
-        let git = status_of("git", &path, &Lookup::unix(), &managed_dir_in(&home, "git"), VERSION_TIMEOUT);
+        let git = status_of("git", &path, &lookup, &managed_dir_in(&home, "git"), VERSION_TIMEOUT);
         assert!(git.path.is_some() && !git.managed, "{git:?}");
         assert!(git.version.as_deref().is_some_and(|v| v.starts_with("git version")), "{git:?}");
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_tool_that_fails_or_hangs_is_found_without_a_version() {
         let dir = temp_dir("tools-broken");
-        crate::testutil::write_script(&dir.join("mnemo"), "#!/bin/sh\necho 'mnemo 1.6.0'\nexit 3\n");
-        crate::testutil::write_script(&dir.join("claude"), "#!/bin/sh\nexec /bin/sleep 30\n");
+        crate::testutil::stand_in(&dir, "mnemo", "echo 'mnemo 1.6.0'\nexit 3\n", "echo mnemo 1.6.0\nexit /b 3");
+        // On Windows `ping` stands in for `sleep`, and outlives the batch file that started it,
+        // holding its stdout open: as a program a hung tool started would.
+        crate::testutil::stand_in(&dir, "claude", "exec /bin/sleep 30\n", "\"%SystemRoot%\\System32\\PING.EXE\" -n 30 127.0.0.1");
         let path = dir.to_string_lossy().into_owned();
-        let broken = status_of("mnemo", &path, &Lookup::unix(), &dir, VERSION_TIMEOUT);
+        let lookup = Lookup::native();
+        let broken = status_of("mnemo", &path, &lookup, &dir, VERSION_TIMEOUT);
         assert!(broken.path.is_some() && broken.version.is_none(), "{broken:?}");
         let started = Instant::now();
-        let hung = status_of("claude", &path, &Lookup::unix(), &dir, Duration::from_millis(300));
+        let hung = status_of("claude", &path, &lookup, &dir, Duration::from_millis(300));
         assert!(hung.path.is_some() && hung.version.is_none(), "{hung:?}");
         assert!(started.elapsed() < Duration::from_secs(5), "waited {:?}", started.elapsed());
         let _ = std::fs::remove_dir_all(&dir);

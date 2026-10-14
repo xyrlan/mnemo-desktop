@@ -539,38 +539,173 @@ mod closing_tests {
         }
         m.kill(idle);
     }
+
+    /// An interactive shell at its prompt, as a pane runs it: what the question on close counts.
+    struct Interactive {
+        /// The shell, by full path.
+        program: String,
+        args: &'static [&'static str],
+        /// A line that prints `PRODUCT`, which its own echo does not.
+        product: &'static str,
+        /// A line that runs `running` until it is ended.
+        run: &'static str,
+        running: &'static str,
+    }
+
+    /// 7919 × 7907: in no prompt, path or title a shell prints on its own.
+    const PRODUCT: &str = "62615533";
+
+    fn interactive_shells() -> Vec<Interactive> {
+        if cfg!(windows) {
+            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+            vec![
+                Interactive {
+                    program: std::env::var("COMSPEC").unwrap_or_else(|_| format!(r"{root}\System32\cmd.exe")),
+                    args: &[],
+                    product: "set /a 7919*7907",
+                    // By full path: see `closing_asks_…` above.
+                    run: r#""%SystemRoot%\System32\PING.EXE" -n 120 127.0.0.1"#,
+                    running: "ping",
+                },
+                Interactive {
+                    program: format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"),
+                    args: &["-NoLogo", "-NoProfile"],
+                    product: "7919*7907",
+                    run: r#"& "$env:SystemRoot\System32\PING.EXE" -n 120 127.0.0.1"#,
+                    running: "ping",
+                },
+            ]
+        } else {
+            ["/bin/bash", "/bin/zsh"]
+                .into_iter()
+                .filter(|p| Path::new(p).exists())
+                .map(|p| Interactive { program: p.into(), args: &[], product: "echo $((7919*7907))", run: "sleep 120", running: "sleep" })
+                .collect()
+        }
+    }
+
+    /// #338 counts a program under a pane's shell as "running something". On a real pty (a
+    /// pseudoconsole on Windows, where the console host could have been one) a shell waiting at
+    /// its prompt has nothing under it, and a program typed there is under it.
+    #[test]
+    fn an_idle_shell_at_its_prompt_has_no_child_and_a_program_it_runs_is_one() {
+        let shells = interactive_shells();
+        assert!(!shells.is_empty(), "no shell to try");
+        for shell in shells {
+            let home = crate::testutil::temp_dir("pty-interactive");
+            let m = PtyManager::with_shell_dir(None);
+            let opts = SpawnOptions {
+                program: Some(shell.program.clone()),
+                args: shell.args.iter().map(|a| a.to_string()).collect(),
+                cwd: Some(home.to_string_lossy().into_owned()),
+                cols: 200,
+                rows: 24,
+                login: false,
+            };
+            let mut cmd = m.command(opts, default_shell());
+            // No rc file of the person running the tests starts anything. An empty one: with none
+            // at all zsh greets a new user with a menu instead of its prompt.
+            std::fs::write(home.join(".zshrc"), "").unwrap();
+            cmd.env("HOME", &home);
+            cmd.env_remove("ZDOTDIR");
+            let printed = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&printed);
+            let record = move |e| {
+                if let Event::Output(b) = e {
+                    sink.lock().unwrap().extend(b);
+                }
+            };
+            let id = m.launch(cmd, 24, 200, Box::new(record)).expect("spawn");
+            if cfg!(windows) {
+                m.write(id, b"\x1b[1;1R").unwrap();
+            }
+            let said = || String::from_utf8_lossy(&printed.lock().unwrap()).into_owned();
+            let name = &shell.program;
+
+            // At its prompt once it has answered a line it was typed.
+            m.write(id, format!("{}\r", shell.product).as_bytes()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while !said().contains(PRODUCT) {
+                assert!(Instant::now() < deadline, "{name} never answered: printed {:?}", said());
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let pid = m.pid(id).expect("a live shell");
+            for _ in 0..20 {
+                std::thread::sleep(Duration::from_millis(100));
+                let table = crate::procs::table().expect("the process table");
+                let below: Vec<_> = table.children(&[pid]).into_iter().map(|p| (p, closing::name_of(p))).collect();
+                assert!(below.is_empty(), "{name} at its prompt has {below:?} under it");
+                assert_eq!(m.busy(), vec![], "{name} at its prompt");
+            }
+
+            m.write(id, format!("{}\r", shell.run).as_bytes()).unwrap();
+            let busy = busy_with(&m, shell.running, &printed);
+            assert_eq!(busy.len(), 1, "{name}: {busy:?}");
+            assert!(closing::question(&busy).expect("asked").to_lowercase().contains(shell.running), "{name}: {busy:?}");
+            m.kill(id);
+            let _ = std::fs::remove_dir_all(&home);
+        }
+    }
 }
 
-#[cfg(all(test, unix))]
+/// Terminals on a real pty: on Windows a pseudoconsole running `cmd`, where each test that has
+/// one gives its script as `cmd` reads it. The daemon and the zsh/bash integration are unix only.
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
 
+    /// The command line of a terminal running `script`: `/bin/sh -c`, or on Windows
+    /// `cmd /d /v:on /c` (`!x!` reads `x` as it is when the line runs, not when it was read).
+    fn script_args(script: &str) -> (String, Vec<String>) {
+        if cfg!(windows) {
+            // Word by word: `cmd` does not read the quotes portable-pty puts around a spaced argument.
+            let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+            (comspec, ["/d", "/v:on", "/c"].into_iter().chain(script.split(' ')).map(String::from).collect())
+        } else {
+            ("/bin/sh".into(), vec!["-c".into(), script.into()])
+        }
+    }
+
+    /// One of two scripts: `unix`'s for `/bin/sh`, `windows`' for `cmd`.
+    fn either<'a>(unix: &'a str, windows: &'a str) -> &'a str {
+        if cfg!(windows) {
+            windows
+        } else {
+            unix
+        }
+    }
+
     fn sh(manager: &PtyManager, script: &str) -> (PaneId, mpsc::Receiver<Event>) {
+        sh_in(manager, script, None)
+    }
+
+    /// On Windows, wide enough that no path a test prints is wrapped by the pseudoconsole.
+    const COLS: u16 = if cfg!(windows) { 250 } else { 80 };
+
+    fn sh_in(manager: &PtyManager, script: &str, cwd: Option<String>) -> (PaneId, mpsc::Receiver<Event>) {
         let (tx, rx) = mpsc::channel();
+        let (program, args) = script_args(script);
         let id = manager
             .spawn(
-                SpawnOptions {
-                    program: Some("/bin/sh".into()),
-                    args: vec!["-c".into(), script.into()],
-                    cwd: None,
-                    cols: 80,
-                    rows: 24,
-                    login: false,
-                },
+                SpawnOptions { program: Some(program), args, cwd, cols: COLS, rows: 24, login: false },
                 Box::new(move |e| {
                     let _ = tx.send(e);
                 }),
             )
             .expect("spawn");
+        if cfg!(windows) {
+            // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
+            let _ = manager.write(id, b"\x1b[1;1R");
+        }
         (id, rx)
     }
 
     fn collect(rx: &mpsc::Receiver<Event>) -> (Vec<u8>, Option<Option<i32>>) {
         let mut out = Vec::new();
         let mut exit = None;
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         while std::time::Instant::now() < deadline {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Event::Output(b)) => out.extend(b),
@@ -588,7 +723,7 @@ mod tests {
     #[test]
     fn spawn_streams_output_then_exit() {
         let m = PtyManager::new();
-        let (_id, rx) = sh(&m, "printf hi");
+        let (_id, rx) = sh(&m, either("printf hi", "echo hi"));
         let (out, exit) = collect(&rx);
         assert!(String::from_utf8_lossy(&out).contains("hi"), "got {:?}", out);
         assert_eq!(exit, Some(Some(0)));
@@ -605,8 +740,8 @@ mod tests {
     #[test]
     fn ids_are_unique_and_increasing() {
         let m = PtyManager::new();
-        let (a, _ra) = sh(&m, "true");
-        let (b, _rb) = sh(&m, "true");
+        let (a, _ra) = sh(&m, "exit 0");
+        let (b, _rb) = sh(&m, "exit 0");
         assert!(b > a);
     }
 
@@ -615,14 +750,17 @@ mod tests {
         let root = crate::testutil::temp_dir("pty-accounts");
         let place = crate::accounts::Place::new(root.join("home"), root.join("app"));
         let m = PtyManager::with_shell_dir(None).with_accounts(PaneAccounts::new(place.clone(), None));
-        let probe = "printf '<%s>' \"${CLAUDE_CONFIG_DIR-unset}\"";
+        let probe = either(
+            "printf '[%s]' \"${CLAUDE_CONFIG_DIR-unset}\"",
+            "if defined CLAUDE_CONFIG_DIR (echo [!CLAUDE_CONFIG_DIR!]) else (echo [unset])",
+        );
 
         let (default, rx) = sh(&m, probe);
-        assert!(String::from_utf8_lossy(&collect(&rx).0).contains("<unset>"), "the default account leaves it unset");
+        assert!(String::from_utf8_lossy(&collect(&rx).0).contains("[unset]"), "the default account leaves it unset");
 
         place.add("Work").expect("add");
         let (work, rx) = sh(&m, probe);
-        let want = format!("<{}>", root.join("home/.claude-work").display());
+        let want = format!("[{}]", root.join("home").join(".claude-work").display());
         let out = collect(&rx).0;
         assert!(String::from_utf8_lossy(&out).contains(&want), "got {:?}", String::from_utf8_lossy(&out));
 
@@ -638,15 +776,15 @@ mod tests {
     #[test]
     fn env_is_set_for_the_child() {
         let m = PtyManager::new();
-        let (_id, rx) = sh(&m, "printf \"%s|%s\" \"$MNEMO_DESKTOP\" \"$TERM\"");
+        let (_id, rx) = sh(&m, either("printf \"%s,%s\" \"$MNEMO_DESKTOP\" \"$TERM\"", "echo %MNEMO_DESKTOP%,%TERM%"));
         let (out, _) = collect(&rx);
-        assert!(String::from_utf8_lossy(&out).contains("1|xterm-256color"), "got {:?}", out);
+        assert!(String::from_utf8_lossy(&out).contains("1,xterm-256color"), "got {:?}", out);
     }
 
     #[test]
     fn resize_live_pty_ok() {
         let m = PtyManager::new();
-        let (id, rx) = sh(&m, "sleep 2");
+        let (id, rx) = sh(&m, either("sleep 2", "set /p x="));
         m.resize(id, 120, 40).expect("resize");
         m.kill(id);
         let (_, exit) = collect(&rx);
@@ -656,7 +794,7 @@ mod tests {
     #[test]
     fn kill_is_idempotent_and_unknown_is_noop() {
         let m = PtyManager::new();
-        let (id, rx) = sh(&m, "true");
+        let (id, rx) = sh(&m, "exit 0");
         let _ = collect(&rx);
         m.kill(id);
         m.kill(id);
@@ -666,8 +804,8 @@ mod tests {
     #[test]
     fn write_reaches_the_child() {
         let m = PtyManager::new();
-        let (id, rx) = sh(&m, "read x; printf \"got:%s\" \"$x\"");
-        m.write(id, b"abc\n").expect("write");
+        let (id, rx) = sh(&m, either("read x; printf \"got:%s\" \"$x\"", "set /p x= & echo got:!x!"));
+        m.write(id, if cfg!(windows) { b"abc\r" } else { b"abc\n" }).expect("write");
         let (out, exit) = collect(&rx);
         assert!(String::from_utf8_lossy(&out).contains("got:abc"), "got {:?}", out);
         assert_eq!(exit, Some(Some(0)));
@@ -676,11 +814,10 @@ mod tests {
     #[test]
     fn pid_is_the_spawned_child_until_it_exits() {
         let m = PtyManager::new();
-        let (id, rx) = sh(&m, "read x");
+        let (id, rx) = sh(&m, either("read x", "set /p x="));
         let pid = m.pid(id).expect("a live pane has a pid");
-        let ppid = crate::proc::command("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
-        assert_eq!(String::from_utf8_lossy(&ppid.stdout).trim(), std::process::id().to_string());
-        m.write(id, b"\n").unwrap();
+        assert_eq!(crate::procs::table().unwrap().parent(pid), Some(std::process::id()));
+        m.write(id, if cfg!(windows) { b"\r" } else { b"\n" }).unwrap();
         let _ = collect(&rx);
         assert_eq!(m.pid(id), None);
         assert_eq!(m.pid(999_999), None);
@@ -689,16 +826,18 @@ mod tests {
     #[test]
     fn write_after_exit_is_error() {
         let m = PtyManager::new();
-        let (id, rx) = sh(&m, "true");
+        let (id, rx) = sh(&m, "exit 0");
         let _ = collect(&rx);
         assert!(m.write(id, b"x").is_err());
     }
 
+    #[cfg(unix)]
     fn tmp(tag: &str) -> PathBuf {
         let d = crate::testutil::temp_dir(&format!("pty-{tag}"));
         d
     }
 
+    #[cfg(unix)]
     fn default_shell_opts(cwd: &Path) -> SpawnOptions {
         SpawnOptions {
             program: None,
@@ -712,6 +851,7 @@ mod tests {
 
     /// Runs the default shell (`shell`) through the integration with `home` as $HOME, types
     /// `input`, and returns everything it printed.
+    #[cfg(unix)]
     fn run_default_shell(shell: &str, home: &Path, cwd: &Path, input: &[u8]) -> String {
         let m = PtyManager::with_shell_dir(Some(home.join(".mnemo-desktop/shell")));
         let mut cmd = m.command(default_shell_opts(cwd), shell.into());
@@ -734,6 +874,7 @@ mod tests {
         String::from_utf8_lossy(&out).into_owned()
     }
 
+    #[cfg(unix)]
     #[test]
     fn bootstrap_dir_holds_the_zsh_files_and_the_bash_rc() {
         let dir = tmp("install");
@@ -758,6 +899,7 @@ mod tests {
         assert_eq!(std::fs::metadata(zdotdir.join(".zshenv")).unwrap().modified().unwrap(), before);
     }
 
+    #[cfg(unix)]
     #[test]
     fn spawn_env_carries_zdotdir_and_term_program() {
         let dir = tmp("env");
@@ -801,6 +943,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn zsh_loads_the_user_config_and_reports_its_cwd() {
         if !Path::new("/bin/zsh").exists() {
@@ -821,6 +964,7 @@ mod tests {
         assert!(out.contains("/a%20dir\x07"), "cwd not percent-encoded in {out:?}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn bash_loads_the_login_files_and_reports_its_cwd() {
         if !Path::new("/bin/bash").exists() {
@@ -838,51 +982,35 @@ mod tests {
 
     #[test]
     fn no_cwd_starts_in_home_not_the_process_cwd() {
-        let home = std::env::var("HOME").expect("HOME");
-        for cwd in [None, Some("/definitely/not/a/dir".to_string())] {
+        let home = home_dir().expect("a home");
+        // macOS reaches a home under /var through a link; Windows names it as USERPROFILE does.
+        let home = if cfg!(windows) { home } else { std::fs::canonicalize(&home).unwrap() };
+        for cwd in [None, Some(if cfg!(windows) { r"C:\definitely\not\a\dir" } else { "/definitely/not/a/dir" }.to_string())] {
             let m = PtyManager::new();
-            let (tx, rx) = mpsc::channel();
-            m.spawn(
-                SpawnOptions { program: Some("/bin/sh".into()), args: vec!["-c".into(), "pwd -P".into()], cwd, cols: 80, rows: 24, login: false },
-                Box::new(move |e| {
-                    let _ = tx.send(e);
-                }),
-            )
-            .unwrap();
+            let (_, rx) = sh_in(&m, either("pwd -P", "cd"), cwd);
             let (out, _) = collect(&rx);
-            let real = std::fs::canonicalize(&home).unwrap();
-            assert!(String::from_utf8_lossy(&out).contains(&*real.to_string_lossy()), "got {out:?}");
+            assert!(String::from_utf8_lossy(&out).contains(&*home.to_string_lossy()), "got {:?}", String::from_utf8_lossy(&out));
         }
     }
 
     #[test]
     fn cwd_is_honoured() {
+        let dir = crate::testutil::temp_dir("pty-cwd");
         let m = PtyManager::new();
-        let (tx, rx) = mpsc::channel();
-        m.spawn(
-            SpawnOptions {
-                program: Some("/bin/sh".into()),
-                args: vec!["-c".into(), "pwd".into()],
-                cwd: Some("/tmp".into()),
-                cols: 80,
-                rows: 24,
-                login: false,
-            },
-            Box::new(move |e| {
-                let _ = tx.send(e);
-            }),
-        )
-        .unwrap();
+        let (_, rx) = sh_in(&m, either("pwd", "cd"), Some(dir.to_string_lossy().into_owned()));
         let (out, _) = collect(&rx);
         let s = String::from_utf8_lossy(&out);
-        assert!(s.contains("/tmp"), "got {s:?}");
+        // By its own name: the folder above it may be spelled another way (a link, a short name).
+        assert!(s.contains(&*dir.file_name().unwrap().to_string_lossy()), "got {s:?}");
     }
 
     // -- terminals held by a daemon (server.rs, in-process here; tests/ptyd.rs runs the binary) --
 
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     use std::time::Instant;
 
+    #[cfg(unix)]
     /// A daemon serving on a fresh socket, in this process. `Shutdown` only records itself.
     fn daemon(tag: &str) -> (PathBuf, Arc<server::Server>, mpsc::Receiver<()>) {
         let socket = tmp(tag).join(SOCKET);
@@ -897,12 +1025,14 @@ mod tests {
         (socket, srv, rx)
     }
 
+    #[cfg(unix)]
     /// An app: talks to the daemon at `socket`, and has no binary to start one with.
     fn app(socket: &Path) -> PtyManager {
         PtyManager::with_daemon(socket.to_path_buf(), PathBuf::from("/nonexistent/mnemo-desktop-ptyd"), None)
     }
 
     /// The other half of the question on close (#338): what the daemon holds runs on.
+    #[cfg(unix)]
     #[test]
     fn closing_asks_nothing_over_terminals_the_daemon_holds() {
         let (socket, srv, _rx) = daemon("closing");
@@ -916,6 +1046,7 @@ mod tests {
         drop(srv);
     }
 
+    #[cfg(unix)]
     /// Output until `want` shows up, within 5 s.
     fn until(rx: &mpsc::Receiver<Event>, want: &str) -> String {
         let mut out = Vec::new();
@@ -928,6 +1059,7 @@ mod tests {
         String::from_utf8_lossy(&out).into_owned()
     }
 
+    #[cfg(unix)]
     fn eventually(what: &str, mut f: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !f() {
@@ -936,6 +1068,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn recorder() -> (Sink, mpsc::Receiver<Event>) {
         let (tx, rx) = mpsc::channel();
         (
@@ -946,6 +1079,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_shell_outlives_the_app_and_the_next_one_attaches_with_its_screen() {
         let (socket, srv, _) = daemon("keep");
@@ -985,6 +1119,7 @@ mod tests {
         assert_eq!(second.pid(id), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_shell_that_ended_while_the_app_was_away_is_listed_dead_until_killed() {
         let (socket, _srv, _) = daemon("dead");
@@ -1004,6 +1139,7 @@ mod tests {
         assert!(second.list().unwrap().is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_attached_app_hears_output_and_exit_and_the_one_it_replaced_does_not() {
         let (socket, _srv, _) = daemon("move");
@@ -1019,6 +1155,7 @@ mod tests {
         assert!(rx_a.try_iter().all(|e| matches!(e, Event::Output(ref b) if !String::from_utf8_lossy(b).contains("late"))));
     }
 
+    #[cfg(unix)]
     #[test]
     fn no_daemon_and_no_binary_means_terminals_held_in_process() {
         let socket = tmp("none").join(SOCKET);
@@ -1032,6 +1169,7 @@ mod tests {
         m.release();
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_daemon_of_another_version_is_asked_to_leave() {
         use wire::{frame, read_frame, Message, Request};
@@ -1064,6 +1202,7 @@ mod tests {
         assert_eq!(asked.recv_timeout(Duration::from_secs(5)), Ok(Op::Shutdown));
     }
 
+    #[cfg(unix)]
     #[test]
     fn when_the_daemon_dies_its_terminals_end_and_calls_fail_instead_of_hanging() {
         use wire::{frame, read_frame, Message, Request};

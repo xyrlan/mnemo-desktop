@@ -128,7 +128,7 @@ use commands::PtyState;
 use tauri::Manager;
 
 /// `MNEMO_DESKTOP_SMOKE=1`: spawn the default shell, send `exit`, and exit the app with 0
-/// when the PTY reports the shell ended within 5 s, 1 otherwise. Used by CI.
+/// when the PTY reports the shell ended within 5 s, 1 otherwise. Used by CI, on every OS.
 fn run_smoke(app: &tauri::App) -> Result<(), String> {
     let state = app.state::<PtyState>();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -138,7 +138,14 @@ fn run_smoke(app: &tauri::App) -> Result<(), String> {
             let _ = tx.send(e);
         }),
     )?;
-    state.0.write(id, b"exit\n")?;
+    if cfg!(windows) {
+        // A pseudoconsole asks where the cursor is before the shell starts; xterm.js answers it
+        // in the app, nobody does here. Enter is `\r`, as a terminal sends it.
+        state.0.write(id, b"\x1b[1;1R")?;
+        state.0.write(id, b"exit\r")?;
+    } else {
+        state.0.write(id, b"exit\n")?;
+    }
     let handle = app.handle().clone();
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
