@@ -99,6 +99,11 @@ test('Fix’s prompt says what it could not read, and bounds the logs it carries
   expect(text).not.toContain('gh run view --job undefined')
   expect(text).toContain('Its log could not be read (log expired).')
 
+  // #367: annotations that could not be fetched are said to be missing, not left out as none.
+  const blind = fixPrompt(PR, [{ check: WINDOWS, details: { ...WINDOWS_DETAILS, annotations: [], annotationsError: 'gh: HTTP 502' } }])
+  expect(blind).toContain('Its annotations could not be read (gh: HTTP 502)')
+  expect(blind).not.toContain('Annotations:')
+
   const long = Array.from({ length: 4000 }, (_, i) => `line ${i}`).join('\n')
   const big = fixPrompt(PR, [
     { check: WINDOWS, details: { ...WINDOWS_DETAILS, logTail: long } },

@@ -7,6 +7,8 @@ import { openUrl } from '../github/actions'
 import { stopChild, takeOver } from './run'
 import type { ChildSession } from '../mission/types'
 import { useFleet } from '../fleet/store'
+import { useMission } from '../mission/app-store'
+import { SnapshotErrors } from '../mission/SnapshotErrors'
 import type { PaneViewProps } from '../panes/registry'
 import { dispatchTitle, waveOfTarget, type Wave } from './model'
 import { knownWorktrees, useWaves } from './live'
@@ -62,6 +64,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
   const now = useNow()
   const repos = useFleet((f) => f.repos)
   const open = useApp((s) => s.worktrees)
+  const errors = useMission((s) => s.snapshot.errors)
   const list = useRef<HTMLDivElement>(null)
   useTitle(id, waves)
 
@@ -114,6 +117,7 @@ export function DispatchPane({ id, props }: PaneViewProps) {
               from {name}
             </span>
           </div>
+          <SnapshotErrors errors={errors} sources={['children', 'sessions', 'prs']} className="mx-2 mt-2" />
           <WaveList parent={parent} waves={waves} selected={selected} answeringRight={answeringRight} actions={actions} now={now} />
         </div>
         <div className="dispatch-detail">

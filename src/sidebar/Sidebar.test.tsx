@@ -386,3 +386,16 @@ test('a wave line opens the parent’s Dispatch tab on that wave’s child that 
   expect(tab.opened[1]).toEqual(['/r/app', 'tab-groups-core'])
   expect(layoutStore.getState().switchWorktree).not.toHaveBeenCalled()
 })
+
+test('a snapshot that could not list the sessions says why above the cards, not "no agents" (#367)', async () => {
+  fleetStore.setState({ repos: [repo('/r', [tree('/r')])] })
+  missionStore.setState({ snapshot: { repos: [], errors: ['account work: claude agents --json --all: Not logged in', 'gh pr list --json x: HTTP 502'], at: 'now' } })
+  const host = await mount()
+  const alert = host.querySelector<HTMLElement>('[data-snapshot-errors]')!
+  expect(alert.textContent).toBe('Claude sessions could not be listed on account work: claude agents --json --all: Not logged in')
+  expect(alert.querySelector('p')!.title).toBe('account work: claude agents --json --all: Not logged in')
+  expect(card(host, '/r')).not.toBeNull()
+
+  await act(async () => missionStore.setState({ snapshot: { repos: [], errors: [], at: 'later' } }))
+  expect(host.querySelector('[data-snapshot-errors]')).toBeNull()
+})

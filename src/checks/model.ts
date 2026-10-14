@@ -131,7 +131,7 @@ export function fixPrompt(pr: ChecksPr, failing: readonly Failing[]): string {
       if (notes.length) {
         lines.push('Annotations:')
         for (const a of notes) lines.push(`- ${a.path}${a.line ? `:${a.line}` : ''} (${a.level})${a.title ? ` ${a.title}:` : ''} ${a.message}`)
-      }
+      } else if (details.annotationsError) lines.push(`Its annotations could not be read (${details.annotationsError}): read them on the check's page.`)
       if (details.logTail) lines.push('Log tail:', '```text', tailOf(details.logTail, perLog), '```')
       else if (details.logError) lines.push(`Its log could not be read (${details.logError}).`)
     }

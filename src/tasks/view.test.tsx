@@ -197,3 +197,11 @@ test('with no project yet, it says where to add one', async () => {
   await render()
   expect(host.textContent).toContain('No projects yet')
 })
+
+test('a Home read that could not read Claude’s history says so where the projects would be (#367)', async () => {
+  ipc.snapshot = { ...EMPTY, errors: ['history (/Users/me/.claude/history.jsonl): Permission denied (os error 13)', 'github (mnemo): HTTP 502'] }
+  await render()
+  const alert = host.querySelector<HTMLElement>('[data-snapshot-errors]')!
+  expect(alert.textContent).toBe("Claude's history could not be read: history (/Users/me/.claude/history.jsonl): Permission denied (os error 13)")
+  expect(host.textContent).toContain('No projects yet')
+})
