@@ -7,22 +7,45 @@
 
 use std::collections::HashMap;
 
-/// The live processes at one moment: pid → parent pid.
+/// The live processes at one moment: pid → parent pid, and where the system says so, when each
+/// was created.
 #[derive(Debug, Clone, Default)]
-pub struct Table(HashMap<u32, u32>);
+pub struct Table {
+    parents: HashMap<u32, u32>,
+    /// Windows only, in 100 ns ticks; a process whose time could not be read has none.
+    created: HashMap<u32, u64>,
+}
 
 impl Table {
-    /// The parent of `pid`, None when it was not running.
+    /// The parent of `pid`, None when it was not running, or when the pid its row names is now a
+    /// process created after it: Windows gives a dead parent's pid to new processes, and who
+    /// started this one can then no longer be told. A parent that has ended and whose pid nobody
+    /// holds is still named, as before.
     pub fn parent(&self, pid: u32) -> Option<u32> {
-        self.0.get(&pid).copied()
+        let ppid = *self.parents.get(&pid)?;
+        (!self.parents.contains_key(&ppid) || self.started(pid, ppid)).then_some(ppid)
     }
 
     /// Every pid whose parent is one of `parents`, as `pgrep -P a,b,c` answered. A parent that is
     /// not running has no children: Windows leaves a dead parent's pid on what it started, where
     /// macOS and Linux hand an orphan to another process at once. Without this a pane whose shell
-    /// had just ended still read as running whatever outlived it by a moment.
+    /// had just ended still read as running whatever outlived it by a moment. Nor is a process
+    /// the child of one created after it, which is that dead parent's pid given to a new process.
     pub fn children(&self, parents: &[u32]) -> Vec<u32> {
-        self.0.iter().filter(|(pid, ppid)| pid != ppid && parents.contains(ppid) && self.0.contains_key(ppid)).map(|(pid, _)| *pid).collect()
+        self.parents
+            .iter()
+            .filter(|(pid, ppid)| pid != ppid && parents.contains(ppid) && self.parents.contains_key(ppid) && self.started(**pid, **ppid))
+            .map(|(pid, _)| *pid)
+            .collect()
+    }
+
+    /// Whether the live process `ppid` can have started `pid`: not when it was created after it.
+    /// Where either time is unknown (every row off Windows) the row's word is taken.
+    fn started(&self, pid: u32, ppid: u32) -> bool {
+        match (self.created.get(&pid), self.created.get(&ppid)) {
+            (Some(child), Some(parent)) => parent <= child,
+            _ => true,
+        }
     }
 }
 
@@ -45,7 +68,8 @@ pub fn table() -> Result<Table, String> {
         return Err(failed());
     }
     pids.truncate(got as usize);
-    Ok(Table(pids.into_iter().filter_map(|p| Some((u32::try_from(p).ok()?, listed_parent(p)?))).collect()))
+    let parents = pids.into_iter().filter_map(|p| Some((u32::try_from(p).ok()?, listed_parent(p)?))).collect();
+    Ok(Table { parents, created: HashMap::new() })
 }
 
 /// A row of the table: the parent of any user's process, as `pgrep` listed them (`parent_of`
@@ -64,12 +88,13 @@ fn listed_parent(pid: libc::pid_t) -> Option<u32> {
 pub fn table() -> Result<Table, String> {
     let entries = std::fs::read_dir("/proc").map_err(|e| format!("the process table could not be read: /proc: {e}"))?;
     let pids = entries.flatten().filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok());
-    Ok(Table(pids.filter_map(|p| Some((p, parent_of(p)?))).collect()))
+    Ok(Table { parents: pids.filter_map(|p| Some((p, parent_of(p)?))).collect(), created: HashMap::new() })
 }
 
 /// One snapshot of the system (`CreateToolhelp32Snapshot`). A parent that has exited keeps its
 /// pid in its children's rows, and Windows may give that pid to a new process: a row's parent is
-/// the pid that started it, not proof that the process with that pid now did.
+/// the pid that started it, not proof that the process with that pid now did: each row's creation
+/// time is read too, and `Table` takes a parent created after its child for a stranger.
 #[cfg(windows)]
 pub fn table() -> Result<Table, String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -101,7 +126,41 @@ pub fn table() -> Result<Table, String> {
     }
     // SAFETY: `snapshot` is open and not used again.
     unsafe { CloseHandle(snapshot) };
-    Ok(Table(rows))
+    // A pid opened after the snapshot may already be another process: one created since is not
+    // the row's, and its time is not taken.
+    let taken = filetime_now();
+    let created = rows.keys().filter_map(|&pid| Some((pid, created_at(pid).filter(|&t| t <= taken)?))).collect();
+    Ok(Table { parents: rows, created })
+}
+
+/// When `pid` was created, in 100 ns ticks since 1601 (a FILETIME). None when it cannot be opened
+/// (the idle and system processes, a protected one, one gone since).
+#[cfg(windows)]
+fn created_at(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    // SAFETY: no pointers go in; the handle is closed below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: `process` is open with the right to ask, and the four FILETIMEs outlive the call.
+    let asked = unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) };
+    // SAFETY: `process` is open and not used again.
+    unsafe { CloseHandle(process) };
+    let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    (asked != 0 && ticks != 0).then_some(ticks)
+}
+
+/// Now, as a FILETIME counts.
+#[cfg(windows)]
+fn filetime_now() -> u64 {
+    const UNIX_EPOCH_IN_FILETIME_SECS: u64 = 11_644_473_600;
+    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    (since.as_secs() + UNIX_EPOCH_IN_FILETIME_SECS) * 10_000_000 + u64::from(since.subsec_nanos()) / 100
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
@@ -289,6 +348,11 @@ mod tests {
     use super::testing::*;
     use super::*;
 
+    /// A table built by hand: (pid, parent) rows, and the creation times known of some.
+    fn rows(parents: &[(u32, u32)], created: &[(u32, u64)]) -> Table {
+        Table { parents: parents.iter().copied().collect(), created: created.iter().copied().collect() }
+    }
+
     /// On every system CI builds for, Windows among them: nothing here is behind `cfg(unix)`.
     #[test]
     fn a_real_child_is_found_under_its_parent_and_forgotten_once_it_exits() {
@@ -350,7 +414,7 @@ mod tests {
     /// and what it started still there, still naming it as the parent.
     #[test]
     fn what_a_dead_parent_started_is_not_its_child() {
-        let table = Table(HashMap::from([(100, 1), (200, 100), (300, 77), (301, 77)]));
+        let table = rows(&[(100, 1), (200, 100), (300, 77), (301, 77)], &[]);
         assert_eq!(table.children(&[100]), [200]);
         assert_eq!(table.parent(77), None, "77 has ended");
         assert_eq!(table.children(&[77]), Vec::<u32>::new());
@@ -362,8 +426,88 @@ mod tests {
     #[test]
     fn a_process_is_not_its_own_child() {
         // Windows lists the idle process as pid 0 with parent 0.
-        let table = Table(HashMap::from([(0, 0), (4, 0), (88, 4)]));
+        let table = rows(&[(0, 0), (4, 0), (88, 4)], &[]);
         assert_eq!(table.children(&[0]), [4]);
         assert_eq!(table.children(&[4]), [88]);
+    }
+
+    /// Windows after a shell (77) has ended and its pid has been given to a new process: what the
+    /// shell left running still names 77, and is not the new process's.
+    #[test]
+    fn a_process_is_not_the_child_of_one_created_after_it() {
+        // 77 is the new process, created at 50; 300 and 301 were started by the old 77, before it.
+        // 302 the new 77 did start. 400 has no time read, 401 is under a parent with none.
+        let table = rows(
+            &[(1, 0), (77, 1), (300, 77), (301, 77), (302, 77), (400, 77), (500, 1), (401, 500)],
+            &[(1, 1), (77, 50), (300, 10), (301, 49), (302, 60), (401, 5)],
+        );
+        let sorted = |mut pids: Vec<u32>| {
+            pids.sort();
+            pids
+        };
+        assert_eq!(sorted(table.children(&[77])), [302, 400], "where a time is missing the row is taken at its word");
+        assert_eq!(table.parent(300), None, "who started 300 can no longer be told");
+        assert_eq!(table.parent(301), None);
+        assert_eq!(table.parent(302), Some(77));
+        assert_eq!(table.parent(400), Some(77));
+        assert_eq!(table.children(&[500]), [401]);
+        assert_eq!(table.parent(401), Some(500));
+        assert_eq!(table.parent(77), Some(1));
+        // Created in the same tick as its parent is still its child: the clock is coarse.
+        let same = rows(&[(10, 1), (11, 10)], &[(10, 7), (11, 7)]);
+        assert_eq!(same.children(&[10]), [11]);
+        assert_eq!(same.parent(11), Some(10));
+    }
+
+    /// Real processes, the parent ending first: a shell is killed and what it ran outlives it. On
+    /// Windows that orphan still names the shell's pid; a process created after it is then given
+    /// that pid (here: a real later process's row moved onto it, as no test can make Windows
+    /// reuse a pid on demand), and the orphan is not counted as its child. Nothing here is
+    /// `cfg(unix)`, so CI's Windows job runs it, and there the creation times are real.
+    #[test]
+    fn what_outlives_its_shell_is_not_the_child_of_a_later_process_given_the_shells_pid() {
+        let mut sh = shell();
+        let dead = sh.id();
+        let orphans = started_by(dead);
+        // The shell alone, not what it started. `sh` stays held, so Windows cannot really give
+        // its pid to anything while this runs.
+        sh.kill().unwrap();
+        sh.wait().unwrap();
+        eventually("the killed shell is still in the table", || table().unwrap().parent(dead).is_none());
+        let later = sleeper();
+
+        let mut real = table().unwrap();
+        // A `conhost.exe` may leave with the shell; the program it ran does not.
+        let orphans: Vec<u32> = orphans.into_iter().filter(|o| real.parents.contains_key(o)).collect();
+        assert!(!orphans.is_empty(), "nothing outlived the shell");
+        assert!(real.children(&[dead]).is_empty(), "a dead parent has no children");
+        #[cfg(windows)]
+        {
+            let me = std::process::id();
+            assert!(orphans.iter().all(|&o| real.parents.get(&o) == Some(&dead)), "Windows leaves the dead shell's pid on {orphans:?}");
+            for pid in orphans.iter().chain([&later.id(), &me]) {
+                assert!(real.created.contains_key(pid), "no creation time read for {pid}");
+            }
+            assert!(orphans.iter().all(|o| real.created[o] <= real.created[&later.id()]));
+            assert!(real.created[&me] <= real.created[&later.id()]);
+        }
+
+        // The later process takes the dead shell's pid, with its own parent and creation time.
+        let parent = real.parents.remove(&later.id()).unwrap();
+        real.parents.insert(dead, parent);
+        if let Some(t) = real.created.remove(&later.id()) {
+            real.created.insert(dead, t);
+        }
+        assert!(real.children(&[dead]).iter().all(|p| !orphans.contains(p)), "{:?} counted under the new {dead}", real.children(&[dead]));
+        assert!(orphans.iter().all(|&o| real.parent(o) != Some(dead)));
+        assert_eq!(real.parent(dead), Some(std::process::id()), "the new process's own parent stands");
+
+        for pid in orphans {
+            #[cfg(windows)]
+            let _ = crate::proc::command("taskkill").args(["/F", "/PID", &pid.to_string()]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+            #[cfg(not(windows))]
+            let _ = crate::proc::command("kill").arg(pid.to_string()).status();
+        }
+        end(later);
     }
 }
