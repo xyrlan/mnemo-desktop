@@ -3,6 +3,7 @@ import { bufferLines, tail } from '../terminal/buffer'
 import { tauriPty } from '../pty/client'
 import { DETACH_KEY, promptOptions } from '../cockpit/prompt'
 import { accountOf, idOf, onAccount, type Target } from './account'
+import { paneShell, thenLeave, typed, type Shell } from '../pty/typed'
 
 /** "Reply as me": the draft, as typed, goes into the child's own terminal through a hidden
  *  `claude attach <id>`, so it lands as the maintainer's turn (`origin.kind: "human"`) instead
@@ -32,6 +33,8 @@ export type Deps = {
   waitingFor: (id: string) => Promise<string | null>
   /** A login shell on a hidden PTY; the command is typed into it. */
   open: () => Promise<AttachSession>
+  /** The shell that PTY runs: the attach is typed for it. */
+  shell: Shell
   sleep: (ms: number) => Promise<void>
   /** How long the attach gets to draw its input box. */
   timeoutMs: number
@@ -110,6 +113,9 @@ async function openHidden(): Promise<AttachSession> {
 const defaults: Deps = {
   waitingFor: (id) => invoke<string | null>('mission_waiting_for', { id }),
   open: openHidden,
+  get shell() {
+    return paneShell()
+  },
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   timeoutMs: 20_000,
   stepMs: 5_000,
@@ -126,8 +132,8 @@ export async function attached<R>(target: Target, d: Deps, body: (s: AttachSessi
   const id = idOf(target)
   const s = await d.open()
   try {
-    // `exec`: when the attach ends, the PTY ends, and no shell is left to type into.
-    await s.write(`exec ${onAccount(`claude attach ${id}`, accountOf(target))}\r`)
+    // When the attach ends, the PTY ends, and no shell is left to type into.
+    await s.write(typed(thenLeave(onAccount(`claude attach ${id}`, accountOf(target), d.shell), d.shell), d.shell, '\r'))
     const until: Until = async (what, ms, probe) => {
       const end = Date.now() + ms
       for (;;) {

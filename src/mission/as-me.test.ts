@@ -127,6 +127,24 @@ test("typeAsMe attaches on the child's own account when it is given the child", 
   expect(asked).toEqual(['b0b0b0b0'])
 })
 
+test('on Windows the attach is typed for the shell the hidden pane runs, with one account and with two', async () => {
+  const work = { id: 'b0b0b0b0', account: 'work', account_env: { config_dir: 'C:\\Users\\Jo Doe\\.claude-work' } }
+  const home = { id: 'a1a1a1a1', account: 'default', account_env: { config_dir: null } }
+  const first = async (target: Parameters<typeof typeAsMe>[0], shell: 'cmd' | 'powershell') => {
+    const a = fakeAttach()
+    await typeAsMe(target, 'go', { ...quick, shell, open: async () => a.session })
+    expect(a.writes.slice(1)).toEqual(['\x1b[200~go\x1b[201~', '\r', DETACH_KEY])
+    return a.writes[0]
+  }
+  expect(await first('5a824ae5', 'cmd')).toBe('claude attach 5a824ae5 & exit\r')
+  expect(await first(work, 'cmd')).toBe('cmd /d /s /c "set "CLAUDE_CONFIG_DIR=C:\\Users\\Jo Doe\\.claude-work"& claude attach b0b0b0b0" & exit\r')
+  expect(await first(home, 'cmd')).toBe('cmd /d /s /c "set "CLAUDE_CONFIG_DIR="& claude attach a1a1a1a1" & exit\r')
+  expect(await first('5a824ae5', 'powershell')).toBe('claude attach 5a824ae5; exit\r')
+  expect(await first(work, 'powershell')).toBe(
+    "$mnemoWas = $env:CLAUDE_CONFIG_DIR; $env:CLAUDE_CONFIG_DIR = 'C:\\Users\\Jo Doe\\.claude-work'; try { claude attach b0b0b0b0 } finally { $env:CLAUDE_CONFIG_DIR = $mnemoWas }; exit\r",
+  )
+})
+
 test('typeAsMe never attaches to a child parked on a prompt', async () => {
   const open = vi.fn()
   await expect(typeAsMe('0cf48e62', 'yes', { ...quick, waitingFor: async () => 'permission prompt', open })).rejects.toThrow('permission prompt')

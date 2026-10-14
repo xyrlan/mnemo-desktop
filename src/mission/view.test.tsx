@@ -90,6 +90,7 @@ import { store as appStore } from '../layout/app-store'
 import type { SessionStatus } from '../conversation/types'
 import { settingsStore } from '../settings/app-store'
 import { routeStore } from './agent'
+import { routeOff } from './rows'
 import './view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -436,6 +437,34 @@ test('a child that asked as it ended its turn gets the composer under its questi
     await expect((chat.composer!.onSend as (t: string) => Promise<void>)('yes')).rejects.toThrow("this is the child's suggested reply")
   } finally {
     r.restore()
+  }
+})
+
+test('on Windows the Message route is off and says why: it needs a socket that is not there', async () => {
+  expect(routeOff('message', true)).toMatch(/^Off on Windows: a message goes through a Unix socket/)
+  expect(routeOff('as-me', true)).toBeNull()
+  expect(routeOff('message', false)).toBeNull()
+  const agent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0')
+  const blocked = { ...allChildren(snapshot).find((c) => c.tempo === 'blocked')!, session_id: 'sess-b' }
+  withChild(blocked)
+  const r = recordReplies()
+  try {
+    await mount(blocked.id)
+    const message = foot()!.querySelector<HTMLButtonElement>('[data-route="message"]')!
+    expect(message.getAttribute('aria-disabled')).toBe('true')
+    expect(message.title).toMatch(/^Off on Windows/)
+    await act(async () => message.click())
+    expect(foot()!.querySelector('[data-route="as-me"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(message.getAttribute('aria-checked')).toBe('false')
+    // The child's suggestion goes as a message too.
+    const suggested = foot()!.querySelector<HTMLButtonElement>('.ms-send-suggested')!
+    expect(suggested.disabled).toBe(true)
+    expect(suggested.title).toMatch(/^Off on Windows/)
+    await act(async () => (chat.composer!.onSend as (t: string) => Promise<void>)('use serde'))
+    expect(r.calls).toEqual([['as-me', 'use serde', 'yes']])
+  } finally {
+    r.restore()
+    agent.mockRestore()
   }
 })
 
