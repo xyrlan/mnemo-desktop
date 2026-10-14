@@ -521,8 +521,7 @@ mod closing_tests {
         assert_eq!(closing::question(&m.busy()), None, "an idle shell loses nothing");
 
         // `; :` keeps sh from becoming the one command it was given.
-        // On Windows a second `cmd`, by its full path: on windows-latest a pane started through
-        // `command` finds neither `ping` nor `powershell` by name (its `PATH` is not this test's).
+        // On Windows a second `cmd`, by its full path, which needs nothing of the pane's `PATH`.
         let nested = format!("{} /d /c set /p y=", std::env::var("COMSPEC").unwrap_or_default());
         let (working, printed) = shell(&m, if cfg!(windows) { &nested } else { "sleep 60; :" });
         let program = if cfg!(windows) { "cmd" } else { "sleep" };
@@ -552,9 +551,10 @@ mod windows_path_tests {
     #[test]
     fn a_pane_finds_the_systems_own_tools_by_name() {
         let m = PtyManager::with_shell_dir(None);
-        // The default shell, as a person's pane starts it, given one line to run.
+        // `cmd` by name, whichever shell is the default: every pane gets the same `PATH`.
         let line = "where powershell && where ping && echo ALL-FOUND";
-        let opts = SpawnOptions { program: None, args: ["/d", "/c"].into_iter().chain(line.split(' ')).map(String::from).collect(), cwd: None, cols: 200, rows: 24, login: false };
+        let program = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+        let opts = SpawnOptions { program: Some(program), args: ["/d", "/c"].into_iter().chain(line.split(' ')).map(String::from).collect(), cwd: None, cols: 200, rows: 24, login: false };
         let (tx, rx) = mpsc::channel();
         let id = m.spawn(opts, Box::new(move |e| drop(tx.send(e)))).expect("spawn");
         // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
