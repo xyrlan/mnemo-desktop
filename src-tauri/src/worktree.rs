@@ -600,6 +600,30 @@ mod tests {
         assert_eq!(parse_porcelain("worktree /b.git\nbare\n"), []);
     }
 
+    /// The poll runs `list` every 30 s in every tree. A plain `git status` that meets stale stat
+    /// data rewrites `.git/index` under `index.lock`, and a `git add` or `git commit` running
+    /// beside it fails on that lock (#340). Not `cfg(unix)`: Windows is where status is slow.
+    #[test]
+    fn listing_leaves_a_stale_index_as_it_is() {
+        let root = repo("wt-stale-index");
+        let index = root.join(".git").join("index");
+        // The same bytes at another time: the index's stat data for README is stale, the tree clean.
+        let readme = std::fs::OpenOptions::new().write(true).open(root.join("README")).unwrap();
+        readme.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        drop(readme);
+        let before = std::fs::read(&index).unwrap();
+
+        let trees = list(&s(&root)).unwrap();
+        assert_eq!((trees.len(), trees[0].dirty), (1, false));
+        assert!(std::fs::read(&index).unwrap() == before, "the background status rewrote .git/index");
+
+        // The premise, so the assertion above cannot pass for nothing: git left to itself does
+        // rewrite this index.
+        let out = crate::proc::command("git").args(["status", "--porcelain"]).env_remove("GIT_OPTIONAL_LOCKS").current_dir(&root).output().unwrap();
+        assert!(out.status.success() && out.stdout.is_empty());
+        assert!(std::fs::read(&index).unwrap() != before, "a plain git status no longer refreshes a stale index: this test proves nothing");
+    }
+
     #[test]
     fn names_that_are_not_one_plain_segment_are_refused() {
         for bad in ["", "..", "../x", "a/b", "a\\b", ".hidden", "-f", "a..b", "x.lock", "x.", "a b", "é", "a:b"] {
