@@ -463,10 +463,12 @@ fn daemon_binary() -> Option<PathBuf> {
 #[cfg(test)]
 mod closing_tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    /// A terminal held by `manager`, its shell running `script` (`/bin/sh -c`, `cmd /d /c`).
-    fn shell(manager: &PtyManager, script: &str) -> PaneId {
+    /// A terminal held by `manager`, its shell running `script` (`/bin/sh -c`, `cmd /d /c`), and
+    /// what it has printed.
+    fn shell(manager: &PtyManager, script: &str) -> (PaneId, Arc<Mutex<Vec<u8>>>) {
         let (program, args): (&str, Vec<String>) = if cfg!(windows) {
             // Word by word: `cmd` does not read the quotes portable-pty puts around a spaced argument.
             ("cmd.exe", ["/d", "/c"].into_iter().chain(script.split(' ')).map(String::from).collect())
@@ -475,23 +477,34 @@ mod closing_tests {
         };
         let program = std::env::var("COMSPEC").ok().filter(|_| cfg!(windows)).unwrap_or_else(|| program.into());
         let opts = SpawnOptions { program: Some(program), args, cwd: None, cols: 80, rows: 24, login: false };
-        let id = manager.spawn(opts, Box::new(|_| {})).expect("spawn");
+        let printed = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&printed);
+        let record = move |e| {
+            if let Event::Output(b) = e {
+                sink.lock().unwrap().extend(b);
+            }
+        };
+        let id = manager.spawn(opts, Box::new(record)).expect("spawn");
         if cfg!(windows) {
             // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
             manager.write(id, b"\x1b[1;1R").unwrap();
         }
-        id
+        (id, printed)
     }
 
-    /// `manager.busy()` once it names `program`, within 30 s.
-    fn busy_with(manager: &PtyManager, program: &str) -> Vec<closing::Busy> {
+    /// `manager.busy()` once it names `program`, within 30 s. `printed` is what its shell said.
+    fn busy_with(manager: &PtyManager, program: &str, printed: &Mutex<Vec<u8>>) -> Vec<closing::Busy> {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let busy = manager.busy();
             if busy.iter().any(|b| b.programs.iter().any(|p| p.eq_ignore_ascii_case(program))) {
                 return busy;
             }
-            assert!(Instant::now() < deadline, "{program} never showed under a shell: {busy:?}");
+            if Instant::now() >= deadline {
+                let (held, said) = (manager.list(), String::from_utf8_lossy(&printed.lock().unwrap()).into_owned());
+                let below: Vec<_> = closing::processes().into_iter().filter(|(pid, parent, _)| held.iter().flatten().any(|t| t.pid == *parent || t.pid == *pid)).collect();
+                panic!("{program} never showed under a shell: busy {busy:?}, held {held:?}, processes {below:?}, printed {said:?}");
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -501,13 +514,13 @@ mod closing_tests {
         let m = PtyManager::with_shell_dir(None);
         assert_eq!(closing::question(&m.busy()), None, "no terminal, no question");
         // A shell waiting for a line, as at its prompt.
-        let idle = shell(&m, if cfg!(windows) { "set /p x=" } else { "read x" });
+        let (idle, _) = shell(&m, if cfg!(windows) { "set /p x=" } else { "read x" });
         assert_eq!(closing::question(&m.busy()), None, "an idle shell loses nothing");
 
         // `; :` keeps sh from becoming the one command it was given.
-        let working = shell(&m, if cfg!(windows) { "ping -n 60 127.0.0.1 >NUL" } else { "sleep 60; :" });
-        let program = if cfg!(windows) { "ping" } else { "sleep" };
-        let busy = busy_with(&m, program);
+        let (working, printed) = shell(&m, if cfg!(windows) { "powershell -NoProfile -Command Start-Sleep 60" } else { "sleep 60; :" });
+        let program = if cfg!(windows) { "powershell" } else { "sleep" };
+        let busy = busy_with(&m, program, &printed);
         assert_eq!(busy.len(), 1, "the idle shell is not among them: {busy:?}");
         let question = closing::question(&busy).expect("asked");
         assert!(question.to_lowercase().contains(program), "{question}");
