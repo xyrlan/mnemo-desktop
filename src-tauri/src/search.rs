@@ -380,7 +380,14 @@ fn entry_path(root: &str, rel: &str) -> String {
 /// to, which reads them.
 fn group(asked: &str, root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileResult> {
     let mut files: Vec<FileRecords> = Vec::new();
-    for (path, line, col, text) in records {
+    for (path, line, col, mut text) in records {
+        // A match that still runs into a CRLF's CR (`\s`, `[^;]*`) ends before it, as the
+        // editor's line does; one that was only the CR is not on the line at all.
+        let shown = text.trim_end_matches('\r').len();
+        if shown == 0 && !text.is_empty() {
+            continue;
+        }
+        text.truncate(shown);
         match files.last_mut() {
             Some((p, ms)) if *p == path => ms.push((line, col, text)),
             _ => files.push((path, vec![(line, col, text)])),
@@ -432,7 +439,11 @@ pub fn search_in(root: &str, query: &str, opts: &SearchOpts, scope: &crate::fs::
     }
     let kind_at = args.len();
     args.push(if opts.use_regex { "-P" } else { "-F" }.into());
-    args.extend(["-e".into(), query.to_string(), "--".into()]);
+    // git hands PCRE a line with its CR when the file ends lines with CRLF (every file of a
+    // default Git for Windows checkout). With CR, LF and CRLF all newlines, `$` matches before
+    // that CR and `.` does not take it, as in the editor, whose lines have none.
+    let pattern = if opts.use_regex { format!("(*ANYCRLF){query}") } else { query.to_string() };
+    args.extend(["-e".into(), pattern, "--".into()]);
     args.extend(pathspecs(&opts.include, &opts.exclude));
 
     let mut outcome = grep(&root, &args, max, deadline, superseded)?;
@@ -440,6 +451,7 @@ pub fn search_in(root: &str, query: &str, opts: &SearchOpts, scope: &crate::fs::
     if let Outcome::Failed(msg) = &outcome {
         if opts.use_regex && (msg.contains("Perl-compatible") || msg.contains("PCRE")) {
             args[kind_at] = "-E".into();
+            args[kind_at + 2] = query.to_string();
             outcome = grep(&root, &args, max, deadline, superseded)?;
         }
     }
@@ -721,6 +733,22 @@ mod tests {
         let r = run(&d, "a.", SearchOpts { use_regex: true, include: "row.txt".into(), ..Default::default() }).unwrap();
         let cols: Vec<u32> = r.files[0].matches.iter().map(|m| m.column).collect();
         assert_eq!(cols, vec![1, 4, 7, 10, 14, 17]);
+    }
+
+    #[test]
+    fn a_regex_reads_a_crlf_line_as_the_editor_does() {
+        let d = repo();
+        write(&d, "crlf.txt", "let foo = 1;\r\nbar end\r\n");
+        let re = |q: &str| run(&d, q, SearchOpts { use_regex: true, case_sensitive: true, include: "crlf.txt".into(), ..Default::default() }).unwrap();
+        let ms = |r: SearchResult| r.files.into_iter().flat_map(|f| f.matches).map(|m| (m.line, m.column, m.match_length, m.line_content)).collect::<Vec<_>>();
+        // Running to the end of the line stops before the CR, where the match starts.
+        assert_eq!(ms(re("foo.*")), vec![(1, 5, 8, "let foo = 1;".to_string())]);
+        assert_eq!(ms(re("foo[^x]*")), vec![(1, 5, 8, "let foo = 1;".to_string())]);
+        // `$` is the end of the line, CR or not.
+        assert_eq!(ms(re("end$")), vec![(2, 5, 3, "bar end".to_string())]);
+        assert_eq!(ms(re(";$")), vec![(1, 12, 1, "let foo = 1;".to_string())]);
+        // A match on nothing but the CR is not one.
+        assert_eq!(ms(re(r"\r")), vec![]);
     }
 
     #[test]
