@@ -1,5 +1,6 @@
 import { ExternalLink, Globe, SquareDashedMousePointer } from 'lucide-react'
 import { Button, Kbd, KbdGroup } from '@/ui'
+import { shortcutKeys } from '../actions/chords'
 
 export type BlankPageProps = {
   /** Design Mode is on and waits for a page to arm. */
@@ -8,7 +9,6 @@ export type BlankPageProps = {
   onDesign(): void
 }
 
-const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
 
 /** What a browser pane with no page shows where the page goes: what the pane is for, Design
  *  Mode first. The page's webview stays hidden meanwhile, or it would cover this. */
@@ -48,9 +48,9 @@ export function BlankPage({ waiting, onDesign }: BlankPageProps) {
           </li>
           <li className="flex items-center gap-2">
             <KbdGroup>
-              <Kbd>{isMac ? '⌘' : 'Ctrl'}</Kbd>
-              <Kbd>⇧</Kbd>
-              <Kbd>B</Kbd>
+              {shortcutKeys('tab.new-browser').map((k) => (
+                <Kbd key={k}>{k}</Kbd>
+              ))}
             </KbdGroup>
             <span>opens another browser tab, as does the “+” by the tabs.</span>
           </li>

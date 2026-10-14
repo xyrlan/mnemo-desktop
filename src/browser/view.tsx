@@ -185,7 +185,6 @@ register({
 register({
   id: 'tab.new-browser',
   title: 'New browser tab',
-  shortcut: '⌘⇧B',
   run: () => store.getState().openView('browser', { url: '' }, 'tab', 'browser'),
 })
 

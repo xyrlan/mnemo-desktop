@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../actions/chords'
 import { activateAgent, addProject, registerSidebarActions } from './actions'
 import { archiveStore } from './archive'
 import { sidebarStore } from './store'
@@ -16,8 +17,9 @@ const three = () =>
 test('worktree.go.1 … worktree.go.9 are registered, with the keymap’s chords', () => {
   const ids = [...actions.keys()].filter((id) => id.startsWith('worktree.go.'))
   expect(ids).toEqual(Array.from({ length: 9 }, (_, i) => `worktree.go.${i + 1}`))
-  expect(actions.get('worktree.go.1')).toMatchObject({ title: 'Go to workspace 1', shortcut: '⌘1' })
-  expect(actions.get('worktree.go.9')?.shortcut).toBe('⌘9')
+  expect(actions.get('worktree.go.1')).toMatchObject({ title: 'Go to workspace 1' })
+  expect([shortcutLabel('worktree.go.1', 'mac'), shortcutLabel('worktree.go.9', 'mac')]).toEqual(['⌘1', '⌘9'])
+  expect(shortcutLabel('worktree.go.1', 'other')).toBe('Ctrl+Shift+1')
 })
 
 test('worktree.cleanup opens the cleanup view', async () => {

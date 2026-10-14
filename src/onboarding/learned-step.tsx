@@ -7,7 +7,9 @@ import { cn } from '@/ui/cn'
 import { learned, useLearned } from '../learned/app-store'
 import { settled, type Count, type Phase } from '../learned/store'
 import { day, firstExpiry, groupPages, type Group, type LearnedPage } from '../learned/types'
+import { shortcutLabel } from '../actions/chords'
 
+const PALETTE = shortcutLabel('palette.open')
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 function Bar({ label, count }: { label: string; count: Count | null }) {
@@ -120,7 +122,7 @@ function Body({ phase, project }: { phase: Phase; project: string }) {
         <div className="flex flex-col gap-3">
           <Bar label="reading sessions" count={phase.harvest} />
           <Bar label="learning from them" count={phase.extract} />
-          <Muted>You can close this: the run keeps going, and ⌘K → “Review what mnemo learned” brings the review back.</Muted>
+          <Muted>You can close this: the run keeps going, and {PALETTE} → “Review what mnemo learned” brings the review back.</Muted>
           {phase.err.length > 0 && (
             <pre className="max-h-24 overflow-y-auto font-mono text-[11px] whitespace-pre-wrap text-destructive">{phase.err.join('\n')}</pre>
           )}
@@ -167,7 +169,7 @@ function Body({ phase, project }: { phase: Phase; project: string }) {
         <Muted>mnemo reaches the kept pages from your next prompt on.</Muted>
       )
     case 'declined':
-      return <Muted>Nothing was read. ⌘K → “Review what mnemo learned” asks again whenever you want.</Muted>
+      return <Muted>Nothing was read. {PALETTE} → “Review what mnemo learned” asks again whenever you want.</Muted>
     case 'nothing':
       return <Muted>No session left to read in {project}, and nothing learned from your history is waiting.</Muted>
     case 'no-repo':

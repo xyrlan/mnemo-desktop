@@ -908,7 +908,8 @@ test('with no session the face says so and how to go back', async () => {
   paneIn({ sessionId: undefined })
   await render(<Face />)
   expect(text()).toContain('No Claude session in this pane')
-  expect(text()).toContain('⌘⇧C')
+  // jsdom is no Mac: the chord printed is the one bound there.
+  expect(text()).toContain('Alt+Shift+C')
 })
 
 test('open terminal flips the pane to its terminal face and gives the xterm the keys', async () => {
@@ -1000,7 +1001,7 @@ test('a terminal pane bar toggles the face and shows the current one; other pane
   const git = { repo: async () => null, branch: async () => null }
   await render(<PaneBar id={PANE} client={git} sessions={sessions} />)
   const toggle = () => q('.pane-bar-face')
-  expect(toggle()?.title).toBe('Toggle conversation (⌘⇧C)')
+  expect(toggle()?.title).toBe('Toggle conversation (Alt+Shift+C)')
   expect(toggle()?.textContent).toBe('terminal')
   await click(toggle())
   expect(store.getState().panes[PANE].face).toBe('conversation')

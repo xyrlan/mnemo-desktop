@@ -5,6 +5,7 @@ import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from
 import { cn } from '@/ui/cn'
 import { useShell } from '../shell/store'
 import { RIGHT_SIDEBAR_MIN_WIDTH, clampRightSidebarPanelWidth } from './width'
+import { shortcutLabel } from '../actions/chords'
 
 /** One tab of the activity bar and the panel it shows. */
 export type ActivityItem = {
@@ -113,7 +114,7 @@ export function RightSidebar({ items }: { items: ActivityItem[] }): React.JSX.El
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={6}>
-                  Toggle right sidebar (⌘L)
+                  Toggle right sidebar ({shortcutLabel('sidebar.toggle-right')})
                 </TooltipContent>
               </Tooltip>
             </div>

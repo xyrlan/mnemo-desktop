@@ -7,6 +7,7 @@ import type { SessionStatus } from './types'
 import { ConversationView, EmptyState } from './ConversationView'
 import { paneAgent, tauriPaneSinks, type PaneSinks } from './agent'
 import './usage'
+import { shortcutLabel } from '../actions/chords'
 
 /** A `claude agents` session's `status` and `waitingFor` as the view's waiting kinds. Claude Code
  *  (2.1.281) says `input needed` for an AskUserQuestion (and an MCP server asking for input),
@@ -65,7 +66,7 @@ export default function ConversationFace({ paneId, sinks = tauriPaneSinks }: { p
           title="No Claude session in this pane"
           subtitle={
             <>
-              Start <code className="font-mono text-foreground">claude</code> in it, or press <kbd className="font-mono text-foreground">⌘⇧C</kbd> to go back to the terminal.
+              Start <code className="font-mono text-foreground">claude</code> in it, or press <kbd className="font-mono text-foreground">{shortcutLabel('pane.toggle-face')}</kbd> to go back to the terminal.
             </>
           }
         >

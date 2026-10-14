@@ -12,6 +12,7 @@ import { SlotOutlet } from './Slot'
 import { useSidebarResize } from './use-sidebar-resize'
 import Workbench from './Workbench'
 import './shell.css'
+import { shortcutLabel } from '../actions/chords'
 
 // Why: straddle the sidebar/workbench seam so the divider sits on the edge instead of leaving
 // a blank strip between the hover target and it.
@@ -47,7 +48,7 @@ function LeftSidebarToggle() {
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6}>
-        Toggle sidebar (⌘B)
+        Toggle sidebar ({shortcutLabel('sidebar.toggle-left')})
       </TooltipContent>
     </Tooltip>
   )
@@ -63,7 +64,7 @@ function RightSidebarToggle() {
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6}>
-        Toggle right sidebar (⌘L)
+        Toggle right sidebar ({shortcutLabel('sidebar.toggle-right')})
       </TooltipContent>
     </Tooltip>
   )

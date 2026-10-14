@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
-import type { Action } from '../actions/registry'
+import { shortcutLabel } from '../actions/chords'
+import type { ActionDef } from '../actions/registry'
 import type { RepoNode, WorktreeNode } from '../fleet/types'
 import { registerShellActions } from './actions'
 import { createShellStore } from './store'
@@ -11,9 +12,9 @@ import { clampSidebarResizeWidth, getNextSidebarResizeWidth, getRenderedSidebarW
 describe('actions', () => {
   test('sidebar.toggle-left and sidebar.toggle-right open and close their sidebar', async () => {
     const shell = createShellStore()
-    const actions: Action[] = []
+    const actions: ActionDef[] = []
     registerShellActions(shell, (a) => actions.push(a))
-    expect(actions.map((a) => [a.id, a.shortcut])).toEqual([
+    expect(actions.map((a) => [a.id, shortcutLabel(a.id, 'mac')])).toEqual([
       ['sidebar.toggle-left', '⌘B'],
       ['sidebar.toggle-right', '⌘L'],
     ])

@@ -8,9 +8,10 @@ import type { PaneViewProps } from '../panes/registry'
 import type { Bounds } from './bounds'
 import { ResizeHandles } from './ResizeHandles'
 import type { FloatingActions, FloatingState, FloatingStore } from './store'
+import { shortcutLabel } from '../actions/chords'
 
-/** The shortcut `floating-terminal.toggle` is bound to (the keymap's, Mod+Alt+A). */
-export const TOGGLE_SHORTCUT = '⌘⌥A'
+/** The shortcut `floating-terminal.toggle` is bound to, from the chord table. */
+export const TOGGLE_SHORTCUT = shortcutLabel('floating-terminal.toggle')
 
 /** Interactive chrome inside the titlebar, which must never also move the panel. */
 const NO_DRAG = 'button,input,textarea,select,[role="menuitem"],[data-floating-terminal-no-drag]'

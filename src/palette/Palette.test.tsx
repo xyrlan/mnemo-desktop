@@ -24,7 +24,9 @@ class RO {
 Element.prototype.scrollIntoView ??= function () {}
 
 const ran: string[] = []
-register({ id: 'test.hello', title: 'Say hello', shortcut: '⌘⇧H', run: () => void ran.push('hello') })
+register({ id: 'test.hello', title: 'Say hello', run: () => void ran.push('hello') })
+// An id the chord table binds: its keys are the table's, for the platform the page reports (not a Mac here).
+register({ id: 'diff.open', title: 'Open changes', run: () => {} })
 // An action that puts the focus somewhere of its own, as "Open file…" does with its prompt.
 const field = document.createElement('input')
 register({ id: 'test.field', title: 'Focus a field', run: () => field.focus() })
@@ -61,8 +63,9 @@ test('the about line says which build is running, so a stale bundle reads as sta
 
 test('every action is listed with its shortcut as keycaps, except the palette itself', async () => {
   await render()
-  const hello = item('Say hello')!
-  expect([...hello.querySelectorAll('kbd kbd')].map((k) => k.textContent)).toEqual(['⌘', '⇧', 'H'])
+  const keys = (title: string) => [...item(title)!.querySelectorAll('kbd kbd')].map((k) => k.textContent)
+  expect(keys('Open changes')).toEqual(['Ctrl', 'Shift', 'G'])
+  expect(keys('Say hello')).toEqual([])
   expect(item('Command palette')).toBeUndefined()
 })
 

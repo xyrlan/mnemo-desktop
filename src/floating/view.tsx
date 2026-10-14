@@ -1,6 +1,6 @@
 /** The floating terminal. It has no pane view: it lives in `view.tsx` because App imports every
  *  `src/*\/view.tsx`, and that import is where it registers `floating-terminal.toggle` (the
- *  keymap binds Mod+Alt+A to it) and mounts itself in the shell's overlay and titlebar slots. */
+ *  chord table binds ⌘⌥A, or Ctrl+Shift+A off a Mac, to it) and mounts itself in the shell's overlay and titlebar slots. */
 import type React from 'react'
 import { register } from '../actions/registry'
 import { store as layout } from '../layout/app-store'
@@ -11,7 +11,7 @@ import { providedSessions, provideSessions } from '../terminal/sessions'
 // Imported first: the terminal view offers the core's terminals as it loads, and the floating
 // shells are then hidden from what it offers.
 import TerminalPane from '../terminal/view'
-import { FloatingTerminal, FloatingTerminalToggle, TOGGLE_SHORTCUT } from './FloatingTerminal'
+import { FloatingTerminal, FloatingTerminalToggle } from './FloatingTerminal'
 import { createFloatingStore, hideFrom } from './store'
 
 function storage(): Storage | null {
@@ -63,7 +63,7 @@ const unfollow = layout.subscribe((s, prev) => {
 const reconcile = () => floating.getState().reconcile()
 window.addEventListener('resize', reconcile)
 
-register({ id: 'floating-terminal.toggle', title: 'Toggle floating terminal', shortcut: TOGGLE_SHORTCUT, run: () => floating.getState().toggle() })
+register({ id: 'floating-terminal.toggle', title: 'Toggle floating terminal', run: () => floating.getState().toggle() })
 
 function LiveFloatingTerminal(): React.JSX.Element {
   return <FloatingTerminal store={floating} terminal={TerminalPane} />

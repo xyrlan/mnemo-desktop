@@ -1,8 +1,6 @@
 import { FolderGit2, FolderOpen, GitBranch, Sparkles, SquareTerminal } from 'lucide-react'
 import { Button, Kbd, KbdGroup } from '@/ui'
-import { detectPlatform } from '../actions/keys'
-
-const MOD = detectPlatform() === 'mac' ? '⌘' : 'Ctrl'
+import { shortcutKeys } from '../actions/chords'
 
 function Keys({ keys }: { keys: string[] }) {
   return (
@@ -67,7 +65,7 @@ export function EmptyWorktree({
           <Button variant="outline" className="w-full justify-start" onClick={onNewTerminal}>
             <SquareTerminal />
             New terminal
-            <Keys keys={[MOD, 'T']} />
+            <Keys keys={shortcutKeys('tab.new')} />
           </Button>
           <Button variant="outline" className="w-full justify-start" title={agentCommand} onClick={onLaunchAgent}>
             <Sparkles />
@@ -76,9 +74,9 @@ export function EmptyWorktree({
           </Button>
         </div>
         <div className="flex flex-col gap-2 text-xs text-muted-foreground">
-          <Hint label="Jump to a workspace" keys={[MOD, 'J']} />
-          <Hint label="New workspace" keys={[MOD, 'N']} />
-          <Hint label="All commands" keys={[MOD, 'K']} />
+          <Hint label="Jump to a workspace" keys={shortcutKeys('worktree.jump')} />
+          <Hint label="New workspace" keys={shortcutKeys('workspace.new')} />
+          <Hint label="All commands" keys={shortcutKeys('palette.open')} />
         </div>
       </div>
     </div>

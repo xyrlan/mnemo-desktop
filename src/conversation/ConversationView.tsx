@@ -21,6 +21,7 @@ import { openUrl } from '../github/actions'
 import './conversation.css'
 
 export type { ChatAgent } from './agent'
+import { shortcutLabel } from '../actions/chords'
 
 export type ConversationViewProps = {
   /** The session to follow. When it changes (a `/clear` in the pane), what was shown stays above
@@ -384,7 +385,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
               <button
                 type="button"
                 className="cv-to-terminal flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
-                title="Back to the terminal (⌘⇧C)"
+                title={`Back to the terminal (${shortcutLabel('pane.toggle-face')})`}
                 aria-label="Back to the terminal"
                 onClick={onOpenTerminal}
               >
