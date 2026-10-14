@@ -4,6 +4,7 @@ import { pruneSnapshot, type Snapshot } from '../mission/types'
 import { advance, buildRepos, eventNext, HOOK_TRUST_MS, keyFor, knownRepos, norm, polledAgents, prIndex, type Tracked } from './model'
 import type { AgentEvent, WorktreeInfo } from './upstream'
 import type { AgentState, Fleet, WaitingFor } from './types'
+import { pollWhileShown, type Shown } from '../shell/while-shown'
 
 /** Everything the fleet reads, injected so tests never touch Tauri (`store.ts` wires the app's). */
 export type FleetSources = {
@@ -56,7 +57,7 @@ export type FleetHandle = {
   onPolledMove(cb: (m: PolledMove) => void): () => void
 }
 
-export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): FleetHandle {
+export function createFleet(src: FleetSources, opts: { pollMs?: number; shown?: Shown } = {}): FleetHandle {
   const now = () => (src.now ? src.now() : Date.now())
   const agents = new Map<string, Tracked>()
   /** Each repo's last listing by root; `[]` when git could not list it and nothing came before. */
@@ -173,17 +174,17 @@ export function createFleet(src: FleetSources, opts: { pollMs?: number } = {}): 
   function connect() {
     const offs = [src.onChange(sync), src.subscribeAgentEvents(onEvent)]
     let tick = 0
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let stopped = false
-    const loop = async () => {
-      await poll({ withPrs: tick % PRS_EVERY === 0, home: src.home().repos.length === 0 })
-      tick++
-      if (!stopped) timer = setTimeout(loop, opts.pollMs ?? POLL_MS)
-    }
-    void loop()
+    // Hidden, it waits. The agents (and so the notifications) still move: `pollMission`
+    // (App.tsx → shell/mission-poll.ts) refreshes the mission snapshot every 3 s, 15 s while
+    // hidden, and `sync` takes each one through `onChange`; hooks move them sooner where heard.
+    // What this loop adds is the worktree listings, PRs and Home, which nobody sees then.
+    const stop = pollWhileShown(
+      () => poll({ withPrs: tick++ % PRS_EVERY === 0, home: src.home().repos.length === 0 }),
+      opts.pollMs ?? POLL_MS,
+      { shown: opts.shown },
+    )
     return () => {
-      stopped = true
-      clearTimeout(timer)
+      stop()
       offs.forEach((off) => off())
     }
   }

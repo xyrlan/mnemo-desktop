@@ -20,6 +20,7 @@ import { MemoryPanel } from './memory/MemoryPanel'
 import { memoryClient } from './memory/client'
 import type { ChildMemory } from './memory/types'
 import { basename } from '../path/path'
+import { pollWhileShown } from '../shell/while-shown'
 
 function MissionPane({ id: paneId, props }: PaneViewProps) {
   const id = String(props.id ?? '')
@@ -35,11 +36,10 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
       // The file only grows: an unchanged length keeps the array, so the markers keep theirs.
       if (alive) setLines((prev) => (prev.length === t.lines.length ? prev : t.lines))
     }
-    void load()
-    const timer = window.setInterval(load, 3000)
+    const stop = pollWhileShown(load, 3000)
     return () => {
       alive = false
-      window.clearInterval(timer)
+      stop()
     }
   }, [id])
 
@@ -54,11 +54,10 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
       const m = await memoryClient.childMemory(sessionId)
       if (alive) setMemory(m)
     }
-    void load()
-    const timer = window.setInterval(load, 5000)
+    const stop = pollWhileShown(load, 5000)
     return () => {
       alive = false
-      window.clearInterval(timer)
+      stop()
     }
   }, [sessionId])
 

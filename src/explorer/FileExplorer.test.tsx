@@ -229,17 +229,36 @@ describe('the explorer', () => {
   })
 
   it('reads the disk again while it is drawn, and on the refresh button', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const client = fakeClient()
     const m = await mount({ store: createExplorerStore(client) })
     const before = client.lists.length
-    await act(async () => void vi.advanceTimersByTime(REFRESH_MS))
+    await act(async () => void (await vi.advanceTimersByTimeAsync(REFRESH_MS)))
     await flush()
     expect(client.lists.length).toBeGreaterThan(before)
     const after = client.lists.length
     await click(m.host.querySelector<HTMLElement>('[aria-label="Refresh Explorer"]')!)
     await flush()
     expect(client.lists.length).toBeGreaterThan(after)
+  })
+
+  it('reads nothing while the window is hidden, and reads again when it shows', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    try {
+      const client = fakeClient()
+      await mount({ store: createExplorerStore(client) })
+      const before = client.lists.length
+      await act(async () => void (await vi.advanceTimersByTimeAsync(REFRESH_MS * 10)))
+      await flush()
+      expect(client.lists.length).toBe(before)
+      state.mockReturnValue('visible')
+      await act(async () => void document.dispatchEvent(new Event('visibilitychange')))
+      await flush()
+      expect(client.lists.length).toBeGreaterThan(before)
+    } finally {
+      state.mockRestore()
+    }
   })
 
   it('collapses every folder from the toolbar', async () => {

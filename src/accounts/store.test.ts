@@ -123,6 +123,40 @@ test('usage is read again every poll', async () => {
   }
 })
 
+test('usage is not read on the poll while the window is hidden, and is read when it shows', async () => {
+  vi.useFakeTimers()
+  const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  try {
+    const { fake, client } = fakeClient({ state: two(), usage: {} })
+    const store = createAccountsStore(client, { pollMs: 1000 })
+    store.getState().start()
+    await vi.advanceTimersByTimeAsync(0)
+    const before = fake.called('usage').length
+    state.mockReturnValue('hidden')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fake.called('usage').length).toBe(before)
+    state.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fake.called('usage').length).toBe(before + 2)
+  } finally {
+    state.mockRestore()
+    vi.useRealTimers()
+  }
+})
+
+test('the first usage read waits for firstUsage: the launch’s burst is over by then', async () => {
+  const { fake, client } = fakeClient({ state: two(), usage: {} })
+  let go!: () => void
+  const store = createAccountsStore(client, { pollMs: 1e9, firstUsage: () => new Promise<void>((r) => (go = r)) })
+  store.getState().start()
+  await settle()
+  expect(fake.called('usage')).toEqual([])
+  go()
+  await settle()
+  expect(fake.called('usage')).toHaveLength(2)
+})
+
 test('adding opens a login terminal on the new account, then switches back', async () => {
   const { fake, store } = await started({ state: two() })
   fake.calls.length = 0

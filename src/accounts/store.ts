@@ -5,6 +5,8 @@ import { tauriAccounts, type AccountsClient } from './client'
 import { createFollow, type FollowDeps } from './follow'
 import { appFollow } from './follow-app'
 import type { Account, AccountsState, PlanUsage } from './types'
+import { afterStartup } from '../shell/after-startup'
+import { pollWhileShown } from '../shell/while-shown'
 
 /** How often every account's usage is read again while the app is open. */
 export const POLL_MS = 5 * 60_000
@@ -63,8 +65,12 @@ const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
  *  and nothing went wrong. A command that ran and failed refuses with its `Err`, a string. */
 const noCommands = (e: unknown) => typeof e !== 'string' || /^command \S+ not found$/.test(e)
 
-/** `follow`: open Claude sessions follow a switch (decision 9). None given: they stay. */
-export function createAccountsStore(client: AccountsClient, opts: { pollMs?: number; follow?: FollowEnv } = {}): AccountsStore {
+/** `follow`: open Claude sessions follow a switch (decision 9). None given: they stay.
+ *  `firstUsage`: what the first plan-usage read waits for; none given, nothing. */
+export function createAccountsStore(
+  client: AccountsClient,
+  opts: { pollMs?: number; follow?: FollowEnv; firstUsage?: () => Promise<void> } = {},
+): AccountsStore {
   return createZustand<Accounts>((set, get) => {
     let started = false
     /** The active account the open sessions were last sent to; null until the list is read. */
@@ -154,7 +160,7 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       set({ listError: null })
       if (!get().state) return
       void readPanes()
-      void get().readUsage(false)
+      void (opts.firstUsage?.() ?? Promise.resolve()).then(() => get().readUsage(false))
       try {
         await client.onChanged((state) => {
           apply(state)
@@ -164,7 +170,7 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
       } catch {
         // No event: the list still changes through this store's own actions.
       }
-      setInterval(() => void get().readUsage(false), opts.pollMs ?? POLL_MS)
+      pollWhileShown(() => get().readUsage(false), opts.pollMs ?? POLL_MS, { wait: true })
     }
 
     function readList() {
@@ -256,7 +262,7 @@ export function createAccountsStore(client: AccountsClient, opts: { pollMs?: num
 }
 
 /** The app's accounts, on the Tauri commands; the open sessions follow a switch. */
-export const accountsStore = createAccountsStore(tauriAccounts, { follow: appFollow })
+export const accountsStore = createAccountsStore(tauriAccounts, { follow: appFollow, firstUsage: afterStartup })
 
 /** The store the accounts UI reads: the app's, or a test's. */
 export const AccountsContext = createContext<AccountsStore>(accountsStore)

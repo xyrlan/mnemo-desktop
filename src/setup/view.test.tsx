@@ -20,6 +20,13 @@ vi.mock('@tauri-apps/api/core', () => ({
     return undefined
   },
 }))
+// The launch check waits for the first burst to pass: the test says when it has.
+const startup = vi.hoisted(() => {
+  let done!: () => void
+  const over = new Promise<void>((r) => (done = r))
+  return { over, done: () => done() }
+})
+vi.mock('../shell/after-startup', () => ({ afterStartup: () => startup.over }))
 vi.mock('@tauri-apps/api/event', () => ({
   listen: async (name: string, h: (e: { payload: unknown }) => void) => {
     t.on[name] = h
@@ -51,6 +58,11 @@ test('at launch with claude and mnemo missing, onboarding opens at setup once th
   await flush()
   expect(onboarding.getState().open).toBe(false)
   await act(() => store.getState().restore({}))
+  await flush()
+  // Back, but the version probes wait for the launch's burst to pass.
+  expect(t.calls).not.toContain('tools_status')
+  expect(onboarding.getState().open).toBe(false)
+  startup.done()
   await flush()
   expect(onboarding.getState()).toMatchObject({ open: true, step: 'setup' })
   // A dialog, not a pane: the workspace stays as it was restored.
