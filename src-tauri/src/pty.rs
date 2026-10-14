@@ -518,8 +518,11 @@ mod closing_tests {
         assert_eq!(closing::question(&m.busy()), None, "an idle shell loses nothing");
 
         // `; :` keeps sh from becoming the one command it was given.
-        let (working, printed) = shell(&m, if cfg!(windows) { "powershell -NoProfile -Command Start-Sleep 60" } else { "sleep 60; :" });
-        let program = if cfg!(windows) { "powershell" } else { "sleep" };
+        // On Windows a second `cmd`, by its full path: on windows-latest a pane started through
+        // `command` finds neither `ping` nor `powershell` by name (its `PATH` is not this test's).
+        let nested = format!("{} /d /c set /p y=", std::env::var("COMSPEC").unwrap_or_default());
+        let (working, printed) = shell(&m, if cfg!(windows) { &nested } else { "sleep 60; :" });
+        let program = if cfg!(windows) { "cmd" } else { "sleep" };
         let busy = busy_with(&m, program, &printed);
         assert_eq!(busy.len(), 1, "the idle shell is not among them: {busy:?}");
         let question = closing::question(&busy).expect("asked");
