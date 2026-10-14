@@ -20,7 +20,7 @@ const ipc = appIpc({
   pty_kill: null,
   pty_pid: 4242,
   pty_list: [],
-  voice_start: null,
+  voice_start: 'MacBook Pro Microphone',
   voice_stop: 'run the voice tests and tell me what fails',
   // Outgoing text is rewritten in English by default; it already is.
   mission_translate: ({ text }) => text,
