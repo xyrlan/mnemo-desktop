@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { store as layout } from '../layout/app-store'
-import type { Account, AccountsState, PlanUsage } from './types'
+import type { Account, AccountsState, PlanUsage, Shared } from './types'
 
 export const CHANGED_EVENT = 'accounts://changed'
 
@@ -13,6 +13,8 @@ export interface AccountsClient {
   add(label: string): Promise<Account>
   rename(id: string, label: string): Promise<AccountsState>
   remove(id: string): Promise<AccountsState>
+  /** Puts back what account `id` holds of its own in place of the default account's. */
+  share(id: string): Promise<Shared>
   /** The account each terminal pane was spawned on, by pane id. */
   panes(): Promise<Record<number, string>>
   /** Records that pane `pane`'s session moved to account `id` (its shell was moved there). */
@@ -30,6 +32,7 @@ export const tauriAccounts: AccountsClient = {
   add: (label) => invoke<Account>('accounts_add', { label }),
   rename: (id, label) => invoke<AccountsState>('accounts_rename', { id, label }),
   remove: (id) => invoke<AccountsState>('accounts_remove', { id }),
+  share: (id) => invoke<Shared>('accounts_share', { id }),
   panes: () => invoke<Record<number, string>>('accounts_panes'),
   movePane: (pane, id) => invoke<void>('accounts_move_pane', { pane, id }),
   usage: (a, refresh) => invoke<PlanUsage>('plan_usage', { configDir: a.configDir, isDefault: a.isDefault, refresh }),

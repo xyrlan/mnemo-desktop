@@ -2479,6 +2479,7 @@ dependencies = [
  "ureq",
  "vt100",
  "whisper-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

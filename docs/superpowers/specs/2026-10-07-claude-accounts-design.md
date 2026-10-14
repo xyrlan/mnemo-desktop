@@ -30,6 +30,16 @@ want to switch from the app and see the plan usage of both accounts (what `/usag
    roster would fight, and a daemon runs its sessions on its own login.
    A shared file Claude Code later replaces with a copy of its own (an atomic write onto a
    link) gets caught. The account shows it, and nothing written to either copy is lost.
+   *Since #311:* an account is never left unshared without saying so. On Windows a shared dir
+   is a junction, which needs no privilege; a shared file needs a symbolic link, which Windows
+   allows only with Developer Mode on or to an elevated app. Adding an account where a link
+   cannot be made is refused and undone, and says what to turn on. A link a later start cannot
+   make is the account's problem in the list, not only a line in the log. An entry that is the
+   account's own (Claude Code made it before any link was there, or wrote a copy over the
+   link) is offered back: "Share with the default account" moves it aside, links it, and puts
+   in `~/.claude` whatever is not there yet, `history.jsonl` line by line. What differs from
+   the default account's is not merged: it stays in `<account dir>/unshared/<time>/`, and the
+   app says where.
 
 4. **`.claude.json` stays per account, and its user-scope `mcpServers` follow the default
    account's.** It holds the login (`oauthAccount`), so it cannot be shared. It also holds the

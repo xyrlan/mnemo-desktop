@@ -81,6 +81,7 @@ function AccountCard({ account, active, entry, now, editing, setEditing }: { acc
   const store = useAccountsStore()
   const renaming = editing?.kind === 'rename' && editing.id === account.id
   const removing = editing?.kind === 'remove' && editing.id === account.id
+  const [sharing, setSharing] = useState(false)
   const plan = entry?.usage?.plan
   return (
     <li className={cn('flex flex-col gap-2 rounded-md border px-2.5 py-2', active ? 'border-ring/60 bg-accent/40' : 'border-border')} data-account={account.id} aria-current={active || undefined}>
@@ -152,6 +153,23 @@ function AccountCard({ account, active, entry, now, editing, setEditing }: { acc
           <span>{account.problem}</span>
         </p>
       )}
+      {account.unshared.length > 0 && (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          className="self-start"
+          disabled={sharing}
+          title={`Moves this account's own ${account.unshared.join(', ')} into the default account's and links ${account.unshared.length === 1 ? 'it' : 'them'}. Nothing is written over: what differs from the default account's is kept in a folder beside it.`}
+          onClick={async () => {
+            setSharing(true)
+            await store.getState().share(account.id)
+            setSharing(false)
+          }}
+        >
+          {sharing ? <Loader2 className="animate-spin" aria-hidden /> : null} Share with the default account
+        </Button>
+      )}
       <AccountUsage entry={entry} now={now} />
     </li>
   )
@@ -165,6 +183,7 @@ export function AccountsPanel({ onAdded, now = Date.now() }: { onAdded?(): void;
   const state = useAccounts((s) => s.state)
   const usage = useAccounts((s) => s.usage)
   const error = useAccounts((s) => s.error)
+  const note = useAccounts((s) => s.note)
   const [editing, setEditing] = useState<Editing>(null)
   const [adding, setAdding] = useState<'no' | 'asking' | 'busy'>('no')
   if (!state) return null
@@ -183,6 +202,14 @@ export function AccountsPanel({ onAdded, now = Date.now() }: { onAdded?(): void;
         <div role="alert" className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] leading-snug text-destructive">
           <span className="min-w-0 flex-1 break-words">{error}</span>
           <button type="button" aria-label="Dismiss" className="shrink-0 rounded-sm opacity-70 hover:opacity-100" onClick={() => store.getState().clearError()}>
+            <X className="size-3" />
+          </button>
+        </div>
+      )}
+      {note && (
+        <div role="status" className="flex items-start gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+          <span className="min-w-0 flex-1 break-words">{note}</span>
+          <button type="button" aria-label="Dismiss note" className="shrink-0 rounded-sm opacity-70 hover:opacity-100" onClick={() => store.getState().clearNote()}>
             <X className="size-3" />
           </button>
         </div>

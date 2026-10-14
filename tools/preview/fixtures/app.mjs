@@ -41,7 +41,7 @@ export const BASE = {
   pty_list: () => [],
   memory_feed: () => ({ project: 'mnemo-desktop', briefing: null, fired: [], learned: [], inbox: [] }),
   // One Claude account, the default, with no plan usage read yet.
-  accounts_list: () => ({ active: 'default', accounts: [{ id: 'default', label: 'Default', configDir: `${HOME}/.claude`, isDefault: true, email: null, problem: null }] }),
+  accounts_list: () => ({ active: 'default', accounts: [{ id: 'default', label: 'Default', configDir: `${HOME}/.claude`, isDefault: true, email: null, problem: null, unshared: [] }] }),
   accounts_panes: () => ({}),
   plan_usage: () => ({ limits: [], plan: null, fetchedAt: Date.now(), stale: null }),
   // No project to offer "what mnemo learned" for, so that screen never opens by itself.

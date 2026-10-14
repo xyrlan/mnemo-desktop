@@ -68,6 +68,10 @@ tauri-plugin-notification = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# An account's shared dirs are junctions, which need no privilege to make (accounts.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+
 # Browser panes read the window's content layout to place child webviews (see browser.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

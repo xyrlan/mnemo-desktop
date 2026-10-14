@@ -10,14 +10,15 @@ import { TERMINAL_OUTPUT } from '../fixtures/terminal-output.mjs'
 const now = Date.now()
 const at = (h) => new Date(now + h * 3600_000).toISOString()
 
-const PERSONAL = { id: 'default', label: 'Personal', configDir: `${HOME}/.claude`, isDefault: true, email: 'me@example.com', problem: null }
+const PERSONAL = { id: 'default', label: 'Personal', configDir: `${HOME}/.claude`, isDefault: true, email: 'me@example.com', problem: null, unshared: [] }
 const WORK = {
   id: 'work',
   label: 'Work',
   configDir: `${HOME}/.claude-work`,
   isDefault: false,
   email: 'me@work.example.com',
-  problem: 'history.jsonl is no longer a link to ~/.claude/history.jsonl: Claude Code replaced it with a copy.',
+  problem: "history.jsonl is this account's own, not the default account's: Claude Code made it where no link was, or put a copy of its own over the link. Neither copy is changed.",
+  unshared: ['history.jsonl'],
 }
 
 const limit = (kind, group, percent, resetsH, more = {}) => ({ kind, group, model: null, percent, severity: 'normal', resetsAt: resetsH === null ? null : at(resetsH), active: false, ...more })

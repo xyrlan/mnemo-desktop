@@ -137,3 +137,20 @@ test('rename and remove apply the state they answer', async () => {
   expect(await store.getState().remove('default')).toBe(false)
   expect(store.getState().error).toBe('The default account cannot be removed.')
 })
+
+test('sharing applies the state it answers and says where what differed was kept', async () => {
+  const state = two()
+  state.accounts[1] = account('work', { problem: "settings.json is this account's own.", unshared: ['settings.json'] })
+  const { fake, store } = await started({ state })
+  fake.kept = ['/Users/me/.claude-work/unshared/1/settings.json']
+  expect(await store.getState().share('work')).toBe(true)
+  expect(fake.called('share')).toEqual([['share', 'work']])
+  expect(store.getState().state?.accounts[1].unshared).toEqual([])
+  expect(store.getState().note).toContain('is kept in /Users/me/.claude-work/unshared/1/settings.json')
+  fake.kept = []
+  expect(await store.getState().share('work')).toBe(true)
+  expect(store.getState().note).toBeNull()
+  fake.refuse.share = 'settings.json could not be linked.'
+  expect(await store.getState().share('work')).toBe(false)
+  expect(store.getState().error).toBe('settings.json could not be linked.')
+})
