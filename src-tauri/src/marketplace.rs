@@ -1397,7 +1397,8 @@ mod tests {
             "mnemo",
             "echo \"$1 $2 in $(pwd -P)\"\ncase \"$2\" in *react*) echo 'refused feedback/x: collision' >&2; exit 1;; esac\n",
             // `findstr` by its full path: on windows-latest it was not found by name here (see #371).
-            "echo %1 %2 in %CD%\necho %2| \"%SystemRoot%\\System32\\findstr.exe\" /c:react >nul && (>&2 echo refused feedback/x: collision& exit /b 1)",
+            // Its "no match" is exit 1, which would be the batch file's: hence `exit /b 0`.
+            "echo %1 %2 in %CD%\necho %2| \"%SystemRoot%\\System32\\findstr.exe\" /c:react >nul && (>&2 echo refused feedback/x: collision& exit /b 1)\nexit /b 0",
         );
         let fake = fake.to_string_lossy().to_string();
         let path_env = std::env::var("PATH").unwrap_or_default();
