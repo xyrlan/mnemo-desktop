@@ -30,8 +30,6 @@ const LATEST_PROTOCOL: &str = "2025-06-18";
 /// is offered there and every start says why.
 const UNAVAILABLE: &str =
     "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
-/// Pictures taken through WebKit's own snapshot, which the app implements on macOS only.
-const SNAPSHOT_TOOLS: &[&str] = &["desktop_pane_snapshot", "desktop_app_snapshot"];
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn socket_path() -> PathBuf {
@@ -56,7 +54,7 @@ fn unavailable_on(os: &str) -> Option<&'static str> {
 
 /// The tools this build offers on `os`, each only where it can work: `desktop_app_drive` only
 /// in a debug build, the one kind of app that serves it (`mnemo_desktop_lib::mcp::DEV_TOOLS`);
-/// the snapshots only on macOS; nothing on Windows (`unavailable_on`).
+/// nothing on Windows (`unavailable_on`).
 fn tools_for(debug: bool, os: &str) -> Value {
     if unavailable_on(os).is_some() {
         return json!([]);
@@ -120,20 +118,11 @@ fn tools_for(debug: bool, os: &str) -> Value {
             }
         }));
     }
-    if os != "macos" {
-        list.as_array_mut().expect("a list").retain(|t| !SNAPSHOT_TOOLS.iter().any(|s| t["name"] == *s));
-    }
     list
 }
 
-/// What `initialize` tells the model, naming only tools that are listed.
-fn instructions(os: &str) -> &'static str {
-    if os == "macos" {
-        "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window."
-    } else {
-        "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output or a browser page's text."
-    }
-}
+/// What `initialize` tells the model.
+const INSTRUCTIONS: &str = "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window.";
 
 /// Asks the app one question. `Ok` carries MCP content; `Err` a message for the model.
 fn call_app(method: &str, params: Value) -> Result<Value, String> {
@@ -184,7 +173,7 @@ fn handle_on(msg: &Value, call: &dyn Fn(&str, Value) -> Result<Value, String>, o
             "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(LATEST_PROTOCOL),
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "mnemo-desktop", "version": env!("CARGO_PKG_VERSION") },
-            "instructions": instructions(os)
+            "instructions": INSTRUCTIONS
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools_for(cfg!(debug_assertions), os) })),
@@ -281,7 +270,6 @@ fn parse_call(words: &[String], os: &str) -> Result<Call, String> {
     if !known_on(tool, os) {
         let hint = match tool {
             "desktop_app_drive" => " (only a debug build has it: use target/debug/mnemo-desktop-mcp)",
-            t if SNAPSHOT_TOOLS.contains(&t) => " (snapshots are only implemented on macOS)",
             _ => "",
         };
         return Err(format!("unknown tool {tool:?}{hint}"));
@@ -410,7 +398,7 @@ mod tests {
         }
     }
 
-    /// The answer of a server on macOS, the one system where every tool works.
+    /// The answer of a server on macOS, where every tool works (Linux too).
     fn req(v: Value) -> Value {
         handle_on(&v, &app, "macos").expect("a response")
     }
@@ -472,21 +460,18 @@ mod tests {
 
     #[test]
     fn a_tool_is_listed_only_where_it_can_work() {
-        let reads = ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read"];
-        assert_eq!(names(tools_for(false, "linux")), reads, "no snapshot without WebKit's");
-        assert_eq!(names(tools_for(true, "linux")), [&reads[..], &["desktop_app_drive"]].concat());
-        assert_eq!(names(tools_for(false, "macos")).len(), 5);
+        let all = ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot"];
+        assert_eq!(names(tools_for(false, "linux")), all, "snapshots through WebKitGTK's own");
+        assert_eq!(names(tools_for(true, "linux")), [&all[..], &["desktop_app_drive"]].concat());
+        assert_eq!(names(tools_for(false, "macos")), all);
         assert!(names(tools_for(true, "windows")).is_empty(), "no socket, no tool");
-        assert!(!instructions("linux").contains("snapshot"));
 
         // This system, as CI runs it on each of the three.
         let here = names(tools());
         let want: &[&str] = if cfg!(windows) {
             &[]
-        } else if cfg!(target_os = "macos") {
-            &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]
         } else {
-            &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_app_drive"]
+            &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]
         };
         assert_eq!(here, want);
         let r = handle(&json!({ "id": 1, "method": "tools/list" }), &app).unwrap();
@@ -507,8 +492,7 @@ mod tests {
         assert_eq!(code, 1);
         assert_eq!(String::from_utf8(err).unwrap(), format!("{BIN}: {UNAVAILABLE}\n"));
         assert!(on("linux", json!({ "id": 0, "method": "initialize" }))["result"].is_object());
-        let snap = parse_call(&words(&["desktop_app_snapshot"]), "linux").unwrap_err();
-        assert!(snap.contains("only implemented on macOS"), "{snap}");
+        assert_eq!(parse_call(&words(&["desktop_app_snapshot"]), "linux").unwrap().tool, "desktop_app_snapshot");
 
         // This system: Windows refuses at once, the others start.
         let r = handle(&json!({ "id": 0, "method": "initialize" }), &app).unwrap();

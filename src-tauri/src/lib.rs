@@ -403,8 +403,11 @@ pub fn run() {
             plan_usage::plan_usage,
         ])
         .setup(|app| {
-            if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
-                run_smoke(app)?;
+            match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
+                // A picture of the window instead of the shell (mcp.rs).
+                Some(v) if v == "snapshot" => mcp::smoke_snapshot(app.handle().clone()),
+                Some(_) => run_smoke(app)?,
+                None => {}
             }
 
             // -- accounts --

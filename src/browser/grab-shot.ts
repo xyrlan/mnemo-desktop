@@ -2,7 +2,8 @@
 import type { GrabRect } from './grab-payload'
 
 /** The picked element's screenshot: the pane's page is captured whole (`mcp_browser_snapshot`,
- *  a WKWebView snapshot of what the pane shows) and cut down to the element here. */
+ *  the webview's own snapshot of what the pane shows: WebKit, WebView2 or WebKitGTK) and cut
+ *  down to the element here. */
 
 export type Snapshot = { mime: string; data: string }
 export type Box = { x: number; y: number; w: number; h: number }

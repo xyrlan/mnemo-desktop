@@ -41,7 +41,7 @@ pub const APP_SNAPSHOT: &str = "desktop_app_snapshot";
 pub const APP_DRIVE: &str = "desktop_app_drive";
 
 /// Why no tool works on Windows. Keep in step with `UNAVAILABLE` in `src/bin/mnemo-desktop-mcp.rs`,
-/// which lists the tools: it lists no snapshot where `snapshot` is not implemented either.
+/// which lists the tools. Design Mode's snapshot does not go through the MCP and works there.
 pub const UNAVAILABLE: &str =
     "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
 
@@ -405,9 +405,193 @@ async fn snapshot<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(&'static s
     wait(rx, "snapshot").await?
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+async fn snapshot<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(&'static str, Vec<u8>), String> {
+    let (tx, rx) = mpsc::channel();
+    webview
+        .with_webview(move |platform| {
+            // Runs on the main thread, where WebView2 calls the completion handler as well.
+            webview2::take_snapshot(platform.controller(), tx)
+        })
+        .map_err(|e| e.to_string())?;
+    wait(rx, "snapshot").await?
+}
+
+#[cfg(target_os = "linux")]
+async fn snapshot<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(&'static str, Vec<u8>), String> {
+    let (tx, rx) = mpsc::channel();
+    webview
+        .with_webview(move |platform| {
+            // Runs on GTK's main thread, whose loop calls WebKit's callback as well.
+            webkitgtk::take_snapshot(&platform.inner(), tx)
+        })
+        .map_err(|e| e.to_string())?;
+    wait(rx, "snapshot").await?
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 async fn snapshot<R: Runtime>(_webview: &tauri::Webview<R>) -> Result<(&'static str, Vec<u8>), String> {
-    Err("pane snapshots are only implemented on macOS".into())
+    Err(format!("the app cannot take a picture of a page on {}", std::env::consts::OS))
+}
+
+/// `MNEMO_DESKTOP_SMOKE=snapshot`: the built app takes a picture of its own window through the
+/// same `snapshot` Design Mode and `desktop_pane_snapshot` use, and exits 0 when it is an image,
+/// 1 otherwise. CI runs it on all three systems: the only real webview a test can capture there.
+/// The process exits itself: `AppHandle::exit(1)` was seen to end it with 0 on macOS.
+pub fn smoke_snapshot<R: Runtime>(app: AppHandle<R>) {
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut last = String::from("the window never opened");
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(500));
+            let Some(webview) = app.get_webview(MAIN) else { continue };
+            match tauri::async_runtime::block_on(snapshot(&webview)).and_then(|(mime, bytes)| image_size(mime, &bytes).map(|size| (mime, bytes.len(), size))) {
+                Ok((mime, len, (w, h))) => {
+                    let window = webview.window().inner_size().map(|s| format!("{}x{}", s.width, s.height)).unwrap_or_default();
+                    eprintln!("smoke: snapshot ok: {mime}, {w}x{h}, {len} bytes (window {window})");
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("smoke: snapshot attempt: {e}");
+                    last = e;
+                }
+            }
+        }
+        eprintln!("smoke: snapshot FAILED: {last}");
+        std::process::exit(1);
+    });
+}
+
+/// The pixel size a PNG or JPEG says it has; an error when it is neither or says nothing.
+pub fn image_size(mime: &str, bytes: &[u8]) -> Result<(u32, u32), String> {
+    let be16 = |b: &[u8]| u32::from(u16::from_be_bytes([b[0], b[1]]));
+    let size = match mime {
+        "image/png" if bytes.len() >= 24 && bytes.starts_with(b"\x89PNG\r\n\x1a\n") && &bytes[12..16] == b"IHDR" => {
+            let be32 = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+            Some((be32(&bytes[16..20]), be32(&bytes[20..24])))
+        }
+        // The first start-of-frame segment (SOF0..SOF15, less DHT, JPG and DAC) has the size.
+        "image/jpeg" if bytes.starts_with(&[0xFF, 0xD8]) => {
+            let mut i = 2;
+            let mut found = None;
+            while i + 9 <= bytes.len() && bytes[i] == 0xFF {
+                let marker = bytes[i + 1];
+                if (0xC0..=0xCF).contains(&marker) && ![0xC4, 0xC8, 0xCC].contains(&marker) {
+                    found = Some((be16(&bytes[i + 7..]), be16(&bytes[i + 5..])));
+                    break;
+                }
+                i += 2 + be16(&bytes[i + 2..]) as usize;
+            }
+            found
+        }
+        _ => None,
+    };
+    match size {
+        Some((w, h)) if w > 0 && h > 0 => Ok((w, h)),
+        _ => Err(format!("the snapshot is not a {mime} with a size ({} bytes)", bytes.len())),
+    }
+}
+
+#[cfg(windows)]
+mod webview2 {
+    use std::sync::mpsc::Sender;
+
+    use webview2_com::CapturePreviewCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG,
+        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+    };
+    use windows::Win32::System::Com::{IStream, STREAM_SEEK_END, STREAM_SEEK_SET};
+    use windows::Win32::UI::Shell::SHCreateMemStream;
+
+    type Shot = Result<(&'static str, Vec<u8>), String>;
+
+    /// The page as WebView2 draws it, as a PNG, or a JPEG when the PNG is past `MAX_PNG`.
+    pub fn take_snapshot(controller: ICoreWebView2Controller, tx: Sender<Shot>) {
+        capture(controller, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, tx);
+    }
+
+    fn capture(controller: ICoreWebView2Controller, format: COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT, tx: Sender<Shot>) {
+        let png = format == COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+        let mime = if png { "image/png" } else { "image/jpeg" };
+        let started = (|| -> Result<(), String> {
+            // SAFETY: COM calls on the webview's own (main) thread, where it was created.
+            unsafe {
+                let webview = controller.CoreWebView2().map_err(|e| format!("the page is gone: {}", e.message()))?;
+                let stream = SHCreateMemStream(None).ok_or("no memory for the picture")?;
+                let (out, done, again) = (stream.clone(), tx.clone(), controller.clone());
+                let handler = CapturePreviewCompletedHandler::create(Box::new(move |result: windows::core::Result<()>| {
+                    let shot = result.map_err(|e| format!("the page could not be captured: {}", e.message())).and_then(|()| read(&out));
+                    match shot {
+                        Ok(bytes) if png && bytes.len() > super::MAX_PNG => capture(again, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG, done),
+                        Ok(bytes) if bytes.is_empty() => {
+                            let _ = done.send(Err("the page could not be captured: WebView2 gave an empty picture".into()));
+                        }
+                        Ok(bytes) => {
+                            let _ = done.send(Ok((mime, bytes)));
+                        }
+                        Err(e) => {
+                            let _ = done.send(Err(e));
+                        }
+                    }
+                    Ok(())
+                }));
+                webview.CapturePreview(format, &stream, &handler).map_err(|e| format!("the page could not be captured: {}", e.message()))
+            }
+        })();
+        if let Err(e) = started {
+            let _ = tx.send(Err(e));
+        }
+    }
+
+    unsafe fn read(stream: &IStream) -> Result<Vec<u8>, String> {
+        let failed = |e: windows::core::Error| format!("reading the captured picture failed: {}", e.message());
+        let mut len = 0u64;
+        stream.Seek(0, STREAM_SEEK_END, Some(&mut len)).map_err(failed)?;
+        stream.Seek(0, STREAM_SEEK_SET, None).map_err(failed)?;
+        let mut bytes = vec![0u8; len as usize];
+        let mut filled = 0usize;
+        while filled < bytes.len() {
+            let mut got = 0u32;
+            let rest = (bytes.len() - filled).min(u32::MAX as usize) as u32;
+            stream.Read(bytes[filled..].as_mut_ptr().cast(), rest, Some(&mut got)).ok().map_err(failed)?;
+            if got == 0 {
+                break;
+            }
+            filled += got as usize;
+        }
+        bytes.truncate(filled);
+        Ok(bytes)
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod webkitgtk {
+    use std::sync::mpsc::Sender;
+
+    use gdk::gdk_pixbuf::Pixbuf;
+    use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebView, WebViewExt};
+
+    type Shot = Result<(&'static str, Vec<u8>), String>;
+
+    /// What the page shows on screen, as a PNG, or a JPEG when the PNG is past `MAX_PNG`.
+    pub fn take_snapshot(webview: &WebView, tx: Sender<Shot>) {
+        webview.snapshot(SnapshotRegion::Visible, SnapshotOptions::NONE, None::<&webkit2gtk::gio::Cancellable>, move |result| {
+            let shot = result.map_err(|e| format!("the page could not be captured: {e}")).and_then(encode);
+            let _ = tx.send(shot);
+        });
+    }
+
+    fn encode(surface: gdk::cairo::Surface) -> Shot {
+        let image = gdk::cairo::ImageSurface::try_from(surface).map_err(|_| "the captured image has no bitmap".to_string())?;
+        let pixbuf: Pixbuf = gdk::pixbuf_get_from_surface(&image, 0, 0, image.width(), image.height()).ok_or("the captured image has no bitmap")?;
+        let png = pixbuf.save_to_bufferv("png", &[]).map_err(|e| format!("encoding the captured image failed: {e}"))?;
+        if png.len() <= super::MAX_PNG {
+            return Ok(("image/png", png));
+        }
+        let jpeg = pixbuf.save_to_bufferv("jpeg", &[("quality", "75")]).map_err(|e| format!("encoding the captured image failed: {e}"))?;
+        Ok(("image/jpeg", jpeg))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -554,6 +738,18 @@ mod tests {
     fn a_snapshot_is_image_content() {
         let c = image_content("image/png", b"\x89PNG");
         assert_eq!(c, json!([{ "type": "image", "data": "iVBORw==", "mimeType": "image/png" }]));
+    }
+
+    #[test]
+    fn the_smoke_reads_the_size_an_image_says_it_has() {
+        let png = [&b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR"[..], &640u32.to_be_bytes(), &480u32.to_be_bytes()].concat();
+        assert_eq!(image_size("image/png", &png), Ok((640, 480)));
+        // SOI, an APP0 of 4 bytes, then SOF0: length, precision, height 2, width 3.
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 0, 0, 0xFF, 0xC0, 0, 11, 8, 0, 2, 0, 3, 1, 0, 0, 0];
+        assert_eq!(image_size("image/jpeg", &jpeg), Ok((3, 2)));
+        assert!(image_size("image/png", &jpeg).is_err());
+        assert!(image_size("image/png", &[&png[..16], &[0; 8]].concat()).is_err(), "no size");
+        assert!(image_size("image/jpeg", b"").is_err());
     }
 
     #[test]

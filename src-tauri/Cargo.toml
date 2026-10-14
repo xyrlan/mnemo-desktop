@@ -76,10 +76,17 @@ libc = "0.2"
 # focus (browser_keys.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
-# WebView2's own interfaces, at the versions wry uses: the keys a browser pane hands the host
-# first, and the app webview's browser keys (browser_keys.rs).
+# WebView2's own interfaces, at the versions wry uses, so the controller Tauri hands over is these
+# crates' type: the keys a browser pane hands the host first, the app webview's browser keys
+# (browser_keys.rs), and pane snapshots through CapturePreview into a memory stream (mcp.rs).
 webview2-com = "0.38"
 windows-core = "0.61"
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+
+# Pane snapshots through WebKitGTK's own, encoded by gdk-pixbuf (mcp.rs). The versions wry uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+gdk = "0.18"
 
 # A start that fails says so in a dialog (crash.rs): before the app, or after it failed, there
 # is no AppHandle for the dialog plugin to show one with. The plugin's own rfd, no new crate;
