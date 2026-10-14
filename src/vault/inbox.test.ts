@@ -113,3 +113,34 @@ test('splits the frontmatter fence from the body', () => {
 test('a page with no frontmatter fence still reads, as the body', () => {
   expect(splitFrontmatter('just text, no fence\n')).toEqual({ frontmatter: '', body: 'just text, no fence\n' })
 })
+
+// `mnemo` is Python, and Python's piped stdout on Windows ends every line in `\r\n` (#334).
+const crlf = (text: string) => text.replace(/\n/g, '\r\n')
+
+test('a listing whose lines end in \\r\\n parses to the same rows, summary and count', () => {
+  expect(parseInboxListing(crlf(LISTING))).toEqual(parseInboxListing(LISTING))
+  expect(parseInboxListing(crlf(LISTING)).rows).toHaveLength(3)
+})
+
+test('the empty-queue lines read the same with \\r\\n', () => {
+  const empty = 'nothing staged for mnemo-desktop — 12 page(s) wait for other projects (`mnemo inbox --all`)\n'
+  expect(parseInboxListing(crlf(empty))).toEqual(parseInboxListing(empty))
+  expect(parseInboxListing(crlf('nothing staged in shared/_inbox/\n'))).toEqual({ rows: [], summary: 'nothing staged in shared/_inbox/', other: 0 })
+})
+
+test('--stats reads the same with \\r\\n', () => {
+  const stats = [
+    '144 staged in shared/_inbox/ (median 5d, oldest 19d)',
+    'last 7 days: 44 offered at session start, 0 promoted, 101 dropped (101 resolved)',
+    '  held pages expired unreviewed: 3, restored: 1 (`mnemo inbox --restore KEY`)',
+    'median offer → decision: 1.55541d',
+    '',
+  ].join('\n')
+  expect(parseInboxStats(stats)).not.toBeNull()
+  expect(parseInboxStats(crlf(stats))).toEqual(parseInboxStats(stats))
+})
+
+test('a shown page with \\r\\n splits into the same frontmatter and body, with no \\r left in either', () => {
+  expect(splitFrontmatter(crlf(SHOWN))).toEqual(splitFrontmatter(SHOWN))
+  expect(splitFrontmatter(crlf('just text, no fence\n'))).toEqual({ frontmatter: '', body: 'just text, no fence\n' })
+})
