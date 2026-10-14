@@ -2478,7 +2478,9 @@ dependencies = [
  "tauri-plugin-notification",
  "ureq",
  "vt100",
+ "webview2-com",
  "whisper-rs",
+ "windows-core 0.61.2",
  "windows-sys 0.61.2",
 ]
 

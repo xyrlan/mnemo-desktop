@@ -24,6 +24,8 @@ pub mod tools;
 
 // -- browser (src/browser.rs) --
 pub mod browser;
+// What a key does in a browser pane and in the app's own webview, on Windows (src/browser_keys.rs).
+pub mod browser_keys;
 
 // -- settings (src/settings.rs) --
 pub mod settings;
@@ -242,6 +244,7 @@ pub fn run() {
             browser::browser_open_external,
             browser::browser_data_store,
             browser::browser_save_shot,
+            browser_keys::browser_chords,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
@@ -406,6 +409,12 @@ pub fn run() {
             // -- voice --
             // Loads the dictation model in the background if it is on disk (src/voice.rs).
             voice::warm(app.handle());
+
+            // -- app webview --
+            // The app, not a web page: on Windows F5 does not reload it (src/browser_keys.rs).
+            if let Some(main) = app.get_webview("main") {
+                browser_keys::no_browser_keys(&main);
+            }
 
             // -- menu --
             // App chords as native menu accelerators, so they reach the app while a browser

@@ -157,6 +157,9 @@
 /* ── Dark ──────────────────────────────────────────────── */
 
 .dark {
+  /* What the webview draws itself takes the dark scheme too: WebView2's always-visible
+     scrollbars where `scrollbar-sleek` is missing, checkboxes, selects, autofill. */
+  color-scheme: dark;
   --background: #0a0a0a;
   --editor-surface: #1e1e1e;
   --foreground: #fafafa;
