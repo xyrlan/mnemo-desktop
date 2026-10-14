@@ -41,9 +41,11 @@ Measured on the maintainer's machine on 2026-10-14.
   | learned | 970 | project only |
   | enforce | 0 | the denial log does not exist |
 
-- **Stuck children:** 17 `blocked` episodes in the job timelines that ended. They lasted
-  **median 44 min, p90 4.3 h**. 22 more jobs ended while blocked. This is a thin baseline that
-  does not separate rate limits; the measure tool does.
+- **Stuck children:** a first probe counted 17 ended `blocked` episodes at median 44 min, but it
+  counted rate limits in. With them set apart (`tools/measure_attention.py`, mnemo PR #663):
+  13 ended episodes, **median 7 min** [3–44], **p90 57 min** [24 min–4.3 h], over 817 jobs; 12 more
+  were still open when their job's record ended, and 15 rate-limit waits were set apart. Thin: the
+  ranges span an order of magnitude.
 - **The old cockpit:** it is dead, and its death says nothing about this view. It failed because
   little in it worked at the time, not because it was a separate surface (maintainer, this session).
 - **The octopus:** the pet and avatar is a 32×32 rect grid. The maintainer finds it too plain
@@ -70,7 +72,7 @@ Measured on the maintainer's machine on 2026-10-14.
 | Q18 | **The state table below.** |
 | Q19 | **Art in two steps:** a concept sheet (nexus + three classes, about 4 candidates) for the maintainer to choose from, then the full set in the chosen style. Cap of **300 Higgsfield credits**. **Chosen:** direction C, retro 16-bit: chunky dark outlines, bold cel shading, royal blue, purple, white and pink. It was the most legible at sprite size of the four tried (clean steel, neon, retro and industrial). |
 | Art licence | **The sprites carry their own licence** (`src/nexus/sprites/LICENSE`): use and redistribution are allowed, ML training is not. This mirrors §5.2(iv) of Higgsfield's terms (2026-07-26), which bars permitting third parties to train on outputs. The code stays MIT. |
-| Q20 | **Art and code in parallel:** children build against placeholder sprites behind `SpriteManifest`; the parent session makes the art with the maintainer and swaps the files at the end. |
+| Q20 | **Art and code in parallel.** In practice the art was finished before the seams merged, so it landed with them: the children build against the final sprites, with no placeholders and no swap. |
 | Q21 | **Memory lives in the world:** one archive per territory, which grows with its live pages, plus the universal core. Clicking an archive opens that project's Memory panel. |
 | Q22 | **The memory table below.** Packets are **neutral**, with no celebration: the reflex is on-point about 1 time in 10 (measured), and the view must not sell value nobody has proven. |
 | Q23 | **Events for one agent within ~5 s coalesce** into one packet marked `×N`. With reduced motion, only the counter changes. |
