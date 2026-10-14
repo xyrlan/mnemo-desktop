@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { parseInboxListing, parseInboxStats, splitFrontmatter } from './inbox'
 
 // Captured from a real `mnemo inbox` (project-scoped) on 2026-09-22.
@@ -112,4 +113,50 @@ test('splits the frontmatter fence from the body', () => {
 
 test('a page with no frontmatter fence still reads, as the body', () => {
   expect(splitFrontmatter('just text, no fence\n')).toEqual({ frontmatter: '', body: 'just text, no fence\n' })
+})
+
+// `mnemo` is Python, and Python's piped stdout on Windows ends every line in `\r\n` (#334).
+const crlf = (text: string) => text.replace(/\n/g, '\r\n')
+
+test('a listing whose lines end in \\r\\n parses to the same rows, summary and count', () => {
+  expect(parseInboxListing(crlf(LISTING))).toEqual(parseInboxListing(LISTING))
+  expect(parseInboxListing(crlf(LISTING)).rows).toHaveLength(3)
+})
+
+test('the empty-queue lines read the same with \\r\\n', () => {
+  const empty = 'nothing staged for mnemo-desktop — 12 page(s) wait for other projects (`mnemo inbox --all`)\n'
+  expect(parseInboxListing(crlf(empty))).toEqual(parseInboxListing(empty))
+  expect(parseInboxListing(crlf('nothing staged in shared/_inbox/\n'))).toEqual({ rows: [], summary: 'nothing staged in shared/_inbox/', other: 0 })
+})
+
+test('--stats reads the same with \\r\\n', () => {
+  const stats = [
+    '144 staged in shared/_inbox/ (median 5d, oldest 19d)',
+    'last 7 days: 44 offered at session start, 0 promoted, 101 dropped (101 resolved)',
+    '  held pages expired unreviewed: 3, restored: 1 (`mnemo inbox --restore KEY`)',
+    'median offer → decision: 1.55541d',
+    '',
+  ].join('\n')
+  expect(parseInboxStats(stats)).not.toBeNull()
+  expect(parseInboxStats(crlf(stats))).toEqual(parseInboxStats(stats))
+})
+
+test('a shown page with \\r\\n splits into the same frontmatter and body, with no \\r left in either', () => {
+  expect(splitFrontmatter(crlf(SHOWN))).toEqual(splitFrontmatter(SHOWN))
+  expect(splitFrontmatter(crlf('just text, no fence\n'))).toEqual({ frontmatter: '', body: 'just text, no fence\n' })
+})
+
+// The premise itself, where it can be run: a Python that sets its streams up as mnemo's
+// `cli/runtime.py` does (encoding only) and prints the listing down a pipe. Windows only —
+// anywhere else the pipe carries `\n` and this would prove nothing.
+test.runIf(process.platform === 'win32')('a real Python on Windows prints the listing with \\r\\n, and it still parses', () => {
+  const code = 'import sys\nsys.stdout.reconfigure(encoding="utf-8", errors="replace")\nfor line in sys.stdin.buffer.read().decode("utf-8").split("\\n")[:-1]:\n    print(line)\n'
+  const r = spawnSync('python', ['-c', code], { input: LISTING, encoding: 'utf8' })
+  // A Windows machine with no `python` on PATH has nothing to show; CI has one and must run it.
+  if (r.error && !process.env.CI) return
+  expect(r.error).toBeUndefined()
+  expect(r.status).toBe(0)
+  expect(r.stdout).toBe(crlf(LISTING))
+  expect(parseInboxListing(r.stdout)).toEqual(parseInboxListing(LISTING))
+  console.log(`#334: python on ${process.platform} piped ${r.stdout.split('\r\n').length - 1} lines ending in \\r\\n; ${parseInboxListing(r.stdout).rows.length} rows parsed`)
 })
