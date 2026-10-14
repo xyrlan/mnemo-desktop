@@ -103,8 +103,9 @@ test('restore recreates the tabs with new ids, spawns shells in their cwd and re
     expect(st.tabs).toHaveLength(2)
     expect(st.tabs[0]).toEqual({ id: 'tab-10', root: split('row', 0.3, leaf(10), leaf(11)), focused: 10 })
     expect(st.activeTab).toBe('tab-10')
-    expect(st.panes[10]).toEqual({ id: 10, view: 'terminal', cwd: '/repo' })
-    expect(st.panes[11]).toEqual({ id: 11, view: 'terminal', cwd: '/repo/wt', sessionId: 'sess-1' })
+    // No core held their old shells: each is on a new one, and says so (#338).
+    expect(st.panes[10]).toEqual({ id: 10, view: 'terminal', cwd: '/repo', renewed: true })
+    expect(st.panes[11]).toEqual({ id: 11, view: 'terminal', cwd: '/repo/wt', sessionId: 'sess-1', renewed: true })
     const cockpit = st.tabs[1]
     expect(cockpit.name).toBe('triage')
     expect(st.panes[cockpit.focused]).toMatchObject({ view: 'cockpit', props: { x: 1 }, title: 'cockpit' })

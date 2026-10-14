@@ -42,6 +42,9 @@ export type Pane = {
   title?: string
   exitCode?: number | null
   error?: string
+  /** A restored terminal whose shell was no longer running: this one is new, and the pane says
+   *  so until that is seen (`shellNoticed`). Not saved. */
+  renewed?: true
   /** The Claude Code session this terminal runs, when opened for one (Home focuses it instead of forking). */
   sessionId?: string
   /** Which face a terminal pane shows: the xterm (default) or its Claude session as cards (round 20).
@@ -203,6 +206,8 @@ export type Actions = {
   setFace(id: PaneId, face: Face): void
   setTitle(id: PaneId, title: string): void
   paneExited(id: PaneId, code: number | null): void
+  /** The note on a pane that came back on a new shell (`Pane.renewed`) was seen. */
+  shellNoticed(id: PaneId): void
   attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
   setPalette(open: boolean): void
   /** The layout as `~/.mnemo-desktop/workspace.json` keeps it, per open worktree: tabs, trees
@@ -521,6 +526,9 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
               // Its shell kept running: the pane keeps its id, and the Claude in it runs on.
               const back = await reattach(old, cwd)
               const id = back ? old : await spawnPane(cwd)
+              // What ran here is gone (the app held it and was closed, or it ended while away):
+              // nothing else on a new prompt in the old folder shows that (#338).
+              if (!back && id > 0) set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], id, renewed: true } } }))
               ids.set(old, id)
               if (p.face) get().setFace(id, p.face)
               if (p.sessionId) {
@@ -942,6 +950,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
       paneExited(id, code) {
         set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], id, exitCode: code } } } : {}))
+      },
+      shellNoticed(id) {
+        set((s) => {
+          if (!s.panes[id]?.renewed) return {}
+          const { renewed: _, ...pane } = s.panes[id]
+          return { panes: { ...s.panes, [id]: pane } }
+        })
       },
       attachSink(id, sink) {
         set((s) => ({ sinks: { ...s.sinks, [id]: sink } }))

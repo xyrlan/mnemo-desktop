@@ -977,6 +977,23 @@ describe('terminals that outlived the page', () => {
     }
   })
 
+  test('a pane that came back on a new shell says so until that is seen; one still on its own shell does not (#338)', async () => {
+    const pty = fakePty({ first: 100 })
+    const core = fakeSessions([live(1, '/a')])
+    const s = createStore(pty, { workspace: () => null, sessions: core.client })
+    await s.getState().restore(await savedPair())
+    expect(s.getState().panes[1].renewed).toBeUndefined()
+    expect(s.getState().panes[100]).toMatchObject({ view: 'terminal', cwd: '/b', renewed: true })
+    // Said once: the next save does not carry it into the launch after.
+    expect(JSON.stringify(s.getState().snapshotForSave())).not.toContain('renewed')
+    s.getState().shellNoticed(100)
+    expect(s.getState().panes[100]).toMatchObject({ view: 'terminal', cwd: '/b' })
+    expect('renewed' in s.getState().panes[100]).toBe(false)
+    // A shell opened by hand is new by intent: nothing to say.
+    await s.getState().newTab('/c')
+    expect(s.getState().panes[101].renewed).toBeUndefined()
+  })
+
   test('output that beats the attach answer goes after the screen', async () => {
     const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: 'screen,' }, { 1: 'early' })
     const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
