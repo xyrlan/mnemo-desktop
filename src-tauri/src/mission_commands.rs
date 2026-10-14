@@ -1,11 +1,13 @@
 use crate::mission::{self, Snapshot, Timeline};
 use std::collections::HashMap;
 
+/// A poll that panicked is a snapshot that says so in `errors`, never one with nothing in it:
+/// the fleet takes an empty, error-free snapshot to mean every session ended (#364).
 #[tauri::command]
 pub async fn mission_snapshot(focused_cwd: Option<String>, with_prs: bool) -> Snapshot {
-    tauri::async_runtime::spawn_blocking(move || mission::collect_snapshot(focused_cwd.as_deref(), with_prs))
+    crate::crash::read("The sessions snapshot", move || mission::collect_snapshot(focused_cwd.as_deref(), with_prs))
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| Snapshot { errors: vec![e], ..Default::default() })
 }
 
 #[tauri::command]

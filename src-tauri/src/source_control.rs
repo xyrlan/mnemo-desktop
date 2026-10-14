@@ -69,10 +69,9 @@ pub struct ScmStatus {
 
 /// `git <args>` in `cwd`, with `stdin` fed and closed; its stdout, or what it said.
 fn git(cwd: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, String> {
-    let mut cmd = crate::proc::command("git");
+    let mut cmd = crate::proc::tool("git", &login_path());
     cmd.args(args)
         .current_dir(cwd)
-        .env("PATH", login_path())
         .env("GIT_TERMINAL_PROMPT", "0")
         // A path is a path: no globs, no `:(magic)`.
         .env("GIT_LITERAL_PATHSPECS", "1")

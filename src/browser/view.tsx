@@ -10,7 +10,8 @@ import { makeBrowserClient, pageBounds, sameBounds, type Bounds } from './client
 import { AddressBar, barReducer, initialBar } from './address'
 import { makeWebviews } from './lifecycle'
 import { BLANK, normalizeUrl } from './url'
-import { terminalCwd } from './pr'
+import { openBranchPr, terminalCwd } from './pr'
+import { toast } from '@/ui'
 import { focusedEvent, toViewport, watchPageFocus, type FocusHost } from './focus'
 import { registerReuse } from '../layout/reuse'
 import { DesignStrip, DesignToggle, runDesignMode } from './design-view'
@@ -197,10 +198,13 @@ register({
 register({
   id: 'browser.open-pr',
   title: 'Open pull request for this branch',
-  run: async () => {
-    const url = await browser.prUrl(terminalCwd(store.getState())).catch(() => null)
-    if (url) store.getState().openView('browser', { url }, 'auto', 'pull request')
-  },
+  run: () =>
+    openBranchPr({
+      prUrl: (cwd) => browser.prUrl(cwd),
+      cwd: terminalCwd(store.getState()),
+      open: (url) => store.getState().openView('browser', { url }, 'auto', 'pull request'),
+      tell: (why) => toast('No pull request opened', { description: why }),
+    }),
 })
 
 // -- mcp: read/snapshot bridge for the desktop MCP (src/browser/read.ts, src/mcp/) --

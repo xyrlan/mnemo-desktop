@@ -278,3 +278,13 @@ test('useWaveLines counts each section, and hands back the same array while no c
   await act(async () => root.render(<Probe p={ROOT} />))
   expect(got.at(-1)).toEqual([{ feature: 'other-parent', needsYou: 0, working: 1, done: 0 }])
 })
+
+test('a snapshot that could not list the children says why above the waves, in words to act on (#367)', async () => {
+  missionStore.setState({ snapshot: { ...snapshot, errors: ['mnemo: No such file or directory (os error 2)', 'history (/x): denied'] } })
+  await mount()
+  const alert = host.querySelector<HTMLElement>('[data-snapshot-errors]')!
+  expect(alert.textContent).toContain('Background children could not be listed: `mnemo` was not found.')
+  expect(alert.textContent).not.toContain('history')
+  // The waves it could read are still there.
+  expect(sections()).toContain('new-wave')
+})

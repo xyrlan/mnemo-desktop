@@ -11,6 +11,7 @@
 pub mod closing;
 mod host;
 mod screen;
+pub mod shells;
 // Most of it is the daemon protocol, which only unix speaks.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod wire;
@@ -85,6 +86,8 @@ impl Default for PtyManager {
 /// Bootstrap rc files that make zsh and bash report their cwd with OSC 7 at each prompt, so a
 /// new pane can open where the focused one is. macOS zsh only does that for Apple Terminal.
 /// fish reports it on its own. Written under `shell_dir` as `zsh/<name>` and `bash/mnemo.bashrc`.
+/// On Windows, Git Bash gets the bash file; PowerShell and cmd report with OSC 9;9 through
+/// `POWERSHELL_HOOK` and `CMD_PROMPT_HOOK`, which need no file.
 const ZSH_RC: [(&str, &str); 4] = [
     (".zshenv", include_str!("../shell/zsh/.zshenv")),
     (".zprofile", include_str!("../shell/zsh/.zprofile")),
@@ -92,6 +95,13 @@ const ZSH_RC: [(&str, &str); 4] = [
     (".zlogin", include_str!("../shell/zsh/.zlogin")),
 ];
 const BASH_RC: &str = include_str!("../shell/bash/mnemo.bashrc");
+/// Wraps PowerShell's `prompt`; passed as `-EncodedCommand`.
+const POWERSHELL_HOOK: &str = include_str!("../shell/powershell/mnemo.ps1");
+/// cmd's prompt reports the folder when it starts with this: OSC 9;9 with `$P`, the drive and
+/// path, as Windows Terminal documents it. cmd reads its prompt from `PROMPT`.
+const CMD_PROMPT_HOOK: &str = "$e]9;9;$P$e\\";
+/// cmd's own prompt when `PROMPT` is not set.
+const CMD_PROMPT_DEFAULT: &str = "$P$G";
 
 /// What a Claude Code session exports to the processes it runs. An app started from one (a
 /// `tauri dev` an agent launched) would hand them to every pane, and a `claude` typed there
@@ -115,7 +125,7 @@ fn home_dir() -> Option<PathBuf> {
 
 /// `~/.mnemo-desktop/shell`, unless `MNEMO_NO_SHELL_INTEGRATION=1`.
 fn default_shell_dir() -> Option<PathBuf> {
-    if cfg!(windows) || std::env::var("MNEMO_NO_SHELL_INTEGRATION").is_ok_and(|v| v == "1") {
+    if std::env::var("MNEMO_NO_SHELL_INTEGRATION").is_ok_and(|v| v == "1") {
         return None;
     }
     home_dir().map(|h| crate::app_dir::app_dir_in(&h).join("shell"))
@@ -135,14 +145,17 @@ enum Integration {
     Zsh(PathBuf),
     /// `--rcfile` for bash.
     Bash(PathBuf),
+    /// `-NoExit -EncodedCommand` for Windows PowerShell and pwsh.
+    PowerShell,
+    /// `PROMPT` for cmd.
+    Cmd,
 }
 
 /// Writes the rc files for `shell` (a program path), or returns `None` for a shell without
 /// integration. Runs on every spawn: zsh pointed at a missing ZDOTDIR would silently skip the
 /// user's own config.
 fn install_integration(dir: &Path, shell: &str) -> std::io::Result<Option<Integration>> {
-    let name = Path::new(shell).file_name().and_then(|n| n.to_str()).unwrap_or("");
-    match name.trim_start_matches('-') {
+    match shells::stem(shell).as_str() {
         "zsh" => {
             let zsh = dir.join("zsh");
             for (file, contents) in ZSH_RC {
@@ -155,6 +168,8 @@ fn install_integration(dir: &Path, shell: &str) -> std::io::Result<Option<Integr
             write_if_changed(&rc, BASH_RC)?;
             Ok(Some(Integration::Bash(rc)))
         }
+        "powershell" | "pwsh" => Ok(Some(Integration::PowerShell)),
+        "cmd" => Ok(Some(Integration::Cmd)),
         _ => Ok(None),
     }
 }
@@ -171,6 +186,20 @@ pub fn default_shell() -> String {
             }
         })
     }
+}
+
+/// `script` as `-EncodedCommand` takes it: base64 of its UTF-16LE.
+fn powershell_encoded(script: &str) -> String {
+    use base64::Engine;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// cmd's `PROMPT` with the folder report in front of the person's own (`user`), once: a pane
+/// whose app was started from a mnemo cmd inherits the hook already.
+fn cmd_prompt(user: Option<&str>) -> String {
+    let own = user.map(|p| p.strip_prefix(CMD_PROMPT_HOOK).unwrap_or(p)).filter(|p| !p.is_empty()).unwrap_or(CMD_PROMPT_DEFAULT);
+    format!("{CMD_PROMPT_HOOK}{own}")
 }
 
 impl PtyManager {
@@ -232,7 +261,7 @@ impl PtyManager {
 
     pub fn spawn(&self, opts: SpawnOptions, sink: Sink) -> Result<PaneId, String> {
         let (rows, cols) = (opts.rows, opts.cols);
-        let mut cmd = self.command(opts, default_shell());
+        let mut cmd = self.command(opts, shells::for_new_pane());
         let account = self.accounts.as_ref().map(PaneAccounts::current);
         if let Some(a) = &account {
             on_account(&mut cmd, a);
@@ -274,7 +303,10 @@ impl PtyManager {
             }),
             _ => None,
         };
-        let mut cmd = CommandBuilder::new(opts.program.unwrap_or(shell));
+        let program = opts.program.unwrap_or(shell);
+        // Git Bash is the one Windows shell that reads `-l`.
+        let reads_login = !cfg!(windows) || shells::stem(&program) == "bash";
+        let mut cmd = CommandBuilder::new(program);
         match &integration {
             Some(Integration::Bash(rc)) => {
                 // bash ignores `--rcfile` in a login shell, so the rc file loads the login files.
@@ -284,7 +316,13 @@ impl PtyManager {
                     cmd.env("MNEMO_BASH_LOGIN", "1");
                 }
             }
-            _ if opts.login && !cfg!(windows) => cmd.arg("-l"),
+            Some(Integration::PowerShell) => {
+                cmd.arg("-NoExit");
+                cmd.arg("-EncodedCommand");
+                cmd.arg(powershell_encoded(POWERSHELL_HOOK));
+            }
+            Some(Integration::Cmd) => cmd.env("PROMPT", cmd_prompt(std::env::var("PROMPT").ok().as_deref())),
+            _ if opts.login && reads_login => cmd.arg("-l"),
             _ => {}
         }
         if let Some(Integration::Zsh(zdotdir)) = &integration {
@@ -314,9 +352,12 @@ impl PtyManager {
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         cmd.env("MNEMO_DESKTOP", "1");
         // A session in this pane reaches this app's MCP socket, whichever build registered the
-        // binary, and never an instance whose pane started this app (#168).
-        let (var, socket) = crate::mcp::pane_env();
-        cmd.env(var, socket);
+        // binary, and never an instance whose pane started this app (#168). Where no socket is
+        // served (Windows) a pane gets none, not even one inherited.
+        match crate::mcp::pane_env() {
+            Some((var, socket)) => cmd.env(var, socket),
+            None => cmd.env_remove(crate::mcp::SOCKET_ENV),
+        }
         cmd
     }
 
@@ -537,6 +578,25 @@ mod closing_tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         m.kill(idle);
+    }
+}
+
+/// The MCP socket a pane is pointed at, on every platform (#362).
+#[cfg(test)]
+mod mcp_env_tests {
+    use super::*;
+
+    #[test]
+    fn a_pane_gets_the_mcp_socket_only_where_one_is_served() {
+        // An app started from another app's pane inherits that app's socket.
+        // SAFETY: nothing else in this binary reads this variable.
+        unsafe { std::env::set_var(crate::mcp::SOCKET_ENV, "inherited.sock") };
+        let program = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+        let opts = SpawnOptions { program: Some(program.into()), args: vec![], cwd: None, cols: 80, rows: 24, login: false };
+        let cmd = PtyManager::with_shell_dir(None).command(opts, program.into());
+        let socket = crate::mcp::socket_path();
+        let want = if cfg!(windows) { None } else { Some(socket.as_os_str()) };
+        assert_eq!(cmd.get_env(crate::mcp::SOCKET_ENV), want);
     }
 }
 
@@ -1151,5 +1211,159 @@ mod tests {
         let t = Instant::now();
         assert!(m.list().is_err());
         assert!(t.elapsed() < Duration::from_secs(8), "took {:?}", t.elapsed());
+    }
+}
+
+/// The shell integration on Windows (#360): what each shell is started with, on every platform,
+/// and on Windows a real pane of each installed shell whose `cd` the app follows.
+#[cfg(test)]
+mod windows_integration_tests {
+    use super::*;
+
+    fn opts(cwd: &Path) -> SpawnOptions {
+        SpawnOptions { program: None, args: vec![], cwd: Some(cwd.to_string_lossy().into_owned()), cols: 80, rows: 24, login: true }
+    }
+
+    fn decoded(b64: &std::ffi::OsStr) -> String {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64.to_str().unwrap()).unwrap();
+        let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        String::from_utf16(&wide).unwrap()
+    }
+
+    #[test]
+    fn powershell_starts_with_its_prompt_hook_and_cmd_with_its_prompt() {
+        let dir = crate::testutil::temp_dir("pty-win-integration");
+        let m = PtyManager::with_shell_dir(Some(dir.clone()));
+        for ps in [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", r"C:\Program Files\PowerShell\7\pwsh.exe"] {
+            let cmd = m.command(opts(&dir), ps.into());
+            let argv = cmd.get_argv();
+            assert_eq!(argv[1..3], ["-NoExit", "-EncodedCommand"], "{ps}");
+            assert_eq!(argv.len(), 4, "no -l for PowerShell: {argv:?}");
+            assert_eq!(decoded(&argv[3]), POWERSHELL_HOOK);
+            assert_eq!(cmd.get_env("PROMPT"), std::env::var_os("PROMPT").as_deref(), "{ps}");
+        }
+        let cmd = m.command(opts(&dir), r"C:\Windows\system32\cmd.exe".into());
+        assert_eq!(cmd.get_argv().len(), 1, "cmd takes no argument: {:?}", cmd.get_argv());
+        assert_eq!(cmd.get_env("PROMPT").unwrap().to_str().unwrap(), cmd_prompt(std::env::var("PROMPT").ok().as_deref()));
+
+        // Git Bash is bash: the same rc file, and the login files through it.
+        let bash = m.command(opts(&dir), r"C:\Program Files\Git\bin\bash.exe".into());
+        assert_eq!(bash.get_argv()[1..], ["--rcfile".as_ref(), dir.join("bash").join("mnemo.bashrc").as_os_str()]);
+        assert_eq!(bash.get_env("MNEMO_BASH_LOGIN"), Some("1".as_ref()));
+
+        // Integration off, or a program asked for by name: run as given.
+        let off = PtyManager::with_shell_dir(None).command(opts(&dir), r"C:\Windows\system32\cmd.exe".into());
+        assert_eq!(off.get_env("PROMPT"), std::env::var_os("PROMPT").as_deref());
+        // `-l` is read by no Windows shell but bash; elsewhere every login shell gets it, as before.
+        assert_eq!(off.get_argv().len(), if cfg!(windows) { 1 } else { 2 });
+        let mut asked = opts(&dir);
+        asked.program = Some("powershell.exe".into());
+        asked.login = false;
+        assert_eq!(m.command(asked, "cmd.exe".into()).get_argv().len(), 1);
+    }
+
+    #[test]
+    fn cmd_prompt_reports_the_folder_before_the_persons_own_once() {
+        assert_eq!(cmd_prompt(None), "$e]9;9;$P$e\\$P$G");
+        assert_eq!(cmd_prompt(Some("")), "$e]9;9;$P$e\\$P$G");
+        assert_eq!(cmd_prompt(Some("$N$G")), "$e]9;9;$P$e\\$N$G");
+        assert_eq!(cmd_prompt(Some(&cmd_prompt(Some("$N$G")))), "$e]9;9;$P$e\\$N$G");
+    }
+
+    #[test]
+    fn the_powershell_hook_wraps_the_prompt_there_was() {
+        // The prompt the profile left runs first, so `PS C:\…>` still starts the line the app
+        // reads a shell from (`src/pty/typed.ts`, `shellOf`).
+        let wrapped = POWERSHELL_HOOK.find("& $global:__mnemo_prompt").expect("calls the old prompt");
+        assert!(POWERSHELL_HOOK.find("$global:__mnemo_prompt = $function:prompt").unwrap() < wrapped);
+        assert!(POWERSHELL_HOOK.contains("]9;9;$($loc.ProviderPath)$([char]27)\\\" + $out"));
+    }
+
+    /// A real pane of `shell`, started in one folder, told to `cd` (`typed(folder)`) into another:
+    /// what the app holds as its folder follows it. Only Windows has these shells.
+    #[cfg(windows)]
+    fn follows(shell: &str, typed: impl Fn(&Path) -> String) {
+        use std::time::{Duration, Instant};
+        let root = crate::testutil::temp_dir("pty-follow");
+        let (from, to) = (root.join("start here"), root.join("gone there"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        let m = PtyManager::with_shell_dir(Some(root.join("shell")));
+        let mut cmd = m.command(opts(&from), shell.into());
+        cmd.env_remove("MNEMO_NO_SHELL_INTEGRATION");
+        let printed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&printed);
+        let id = m
+            .launch(
+                cmd,
+                24,
+                120,
+                Box::new(move |e| {
+                    if let Event::Output(b) = e {
+                        sink.lock().unwrap().extend(b);
+                    }
+                }),
+            )
+            .expect("spawn");
+        // A pseudoconsole asks where the cursor is before it starts; no terminal is drawn here.
+        m.write(id, b"\x1b[1;1R").unwrap();
+        let same = |reported: &str, want: &Path| std::fs::canonicalize(reported).ok() == std::fs::canonicalize(want).ok();
+        let wait = |want: &Path| {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            loop {
+                let cwd = m.list().unwrap().into_iter().find(|i| i.id == id).map(|i| i.cwd).unwrap_or_default();
+                if same(&cwd, want) {
+                    return cwd;
+                }
+                let said = String::from_utf8_lossy(&printed.lock().unwrap()).into_owned();
+                assert!(Instant::now() < deadline, "{shell}: the folder held is {cwd:?}, not {}; it printed {said:?}", want.display());
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        };
+        // Its first prompt reports where it started; then it follows the `cd`.
+        let first = wait(&from);
+        m.write(id, format!("{}\r", typed(&to)).as_bytes()).unwrap();
+        let then = wait(&to);
+        eprintln!("{shell}: followed {first:?} -> {then:?}");
+        m.kill(id);
+    }
+
+    #[cfg(windows)]
+    fn installed(id: &str) -> Option<String> {
+        let found = shells::installed(&|v| std::env::var(v).ok(), &|p| p.is_file());
+        let path = found.into_iter().find(|f| f.id == id).map(|f| f.path);
+        if path.is_none() {
+            eprintln!("{id} is not installed here: not tried");
+        }
+        path
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_powershell_pane_is_followed_into_the_folder_it_cds_to() {
+        follows(&installed("powershell").expect("Windows PowerShell ships with Windows"), |to| format!("cd '{}'", to.display()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_pwsh_pane_is_followed_into_the_folder_it_cds_to() {
+        if let Some(pwsh) = installed("pwsh") {
+            follows(&pwsh, |to| format!("cd '{}'", to.display()));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_pane_is_followed_into_the_folder_it_cds_to() {
+        follows(&installed("cmd").expect("cmd ships with Windows"), |to| format!("cd /d \"{}\"", to.display()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_git_bash_pane_is_followed_into_the_folder_it_cds_to() {
+        if let Some(bash) = installed("git-bash") {
+            follows(&bash, |to| format!("cd '{}'", to.display().to_string().replace('\\', "/")));
+        }
     }
 }
