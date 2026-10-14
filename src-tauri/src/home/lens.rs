@@ -228,10 +228,9 @@ pub type GhRun<'a> = &'a (dyn Fn(&[&str], &Path) -> Result<String, String> + Syn
 pub const GH_MISSING: &str = "gh not found in PATH (brew install gh)";
 
 fn run_gh(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let out = crate::proc::command("gh")
+    let out = crate::proc::tool("gh", &crate::mission::login_path())
         .args(args)
         .current_dir(cwd)
-        .env("PATH", crate::mission::login_path())
         .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GH_MISSING.to_string() } else { e.to_string() })?;

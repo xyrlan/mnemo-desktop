@@ -191,10 +191,9 @@ pub fn exec(program: &str, path_env: &str, args: &[String], cwd: &str, stdin: Op
     if !Path::new(cwd).is_dir() {
         return refuse(format!("{cwd}: not a directory"));
     }
-    let spawned = crate::proc::command(program)
+    let spawned = crate::proc::tool(program, path_env)
         .args(args)
         .current_dir(cwd)
-        .env("PATH", path_env)
         .env("NO_COLOR", "1")
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())

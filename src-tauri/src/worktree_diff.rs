@@ -72,8 +72,8 @@ pub struct FileSides {
 }
 
 fn git_bytes(args: &[&str], cwd: &Path) -> Result<Vec<u8>, String> {
-    let mut cmd = crate::proc::command("git");
-    cmd.args(args).env("PATH", login_path()).current_dir(cwd).stdin(std::process::Stdio::null());
+    let mut cmd = crate::proc::tool("git", &login_path());
+    cmd.args(args).current_dir(cwd).stdin(std::process::Stdio::null());
     let out = cmd.output().map_err(|e| format!("git: {e}"))?;
     if !out.status.success() {
         return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
