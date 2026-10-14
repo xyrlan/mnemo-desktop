@@ -8,6 +8,7 @@ import { listWorktrees, subscribeAgentEvents } from './upstream'
 import type { Fleet } from './types'
 
 export type { AgentNode, Fleet, RepoNode, WorktreeNode } from './types'
+export type { PolledMove } from './create'
 
 /** The single live fleet, wired to the app's stores. The logic is `createFleet` (`create.ts`),
  *  which tests drive without Tauri. */
@@ -36,4 +37,6 @@ const fleet = createFleet({
 fleet.connect()
 
 export const fleetStore = fleet.store
+/** What polling saw move that no hook told of (`PolledMove`), for the notifier. */
+export const subscribePolledMoves = fleet.onPolledMove
 export const useFleet = <T,>(sel: (f: Fleet) => T): T => useStore(fleetStore, sel)
