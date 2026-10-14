@@ -53,6 +53,10 @@ export type ChildSession = {
   /** What a command typed into a pane needs to reach the child on `account`; null while there is
    *  only the default account. Absent in snapshots from before accounts. */
   account_env?: AccountEnv | null
+  /** Whether the parent has this child's finish notice (Nexus spec Q12): `held` while it waits in
+   *  `held-notices.jsonl` for the parent's next prompt, `delivered` once the parent has it, null
+   *  while the child has sent none. Absent in snapshots from before the Nexus round. */
+  notice?: 'held' | 'delivered' | null
 }
 /** `ci` is pass only when the PR has checks and every one of them passed (`check_verdict` in
  *  mission.rs). `draft` and `failing` are absent on a `Pr` built outside the snapshot. */

@@ -113,6 +113,9 @@ pub mod build_info;
 // -- usage (src/usage.rs) --
 pub mod usage;
 
+// -- nexus (src/nexus.rs) --
+pub mod nexus;
+
 // -- app dir (src/app_dir.rs) --
 pub mod app_dir;
 
@@ -387,6 +390,9 @@ pub fn run() {
 
             // -- usage commands --
             usage::usage_log,
+
+            // -- nexus commands --
+            nexus::nexus_archives,
 
             // -- install review commands --
             install_review::install_review_project,
