@@ -366,7 +366,19 @@ fn build_match(line_no: u32, line: Option<&[u8]>, at: Option<usize>, text: &str)
     m
 }
 
-fn group(root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileResult> {
+/// The path of `rel` under `root` as the Explorer spells it: `joinPath` in `src/explorer/paths.ts`,
+/// applied to the root as it was asked for. An editor tab is reused for a string-equal path only.
+fn entry_path(root: &str, rel: &str) -> String {
+    if root.ends_with('/') {
+        format!("{root}{rel}")
+    } else {
+        format!("{root}/{rel}")
+    }
+}
+
+/// `asked` is the root as the caller spelt it, which names the files; `root` is where it resolved
+/// to, which reads them.
+fn group(asked: &str, root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileResult> {
     let mut files: Vec<FileRecords> = Vec::new();
     for (path, line, col, text) in records {
         match files.last_mut() {
@@ -388,7 +400,7 @@ fn group(root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileR
                 let at = line.map_or_else(|| vec![None; found.len()], |l| place(l, &found, whole_word));
                 matches.extend(found.iter().zip(at).map(|(&(_, text), at)| build_match(n, line, at, text)));
             }
-            SearchFileResult { file_path: abs.to_string_lossy().into_owned(), relative_path: rel, matches }
+            SearchFileResult { file_path: entry_path(asked, &rel), relative_path: rel, matches }
         })
         .collect()
 }
@@ -396,7 +408,8 @@ fn group(root: &Path, records: Vec<Record>, whole_word: bool) -> Vec<SearchFileR
 /// Searches the files under `root` (which must lie in `scope`, as the editor's files do) for `query`.
 pub fn search_in(root: &str, query: &str, opts: &SearchOpts, scope: &crate::fs::Scope, limit: Duration, superseded: &dyn Fn() -> bool) -> Result<SearchResult, String> {
     let deadline = Instant::now() + limit;
-    let root: PathBuf = crate::fs::guard(root, scope)?;
+    let asked = root;
+    let root: PathBuf = crate::fs::guard(asked, scope)?;
     if !root.is_dir() {
         return Err(format!("{} is not a folder", root.display()));
     }
@@ -434,7 +447,7 @@ pub fn search_in(root: &str, query: &str, opts: &SearchOpts, scope: &crate::fs::
         Outcome::Failed(msg) => Err(msg),
         Outcome::Done { mut records, truncated, timed_out } => {
             records.truncate(max);
-            let files = group(&root, records, opts.whole_word);
+            let files = group(asked, &root, records, opts.whole_word);
             let total_matches = files.iter().map(|f| f.matches.len()).sum();
             Ok(SearchResult { files, total_matches, truncated, timed_out })
         }
@@ -510,9 +523,59 @@ mod tests {
         assert_eq!(r.total_matches, 5);
         assert!(!r.truncated && !r.timed_out);
         let main = &r.files[2];
-        assert_eq!(main.file_path, d.canonicalize().unwrap().join("src/main.ts").to_string_lossy());
         assert_eq!(main.matches[1].line_content, "const Foo = foo + food");
         assert_eq!(main.matches[1].match_length, 3);
+    }
+
+    /// The path the Explorer gives `rel` under `root`: it lists one folder at a time and joins
+    /// each name onto the folder it asked for (`joinPath`, `src/explorer/paths.ts`).
+    fn explorer_path(root: &str, rel: &str, scope: &Scope) -> String {
+        let mut at = root.to_string();
+        for name in rel.split('/') {
+            let listed = crate::fs::list_in(&at, scope).unwrap();
+            assert!(listed.iter().any(|e| e.name == name), "{name} is not listed in {at}");
+            at = if at.ends_with('/') { format!("{at}{name}") } else { format!("{at}/{name}") };
+        }
+        at
+    }
+
+    #[test]
+    fn a_result_is_named_as_the_explorer_names_the_file() {
+        let d = repo();
+        let root = d.to_str().unwrap();
+        let scope = Scope::home(d.parent().unwrap());
+        // The guard resolves the root to another spelling: `\\?\C:\…` on Windows, `/private/var/…`
+        // for macOS's temp dir. Where it does not, this test shows nothing about that.
+        #[cfg(any(windows, target_os = "macos"))]
+        assert_ne!(crate::fs::guard(root, &scope).unwrap(), d, "the guard no longer respells this root");
+        let r = search_in(root, "foo", &SearchOpts::default(), &scope, TIME_LIMIT, &|| false).unwrap();
+        assert_eq!(r.files.len(), 3);
+        for f in &r.files {
+            assert_eq!(f.file_path, explorer_path(root, &f.relative_path, &scope));
+            assert!(!f.file_path.starts_with(r"\\?\"), "{}", f.file_path);
+        }
+        // The lines were still read: from the resolved root, whatever the result is called.
+        assert_eq!(r.files[2].matches[1].line_content, "const Foo = foo + food");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_symlink_is_named_through_it_and_guarded_where_it_leads() {
+        let d = repo();
+        let home = temp_dir("search-link-home");
+        let link = home.join("linked");
+        std::os::unix::fs::symlink(&d, &link).unwrap();
+        let root = link.to_str().unwrap();
+        // The link is in home and the repo is not: the guard decides on where the link leads.
+        let err = search_in(root, "foo", &SearchOpts::default(), &Scope::home(&home), TIME_LIMIT, &|| false).unwrap_err();
+        assert!(err.contains("outside the home directory"), "{err}");
+        let scope = Scope { home, projects: vec![d.to_string_lossy().into_owned()] };
+        let r = search_in(root, "foo", &SearchOpts::default(), &scope, TIME_LIMIT, &|| false).unwrap();
+        assert_eq!(r.files.len(), 3);
+        for f in &r.files {
+            assert_eq!(f.file_path, explorer_path(root, &f.relative_path, &scope));
+            assert!(f.file_path.starts_with(root), "{}", f.file_path);
+        }
     }
 
     #[test]
