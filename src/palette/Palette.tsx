@@ -5,6 +5,7 @@ import { Kbd, KbdGroup } from '@/ui/kbd'
 import { store, useApp } from '../layout/app-store'
 import { all, run } from '../actions/registry'
 import { aboutLine, buildInfo, type BuildInfo } from '../about/info'
+import { newerLine, newerRelease, openRelease, type NewerRelease } from '../about/release'
 
 // Dictation types into the pane behind the palette, not into its field (src/voice/route.ts).
 const PALETTE: Record<string, string> = { 'data-palette': '' }
@@ -15,10 +16,12 @@ export function shortcutKeys(shortcut: string): string[] {
 }
 
 /** ⌘K: every action, searched by its title; Enter runs the selected one. The build that is
- *  running is named at the bottom, so a stale bundle reads as stale. */
+ *  running is named at the bottom, so a stale bundle reads as stale, with a newer release
+ *  beside it when GitHub has one. */
 export default function Palette() {
   const open = useApp((s) => s.paletteOpen)
   const [build, setBuild] = useState<BuildInfo | null>(null)
+  const [newer, setNewer] = useState<NewerRelease | null>(null)
   // A dismissal puts the focus back where it was (a terminal, say); an action that ran decides
   // where it goes (a prompt, a new pane). With no trigger, Radix would leave it on <body>.
   const back = useRef<HTMLElement | null>(null)
@@ -26,6 +29,7 @@ export default function Palette() {
   useEffect(() => {
     let live = true
     void buildInfo().then((b) => live && setBuild(b))
+    void newerRelease().then((r) => live && setNewer(r))
     return () => {
       live = false
     }
@@ -75,7 +79,23 @@ export default function Palette() {
             </CommandItem>
           ))}
       </CommandList>
-      {about && <div className="palette-about border-t border-border px-3.5 py-2 text-[11px] text-muted-foreground select-text">{about}</div>}
+      {about && (
+        <div className="palette-about border-t border-border px-3.5 py-2 text-[11px] text-muted-foreground select-text">
+          {about}
+          {newer && (
+            <>
+              {' · '}
+              <button
+                type="button"
+                className="palette-newer underline underline-offset-2 hover:text-foreground"
+                onClick={() => void openRelease(newer).catch((why) => console.warn('could not open the release page:', why))}
+              >
+                {newerLine(newer)}
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </CommandDialog>
   )
 }

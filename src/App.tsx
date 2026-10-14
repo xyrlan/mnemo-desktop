@@ -7,6 +7,7 @@ import { registerBuiltins } from './actions/registry'
 import { startWorkspace, type Workspace } from './layout/persist'
 import Shell from './shell/Shell'
 import { registerShellActions } from './shell/actions'
+import { tellNewerRelease } from './about/release'
 import { pollMission, refreshGithubEvery, reloadUnknownTitles, showFirstWorktree } from './shell/live'
 
 // Every `src/<view>/view.tsx` registers its pane view, or mounts its screen in a shell slot
@@ -30,6 +31,8 @@ export default function App() {
   useEffect(() => pollMission(), [])
   useEffect(() => reloadUnknownTitles(), [])
   useEffect(() => refreshGithubEvery(), [])
+  // A newer release on GitHub is said once per version (#366).
+  useEffect(() => void tellNewerRelease(toast), [])
   useEffect(() => {
     workspace ??= startWorkspace(store, undefined, undefined, (why) =>
       toast.error('Could not save the workspace layout', { id: 'workspace-save', description: why }),
