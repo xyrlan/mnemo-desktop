@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(e[0].kind, "catchup");
         assert!(e[1..].iter().all(|e| e.kind == "tool"));
         // Inject rows carry their agent; MCP calls only a project, which stands in.
-        assert_eq!((e[0].agent.as_str(), e[2].agent.as_str()), ("sg-imports", "mnemo-desktop"));
+        assert_eq!((e[0].agent.as_str(), e[2].agent.as_str()), ("repo-d", "mnemo-desktop"));
     }
 
     #[test]
@@ -351,7 +351,7 @@ mod tests {
     fn enrichment_and_denial_rows() {
         let e = events(Log::Enrich, "enrichment-log.jsonl");
         assert_eq!(e.len(), 1);
-        assert_eq!((e[0].kind, e[0].tool.as_deref(), e[0].project.as_str()), ("enrich", Some("Edit"), "clubinho"));
+        assert_eq!((e[0].kind, e[0].tool.as_deref(), e[0].project.as_str()), ("enrich", Some("Edit"), "repo-a"));
         assert_eq!(e[0].slugs, ["plan-upgrade-reuses-renewal-infrastructure-no-new-endpoint"]);
         assert!(e[0].file_path.is_some());
 

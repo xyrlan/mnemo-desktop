@@ -42,7 +42,7 @@ test('an event from another repo never appears', async () => {
   const host = document.createElement('div')
   const root = createRoot(host)
   await act(async () => root.render(<Overlay pane={1} store={store} />))
-  await act(async () => store.getState().push(ev({ project: 'clubinho', agent: 'clubinho' })))
+  await act(async () => store.getState().push(ev({ project: 'repo-a', agent: 'repo-a' })))
   expect(host.querySelector('.pv-overlay')).toBeNull()
   act(() => root.unmount())
 })

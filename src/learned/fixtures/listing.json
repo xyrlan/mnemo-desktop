@@ -1,9 +1,9 @@
 {
-  "project": "clubinho",
+  "project": "repo-a",
   "origin": "backfill",
   "pages": [
     {
-      "key": "project/clubinho__cron-annual-bloqueado-183",
+      "key": "project/repo-a__cron-annual-bloqueado-183",
       "type": "project",
       "name": "Annual cron blocked until #183",
       "description": "The annual billing cron stays disabled until #183 lands.",
@@ -12,7 +12,7 @@
       "expires_at": "2026-10-08T10:12:03"
     },
     {
-      "key": "project/clubinho__staging-db-is-shared",
+      "key": "project/repo-a__staging-db-is-shared",
       "type": "project",
       "name": "Staging shares the production database host",
       "description": "Staging and production run on one Postgres host.",
@@ -21,7 +21,7 @@
       "expires_at": "2026-10-08T10:12:04"
     },
     {
-      "key": "feedback/clubinho__answer-in-portuguese",
+      "key": "feedback/repo-a__answer-in-portuguese",
       "type": "feedback",
       "name": "Answer in Portuguese",
       "description": "Replies to the user are in Portuguese.",
@@ -30,7 +30,7 @@
       "expires_at": "2026-10-08T10:12:05"
     },
     {
-      "key": "reference/clubinho__asaas-sandbox",
+      "key": "reference/repo-a__asaas-sandbox",
       "type": "reference",
       "name": "Asaas sandbox keys",
       "description": "Where the payment sandbox keys live.",
@@ -39,7 +39,7 @@
       "expires_at": "2026-10-08T10:12:06"
     },
     {
-      "key": "user/clubinho__runs-on-a-mac",
+      "key": "user/repo-a__runs-on-a-mac",
       "type": "user",
       "name": "Works on a Mac",
       "description": "The user's machine is macOS.",

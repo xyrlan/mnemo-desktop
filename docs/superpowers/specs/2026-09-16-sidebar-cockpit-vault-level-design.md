@@ -49,7 +49,7 @@ changes*.
 | Exit style | **Shrink in place.** No directional flight. | Flying toward the causing pane couples the square to pane geometry before we know the effect is worth it. That is the version to build after this one is on screen. |
 | The Map | **Removed.** | The user prefers it gone; the ego view already answers "this rule and its neighbours", which is the real use. |
 | Data source | `vault_health()` + `mnemo://pulse`. **Never** `vault_map`. | If the square read `vault_map`, deleting `vaultmap.rs` would be impossible and we would be maintaining the Rust we set out to kill. |
-| Build order | Sidebar and Map removal now; the square **blocks** on `feat/mnemo-presence` merging. | The square needs `src/avatar/*` and the 9-kind `PulseKind`, both being edited right now in `/Users/xyrlan/github/mnemo-desktop-wt-presence`. Two sessions in one file cost three git accidents on 2026-09-12. |
+| Build order | Sidebar and Map removal now; the square **blocks** on `feat/mnemo-presence` merging. | The square needs `src/avatar/*` and the 9-kind `PulseKind`, both being edited right now in `/Users/you/github/mnemo-desktop-wt-presence`. Two sessions in one file cost three git accidents on 2026-09-12. |
 
 ## 1. Piece 1 — the cockpit moves into the sidebar
 

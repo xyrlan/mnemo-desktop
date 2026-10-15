@@ -294,7 +294,7 @@ pub fn run() {
 - [ ] **Step 5: install, generate icons, verify dev build compiles**
 
 ```bash
-cd /Users/xyrlan/github/mnemo-desktop
+cd /Users/you/github/mnemo-desktop
 pnpm install
 python3 - <<'EOF'
 # 1024x1024 placeholder PNG (solid colour) for icon generation
