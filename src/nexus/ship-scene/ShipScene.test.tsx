@@ -78,7 +78,11 @@ beforeEach(() => {
   calls.action = []
   calls.triage = 0
 })
+/** `navigator.platform`, for ⌥1–9 (macOS only). */
+const platform = (p: string) => Object.defineProperty(navigator, 'platform', { value: p, configurable: true })
+
 afterEach(async () => {
+  delete (navigator as { platform?: string }).platform
   await act(async () => root?.unmount())
   root = null
   document.body.innerHTML = ''
@@ -110,7 +114,8 @@ test('the top bar counts as chips; the need chip triages, and rests when nothing
   expect(($('[data-chip="need"]') as HTMLButtonElement).disabled).toBe(true)
 })
 
-test('the bridge holds the fleet prompt, a row per exception labelled ⌥N, and is red while a question waits', async () => {
+test('the bridge holds the fleet prompt, a row per exception labelled ⌥N on macOS, and is red while a question waits', async () => {
+  platform('MacIntel')
   await draw()
   const bridge = $('.ship-bridge')!
   expect(bridge.dataset.tone).toBe('red')
@@ -127,15 +132,28 @@ test('the bridge holds the fleet prompt, a row per exception labelled ⌥N, and 
   expect($('.ship-exceptions')).toBeNull()
 })
 
-test('a row’s buttons settle it, and the row itself opens its robot', async () => {
+test('off macOS the rows carry no ⌥N: Alt+digit is the workbench’s', async () => {
+  platform('Win32')
+  await draw()
+  expect($$('.ship-xrow')).toHaveLength(3)
+  expect($('.ship-xn')).toBeNull()
+})
+
+test('a row’s buttons settle it, merge and stop on a second press; the row itself opens its robot', async () => {
   await draw()
   const [need, ready, stranded] = $$('.ship-xrow')
   await click(need.querySelector('[data-x="answer · Tab"]'))
   expect(calls.triage).toBe(1)
   await click(ready.querySelector('[data-x="merge"]'))
+  expect(calls.action).toEqual([])
+  expect(ready.querySelector('[data-x="merge"]')!.textContent).toBe('confirm merge?')
+  await click(ready.querySelector('[data-x="merge"]'))
   expect(calls.action).toEqual([{ kind: 'merge', robotIds: ['360'] }])
   await click(stranded.querySelector('[data-x="stop"]'))
+  expect(stranded.querySelector('[data-x="stop"]')!.textContent).toBe('confirm stop?')
+  await click(stranded.querySelector('[data-x="stop"]'))
   expect(calls.action[1]).toEqual({ kind: 'stop', robotIds: ['370'] })
+  expect(calls.open).toEqual([])
   await click(ready.querySelector('[data-x="open"]'))
   await click(stranded.querySelector('.ship-xt'))
   expect(calls.open).toEqual(['360', '370'])
@@ -146,6 +164,8 @@ test('a landable mission gets a row that lands it', async () => {
   expect($('.ship-bridge')!.dataset.tone).toBe('lilac')
   expect($('.ship-xt')!.textContent).toBe('mission nexus-v2 · 5/5 green → land')
   await click($('[data-x="land"]'))
+  expect(calls.action).toEqual([])
+  await click($('[data-x="land"]'))
   expect(calls.action).toEqual([{ kind: 'land', root: ROOT, feature: 'nexus-v2' }])
   expect(calls.open).toEqual([])
 })
@@ -154,7 +174,7 @@ test('merge all green asks for a second click, and forgets after a while', async
   vi.useFakeTimers()
   const ready = (id: string, n: number) => ({ kind: 'ready' as const, robotId: id, pr: pr(n), waitingMs: 60_000 })
   await draw({ ship: ship({ bridge: { exceptions: [ready('1', 11), ready('2', 12)], blocked: [] } }) })
-  const all = () => $('[data-merge-all]')!
+  const all = () => $('[data-x="merge-all"]')!
   expect(all().textContent).toBe('✈ merge all green (2)')
   await click(all())
   expect(all().textContent).toBe('confirm merge of 2?')
@@ -164,6 +184,20 @@ test('merge all green asks for a second click, and forgets after a while', async
   await click(all())
   await click(all())
   expect(calls.action).toEqual([{ kind: 'merge', robotIds: ['1', '2'] }])
+  // What is merged is what was ready when it was armed, not what is ready at the second press.
+  await click(all())
+  await draw({ ship: ship({ bridge: { exceptions: [ready('1', 11), ready('2', 12), ready('3', 13)], blocked: [] } }) })
+  await click(all())
+  expect(calls.action[1]).toEqual({ kind: 'merge', robotIds: ['1', '2'] })
+})
+
+test('past two blocked robots the bridge counts the rest and sends you to triage', async () => {
+  const blocked = ['a', 'b', 'c', 'd'].map((id) => robot(id, { state: 'need', zone: 'bridge', need: { kind: 'question', text: `${id}?`, options: ['yes'] } }))
+  await draw({ ship: ship({ bridge: { exceptions: [], blocked }, counts: { working: 0, need: 4, ready: 0 } }) })
+  expect($$('[data-blocked]').map((b) => b.dataset.blocked)).toEqual(['a', 'b'])
+  expect($('.ship-more-blocked')!.textContent).toBe('+2 blocked · triage')
+  await click($('.ship-more-blocked'))
+  expect(calls.triage).toBe(1)
 })
 
 test('a blocked robot stands on the bridge with its question, answered in place', async () => {
@@ -338,6 +372,17 @@ test('with reduced motion nobody takes turns: the voices stay until a line chang
   expect($$('.ship-bubble').map((b) => b.dataset.for)).toEqual(before)
 })
 
+test('a line that changed takes the floor; a clock moving on does not', async () => {
+  const flight = (third: string) => [robot('f0'), robot('f1'), robot('f2', { line: '', act: third })]
+  await draw({ ship: ship({ decks: [deck({ flight: flight('idle for 6 min') })] }), reducedMotion: true })
+  const speakers = () => $$('.ship-bubble').map((b) => b.dataset.for)
+  expect(speakers()).toEqual(['f0', 'f1'])
+  await draw({ ship: ship({ decks: [deck({ flight: flight('idle for 7 min') })] }), reducedMotion: true })
+  expect(speakers()).toEqual(['f0', 'f1'])
+  await draw({ ship: ship({ decks: [deck({ flight: flight('Bash · pnpm test') })] }), reducedMotion: true })
+  expect(speakers()).toContain('f2')
+})
+
 test('a robot that arrives after the first draw beams in on the teleport pad', async () => {
   await draw({ ship: ship({ decks: [deck({ flight: [robot('1')] })] }) })
   expect($$('[data-arriving]')).toHaveLength(0)
@@ -364,13 +409,21 @@ test('a robot that changes room walks there, facing where it goes', async () => 
   expect(el.hasAttribute('data-left')).toBe(true)
 })
 
-test('a merged robot boards its shuttle and launches; a closed one walks off; one gone to the bridge does neither', async () => {
-  const merged = robot('m', { state: 'done', zone: 'hangar', pr: pr(1), ci: 'green', fate: { state: 'MERGED', mergedAt: 1, closedAt: null, checks: [] } })
-  const closed = robot('c', { state: 'done', zone: 'hangar', pr: pr(2), fate: { state: 'CLOSED', mergedAt: null, closedAt: 1, checks: [] } })
+test('a robot the log says merged boards its shuttle and launches; a closed one walks off; one gone to the bridge does neither', async () => {
+  // As the ship builds them: the robots stand there with an open PR, then are gone in the build
+  // their fate turns final; only the log says which merged.
+  const open = { state: 'OPEN' as const, mergedAt: null, closedAt: null, checks: [] }
+  const merged = robot('m', { state: 'done', zone: 'hangar', pr: pr(1), ci: 'green', fate: open })
+  const closed = robot('c', { state: 'done', zone: 'hangar', pr: pr(2), fate: open })
   const climber = robot('b')
   await draw({ ship: ship({ decks: [deck({ flight: [climber], hangar: [merged, closed] })] }) })
   const up = { ...climber, state: 'need' as const, zone: 'bridge' as const, need: { kind: 'question' as const, text: '?', options: [] } }
-  await draw({ ship: ship({ decks: [deck()], bridge: { exceptions: [], blocked: [up] } }) })
+  const after = ship({ decks: [deck()], bridge: { exceptions: [], blocked: [up] } })
+  await draw({ ship: after })
+  expect($('[data-leaving="m"]')!.dataset.exit).toBe('walk')
+  // The log's milestone lands a moment later (the view appends it after the build).
+  const log: LogEvent[] = [{ id: 'merged:m', at: 1, kind: 'merged', robotId: 'm', captainId: 'cap-1', text: 'PR #1 merged' }]
+  await draw({ ship: after, log })
   const launch = $('[data-leaving="m"]')!
   expect(launch.dataset.exit).toBe('launch')
   expect(launch.querySelector('img')!.getAttribute('src')).toBe(SHIP_SPRITES.shuttle.launch.src)
@@ -379,6 +432,52 @@ test('a merged robot boards its shuttle and launches; a closed one walks off; on
   await fire(launch.querySelector('.ship-launch')!, 'animationend', 'ship-launch')
   await fire($('[data-leaving="c"] .ship-walk-off')!, 'animationend', 'ship-walk-off')
   expect($$('[data-leaving]')).toHaveLength(0)
+})
+
+test('the last robot of a deck still makes its exit: the deck stays, emptied, until it has left', async () => {
+  const merged = robot('m', { state: 'done', zone: 'hangar', pr: pr(1), ci: 'green' })
+  await draw({ ship: ship({ decks: [deck({ hangar: [merged] })] }) })
+  const log: LogEvent[] = [{ id: 'merged:m', at: 1, kind: 'merged', robotId: 'm', captainId: 'cap-1', text: 'PR #1 merged' }]
+  await draw({ ship: ship({ docks: [dock('mnemo-desktop', [captain('cap-1')])] }), log })
+  const ghost = $('[data-deck="/home/dev/mnemo-desktop"]')!
+  expect(ghost.hasAttribute('data-ghost')).toBe(true)
+  expect(ghost.querySelector('[data-leaving="m"]')!.getAttribute('data-exit')).toBe('launch')
+  expect($('.ship-robot')).toBeNull()
+  await fire(ghost.querySelector('.ship-launch')!, 'animationend', 'ship-launch')
+  expect($('[data-deck]')).toBeNull()
+})
+
+test('a deck that leaves while motion is reduced simply goes', async () => {
+  await draw({ ship: ship({ decks: [deck({ hangar: [robot('m', { state: 'done', zone: 'hangar' })] })] }), reducedMotion: true })
+  await draw({ ship: ship(), reducedMotion: true })
+  expect($('[data-deck]')).toBeNull()
+})
+
+test('a relayout (the window or the drawer resized) moves robots without walking', async () => {
+  let width = 1400
+  let observed: (() => void) | null = null
+  const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!
+  Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => width })
+  const RO = globalThis.ResizeObserver
+  globalThis.ResizeObserver = class {
+    constructor(cb: () => void) {
+      observed = cb
+    }
+    observe() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+  try {
+    await draw({ ship: ship({ decks: [deck({ flight: [robot('1'), robot('2')], stranded: [robot('3', { state: 'idle', zone: 'stranded' })] })] }) })
+    const x0 = robotEl('3')!.style.transform
+    width = 1000
+    await act(async () => observed!())
+    expect(robotEl('3')!.style.transform).not.toBe(x0)
+    expect($$('[data-walking]')).toHaveLength(0)
+    expect(robotEl('3')!.hasAttribute('data-still')).toBe(true)
+  } finally {
+    Object.defineProperty(Element.prototype, 'clientWidth', desc)
+    globalThis.ResizeObserver = RO
+  }
 })
 
 test('with reduced motion nothing beams in, walks, launches or walks off', async () => {

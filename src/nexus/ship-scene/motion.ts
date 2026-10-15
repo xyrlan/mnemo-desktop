@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type AnimationEvent, type TransitionEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type TransitionEvent } from 'react'
 import type { ShipRobot } from '../ship-types'
 
 /** The ship's motion that needs memory of the last draw (spec "Motion"). Every movement itself is
@@ -12,24 +12,31 @@ const STEP = 2
 export const WALK_MS = 1_400
 
 /** Whether a robot is walking to where it now stands, and which way it faces: it faces where it
- *  went, and keeps facing that way once there. */
-export function useWalk(x: number, reducedMotion: boolean): { walking: boolean; left: boolean; onTransitionEnd(e: TransitionEvent): void } {
+ *  went, and keeps facing that way once there. `still`: it moved because the deck was laid out
+ *  again (a resize), or motion is reduced: it moves without walking. */
+export function useWalk(x: number, still: boolean): { walking: boolean; left: boolean; onTransitionEnd(e: TransitionEvent): void } {
   const prev = useRef<number | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [walking, setWalking] = useState(false)
   const [left, setLeft] = useState(false)
   useLayoutEffect(() => {
     const p = prev.current
     prev.current = x
-    if (p === null || reducedMotion || Math.abs(x - p) <= STEP) return
+    if (p === null || Math.abs(x - p) <= STEP) return
+    clearTimeout(timer.current)
+    if (still) {
+      setWalking(false)
+      return
+    }
     setLeft(x < p)
     setWalking(true)
-    const t = setTimeout(() => setWalking(false), WALK_MS + 300)
-    return () => clearTimeout(t)
-  }, [x, reducedMotion])
+    timer.current = setTimeout(() => setWalking(false), WALK_MS + 300)
+  }, [x, still])
+  useEffect(() => () => clearTimeout(timer.current), [])
   const onTransitionEnd = useCallback((e: TransitionEvent) => {
     if (e.target === e.currentTarget && e.propertyName === 'transform') setWalking(false)
   }, [])
-  return { walking: walking && !reducedMotion, left, onTransitionEnd }
+  return { walking: walking && !still, left, onTransitionEnd }
 }
 
 /** The rule mnemo injected last, while it is new: null on the first draw (opening the view replays
@@ -49,15 +56,14 @@ export function useNewRule(newest: string | null): { rule: string | null; flashe
 }
 
 /** How a robot leaves the ship: `launch` boards its shuttle at its PR's merge; `walk` walks off
- *  (closed, or done without a PR). */
+ *  (closed, or done without a PR). The ship drops a robot in the build its fate turns final, so the
+ *  robot as last drawn never says which: the log's `merged` milestone does. */
 export type Exit = 'launch' | 'walk'
 export type Drawn = { robot: ShipRobot; x: number; y: number }
-export type Leaver = Drawn & { exit: Exit }
+export type Leaver = Drawn
 
 /** Leavers kept at once; past it the oldest go without a show. */
 const MAX_LEAVERS = 30
-
-export const exitOf = (r: ShipRobot): Exit => ((r.fate?.state ?? r.pr?.state) === 'MERGED' ? 'launch' : 'walk')
 
 /** The robots that left this deck since the last draw, where they last stood, until their exit
  *  ends. `alive`: every robot still on the ship anywhere, so one that climbs to the bridge or folds
@@ -72,7 +78,7 @@ export function useLeavers(drawn: Map<string, Drawn>, alive: ReadonlySet<string>
     const left = [...before.values()].filter((d) => !drawn.has(d.robot.id) && !alive.has(d.robot.id))
     if (!left.length) return
     const ids = new Set(left.map((d) => d.robot.id))
-    setLeavers((prev) => [...prev.filter((l) => !ids.has(l.robot.id)), ...left.map((d) => ({ ...d, exit: exitOf(d.robot) }))].slice(-MAX_LEAVERS))
+    setLeavers((prev) => [...prev.filter((l) => !ids.has(l.robot.id)), ...left].slice(-MAX_LEAVERS))
   }, [drawn, alive, reducedMotion])
   const gone = useCallback((id: string) => setLeavers((prev) => (prev.some((l) => l.robot.id === id) ? prev.filter((l) => l.robot.id !== id) : prev)), [])
   // One that came back is drawn as itself, not as its exit.

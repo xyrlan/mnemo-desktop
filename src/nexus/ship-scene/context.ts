@@ -9,6 +9,8 @@ export type SceneCtx = {
   /** Every robot on the ship, by id. */
   robots: ReadonlyMap<string, ShipRobot>
   selection: ReadonlySet<string>
+  /** Robots the log says merged: they leave on their shuttle. */
+  merged: ReadonlySet<string>
   focusId: string | null
   hover: Hover | null
   setHover(h: Hover | null): void

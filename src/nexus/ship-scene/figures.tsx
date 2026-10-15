@@ -1,7 +1,7 @@
 import type { AnimationEvent, CSSProperties, MouseEvent, ReactNode } from 'react'
 import { SHIP_SPRITES, SPRITES, type CaptainSprite } from '../sprites'
 import type { Captain, CaptainPose, ShipRobot } from '../ship-types'
-import { useNewRule, useWalk, type Leaver } from './motion'
+import { useNewRule, useWalk, type Exit, type Leaver } from './motion'
 import { captainTopic, glyph, particlesOf, poseOf, robotName } from './words'
 
 /** The figures on the ship, every sprite at 1× with `image-rendering: pixelated` (`.ship-px`). */
@@ -34,6 +34,8 @@ export type RobotFigureProps = Picks & {
   /** Its top-left on the deck; null on the bridge, where it stands in the flow. */
   pos: { x: number; y: number } | null
   selected: boolean
+  /** The deck was laid out again (a resize): it moves to its new spot at once, without walking. */
+  still?: boolean
   focused: boolean
   dimmed: boolean
   arriving: boolean
@@ -44,8 +46,8 @@ export type RobotFigureProps = Picks & {
 
 /** A child: its body and accessory, its halo, its action badge and particles, its shuttle while
  *  its PR waits, the teleport pad when it beams in, ◈ when mnemo injects a rule. */
-export function RobotFigure({ robot: r, emblem, pos, selected, focused, dimmed, arriving, onArrived, reducedMotion, onOpen, onSelect, onHover, children }: RobotFigureProps) {
-  const { walking, left, onTransitionEnd } = useWalk(pos?.x ?? 0, reducedMotion || !pos)
+export function RobotFigure({ robot: r, emblem, pos, still = false, selected, focused, dimmed, arriving, onArrived, reducedMotion, onOpen, onSelect, onHover, children }: RobotFigureProps) {
+  const { walking, left, onTransitionEnd } = useWalk(pos?.x ?? 0, reducedMotion || !pos || still)
   const { rule, flashed } = useNewRule(r.injected[0] ?? null)
   const fx = particlesOf(r)
   const click = (e: MouseEvent) => (e.shiftKey ? onSelect(r.id) : onOpen(r.id))
@@ -68,6 +70,7 @@ export function RobotFigure({ robot: r, emblem, pos, selected, focused, dimmed, 
       data-left={on(left)}
       data-arriving={on(arriving)}
       data-placed={on(!!pos)}
+      data-still={on(still)}
       style={pos ? at(pos.x, pos.y) : undefined}
       onTransitionEnd={onTransitionEnd}
     >
@@ -108,14 +111,14 @@ export function RobotFigure({ robot: r, emblem, pos, selected, focused, dimmed, 
 
 /** A robot leaving where it last stood: boarding its shuttle and launching, or walking off the
  *  deck's right edge (`off`: how far that is). */
-export function LeaverFigure({ leaver, emblem, off, onGone }: { leaver: Leaver; emblem: string; off: number; onGone(id: string): void }) {
+export function LeaverFigure({ leaver, exit, emblem, off, onGone }: { leaver: Leaver; exit: Exit; emblem: string; off: number; onGone(id: string): void }) {
   const r = leaver.robot
   const ended = (e: AnimationEvent) => {
     if (e.target === e.currentTarget) onGone(r.id)
   }
   return (
-    <div className="ship-leaver" data-leaving={r.id} data-exit={leaver.exit} style={{ ...at(leaver.x, leaver.y), '--off': px(off) } as CSSProperties} aria-hidden>
-      {leaver.exit === 'launch' ? (
+    <div className="ship-leaver" data-leaving={r.id} data-exit={exit} style={{ ...at(leaver.x, leaver.y), '--off': px(off) } as CSSProperties} aria-hidden>
+      {exit === 'launch' ? (
         <img className="ship-px ship-launch" src={SHIP_SPRITES.shuttle.launch.src} alt="" draggable={false} onAnimationEnd={ended} />
       ) : (
         <span className="ship-walk-off" onAnimationEnd={ended}>

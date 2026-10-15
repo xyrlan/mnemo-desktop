@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { SHIP_SPRITES } from '../sprites'
 import type { Deck as DeckT, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
@@ -11,6 +11,14 @@ import { relation, robotLine, robotMore } from './words'
 /** A voice whose turn is this close to over at a tick takes its turn: ticks and draws do not
  *  land on the same ms. */
 const SLACK_MS = 500
+
+/** A line with its numbers blanked: a clock moving on (`idle for 6 min` → `7 min`) is not a new
+ *  line, so it does not take the floor again every minute. */
+export const sameLine = (say: string) => say.replace(/\d+(?:[.,]\d+)?/g, '#')
+
+/** How long a deck that left the ship stays drawn at most, for its robots' exits: longer than the
+ *  longest (the shuttle's 2 s). */
+export const GHOST_MS = 3_000
 
 /** Who speaks in each room now, and where their bubbles hang. Remembers each robot's line and when
  *  it last changed, and each room's voices, across draws. */
@@ -26,7 +34,7 @@ function useBubbles(layout: DeckLayout, tick: number, rotate: boolean): Bubble[]
     const out: Bubble[] = []
     for (const room of layout.rooms) {
       for (const r of room.robots) {
-        const text = robotLine(r).say
+        const text = sameLine(robotLine(r).say)
         if (said.current.get(r.id)?.text !== text) said.current.set(r.id, { text, at: fresh })
       }
       const ids = room.robots.map((r) => r.id)
@@ -47,8 +55,14 @@ function useBubbles(layout: DeckLayout, tick: number, rotate: boolean): Bubble[]
 
 /** One repo's deck: COMMAND with its captains, then in flight, hangar and stranded, each lit while
  *  someone stands in it. */
-export function Deck({ deck, width, alive }: { deck: DeckT; width: number; alive: ReadonlySet<string> }) {
+export function Deck({ deck, width, alive, ghost = false, onSettled }: { deck: DeckT; width: number; alive: ReadonlySet<string>; ghost?: boolean; onSettled?(root: string): void }) {
   const s = useScene()
+  // A width that changed since the last draw is a relayout: robots move there without walking.
+  const lastWidth = useRef(width)
+  const resized = lastWidth.current !== width
+  useLayoutEffect(() => {
+    lastWidth.current = width
+  })
   const [open, setOpen] = useState(false)
   const layout = useMemo(() => deckLayout(deck, width, open), [deck, width, open])
   const drawn = useMemo(() => {
@@ -60,6 +74,15 @@ export function Deck({ deck, width, alive }: { deck: DeckT; width: number; alive
   // node would cancel its walk (a CSS transition).
   const floor = useMemo(() => [...drawn.values()].map((d) => d.robot).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)), [drawn])
   const { leavers, gone } = useLeavers(drawn, alive, s.reducedMotion)
+  // A deck that left the ship (its last child merged) stays until its robots have left it.
+  const had = useRef(false)
+  if (leavers.length) had.current = true
+  useEffect(() => {
+    if (!ghost || !onSettled) return
+    if (had.current && !leavers.length) return onSettled(deck.root)
+    const t = setTimeout(() => onSettled(deck.root), GHOST_MS)
+    return () => clearTimeout(t)
+  }, [ghost, onSettled, leavers.length, deck.root])
   const bubbles = useBubbles(layout, s.tick, !s.reducedMotion)
   const emblem = (r: ShipRobot) => s.emblems.get(r.captainId) ?? ''
 
@@ -67,7 +90,7 @@ export function Deck({ deck, width, alive }: { deck: DeckT; width: number; alive
   const crewOf = hovered?.kind === 'captain' ? hovered.id : null
 
   return (
-    <section className="ship-deck" data-deck={deck.root} aria-label={deck.name} style={{ height: px(layout.height) }}>
+    <section className="ship-deck" data-deck={deck.root} data-ghost={ghost ? '' : undefined} aria-label={deck.name} style={{ height: px(layout.height) }}>
       <div className="ship-cmd" style={{ width: px(layout.cmdW) }}>
         <h3 className="ship-dlabel">{deck.name}</h3>
         {deck.quiet.length > 0 && (
@@ -99,6 +122,7 @@ export function Deck({ deck, width, alive }: { deck: DeckT; width: number; alive
           robot={r}
           emblem={emblem(r)}
           pos={layout.robots.get(r.id)!}
+          still={resized}
           selected={s.selection.has(r.id)}
           focused={isFocused(s.focusId, r)}
           dimmed={!!crewOf && r.captainId !== crewOf}
@@ -127,7 +151,7 @@ export function Deck({ deck, width, alive }: { deck: DeckT; width: number; alive
         </button>
       )}
       {leavers.map((l) => (
-        <LeaverFigure key={l.robot.id} leaver={l} emblem={emblem(l.robot)} off={layout.width + 40 - l.x} onGone={gone} />
+        <LeaverFigure key={l.robot.id} leaver={l} exit={s.merged.has(l.robot.id) ? 'launch' : 'walk'} emblem={emblem(l.robot)} off={layout.width + 40 - l.x} onGone={gone} />
       ))}
       {bubbles.map((b) => {
         const r = drawn.get(b.robotId)!.robot

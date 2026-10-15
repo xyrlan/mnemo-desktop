@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
 import { pollWhileShown } from '../shell/while-shown'
 import { useArrivals } from './scene/motion'
 import { Bridge } from './ship-scene/Bridge'
@@ -9,7 +9,7 @@ import { columns, G } from './ship-scene/geometry'
 import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
 import { chips, rateChip } from './ship-scene/words'
-import type { Ship, ShipRobot, ShipSceneProps } from './ship-types'
+import type { Deck as DeckT, Ship, ShipRobot, ShipSceneProps } from './ship-types'
 import './ship.css'
 
 /** The scroll box's inner width where nothing is laid out (jsdom). */
@@ -30,6 +30,32 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
     return () => ro.disconnect()
   }, [ref])
   return w
+}
+
+type Drawn = { deck: DeckT; ghost: boolean }
+
+/** The decks to draw: the ship's, plus each deck that just left it (its last child merged or
+ *  closed), emptied and kept where it stood until its robots' exits end. Not with reduced motion,
+ *  where nobody makes an exit. */
+function useDecks(decks: DeckT[], reducedMotion: boolean): { decks: Drawn[]; settled(root: string): void } {
+  type Ghost = { deck: DeckT; index: number }
+  const last = useRef<DeckT[]>(decks)
+  const [ghosts, setGhosts] = useState<Ghost[]>([])
+  const roots = new Set(decks.map((d) => d.root))
+  // Found while drawing, so the deck that left keeps its place (and its memory) in this very commit.
+  const kept = reducedMotion ? [] : ghosts.filter((g) => !roots.has(g.deck.root))
+  const left: Ghost[] = reducedMotion
+    ? []
+    : last.current.flatMap((d, index) => (roots.has(d.root) || kept.some((g) => g.deck.root === d.root) ? [] : [{ deck: { ...d, flight: [], hangar: [], stranded: [], hangarReady: false }, index }]))
+  const all = [...kept, ...left]
+  useLayoutEffect(() => {
+    last.current = decks
+    if (left.length || all.length !== ghosts.length) setGhosts(all)
+  })
+  const settled = useCallback((root: string) => setGhosts((prev) => (prev.some((g) => g.deck.root === root) ? prev.filter((g) => g.deck.root !== root) : prev)), [])
+  const out: Drawn[] = decks.map((deck) => ({ deck, ghost: false }))
+  for (const g of [...all].sort((a, b) => a.index - b.index)) out.splice(Math.min(g.index, out.length), 0, { deck: g.deck, ghost: true })
+  return { decks: out, settled }
 }
 
 const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
@@ -54,6 +80,8 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
   }, [ship])
   const ids = useMemo(() => robots.map((r) => r.id), [robots])
   const { arriving, arrived } = useArrivals(ids, reducedMotion)
+  const merged = useMemo(() => new Set(log.flatMap((e) => (e.kind === 'merged' && e.robotId ? [e.robotId] : []))), [log])
+  const { decks, settled } = useDecks(ship.decks, reducedMotion)
 
   const [hover, setHover] = useState<Hover | null>(null)
   // Speech turns: only while turns are taken and someone can see them.
@@ -81,6 +109,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
     emblems,
     robots: byId,
     selection,
+    merged,
     focusId,
     hover,
     setHover,
@@ -127,7 +156,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
           {drawn && (
             <div className="ship-stage" style={{ width: px(width + 2 * G.pad) }}>
               <Bridge ship={ship} prompt={bridge} />
-              {ship.decks.length > 0 && (
+              {decks.length > 0 && (
                 <div className="ship-colhead" aria-hidden>
                   <div style={{ width: px(cols.cmdW) }}>
                     COMMAND <small>parents</small>
@@ -139,8 +168,8 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                   ))}
                 </div>
               )}
-              {ship.decks.map((d) => (
-                <Deck key={d.root} deck={d} width={width} alive={alive} />
+              {decks.map(({ deck: d, ghost }) => (
+                <Deck key={d.root} deck={d} width={width} alive={alive} ghost={ghost} onSettled={settled} />
               ))}
               {ship.docks.length > 0 && (
                 <section className="ship-docks" aria-label="docks">
@@ -155,7 +184,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                   ))}
                 </section>
               )}
-              {!ship.decks.length && !ship.docks.length && <p className="ship-empty">No live sessions.</p>}
+              {!decks.length && !ship.docks.length && <p className="ship-empty">No live sessions.</p>}
             </div>
           )}
         </div>

@@ -189,8 +189,8 @@
 .ship-xtag { white-space: nowrap; }
 .ship-xt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ship-dim); }
 .ship-xmore { padding: 2px 8px; font-size: 11px; color: var(--ship-dim); }
-.ship-bridge button:not(.ship-attend):not(.ship-figure),
-.ship-need button {
+.ship-bridge :where(button:not(.ship-attend):not(.ship-figure)),
+.ship-need :where(button) {
   padding: 0 8px;
   border: 2px solid #26335c;
   border-radius: 2px;
@@ -201,7 +201,10 @@
   white-space: nowrap;
 }
 .ship-bridge button.ship-go { border-color: var(--ship-done); background: #14532d; color: #dcfce7; }
-.ship-blocked { display: flex; flex: none; align-items: flex-end; gap: 16px; }
+/* Armed: the next press acts. */
+.ship-bridge button[data-armed] { border-color: var(--ship-rose); background: #4c0519; color: #fff; }
+.ship-blocked { display: flex; flex: none; align-items: flex-end; gap: 16px; max-width: 50%; }
+.ship-scene .ship-more-blocked { align-self: center; padding: 2px 8px; border: 2px solid #be123c; border-radius: 2px; background: #2a0a17; color: #fecdd3; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .ship-blocked-one { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .ship-need {
   position: relative;
@@ -287,7 +290,15 @@
 .ship-room[data-zone='hangar'] { background: linear-gradient(#141a26, #11161f); }
 .ship-room[data-zone='hangar']::after { height: 7px; background: repeating-linear-gradient(45deg, #ca8a04 0 8px, #1c1917 8px 16px); }
 .ship-room[data-zone='stranded'] { background: repeating-linear-gradient(135deg, #1a1d2e 0 10px, #141726 10px 20px); }
-.ship-room[data-zone='hangar'][data-ready] { box-shadow: inset 0 0 0 2px #4ade8066, inset 0 -50px 64px -28px #4ade8033; }
+/* The ready glow is a layer of its own: only its opacity moves, so the room is not repainted. */
+.ship-room[data-zone='hangar'][data-ready]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px #4ade8099, inset 0 -60px 70px -24px #4ade8055;
+  opacity: 0.6;
+  pointer-events: none;
+}
 .ship-room[data-ready] .ship-rcount { color: var(--ship-done); }
 .ship-rcount { position: absolute; top: 3px; right: 6px; font-size: 10px; color: var(--ship-faint); }
 
@@ -578,7 +589,7 @@
 [data-tone='you'] > i { color: #f0abfc; }
 
 /* ---------- motion: never with reduced motion ---------- */
-.ship-scene:not([data-reduced]) .ship-robot[data-placed] { transition: transform 1.4s ease-in-out; }
+.ship-scene:not([data-reduced]) .ship-robot[data-placed]:not([data-still]) { transition: transform 1.4s ease-in-out; }
 .ship-scene:not([data-reduced]) .ship-robot[data-walking] .ship-body { animation: ship-walk 0.35s steps(2) infinite; }
 .ship-scene:not([data-reduced]) .ship-robot[data-state='working']:not([data-walking]) .ship-body { animation: ship-bob 0.9s steps(2) infinite; }
 .ship-scene:not([data-reduced]) .ship-robot[data-state='idle']:not([data-walking]) .ship-body { animation: ship-breathe 3.2s ease-in-out infinite; }
@@ -596,7 +607,7 @@
 .ship-scene:not([data-reduced]) .ship-lights i:nth-child(2) { animation-delay: 0.3s; }
 .ship-scene:not([data-reduced]) .ship-lights i:nth-child(3) { animation-delay: 0.9s; }
 .ship-scene:not([data-reduced]) .ship-bridge[data-tone='red'] .ship-lights i { animation-duration: 0.6s; }
-.ship-scene:not([data-reduced]) .ship-room[data-zone='hangar'][data-ready] { animation: ship-hangar-ready 2.6s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-room[data-zone='hangar'][data-ready]::before { animation: ship-hangar-ready 2.6s ease-in-out infinite; will-change: opacity; }
 .ship-scene:not([data-reduced]) .ship-tether line { animation: ship-dash 0.6s linear infinite; }
 .ship-scene:not([data-reduced]) .ship-tether [data-tether='relation'] line { animation: none; }
 .ship-scene:not([data-reduced]) .ship-fx[data-fx='sparks']::before { animation: ship-spark 0.45s steps(3) infinite; }
@@ -636,10 +647,8 @@
 @keyframes ship-blink { 50% { opacity: 0.3; } }
 @keyframes ship-hop { 50% { translate: 0 -5px; } }
 @keyframes ship-dash { to { stroke-dashoffset: -8; } }
-@keyframes ship-hangar-ready {
-  0%, 100% { box-shadow: inset 0 0 0 2px #4ade8033, inset 0 -40px 60px -30px #4ade8022; }
-  50% { box-shadow: inset 0 0 0 2px #4ade8099, inset 0 -60px 70px -24px #4ade8055; }
-}
+@keyframes ship-hangar-ready { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
 @keyframes ship-spark { 0% { scale: 0.4; opacity: 1; } 100% { scale: 2.4; translate: 2px -3px; opacity: 0; } }
 @keyframes ship-rise { 0% { translate: 0 0; opacity: 0; } 15% { opacity: 1; } 100% { translate: 0 -44px; opacity: 0; } }
 @keyframes ship-float { 0% { translate: 0 0; opacity: 0; } 20% { opacity: 0.9; } 100% { translate: 6px -34px; opacity: 0; } }

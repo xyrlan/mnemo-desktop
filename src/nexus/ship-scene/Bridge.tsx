@@ -1,13 +1,51 @@
 import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import type { Ship, ShipRobot } from '../ship-types'
+import type { Ship, ShipAction, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
 import { RobotFigure, Tag } from './figures'
 import { bridgeStatus, exceptionRow, toneOf, type Row, type RowButton } from './words'
 
 /** Rows the bridge lists; ⌥1–9 reach them, the rest are counted. */
 export const ROWS = 9
-/** How long "merge all green" waits for its confirming click. */
+/** How long a destructive button waits for its confirming press. */
 export const CONFIRM_MS = 5_000
+/** Blocked robots drawn on the bridge; the rest are counted, and triage reaches them all. */
+export const BLOCKED = 2
+
+/** ⌥1–9 are the Nexus's on macOS only: elsewhere Alt+digit is the workbench's `tab.go`. */
+export const altDigits = () => typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+
+/** A button that acts on its second press within `CONFIRM_MS`. The action is taken at the first
+ *  press, so the second confirms what was shown, not what is there by then. */
+function Armed({ label, confirm, action, go, x }: { label: string; confirm: string; action: () => ShipAction; go?: boolean; x?: string }) {
+  const s = useScene()
+  const [armed, setArmed] = useState<ShipAction | null>(null)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(null), CONFIRM_MS)
+    return () => clearTimeout(t)
+  }, [armed])
+  const press = (e: MouseEvent) => {
+    e.stopPropagation()
+    if (!armed) return setArmed(action())
+    setArmed(null)
+    s.onAction(armed)
+  }
+  return (
+    <button type="button" className={go ? 'ship-go' : undefined} data-x={x} data-armed={armed ? '' : undefined} onClick={press}>
+      {armed ? confirm : label}
+    </button>
+  )
+}
+
+const CONFIRM: Record<ShipAction['kind'], (a: ShipAction) => string> = {
+  merge: (a) => (a.kind === 'merge' && a.robotIds.length > 1 ? `confirm merge of ${a.robotIds.length}?` : 'confirm merge?'),
+  stop: () => 'confirm stop?',
+  land: () => 'confirm land?',
+  answer: () => 'confirm?',
+  message: () => 'confirm?',
+  dispatch: () => 'confirm?',
+  open: () => 'confirm?',
+}
 
 /** The bridge: you. The exceptions, each with what settles it; the fleet prompt; and every blocked
  *  child, climbed up here with its question and an inline answer. Red for a question or a red CI,
@@ -16,17 +54,8 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
   const s = useScene()
   const rows = ship.bridge.exceptions.map(exceptionRow)
   const ready = ship.bridge.exceptions.flatMap((x) => (x.kind === 'ready' ? [x.robotId] : []))
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const t = setTimeout(() => setArmed(false), CONFIRM_MS)
-    return () => clearTimeout(t)
-  }, [armed])
-  const mergeAll = () => {
-    if (!armed) return setArmed(true)
-    setArmed(false)
-    s.onAction({ kind: 'merge', robotIds: ready })
-  }
+  const blocked = ship.bridge.blocked
+  const mac = altDigits()
 
   return (
     <section className="ship-bridge" data-tone={toneOf(ship)} aria-label="bridge">
@@ -52,23 +81,26 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
               <div className="ship-xhead">
                 <span>EXCEPTIONS</span> <small>— everything else flies itself</small>
                 {ready.length > 1 && (
-                  <button type="button" className="ship-go" data-merge-all="" onClick={mergeAll}>
-                    {armed ? `confirm merge of ${ready.length}?` : `✈ merge all green (${ready.length})`}
-                  </button>
+                  <Armed go x="merge-all" label={`✈ merge all green (${ready.length})`} confirm={`confirm merge of ${ready.length}?`} action={() => ({ kind: 'merge', robotIds: ready })} />
                 )}
               </div>
               {rows.slice(0, ROWS).map((row, k) => (
-                <ExceptionRow key={row.key} row={row} n={k + 1} robot={row.robotId ? s.robots.get(row.robotId) : undefined} />
+                <ExceptionRow key={row.key} row={row} n={mac ? k + 1 : null} robot={row.robotId ? s.robots.get(row.robotId) : undefined} />
               ))}
               {rows.length > ROWS && <div className="ship-xmore">+{rows.length - ROWS} exceptions</div>}
             </div>
           )}
         </div>
-        {ship.bridge.blocked.length > 0 && (
+        {blocked.length > 0 && (
           <div className="ship-blocked">
-            {ship.bridge.blocked.map((r) => (
+            {blocked.slice(0, BLOCKED).map((r) => (
               <Blocked key={r.id} robot={r} />
             ))}
+            {blocked.length > BLOCKED && (
+              <button type="button" className="ship-more-blocked" onClick={s.onTriage}>
+                +{blocked.length - BLOCKED} blocked · triage
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -76,20 +108,21 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
   )
 }
 
-function ExceptionRow({ row, n, robot }: { row: Row; n: number; robot: ShipRobot | undefined }) {
+function ExceptionRow({ row, n, robot }: { row: Row; n: number | null; robot: ShipRobot | undefined }) {
   const s = useScene()
   const press = (b: RowButton) => (e: MouseEvent) => {
     e.stopPropagation()
-    if ('action' in b) s.onAction(b.action)
-    else if ('open' in b) s.onOpen(b.open)
+    if ('open' in b) s.onOpen(b.open)
     else s.onTriage()
   }
   const open = () => row.robotId && s.onOpen(row.robotId)
   return (
     <div className="ship-xrow" data-kind={row.kind} data-row={row.key} onClick={open}>
-      <kbd className="ship-xn" title={`⌥${n} opens it`}>
-        ⌥{n}
-      </kbd>
+      {n !== null && (
+        <kbd className="ship-xn" title={`⌥${n} opens it`}>
+          ⌥{n}
+        </kbd>
+      )}
       <span className="ship-xi" aria-hidden>
         {row.icon}
       </span>
@@ -99,11 +132,15 @@ function ExceptionRow({ row, n, robot }: { row: Row; n: number; robot: ShipRobot
         </b>
       )}
       <span className="ship-xt">{row.text}</span>
-      {row.buttons.map((b) => (
-        <button key={b.label} type="button" className={b.go ? 'ship-go' : undefined} data-x={b.label} onClick={press(b)}>
-          {b.label}
-        </button>
-      ))}
+      {row.buttons.map((b) =>
+        'action' in b ? (
+          <Armed key={b.label} go={b.go} x={b.label} label={b.label} confirm={CONFIRM[b.action.kind](b.action)} action={() => b.action} />
+        ) : (
+          <button key={b.label} type="button" className={b.go ? 'ship-go' : undefined} data-x={b.label} onClick={press(b)}>
+            {b.label}
+          </button>
+        ),
+      )}
     </div>
   )
 }
