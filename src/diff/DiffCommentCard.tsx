@@ -1,8 +1,8 @@
 // adapted from stablyai/orca src/renderer/src/components/diff-comments/DiffCommentCard.tsx (MIT, 122b8c25)
 import { CornerDownLeft, Pencil, Trash } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Button } from '@/ui'
 import { getDiffCommentLineLabel, useMountedRef } from './comment'
+import { ownEscape } from './esc'
 
 // Why: the saved-note card lives inside a Monaco view zone's DOM node.
 // useDiffCommentDecorator creates a React root per zone and renders this
@@ -62,6 +62,7 @@ export function DiffCommentCard({
   const cardRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const resizeAfterCloseRef = useRef(false)
+  const cancelRef = useRef<() => void>(() => {})
   const observesRenderedSize = observeRenderedSize === true && onContentResize !== undefined
 
   // Why: stash `onContentResize` in a ref so resize effects do not depend on
@@ -121,6 +122,7 @@ export function DiffCommentCard({
       return
     }
     resizeDiffCommentTextarea(el)
+    ownEscape(el, () => cancelRef.current())
     el.focus()
     el.setSelectionRange(el.value.length, el.value.length)
     onContentResizeRef.current?.()
@@ -143,6 +145,7 @@ export function DiffCommentCard({
     setEditing(false)
     setDraft(body)
   }
+  cancelRef.current = handleCancel
 
   const trimmedDraft = draft.trim()
   const canSubmit = !submitting && trimmedDraft.length > 0 && trimmedDraft !== body
@@ -206,7 +209,7 @@ export function DiffCommentCard({
                       handleStartEdit()
                     }}
                   >
-                    <Pencil className="size-3" />
+                    <Pencil size={12} />
                   </button>
                   {onDelete && <span className="orca-diff-comment-pill-divider" />}
                 </>
@@ -223,7 +226,7 @@ export function DiffCommentCard({
                     onDelete()
                   }}
                 >
-                  <Trash className="size-3" />
+                  <Trash size={12} />
                 </button>
               )}
             </div>
@@ -239,7 +242,7 @@ export function DiffCommentCard({
 
         {/* Body or Edit Mode */}
         {editing ? (
-          <div className="flex flex-col gap-2 mt-1">
+          <div className="orca-diff-comment-edit-col">
             <textarea
               ref={textareaRef}
               className="orca-diff-comment-popover-textarea"
@@ -268,11 +271,12 @@ export function DiffCommentCard({
               rows={3}
             />
             <div className="orca-diff-comment-popover-footer">
-              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={submitting}>
+              <button type="button" className="orca-diff-comment-btn" data-variant="ghost" onClick={handleCancel} disabled={submitting}>
                 Cancel
-              </Button>
-              <Button
-                size="sm"
+              </button>
+              <button
+                type="button"
+                className="orca-diff-comment-btn"
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
                 title={
@@ -282,8 +286,8 @@ export function DiffCommentCard({
                 }
               >
                 Save
-                <CornerDownLeft className="ml-1 size-3 opacity-70" />
-              </Button>
+                <CornerDownLeft size={12} className="orca-diff-comment-btn-key" />
+              </button>
             </div>
           </div>
         ) : (

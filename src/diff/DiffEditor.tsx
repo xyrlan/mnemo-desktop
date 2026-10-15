@@ -8,6 +8,7 @@ import type { DiffComment } from './comment'
 import { DiffCommentPopover } from './DiffCommentPopover'
 import { getDiffCommentPopoverLeft, getDiffCommentPopoverTop } from './popover-position'
 import { useDiffCommentDecorator } from './useDiffCommentDecorator'
+import './diff.css'
 
 /** What the diff pane hands its editor. Loaded lazily with Monaco (`DiffPane`), so a stand-in with
  *  the same props takes its place in tests. */

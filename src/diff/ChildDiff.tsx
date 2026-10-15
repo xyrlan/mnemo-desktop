@@ -1,5 +1,5 @@
 import { DiffView } from './DiffPane'
-import { diffStore } from './view'
+import { diffStore } from './app-store'
 
 /** A child's branch against where it was cut from: its commits and its uncommitted work, file by
  *  file, with notes that go to the child as the diff pane's notes go to a worktree's agent.

@@ -1,0 +1,84 @@
+/* The Changes window (`ChangesWindow.tsx`): a robot's diff in the ship's frame. The notes on its
+   lines (`src/diff/`) are drawn from the app's tokens; inside the window those tokens take the
+   ship's colours, so a note looks like the ship whatever the app's theme. Monaco's own theme is
+   dark in both. */
+
+.nx-changes {
+  --foreground: var(--nx-ink);
+  --background: var(--nx-hull);
+  --editor-surface: var(--nx-hull-2);
+  --border: var(--nx-edge);
+  --primary: var(--nx-edge-hi);
+  --primary-foreground: var(--nx-space);
+  --ring: var(--nx-edge-hi);
+  --muted-foreground: var(--nx-dim);
+  --destructive: var(--nx-danger);
+  --font-sans: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* The window is as tall as the screen allows: its frame, bar and padding take the rest. */
+  height: calc(100vh - 140px);
+  min-height: 320px;
+}
+
+.nx-changes-bar { display: flex; flex: none; align-items: center; gap: 10px; min-width: 0; }
+.nx-changes-label { flex: none; font-weight: 700; color: #fff; }
+.nx-changes-tree { min-width: 0; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
+.nx-changes-totals { flex: none; color: var(--nx-dim); font-variant-numeric: tabular-nums; }
+.nx-changes-tools { display: flex; flex: none; gap: 6px; margin-left: auto; }
+.nx-changes-tools .nx-btn[aria-pressed='true'] { border-color: var(--nx-edge-hi); }
+
+.nx-changes [data-tone='add'] { color: var(--nx-ok); }
+.nx-changes [data-tone='del'] { color: var(--nx-danger); }
+
+.nx-changes-status { flex: none; padding: 3px 6px; border-left: 3px solid var(--nx-edge); background: #0b0d22cc; }
+.nx-changes-status [data-tone='error'] { color: var(--nx-danger); }
+.nx-changes-status [data-tone='ok'] { color: var(--nx-ok); }
+.nx-changes-status [data-tone='muted'] { color: var(--nx-dim); }
+
+.nx-changes-main { display: flex; flex: 1; min-height: 0; border: 2px solid var(--nx-edge); background: var(--nx-space); }
+.nx-changes-files { flex: none; width: 260px; overflow-y: auto; padding: 3px; border-right: 2px solid var(--nx-edge); }
+.nx-changes-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+}
+.nx-changes-file:hover { background: #1d2750; }
+.nx-changes-file[aria-current='true'] { border-left-color: var(--nx-edge-hi); background: #1d2750; color: #fff; }
+.nx-changes-letter { flex: none; width: 12px; font-weight: 700; text-align: center; color: var(--nx-pale); }
+.nx-changes-file[data-status='added'] .nx-changes-letter,
+.nx-changes-file[data-status='untracked'] .nx-changes-letter { color: var(--nx-ok); }
+.nx-changes-file[data-status='deleted'] .nx-changes-letter,
+.nx-changes-file[data-status='conflicted'] .nx-changes-letter { color: var(--nx-danger); }
+.nx-changes-file[data-status='deleted'] .nx-changes-base { text-decoration: line-through; }
+.nx-changes-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-changes-dir { margin-left: 6px; color: var(--nx-faint); }
+.nx-changes-notes { flex: none; color: var(--nx-edge-hi); }
+.nx-changes-count { display: flex; flex: none; gap: 4px; font-variant-numeric: tabular-nums; }
+
+.nx-changes-diff { position: relative; flex: 1; min-width: 0; }
+.nx-changes-notice { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; color: var(--nx-dim); text-align: center; }
+.nx-changes-notice > div { max-width: 520px; }
+.nx-changes-notice[data-tone='error'] { color: var(--nx-danger); }
+.nx-changes-notice code { color: var(--nx-pale); word-break: break-all; }
+
+/* The notes in the ship's hand: square corners, and the composer's buttons drawn as `.nx-btn`
+   (`.nx button` would otherwise hand them the ink colour). */
+.nx-changes .orca-diff-comment-card,
+.nx-changes .orca-diff-comment-popover,
+.nx-changes .orca-diff-comment-popover-textarea,
+.nx-changes .orca-diff-comment-actions-pill { border-radius: 3px; }
+.nx-changes .orca-diff-comment-card,
+.nx-changes .orca-diff-comment-popover { border: 2px solid var(--nx-edge); background: var(--nx-hull); box-shadow: 4px 4px 0 #000; }
+.nx-changes .orca-diff-comment-btn { height: auto; padding: 1px 9px; border: 2px solid var(--nx-ok); border-radius: 2px; background: #14532d; color: #dcfce7; font-size: 12px; font-weight: 700; }
+.nx-changes .orca-diff-comment-btn:hover:not(:disabled) { background: #166534; }
+.nx-changes .orca-diff-comment-btn[data-variant='ghost'] { border-color: var(--nx-edge); background: #18213f; color: var(--nx-ink); }
+.nx-changes .orca-diff-comment-btn[data-variant='ghost']:hover:not(:disabled) { border-color: var(--nx-edge-hi); background: #18213f; }

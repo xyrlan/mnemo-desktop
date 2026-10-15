@@ -1,8 +1,8 @@
 // adapted from stablyai/orca src/renderer/src/components/diff-comments/DiffCommentPopover.tsx (MIT, 122b8c25)
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { CornerDownLeft } from 'lucide-react'
-import { Button } from '@/ui'
 import { useMountedRef } from './comment'
+import { ownEscape } from './esc'
 import { resolveDiffCommentPopoverTop } from './popover-position'
 
 // Why: a DOM sibling overlay rather than a Monaco content widget, so it can own a React auto-resizing textarea.
@@ -99,6 +99,7 @@ export function DiffCommentPopover({
   const focusTextareaRef = useCallback((textarea: HTMLTextAreaElement | null): void => {
     // Why: focus on mount via the ref callback so no post-render Effect is needed.
     textarea?.focus()
+    if (textarea) ownEscape(textarea, () => onCancelRef.current())
   }, [])
 
   // Why: Monaco's editor doesn't bubble React clicks up, so detect outside-clicks with a document-level mousedown listener.
@@ -193,13 +194,13 @@ export function DiffCommentPopover({
           rows={3}
         />
         <div className="orca-diff-comment-popover-footer">
-          <Button variant="ghost" size="sm" onClick={onCancel}>
+          <button type="button" className="orca-diff-comment-btn" data-variant="ghost" onClick={onCancel}>
             Cancel
-          </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting || !canSubmitComment}>
+          </button>
+          <button type="button" className="orca-diff-comment-btn" onClick={handleSubmit} disabled={submitting || !canSubmitComment}>
             {submitting ? submittingLabel : submitLabel}
-            {!submitting && <CornerDownLeft className="ml-1 size-3 opacity-70" />}
-          </Button>
+            {!submitting && <CornerDownLeft size={12} className="orca-diff-comment-btn-key" />}
+          </button>
         </div>
       </div>
     </div>
