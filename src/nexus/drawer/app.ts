@@ -1,14 +1,14 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view (for a
  *  read-only tab) and diff, ⌘W claimed while the Nexus is open; the sessions the Nexus starts
  *  (`./start`), their Claude session learnt while no pane bar asks for it, and the tabs kept across
- *  a restart (`./persist`). */
+ *  a restart (`./persist`). Nothing here shows the workbench: a repo opens as a shell in a tab. */
+import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
 import { paneRunsClaude } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
 import { tauriDiff } from '../../diff/client'
 import { fleetStore } from '../../fleet/store'
 import { store as layout } from '../../layout/app-store'
-import { attachChild } from '../../mission/rows'
 import { sessionHost } from '../../session/app-host'
 import { settingsStore } from '../../settings/app-store'
 import { pollWhileShown } from '../../shell/while-shown'
@@ -30,12 +30,7 @@ function storage(): Storage | null {
 }
 
 let sessions: Sessions | null = null
-const drawer = createDrawer(sessionHost, nexusStore, {
-  goToPane: (id) => layout.getState().goToPane(id),
-  attach: (child) => attachChild(child),
-  closeNexus: () => nexusStore.getState().setOpen(false),
-  letGo: (pane) => void sessions?.letGo(pane),
-})
+const drawer = createDrawer(sessionHost, nexusStore, { letGo: (pane) => void sessions?.letGo(pane) })
 const unclaim = claimClose(drawer, nexusStore)
 
 /** A UUID for `claude --session-id`, also where the page is not a secure context. */
@@ -92,10 +87,7 @@ export const liveDrawer: DrawerDeps = {
   diff: tauriDiff,
   worktreeOf: (cwd) => deepestWorktree(cwd, [...fleetStore.getState().repos.flatMap((r) => r.worktrees.map((w) => w.path)), ...layout.getState().worktrees]),
   paneOfSession: (sessionId) => liveSessions.paneOf(sessionId),
-  goToRepo: (root) => {
-    nexusStore.getState().setOpen(false)
-    void layout.getState().switchWorktree(root)
-  },
+  goToRepo: (root) => void liveSessions.openSession({ kind: 'shell', root }).catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))),
 }
 
 import.meta.hot?.dispose(() => {

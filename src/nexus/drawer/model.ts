@@ -77,7 +77,7 @@ export function openingOf(
   return { tab: tab(null, f.captain.pose === 'offline' ? ENDED : OUTSIDE), ref: null }
 }
 
-/** A breadcrumb: `go` opens that figure in the drawer, `repo` shows that repo in the workbench. */
+/** A breadcrumb: `go` opens that figure in the drawer, `repo` a terminal in that repo, in the drawer too. */
 export type Crumb = { text: string; go?: string; repo?: string; here?: true }
 
 /** The repo a session's `cwd` is in: the fleet's repo holding it, else the `<repo>` a

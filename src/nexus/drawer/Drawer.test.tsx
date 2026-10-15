@@ -40,9 +40,10 @@ const diff: DiffClient = {
 let root: Root
 function mount(over: { shown?: boolean; ship?: Ship } = {}) {
   const { host, log } = fakeHost()
-  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
+  const drawer = createDrawer(host, nexusStore, {})
   const owners = createStore<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>(() => ({ owners: {} }))
   const opened: string[] = []
+  const repos: string[] = []
   const deps: DrawerDeps = {
     drawer,
     host,
@@ -51,7 +52,7 @@ function mount(over: { shown?: boolean; ship?: Ship } = {}) {
     conversation: ({ sessionId }) => <div data-stub-conversation={sessionId ?? ''} />,
     diff,
     worktreeOf: (cwd) => cwd,
-    goToRepo: () => {},
+    goToRepo: (r) => void repos.push(r),
     paneOfSession: () => null,
   }
   const ship = over.ship ?? shipFixture()
@@ -64,7 +65,7 @@ function mount(over: { shown?: boolean; ship?: Ship } = {}) {
   const render = (shown = over.shown ?? true) =>
     act(() => root.render(<NexusDrawer deps={deps} ship={ship} feed={null} repos={reposFixture} shown={shown} onOpen={(id) => void opened.push(id)} />))
   render()
-  return { host, log, drawer, owners, open, render, opened }
+  return { host, log, drawer, owners, open, render, opened, repos }
 }
 
 const $ = <T extends Element = HTMLElement>(sel: string) => document.querySelector<T>(sel)
@@ -274,7 +275,7 @@ test('a robot’s tab opens its full diff in the Changes window; a captain’s h
   expect(opened).toEqual([{ id: 'changes', params: { robotId: 'r-live', worktree: '/work/mnemo-desktop-wt-682/src', label: '#682·a' } }])
 })
 
-test('a session the Nexus started: named for what it runs until the ship knows it, and never revealed in the workbench', async () => {
+test('a session the Nexus started: named for what it runs until the ship knows it', async () => {
   const { drawer, owners } = mount()
   act(() => owners.setState({ panes: { 30: { offscreen: true } } }))
   act(() => drawer.open({ id: 'session:30', kind: 'session', key: null, readOnly: null, label: 'shell · mnemo-desktop', sessionId: null, cwd: '/work/mnemo-desktop' }, { pane: 30 }))
@@ -285,13 +286,17 @@ test('a session the Nexus started: named for what it runs until the ship knows i
   expect(panel('session:30').querySelector('[data-stub-terminal="30"]')).not.toBeNull()
 })
 
-test('a captain in a workbench pane can be shown there; one in an offscreen pane cannot', async () => {
-  const { open, owners } = mount()
+test('nothing in a tab leads to the workbench: no open as tab, and the repo breadcrumb opens a terminal in the drawer', async () => {
+  const { open, repos } = mount()
   open('cap-1')
-  expect(panel('cap-1').querySelector('[data-open-as-tab]')).not.toBeNull()
-  act(() => owners.setState({ panes: { 7: { offscreen: true } } }))
-  expect(panel('cap-1').querySelector('[data-open-as-tab]')).toBeNull()
+  open('r-live')
+  await act(settle)
+  for (const id of ['cap-1', 'r-live']) expect(panel(id).querySelector('[data-open-as-tab]')).toBeNull()
   expect(panel('cap-1').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo-desktop▸◆ nexus round')
+  const crumb = panel('cap-1').querySelector<HTMLButtonElement>('[data-drawer-crumbs] button')!
+  expect(crumb.title).toBe('Open a terminal in mnemo-desktop')
+  act(() => crumb.click())
+  expect(repos).toEqual(['/work/mnemo-desktop'])
 })
 
 test('the default width is 42% of the window as it is now; a width dragged and saved wins', () => {

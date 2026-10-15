@@ -2,15 +2,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { AgentEvent } from '../agents/events'
 import type { PolledMove } from '../fleet/create'
 import { COALESCE_MS, createNotifier, DONE_TTL_MS, MAX_CARDS, SOUND_GAP_MS, type NotifierDeps } from './notifier'
+import type { Shown } from './decide'
 import { REPOS } from './test-fleet'
 
 let emit: (e: AgentEvent) => void
 let poll: (m: PolledMove) => void
 let look: () => void
-let world: { active: string | null; shownPanes: number[]; focused: boolean; now: number }
+let world: { shown: Shown | null; focused: boolean; now: number }
 let native: Array<[string, string]>
 let sounds: number
-let switched: Array<[string | null, number | null]>
+let opened: Array<[string, string | null]>
 let unsubscribed: number
 let nativeFails: boolean
 
@@ -25,8 +26,7 @@ function make(over: Partial<NotifierDeps> = {}) {
       return () => void unsubscribed++
     },
     repos: () => REPOS,
-    active: () => world.active,
-    shownPanes: () => world.shownPanes,
+    shown: () => world.shown,
     focused: () => world.focused,
     onLook(cb) {
       look = cb
@@ -38,7 +38,7 @@ function make(over: Partial<NotifierDeps> = {}) {
       if (nativeFails) throw new Error('denied')
     },
     sound: () => void sounds++,
-    switchTo: (w, p) => void switched.push([w, p]),
+    open: (sid, w) => void opened.push([sid, w]),
     now: () => world.now,
     ...over,
   })
@@ -51,17 +51,18 @@ const prompt = (sessionId: string, cwd: string, message: string): AgentEvent => 
 const REPORT = 'Another Claude session sent a message:\n<mnemo-child-finished id="720a903b" state="ci-red">'
 
 beforeEach(() => {
-  world = { active: '/code/app', shownPanes: [3], focused: true, now: 10_000 }
+  // s-main's captain is the drawer's tab on screen.
+  world = { shown: { sessionId: 's-main', worktree: null }, focused: true, now: 10_000 }
   native = []
   sounds = 0
-  switched = []
+  opened = []
   unsubscribed = 0
   nativeFails = false
   vi.useFakeTimers()
 })
 afterEach(() => vi.useRealTimers())
 
-test('nothing fires for the worktree you are looking at', () => {
+test('nothing fires for the session the drawer shows', () => {
   const n = make()
   emit(stop('s-main', '/code/app'))
   emit(ask('s-main', '/code/app/src'))
@@ -70,15 +71,15 @@ test('nothing fires for the worktree you are looking at', () => {
   expect(native).toEqual([])
 })
 
-test('a worktree off screen, with focus: a card and a chime, no native notification', () => {
+test('a session off screen, with focus: a card and a chime, no native notification', () => {
   const n = make()
   emit(stop('s-feat', FEAT))
-  expect(n.cards.getState().cards).toMatchObject([{ sessionId: 's-feat', kind: 'done', worktree: FEAT, name: 'feat', repo: 'app', pane: 7, message: 'Finished: Add login' }])
+  expect(n.cards.getState().cards).toMatchObject([{ sessionId: 's-feat', kind: 'done', worktree: FEAT, name: 'feat', repo: 'app', message: 'Finished: Add login' }])
   expect(sounds).toBe(1)
   expect(native).toEqual([])
 })
 
-test('the window unfocused: even the worktree on screen notifies, natively too', async () => {
+test('the window unfocused: even the session on screen notifies, natively too', async () => {
   world.focused = false
   const n = make()
   emit(ask('s-main', '/code/app'))
@@ -102,24 +103,26 @@ test('a refused native notification is only a warning', async () => {
   warn.mockRestore()
 })
 
-test('before any worktree is chosen, the first repo main checkout counts as on screen', () => {
-  world.active = null
+test('with no session on screen (the Nexus closed, the drawer collapsed or empty), every session notifies', () => {
+  world.shown = null
   const n = make()
   emit(stop('s-main', '/code/app'))
-  expect(n.cards.getState().cards).toEqual([])
-  emit(stop('s-x', '/code/lib'))
-  expect(n.cards.getState().cards).toHaveLength(1)
+  expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-main'])
 })
 
-test('an agent in no repo, in a pane of the shown tabs, is on screen; elsewhere it is not', () => {
-  const n = make({ repos: () => [{ ...REPOS[0], worktrees: [REPOS[0].worktrees[1]] }] })
-  world.active = FEAT
-  world.shownPanes = [7]
-  // s-feat is in pane 7 and in FEAT: looking. A stranger in /tmp with no pane: not.
-  emit(stop('s-feat', '/tmp/x'))
+test('another session in the checkout of the captain on screen still notifies', () => {
+  const n = make()
+  emit(stop('s-other', '/code/app'))
+  expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-other'])
+})
+
+test('a dispatched child’s tab on screen covers the child resumed as a new session in its tree', () => {
+  world.shown = { sessionId: 's-feat', worktree: FEAT }
+  const n = make()
+  emit(stop('s-feat-resumed', `${FEAT}/src`))
   expect(n.cards.getState().cards).toEqual([])
   emit(stop('s-stranger', '/tmp/x'))
-  expect(n.cards.getState().cards).toMatchObject([{ worktree: null, name: 'x', pane: null }])
+  expect(n.cards.getState().cards).toMatchObject([{ worktree: null, name: 'x' }])
 })
 
 test('the idle nudge, start and prompt raise nothing', () => {
@@ -186,7 +189,7 @@ test(`alerts closer than ${SOUND_GAP_MS} ms chime once`, () => {
   expect(sounds).toBe(2)
 })
 
-test('clicking a card switches to its worktree and pane, and the card goes', () => {
+test('clicking a card opens its session in the Nexus, with where it runs, and the card goes', () => {
   const n = make()
   emit(stop('s-feat', FEAT))
   emit(stop('s-x', '/code/lib'))
@@ -195,23 +198,14 @@ test('clicking a card switches to its worktree and pane, and the card goes', () 
   n.open(feat.id)
   n.open(lib.id)
   n.open(stray.id)
-  expect(switched).toEqual([[FEAT, 7], ['/code/lib', null]])
+  expect(opened).toEqual([
+    ['s-feat', FEAT],
+    ['s-x', '/code/lib'],
+    ['s-y', null],
+  ])
   expect(n.cards.getState().cards).toEqual([])
   n.open(feat.id)
-  expect(switched).toHaveLength(2)
-})
-
-test('a dispatched child’s card opens its parent’s Dispatch tab instead of its worktree', () => {
-  const routed: Array<[string, string | null]> = []
-  const n = make({ openChild: (sid, w) => (sid === 's-feat' ? (routed.push([sid, w]), true) : false) })
-  emit(stop('s-feat', FEAT))
-  emit(stop('s-x', '/code/lib'))
-  const [feat, lib] = n.cards.getState().cards
-  n.open(feat.id)
-  n.open(lib.id)
-  expect(routed).toEqual([['s-feat', FEAT]])
-  expect(switched).toEqual([['/code/lib', null]])
-  expect(n.cards.getState().cards).toEqual([])
+  expect(opened).toHaveLength(3)
 })
 
 test('dismiss drops only that card', () => {
@@ -222,12 +216,12 @@ test('dismiss drops only that card', () => {
   expect(n.cards.getState().cards.map((c) => c.sessionId)).toEqual(['s-x'])
 })
 
-test('showing a worktree, with focus, clears its cards', () => {
+test('showing a session in the drawer, with focus, clears its card', () => {
   world.focused = false
   const n = make()
   emit(stop('s-feat', FEAT))
   emit(stop('s-x', '/code/lib'))
-  world.active = FEAT
+  world.shown = { sessionId: 's-feat', worktree: FEAT }
   look()
   expect(n.cards.getState().cards).toHaveLength(2)
   world.focused = true
@@ -375,7 +369,7 @@ describe('from polled moves, where no hook is heard (Windows; a dispatched child
     expect(native).toHaveLength(3)
   })
 
-  test('nothing for the worktree you are looking at', () => {
+  test('nothing for the session the drawer shows', () => {
     const n = make()
     poll(moved('s-main', '/code/app', 'done'))
     poll(moved('s-main', '/code/app', 'needs-you'))
@@ -386,7 +380,7 @@ describe('from polled moves, where no hook is heard (Windows; a dispatched child
     world.focused = false
     const n = make()
     poll(moved('s-feat', FEAT, 'needs-you', { child: true, ask: 'Bash: pnpm test' }))
-    expect(n.cards.getState().cards).toMatchObject([{ key: `tree:${FEAT}`, kind: 'permission', name: 'feat', pane: 7, message: 'Needs your permission: Bash: pnpm test' }])
+    expect(n.cards.getState().cards).toMatchObject([{ key: `tree:${FEAT}`, kind: 'permission', name: 'feat', message: 'Needs your permission: Bash: pnpm test' }])
     expect(native).toEqual([['app · feat', 'Needs your permission: Bash: pnpm test']])
     poll(moved('s-feat', FEAT, 'working', { child: true }))
     poll(moved('s-feat', FEAT, 'done', { child: true }))

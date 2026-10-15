@@ -54,13 +54,12 @@ function app(opts: { hooks: boolean }) {
     subscribe: (cb) => (hooks.add(cb), () => void hooks.delete(cb)),
     polled: fleet.onPolledMove,
     repos: () => fleet.store.getState().repos,
-    active: () => ROOT,
-    shownPanes: () => [],
+    shown: () => null,
     focused: () => false,
     onLook: () => () => {},
     native: async (title, body) => void native.push([title, body]),
     sound: () => {},
-    switchTo: () => {},
+    open: () => {},
     now: () => t,
   })
   offs.push(notifier.stop)

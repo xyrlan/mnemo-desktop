@@ -5,6 +5,7 @@ import { STATUS_BAR } from '../shell/edges'
 import { shellStore } from '../shell/store'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
+import { idOf } from '../mission/account'
 import { useMission } from '../mission/app-store'
 import type { Snapshot } from '../mission/types'
 import { usePulse } from '../pulse/app-store'
@@ -20,6 +21,7 @@ import { NexusDrawer, useShownWidth, type DrawerDeps } from './drawer/Drawer'
 import { openingOf } from './drawer/model'
 import { useReducedMotion, useVisible } from './env'
 import { logEvents } from './log'
+import { setFigures } from './outside'
 import { buildShip } from './ship'
 import { asksFrom, type ShipClient } from './ship-client'
 import type { ActionResult, AgentView, Feed, Ship, ShipAction } from './ship-types'
@@ -268,6 +270,25 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
     },
     [drawer],
   )
+  // Every path in the app that goes to a session opens it here (`./outside`): a notification's
+  // click, the mission pane's attach. Its figure's tab, the Nexus open; a child the ship does not
+  // know yet is attached in a tab of its own, which becomes its robot's once the ship lists it.
+  useEffect(() => {
+    const open = (id: string) => {
+      if (!onOpen(id)) return false
+      nexusStore.getState().setOpen(true)
+      return true
+    }
+    return setFigures({
+      open,
+      attach(child) {
+        const id = idOf(child)
+        if (open(id)) return
+        drawer.drawer.open({ id, kind: 'robot', key: null, readOnly: null, label: id, sessionId: null, cwd: null }, { child })
+        nexusStore.getState().setOpen(true)
+      },
+    })
+  }, [onOpen, drawer])
   // Open, the sidebars and the workbench under it are out of reach, keys and focus included (the
   // shell's `covered`); closed, the shell gives their focus back.
   useEffect(() => {

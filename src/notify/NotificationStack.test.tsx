@@ -15,7 +15,6 @@ const card = (id: number, kind: Card['kind'], over: Partial<Card> = {}): Card =>
   repo: 'app',
   message: kind === 'done' ? 'Finished: Add login' : 'Claude needs your permission to use Bash',
   at: 0,
-  pane: null,
   key: `session:s${id}`,
   ...over,
 })
@@ -37,20 +36,21 @@ test('no cards, no stack', async () => {
   expect(host.innerHTML).toBe('')
 })
 
-test('cards draw newest first in the DOM, which the reversed column puts at the bottom', async () => {
+test('cards draw newest first in the DOM, in the ship\'s look, which the reversed column puts at the bottom', async () => {
   const { host } = await mount([card(1, 'done'), card(2, 'permission', { name: 'lib', repo: 'lib' }), card(3, 'question', { repo: null })])
   const stack = host.querySelector('[data-notification-stack]')!
-  expect(stack.className).toContain('flex-col-reverse')
-  expect(stack.className).toContain('fixed')
-  expect(stack.hasAttribute('data-ui')).toBe(true)
+  // The ship's frame and tokens (`.nx`), its own column (`notify.css`): no workbench components.
+  expect(stack.className).toBe('nx nx-notes')
   const cards = [...stack.querySelectorAll('[role="complementary"]')]
   expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['feat: Has a question', 'lib: Needs permission', 'feat: Done'])
   expect(cards.map((c) => c.getAttribute('data-kind'))).toEqual(['question', 'permission', 'done'])
   // The repo shows beside the name only when it says something the name does not.
   expect(cards[2].textContent).toContain('app')
   expect(cards[1].textContent).not.toContain('liblib')
-  expect(cards[2].querySelector('svg')!.getAttribute('class')).toContain('text-state-done')
-  expect(cards[1].querySelector('svg')!.getAttribute('class')).toContain('text-state-needs-you')
+  // Colour means state only, set by the card's kind.
+  expect(cards.every((c) => c.className === 'nx-note')).toBe(true)
+  expect(cards[2].querySelector('.nx-note-kind')!.textContent).toBe('Done')
+  expect(cards[2].querySelector('svg')!.getAttribute('class')).toContain('nx-note-icon')
 })
 
 test('a click opens the card, the cross and Escape dismiss it', async () => {

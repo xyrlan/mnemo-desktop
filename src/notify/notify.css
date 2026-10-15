@@ -1,0 +1,60 @@
+/* The notification stack in the ship's look (spec `2026-10-15-nexus-app-design.md`, Q14): the ship's
+   hull and frame (`src/nexus/ui/ui.css`, whose `.nx` tokens it reads), a column at the bottom right,
+   newest at the bottom, above the status bar while there is one. Colour means state only: the
+   card's left edge, its kind's word and its icon. */
+
+.nx-notes {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  z-index: var(--z-index-toast);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+.nx-notes > * { flex: none; pointer-events: auto; }
+@media (max-width: 480px) { .nx-notes { left: 16px; width: auto; } }
+
+.nx-note {
+  --nx-note-tone: var(--nx-edge-hi);
+  display: flex;
+  border: 2px solid var(--nx-edge);
+  border-left: 4px solid var(--nx-note-tone);
+  border-radius: 3px;
+  background: var(--nx-hull);
+  box-shadow: 0 0 0 2px #000, 5px 5px 0 #000;
+}
+.nx-note[data-kind='done'] { --nx-note-tone: var(--nx-ok); }
+.nx-note[data-kind='permission'] { --nx-note-tone: var(--nx-danger); }
+.nx-note[data-kind='question'] { --nx-note-tone: var(--agent-question, #fb923c); }
+@media (prefers-reduced-motion: no-preference) { .nx-note { animation: nx-note-in 160ms steps(4, end); } }
+@keyframes nx-note-in { from { transform: translateX(24px); opacity: 0; } }
+
+.nx .nx-note-open {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  text-align: left;
+  outline: 0;
+}
+.nx .nx-note-open:hover { background: #1d2750; }
+.nx .nx-note-open:focus-visible { box-shadow: inset 0 0 0 2px var(--nx-edge-hi); }
+.nx-note-icon { flex: none; width: 14px; height: 14px; margin-top: 2px; color: var(--nx-note-tone); }
+.nx-note-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.nx-note-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.nx-note-name { overflow: hidden; color: #fff; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.nx-note-repo { overflow: hidden; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
+.nx-note-kind { color: var(--nx-note-tone); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.nx-note-message { display: -webkit-box; overflow: hidden; color: var(--nx-dim); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.nx .nx-note-close { flex: none; align-self: flex-start; margin: 6px; padding: 0 6px; border: 2px solid var(--nx-edge); border-radius: 2px; background: none; color: var(--nx-dim); }
+.nx .nx-note-close:hover { border-color: var(--nx-edge-hi); color: #fff; }
