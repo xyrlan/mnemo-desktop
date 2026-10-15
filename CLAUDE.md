@@ -19,6 +19,14 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH=/Library/Developer/Comman
 - **Landing removes it:** run `pnpm targets prune <piece>…` for each landed piece.
 - **Bounding:** Cargo never deletes stale artifacts, so `pnpm test` first runs `pnpm targets check`. It warns when the canonical target passes 20 GB (`pnpm targets trim`) or a per-piece target has sat untouched for 24 h (`pnpm targets prune`). `pnpm targets` lists the sizes.
 
+## A fresh Cargo target needs `SDKROOT`
+
+Seen 2026-10-15: building `ring` into a new target with the `DEVELOPER_DIR` prefix fails with `fatal error: 'TargetConditionals.h' file not found`, because the C compiler does not find the macOS SDK. Any cargo command that builds into a target `ring` has not been built in (every per-piece one) also takes:
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+```
+
 ## Public text never names a private repository
 
 This repo is public. Commits, PR bodies, issues, comments, docs, code and

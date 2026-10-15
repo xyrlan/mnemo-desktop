@@ -116,6 +116,9 @@ pub mod usage;
 // -- nexus (src/nexus.rs) --
 pub mod nexus;
 
+// -- nexus feed (src/nexus_feed.rs): what Nexus v2 reads beyond the snapshot --
+pub mod nexus_feed;
+
 // -- app dir (src/app_dir.rs) --
 pub mod app_dir;
 
@@ -395,6 +398,7 @@ pub fn run() {
 
             // -- nexus commands --
             nexus::nexus_archives,
+            nexus_feed::nexus_feed,
 
             // -- install review commands --
             install_review::install_review_project,
@@ -494,6 +498,7 @@ pub fn run() {
                 ];
                 const VIEW: &[(&str, &str, &str)] = &[
                     ("palette.open", "Command Palette", "CmdOrCtrl+K"),
+                    ("nexus.toggle", "Toggle Nexus", "CmdOrCtrl+0"),
                     ("sidebar.toggle-left", "Toggle Left Sidebar", "CmdOrCtrl+B"),
                     ("sidebar.toggle-right", "Toggle Right Sidebar", "CmdOrCtrl+L"),
                     ("pane.toggle-face", "Toggle Conversation", "CmdOrCtrl+Shift+C"),

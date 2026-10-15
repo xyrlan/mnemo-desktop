@@ -20,6 +20,9 @@ const fake = () => {
 
 const sheet = () => document.querySelector('[data-nexus-sheet]')
 
+// v1's drawer, kept until v2 lands; the store now opens on the Nexus, so each test starts closed.
+beforeEach(() => nexusStore.getState().setOpen(false))
+
 afterEach(async () => {
   await act(async () => nexusStore.getState().setOpen(false))
   document.body.innerHTML = ''

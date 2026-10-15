@@ -55,6 +55,7 @@ function before(e: Ev, platform: Platform): string | null {
     return m[k] ?? null
   }
   if (/^[1-9]$/.test(k)) return `worktree.go.${k}`
+  if (k === '0') return 'nexus.toggle' // added with Nexus v2, after the table
   const m: Record<string, string> = { t: 'tab.new', d: 'pane.split.row', w: 'pane.close', e: 'dictation.toggle', k: 'palette.open', j: 'worktree.jump', n: 'workspace.new', b: 'sidebar.toggle-left', l: 'sidebar.toggle-right' }
   return m[k] ?? null
 }
@@ -97,6 +98,7 @@ test('a Mac prints exactly what it did', () => {
     'diff.open': '⌘⇧G',
     'floating-terminal.toggle': '⌘⌥A',
     'dictation.toggle': '⌘E',
+    'nexus.toggle': '⌘0',
     ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((n) => [[`worktree.go.${n}`, `⌘${n}`], [`tab.go.${n}`, `⌃${n}`]])),
   })
 })
@@ -161,6 +163,7 @@ describe('off a Mac', () => {
       'focus.up': 'Alt+Shift+↑',
       'focus.down': 'Alt+Shift+↓',
       'floating-terminal.toggle': 'Ctrl+Shift+A',
+      'nexus.toggle': 'Ctrl+Shift+0',
       // ⌃ digit → Alt+digit, as before.
       ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`tab.go.${n}`, `Alt+${n}`])),
     })
@@ -191,7 +194,7 @@ function pressed(label: string[], platform: Platform): Ev {
     const key = platform === 'mac' && e.altKey ? 'å' : e.shiftKey ? cap : cap.toLowerCase()
     return { ...e, key, code: `Key${cap}` }
   }
-  if (/^[1-9]$/.test(cap)) return { ...e, key: e.shiftKey ? '!@#$%^&*('[Number(cap) - 1] : cap, code: `Digit${cap}` }
+  if (/^[0-9]$/.test(cap)) return { ...e, key: e.shiftKey ? ')!@#$%^&*('[Number(cap)] : cap, code: `Digit${cap}` }
   if (cap === '[' || cap === ']') return { ...e, key: e.shiftKey ? (cap === '[' ? '{' : '}') : cap, code: cap === '[' ? 'BracketLeft' : 'BracketRight' }
   throw new Error(`a label names a key this test cannot press: ${cap}`)
 }

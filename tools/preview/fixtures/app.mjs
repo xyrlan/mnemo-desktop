@@ -9,7 +9,8 @@ const tool = (name, version) => ({ name, path: `/opt/homebrew/bin/${name}`, vers
 
 /** Each entry answers one command; a function gets the command's args. */
 export const BASE = {
-  settings_read: () => ({}),
+  // The app opens on the Nexus; the shots are of other screens, so it starts on the workbench.
+  settings_read: () => ({ nexusAtLaunch: false }),
   settings_write: () => null,
   // A first run with no saved dictation language sets the one the system's languages suggest (#357).
   voice_set_language: () => null,
@@ -52,6 +53,9 @@ export const BASE = {
   install_review_project: () => null,
   // Off a Mac the app hands its chord table to the host for browser panes (src/actions/keys.ts).
   browser_chords: () => null,
+  // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
+  nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
+  usage_log: () => null,
 }
 
 /**

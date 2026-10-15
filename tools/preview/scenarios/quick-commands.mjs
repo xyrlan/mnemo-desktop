@@ -11,6 +11,7 @@ const homeRepo = (root, name) => ({ root, name, last_at: now, pinned: true, hidd
 scenario('quick-commands', {
   ipc: appIpc({
     settings_read: {
+      nexusAtLaunch: false,
       quickCommands: {
         [REPO]: [
           { label: 'Dev server', command: 'pnpm tauri dev' },

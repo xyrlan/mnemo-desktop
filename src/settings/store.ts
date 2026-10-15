@@ -29,6 +29,9 @@ export type Settings = {
    *  `pwsh`, `git-bash`); null starts `%COMSPEC%`, as before there was a choice. Read by the
    *  Rust side at each spawn (`pty/shells.rs`); macOS and Linux ignore it. */
   windowsShell: string | null
+  /** The app opens on the Nexus (v2 spec, "Where it sits in the app"); false opens it on the
+   *  workbench. The preview harness turns it off so its shots show the screen they are about. */
+  nexusAtLaunch: boolean
 }
 
 export const DEFAULTS: Settings = {
@@ -44,6 +47,7 @@ export const DEFAULTS: Settings = {
   projects: [],
   quickCommands: {},
   windowsShell: null,
+  nexusAtLaunch: true,
 }
 
 export interface SettingsClient {
@@ -128,6 +132,7 @@ function pick(v: Partial<Settings>): Partial<Settings> {
     )
   }
   if (typeof v.windowsShell === 'string' && v.windowsShell) out.windowsShell = v.windowsShell
+  if (typeof v.nexusAtLaunch === 'boolean') out.nexusAtLaunch = v.nexusAtLaunch
   return out
 }
 
