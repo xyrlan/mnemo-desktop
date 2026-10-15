@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { createPortal } from 'react-dom'
 import { useArm } from '../../cockpit/actions'
 import { tauriMission } from '../../mission/client'
 import { captainWait } from '../ship-scene/words'
@@ -223,7 +224,9 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   const permission = card?.kind === 'robot' ? card.need.kind === 'permission' : card?.wait.waitsOn === 'permission'
   const context = !card ? [] : card.kind === 'captain' ? card.wait.lines : lines?.length ? lines : [card.robot.line, card.robot.act].filter(truthy)
 
-  return (
+  // At the end of `<body>`, like the Nexus's windows: inside its layer, the open drawer (the same
+  // layer, later) would paint over the card's right edge.
+  return createPortal(
     <div
       data-triage=""
       role="dialog"
@@ -355,6 +358,7 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

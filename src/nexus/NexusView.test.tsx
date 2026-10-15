@@ -100,7 +100,7 @@ beforeEach(() => Object.defineProperty(window, 'innerWidth', { value: 1600, conf
 afterEach(async () => {
   for (const r of roots.splice(0)) act(() => r.unmount())
   for (const t of nexusStore.getState().tabs) await liveDrawer.drawer.close(t.id)
-  nexusStore.setState({ open: true, collapsed: false, drawerWidth: 600, feed: null, triage: false, triageAsked: false })
+  nexusStore.setState({ open: true, collapsed: false, drawerWidth: 600, feed: null, triage: false, triageAsked: false, selection: new Set() })
   seen.ship = null
   seen.feeds.length = 0
   seen.logged = 0
@@ -327,6 +327,24 @@ test('a window, a confirmation and a menu are drawn over the open drawer, not un
   act(() => scene.onMenu?.({ kind: 'robot', id: 'r-live' }, 1500, 200))
   const menu = document.querySelector('[data-nx-menu]')!
   expect(paintsOver(menu, aside)).toBe(true)
+})
+
+test('Triage and the selection bar are drawn over the open drawer, under a window', async () => {
+  seen.ship = blockedShip
+  await mount()
+  const aside = await withDrawer()
+  await act(async () => nexusStore.getState().toggleSelect('r-live'))
+  const bar = document.querySelector('[data-selection-bar]')!
+  expect(paintsOver(bar, aside)).toBe(true)
+  expect(view()!.contains(bar)).toBe(false)
+
+  await act(async () => nexusStore.getState().setTriage(true))
+  const triage = document.querySelector('[data-triage]')!
+  expect(paintsOver(triage, aside)).toBe(true)
+  expect(view()!.contains(triage)).toBe(false)
+  await openTestWindow()
+  expect(paintsOver(document.querySelector('[data-nx-backdrop]')!, triage)).toBe(true)
+  await act(async () => nexusStore.getState().clearSelection())
 })
 
 /** The fixture ship with r-live blocked on a question: Tab has something to triage. */

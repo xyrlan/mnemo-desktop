@@ -25,8 +25,8 @@ afterEach(() => {
 })
 
 const draw = (ids: string[]) => act(async () => root.render(<SelectionBar ship={ship()} selection={new Set(ids)} onClear={() => cleared++} run={run} />))
-const bar = () => host.querySelector('[data-selection-bar]')
-const btn = (b: string) => host.querySelector<HTMLButtonElement>(`[data-b="${b}"]`)!
+const bar = () => document.querySelector('[data-selection-bar]')
+const btn = (b: string) => document.querySelector<HTMLButtonElement>(`[data-b="${b}"]`)!
 const click = (b: string) => act(async () => btn(b).click())
 
 test('nothing while there is no selection, or none of it is on the ship', async () => {
