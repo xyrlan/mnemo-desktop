@@ -213,7 +213,12 @@ export type Actions = {
   paneExited(id: PaneId, code: number | null): void
   /** The note on a pane that came back on a new shell (`Pane.renewed`) was seen. */
   shellNoticed(id: PaneId): void
-  attachSink(id: PaneId, sink: (b: Uint8Array) => void): void
+  /** Draws terminal `id`'s output with `sink` from now on; the returned function lets go of it.
+   *  A view `over` another (a popup showing a pane's session, #421) takes the output and is drawn
+   *  from the core's screen; when it lets go, the view under it is fed again, drawn anew the same
+   *  way, so it is neither blank nor left at the popup's size. A view not `over` replaces the last
+   *  one that was not (a remount), and is fed only once no view is over it. */
+  attachSink(id: PaneId, sink: (b: Uint8Array) => void, over?: boolean): () => void
   setPalette(open: boolean): void
   /** The layout as `~/.mnemo-desktop/workspace.json` keeps it, per open worktree: tabs, trees
    *  with ratios, focus, previews, the group tree with its ratios and each group's tab order and
@@ -254,6 +259,15 @@ export const PROMPT_DELAY_MS = 700
 const fields = (l: WorktreeLayout): WorktreeLayout => ({ tabs: l.tabs, activeTab: l.activeTab, groups: l.groups, groupRoot: l.groupRoot, activeGroup: l.activeGroup })
 const sameShown = (a: WorktreeLayout, b: WorktreeLayout) =>
   a.tabs === b.tabs && a.activeTab === b.activeTab && a.groups === b.groups && a.groupRoot === b.groupRoot && a.activeGroup === b.activeGroup
+
+/** `screen` after a full reset (RIS): the core's screen draws an empty terminal, and the view it
+ *  goes to has drawn something else since (another size, output it missed). */
+function withReset(screen: Uint8Array): Uint8Array {
+  const out = new Uint8Array(screen.length + 2)
+  out.set([0x1b, 0x63])
+  out.set(screen, 2)
+  return out
+}
 
 export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
   const liveSessions = opts.liveSessions ?? (async () => [])
@@ -406,6 +420,34 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
      *  mounted twice in a row (StrictMode) would otherwise draw a restored screen into the first,
      *  discarded terminal and leave the second blank. */
     const replay = new Map<PaneId, Uint8Array[]>()
+
+    type Sink = (b: Uint8Array) => void
+    /** The view of each terminal that is not over another (its pane), and the views over it,
+     *  oldest first. `sinks[id]` is the last of those, else that one. */
+    const under = new Map<PaneId, Sink>()
+    const overs = new Map<PaneId, Sink[]>()
+    /** The latest redraw of each terminal: an older one answering late draws nothing. */
+    const redraws = new Map<PaneId, number>()
+
+    /** Draws terminal `id` anew in the view fed now, from the core's screen: a full reset, then
+     *  the bytes that draw it as it is (`CSI 8 t` first: the view takes that size and refits),
+     *  then what it prints. Nothing without a client: the view shows only what it gets next. */
+    function redraw(id: PaneId) {
+      const sessions = opts.sessions ?? providedSessions()
+      if (!sessions) return
+      const n = (redraws.get(id) ?? 0) + 1
+      redraws.set(id, n)
+      let ready = false
+      const early: Uint8Array[] = []
+      // The core sends `id`'s output to this channel from now on, in place of the one before.
+      const done = (screen: Uint8Array | null) => {
+        ready = true
+        if (redraws.get(id) !== n) return
+        if (screen) route(id, withReset(screen))
+        for (const b of early) route(id, b)
+      }
+      sessions.attach(id, (b) => (ready ? route(id, b) : early.push(b))).then(done, () => done(null))
+    }
 
     /** Output of terminal `id`: to its view, else kept for when it mounts. */
     function route(id: PaneId, b: Uint8Array) {
@@ -975,12 +1017,49 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           return { panes: { ...s.panes, [id]: pane } }
         })
       },
-      attachSink(id, sink) {
-        set((s) => ({ sinks: { ...s.sinks, [id]: sink } }))
-        const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
-        pending.delete(id)
-        if (chunks.length) replay.set(id, chunks)
-        for (const b of chunks) sink(b)
+      attachSink(id, sink, over = false) {
+        const feed = (to: Sink) => set((s) => ({ sinks: { ...s.sinks, [id]: to } }))
+        if (over) {
+          const drawn = id in get().sinks
+          overs.set(id, [...(overs.get(id) ?? []), sink])
+          feed(sink)
+          if (drawn) {
+            pending.delete(id)
+            replay.delete(id)
+            redraw(id)
+          } else {
+            const chunks = pending.get(id) ?? []
+            pending.delete(id)
+            for (const b of chunks) sink(b)
+          }
+        } else {
+          under.set(id, sink)
+          if (overs.get(id)?.length) return () => void (under.get(id) === sink && under.delete(id))
+          feed(sink)
+          const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
+          pending.delete(id)
+          if (chunks.length) replay.set(id, chunks)
+          for (const b of chunks) sink(b)
+        }
+        return () => {
+          const fed = get().sinks[id] === sink
+          if (over) overs.set(id, (overs.get(id) ?? []).filter((x) => x !== sink))
+          else if (under.get(id) === sink) under.delete(id)
+          if (!overs.get(id)?.length) overs.delete(id)
+          if (!fed) return
+          const next = overs.get(id)?.at(-1) ?? under.get(id)
+          if (!next) {
+            // Output waits for the next view, as before the first.
+            set((s) => {
+              const sinks = { ...s.sinks }
+              delete sinks[id]
+              return { sinks }
+            })
+            return
+          }
+          feed(next)
+          redraw(id)
+        }
       },
       setPalette(open) {
         set({ paletteOpen: open })

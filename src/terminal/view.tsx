@@ -24,12 +24,15 @@ import ConversationFace from '../conversation/Face'
 
 const platform = detectPlatform()
 
-export default function TerminalPane({ id }: PaneViewProps) {
+/** `props.over`: drawn over the pane's own view (a popup, `src/popout`), which gets the session
+ *  back when this one closes. */
+export default function TerminalPane({ id, props }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
   const pane = useApp((s) => s.panes[id])
   const broken = id < 0
+  const over = props.over === true
 
   useEffect(() => {
     if (broken) return
@@ -61,13 +64,15 @@ export default function TerminalPane({ id }: PaneViewProps) {
     }
     fit.fit()
 
+    const sink = (b: Uint8Array) => term.write(b, settle)
     /** Fits the terminal to its box and tells the shell; not while the box has no size (a hidden
-     *  tab), so a shell that kept running is never squeezed to xterm's 80×24 meanwhile. */
+     *  tab), so a shell that kept running is never squeezed to xterm's 80×24 meanwhile. Only the
+     *  view fed the output sizes the shell: a pane under a popup leaves it at the popup's size. */
     const refit = () => {
       const d = fit.proposeDimensions()
       if (!d || !(d.cols > 0 && d.rows > 0)) return
       fit.fit()
-      void tauriPty.resize(id, term.cols, term.rows)
+      if (store.getState().sinks[id] === sink) void tauriPty.resize(id, term.cols, term.rows)
     }
     // A shell attached again (a reload, a relaunch) comes back drawn at the size it had:
     // `CSI 8 ; rows ; cols t`, then its scrollback and screen. The terminal takes that size to draw
@@ -86,7 +91,7 @@ export default function TerminalPane({ id }: PaneViewProps) {
       refitAfterWrite = false
       refit()
     }
-    store.getState().attachSink(id, (b) => term.write(b, settle))
+    const release = store.getState().attachSink(id, sink, over)
     // The desktop MCP reads what this pane shows (`desktop_terminal_read`).
     const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
@@ -159,14 +164,15 @@ export default function TerminalPane({ id }: PaneViewProps) {
       osc7.dispose()
       osc9.dispose()
       resized.dispose()
+      release()
       term.dispose()
       termRef.current = null
     }
-  }, [id, broken])
+  }, [id, broken, over])
 
   useEffect(() => {
-    if (focused) termRef.current?.focus()
-  }, [focused])
+    if (focused && !over) termRef.current?.focus()
+  }, [focused, over])
 
   const exited = pane?.exitCode !== undefined
   const close = () => void store.getState().closePane()
