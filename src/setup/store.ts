@@ -8,6 +8,11 @@ export type Run = { running: boolean; lines: string[]; ok: string | null; error:
 
 export const IDLE_RUN: Run = { running: false, lines: [], ok: null, error: null }
 
+/** What GitHub said is the latest mnemo release: `tag` once it answered, `error` why it could not. */
+export type Latest = { asking: boolean; tag: string | null; error: string | null }
+
+export const NOT_ASKED: Latest = { asking: false, tag: null, error: null }
+
 export type SetupState = {
   /** The last `tools_status` answer; null until one arrives. */
   rows: ToolStatus[] | null
@@ -16,6 +21,7 @@ export type SetupState = {
   statusError: string | null
   mnemo: Run
   path: Run
+  latest: Latest
 }
 
 export type SetupActions = {
@@ -23,6 +29,9 @@ export type SetupActions = {
   check(): Promise<ToolStatus[] | null>
   /** Installs mnemo, collecting its `tools-install` lines; checks again once it is in place. */
   installMnemo(): Promise<void>
+  /** Asks GitHub for the latest mnemo release, once per run: an answer is kept, a failure is
+   *  asked again next time. `again` asks even when an answer is kept (a click on Check again). */
+  lookForUpdate(again?: boolean): Promise<void>
   addToPath(): Promise<void>
 }
 
@@ -42,6 +51,7 @@ export function createSetupStore(client: SetupClient): SetupStore {
       statusError: null,
       mnemo: IDLE_RUN,
       path: IDLE_RUN,
+      latest: NOT_ASKED,
 
       async check() {
         const mine = ++asked
@@ -67,12 +77,25 @@ export function createSetupStore(client: SetupClient): SetupStore {
           .catch(() => () => {})
         try {
           const tag = await client.installMnemo()
-          set((s) => ({ mnemo: { ...s.mnemo, running: false, ok: `mnemo ${tag} installed` } }))
-          await get().check()
+          // What was just installed is the latest release: no need to ask GitHub to know it.
+          set((s) => ({ mnemo: { ...s.mnemo, running: false, ok: `mnemo ${tag} installed` }, latest: { ...NOT_ASKED, tag } }))
         } catch (e) {
           set((s) => ({ mnemo: { ...s.mnemo, running: false, error: message(e) } }))
         } finally {
+          // After a failure too: one that came after the swap (`mnemo init`) left a new copy in place.
+          await get().check()
           stop()
+        }
+      },
+
+      async lookForUpdate(again = false) {
+        const { asking, tag } = get().latest
+        if (asking || (tag && !again)) return
+        set((s) => ({ latest: { ...s.latest, asking: true } }))
+        try {
+          set({ latest: { ...NOT_ASKED, tag: await client.latestMnemo() } })
+        } catch (e) {
+          set({ latest: { ...NOT_ASKED, error: message(e) } })
         }
       },
 

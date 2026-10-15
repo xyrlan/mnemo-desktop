@@ -1,8 +1,9 @@
 /** Setup (round 19): the four programs the app runs, found or missing, and a click that
- *  installs each missing one. mnemo installs inside the app; git, gh and Claude Code install
- *  in a terminal tab through this OS's own route. Since the Orca redesign it is onboarding's
- *  first step (`src/onboarding/`), which opens by itself at launch when `claude` or `mnemo` is
- *  missing; the pane stays for a workspace saved with it open. */
+ *  installs each missing one, or updates the mnemo the app installed (#404). mnemo installs
+ *  inside the app; git, gh and Claude Code install in a terminal tab through this OS's own
+ *  route. Since the Orca redesign it is onboarding's first step (`src/onboarding/`), which opens
+ *  by itself at launch when `claude` or `mnemo` is missing; the pane stays for a workspace saved
+ *  with it open. */
 import { useEffect, type ReactNode } from 'react'
 import { CheckCircle2, CircleDashed, Loader2, XCircle } from 'lucide-react'
 import { Badge, Button } from '@/ui'
@@ -12,12 +13,12 @@ import { leaves } from '../layout/tree'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { ghInstall, installGh } from '../github/actions'
-import { setup, useSetup } from './app-store'
+import { checkAgain, setup, useLookForUpdate, useSetup } from './app-store'
 import { onboarding } from '../onboarding/app-store'
 import { afterRestore, openIfMissing } from './launch'
 import { afterStartup } from '../shell/after-startup'
 import type { Run } from './store'
-import { currentOs, ESSENTIAL, installRoute, TOOLS, WHAT, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
+import { currentOs, ESSENTIAL, installRoute, newerMnemo, UPDATE_HINT, TOOLS, WHAT, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
 
 const inTab = (command: string) => void store.getState().openCommandTab(undefined, command)
 
@@ -37,8 +38,30 @@ function RunOutput({ run, head }: { run: Run; head: string }) {
 }
 
 /** Stays under mnemo's row after the install, so its lines and its error outlive the button. */
-function MnemoRun() {
-  return <RunOutput run={useSetup((s) => s.mnemo)} head="installing mnemo" />
+function MnemoRun({ found }: { found: boolean }) {
+  return <RunOutput run={useSetup((s) => s.mnemo)} head={found ? 'updating mnemo' : 'installing mnemo'} />
+}
+
+/** What the app knows of a newer release, for the mnemo it installed: an Update button when
+ *  there is one, a quiet line otherwise. */
+function MnemoUpdate({ version }: { version: string | null }) {
+  const latest = useSetup((s) => s.latest)
+  const mnemo = useSetup((s) => s.mnemo)
+  const line = (text: string) => <div className="su-latest mt-1 text-[11px] break-words text-muted-foreground">{text}</div>
+  if (latest.error) return line(`could not look for a newer mnemo: ${latest.error}`)
+  if (!latest.tag) return latest.asking ? line('looking for a newer release…') : null
+  if (!newerMnemo(version, latest.tag)) return line('the latest release')
+  return (
+    <ActionRow
+      button={
+        <Button size="xs" disabled={mnemo.running} onClick={() => void setup.getState().installMnemo()}>
+          {mnemo.running && <Loader2 className="animate-spin" />}
+          {mnemo.running ? 'updating…' : `Update to ${latest.tag}`}
+        </Button>
+      }
+      hint={UPDATE_HINT}
+    />
+  )
 }
 
 /** The button a missing tool gets, with what it does beside it. */
@@ -129,7 +152,8 @@ function Tool({ name, row }: { name: ToolName; row: ToolStatus | undefined }) {
           </div>
         )}
         {!path && <Action name={name} />}
-        {name === 'mnemo' && <MnemoRun />}
+        {name === 'mnemo' && path && row?.managed && <MnemoUpdate version={row.version} />}
+        {name === 'mnemo' && <MnemoRun found={!!path} />}
       </div>
     </li>
   )
@@ -146,6 +170,7 @@ function SetupPane({ id }: PaneViewProps) {
   useEffect(() => {
     if (shown && !setup.getState().checking) void setup.getState().check()
   }, [shown])
+  useLookForUpdate()
 
   return (
     <div className="pane-body setup overflow-auto px-4 py-3 text-foreground">
@@ -155,7 +180,7 @@ function SetupPane({ id }: PaneViewProps) {
             <div className="su-title text-sm font-medium">Setup</div>
             <div className="su-sub truncate text-xs text-muted-foreground">what the app runs, and where it found it</div>
           </div>
-          <Button variant="outline" size="xs" disabled={checking} onClick={() => void setup.getState().check()}>
+          <Button variant="outline" size="xs" disabled={checking} onClick={() => void checkAgain()}>
             {checking && <Loader2 className="animate-spin" />}
             {checking ? 'checking…' : 'Check again'}
           </Button>

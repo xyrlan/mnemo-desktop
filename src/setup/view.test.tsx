@@ -6,6 +6,7 @@ const t = vi.hoisted(() => ({
   calls: [] as string[],
   status: [] as ToolStatus[],
   install: null as null | (() => Promise<string>),
+  latest: (async () => 'v1.6.0') as () => Promise<string>,
   path: null as null | (() => Promise<string>),
   on: {} as Record<string, (e: { payload: unknown }) => void>,
 }))
@@ -15,6 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     t.calls.push(cmd)
     if (cmd === 'tools_status') return t.status
     if (cmd === 'tools_install_mnemo') return t.install!()
+    if (cmd === 'tools_mnemo_latest') return t.latest()
     if (cmd === 'tools_add_to_path') return t.path!()
     if (cmd === 'gh_auth') return { installed: false, logged: false, login: null, scopes: [] }
     return undefined
@@ -92,8 +94,9 @@ describe('the pane', () => {
       openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]),
     })
     const { setup } = await import('./app-store')
-    const { IDLE_RUN } = await import('./store')
-    setup.setState({ rows: null, statusError: null, mnemo: IDLE_RUN, path: IDLE_RUN })
+    const { IDLE_RUN, NOT_ASKED } = await import('./store')
+    setup.setState({ rows: null, statusError: null, mnemo: IDLE_RUN, path: IDLE_RUN, latest: NOT_ASKED })
+    t.latest = async () => 'v1.6.0'
     t.status = [
       tool('git', '/usr/bin/git', { version: 'git version 2.39.5' }),
       tool('gh', null),
@@ -119,7 +122,8 @@ describe('the pane', () => {
 
   test('lists git, claude, mnemo and gh: found or missing, path, version, and who manages it', async () => {
     await render()
-    expect(t.calls).toEqual(['tools_status'])
+    // The app's own mnemo is found, so GitHub is asked once whether a newer one is out.
+    expect(t.calls).toEqual(['tools_status', 'tools_mnemo_latest'])
     expect([...host.querySelectorAll('.su-tool')].map((r) => [r.getAttribute('data-tool'), r.querySelector('.su-state')?.textContent])).toEqual([
       ['git', 'found'],
       ['claude', 'missing'],
@@ -203,12 +207,91 @@ describe('the pane', () => {
     t.status = t.status.map((r) => (r.name === 'claude' ? tool('claude', '/Users/me/.local/bin/claude') : r))
     await click(button(host, 'Check again'))
     await flush()
-    expect(t.calls).toEqual(['tools_status', 'tools_status'])
+    // Check again is a click: it asks GitHub again too.
+    expect(t.calls).toEqual(['tools_status', 'tools_mnemo_latest', 'tools_status', 'tools_mnemo_latest'])
     expect(row(host, 'claude').querySelector('.su-path')?.textContent).toBe('/Users/me/.local/bin/claude')
     await click(button(host, 'Add to PATH'))
     await flush()
     expect(t.calls).toContain('tools_add_to_path')
     expect(host.querySelector('.su-ok')?.textContent).toBe('Added ~/.mnemo-desktop/tools/mnemo and ~/.local/bin to PATH in ~/.zshrc.')
+  })
+
+  const MANAGED = '/Users/me/.mnemo-desktop/tools/mnemo/mnemo'
+  const withMnemo = (over: Partial<ToolStatus>) => (t.status = t.status.map((r) => (r.name === 'mnemo' ? tool('mnemo', MANAGED, { version: 'mnemo 1.6.0', managed: true, ...over }) : r)))
+
+  test('the mnemo the app installed is offered a newer release, and the update replaces it', async () => {
+    t.latest = async () => 'v1.10.0'
+    t.install = async () => (withMnemo({ version: 'mnemo 1.10.0' }), 'v1.10.0')
+    await render()
+    const update = button(row(host, 'mnemo'), 'Update to v1.10.0')
+    expect(update).toBeTruthy()
+    expect(row(host, 'mnemo').querySelector('.su-hint')?.textContent).toContain('the mnemo you have stays if anything fails before the swap')
+    await click(update)
+    await flush()
+    expect(t.calls).toEqual(['tools_status', 'tools_mnemo_latest', 'tools_install_mnemo', 'tools_status'])
+    expect(row(host, 'mnemo').querySelector('.su-version')?.textContent).toBe('mnemo 1.10.0')
+    expect(row(host, 'mnemo').querySelector('.su-output-head')?.textContent).toBe('mnemo v1.10.0 installed')
+    // Now the latest: nothing more to offer, and GitHub was not asked again to know it.
+    expect(button(row(host, 'mnemo'), 'Update to v1.10.0')).toBeUndefined()
+    expect(row(host, 'mnemo').querySelector('.su-latest')?.textContent).toBe('the latest release')
+  })
+
+  test('the mnemo the app installed, already the latest, says so and offers nothing', async () => {
+    await render()
+    expect(row(host, 'mnemo').querySelector('.su-latest')?.textContent).toBe('the latest release')
+    expect(row(host, 'mnemo').querySelectorAll('button')).toHaveLength(0)
+  })
+
+  test('a mnemo the app did not install is never offered a release, and GitHub is not asked', async () => {
+    withMnemo({ managed: false })
+    t.latest = async () => 'v1.10.0'
+    await render()
+    expect(row(host, 'mnemo').querySelector('.su-state')?.textContent).toBe('found')
+    expect(row(host, 'mnemo').querySelectorAll('button')).toHaveLength(0)
+    expect(row(host, 'mnemo').querySelector('.su-latest')).toBeNull()
+    expect(t.calls).not.toContain('tools_mnemo_latest')
+    await click(button(host, 'Check again'))
+    await flush()
+    expect(t.calls).not.toContain('tools_mnemo_latest')
+  })
+
+  test('a missing mnemo still offers Install, and GitHub is not asked until the click', async () => {
+    t.status = t.status.map((r) => (r.name === 'mnemo' ? tool('mnemo', null) : r))
+    await render()
+    expect(button(row(host, 'mnemo'), 'Install mnemo')).toBeTruthy()
+    expect([...row(host, 'mnemo').querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Install mnemo'])
+    expect(t.calls).toEqual(['tools_status'])
+  })
+
+  test('a failed update says why, and the row still shows the mnemo it had', async () => {
+    t.latest = async () => 'v1.10.0'
+    t.install = async () => {
+      throw 'Could not replace the mnemo in C:\\Users\\me\\.mnemo-desktop\\tools\\mnemo (Access is denied.). The mnemo you had is still in place.'
+    }
+    await render()
+    await click(button(row(host, 'mnemo'), 'Update to v1.10.0'))
+    await flush()
+    expect(row(host, 'mnemo').querySelector('.su-output-head')?.textContent).toBe('updating mnemo failed')
+    expect(row(host, 'mnemo').querySelector('pre.su-error')?.textContent).toContain('The mnemo you had is still in place.')
+    expect(row(host, 'mnemo').querySelector('.su-version')?.textContent).toBe('mnemo 1.6.0')
+    expect(row(host, 'mnemo').querySelector('.su-path')?.textContent).toBe(MANAGED)
+    // It can be tried again.
+    expect(button(row(host, 'mnemo'), 'Update to v1.10.0')?.disabled).toBe(false)
+  })
+
+  test('a lookup that failed says why where the offer would be, and Check again asks again', async () => {
+    t.latest = async () => {
+      throw 'Could not download the latest mnemo release (dns error). Check the internet connection and try again.'
+    }
+    await render()
+    expect(row(host, 'mnemo').querySelector('.su-latest')?.textContent).toBe(
+      'could not look for a newer mnemo: Could not download the latest mnemo release (dns error). Check the internet connection and try again.',
+    )
+    expect(row(host, 'mnemo').querySelector('.su-version')?.textContent).toBe('mnemo 1.6.0')
+    t.latest = async () => 'v1.7.0'
+    await click(button(host, 'Check again'))
+    await flush()
+    expect(button(row(host, 'mnemo'), 'Update to v1.7.0')).toBeTruthy()
   })
 
   test('a failed check says why', async () => {

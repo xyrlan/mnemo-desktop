@@ -82,6 +82,23 @@ pub fn pick_release(json: &str, target: &str) -> Result<Release, String> {
     Ok(Release { tag, asset, archive_url, checksum_url })
 }
 
+/// What the setup screen offers before any click: the latest release's tag, when it has a build
+/// and a checksum for `target`. Its errors say why there is nothing to update to, not that an
+/// install failed, since none ran.
+pub fn latest_tag(json: &str, target: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("GitHub sent a release mnemo-desktop cannot read ({e})."))?;
+    let tag = v["tag_name"].as_str().ok_or("GitHub sent a release without a tag.")?;
+    match pick_release(json, target) {
+        Ok(r) => Ok(r.tag),
+        Err(_) if !has_asset(&v, &format!("mnemo-{tag}-{target}.tar.gz")) => Err(format!("mnemo {tag} is out, but has no build for this system ({target}) yet.")),
+        Err(_) => Err(format!("mnemo {tag} is out, but without a checksum for this system, so the app will not install it.")),
+    }
+}
+
+fn has_asset(release: &serde_json::Value, name: &str) -> bool {
+    release["assets"].as_array().into_iter().flatten().any(|a| a["name"] == name)
+}
+
 /// The digest in a `.sha256` file (`<hex>  <name>`), lowercased; `None` if it has none.
 pub fn parse_checksum(text: &str) -> Option<String> {
     let first = text.split_whitespace().next()?;
@@ -127,7 +144,13 @@ fn swap_in(staged: &Path, dest: &Path, aside: &Path) -> Result<(), String> {
     let had = std::fs::symlink_metadata(dest).is_ok();
     if had {
         std::fs::rename(dest, aside).map_err(|e| {
-            format!("Could not replace the mnemo in {} ({e}). If mnemo is running, close it and try again.", dest.display())
+            // Windows refuses while any mnemo.exe from `dest` runs, and Claude Code's hooks start
+            // one at any moment.
+            format!(
+                "Could not replace the mnemo in {} ({e}). The mnemo you had is still in place. Something is running it: on Windows, \
+                 Claude Code sessions start mnemo through their hooks. Close those sessions, then try again.",
+                dest.display()
+            )
         })?;
     }
     if let Err(e) = std::fs::rename(staged, dest) {
@@ -229,12 +252,24 @@ pub fn fetch_and_install(dest: &Path, target: &str, exe: &str, say: &dyn Fn(Stri
     Ok(release.tag)
 }
 
-/// Runs `mnemo init --yes` from the home directory, saying each line it prints. `Err` names the
-/// exit and the last thing it said.
-fn run_init(exe: &Path, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
-    say("Running mnemo init…".into());
+/// What `mnemo init` runs after an install. A first install sets mnemo up (`--yes` takes
+/// `~/mnemo` for the vault). An update leaves that alone: a full `init --yes` would point the
+/// config back at `~/mnemo` and re-wire the statusLine, MCP and commands the person may have
+/// changed (mnemo #303). It only rewrites mnemo's hooks to the new version's shape.
+fn init_args(update: bool) -> &'static [&'static str] {
+    if update {
+        &["init", "--hooks-only"]
+    } else {
+        &["init", "--yes"]
+    }
+}
+
+/// Runs `mnemo init` (`init_args`) from the home directory, saying each line it prints. `Err`
+/// names the exit and the last thing it said.
+fn run_init(exe: &Path, update: bool, say: &(dyn Fn(String) + Sync)) -> Result<(), String> {
+    say(format!("Running mnemo {}…", init_args(update).join(" ")));
     let mut cmd = crate::proc::tool(exe, &crate::mission::login_path());
-    cmd.args(["init", "--yes"])
+    cmd.args(init_args(update))
         // A pipe on Windows gets the ANSI code page, and mnemo prints emoji.
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
@@ -308,15 +343,42 @@ pub fn install(say: &(dyn Fn(String) + Sync)) -> Result<String, String> {
     let target = target(os, arch).ok_or(format!("mnemo has no build for this system ({os} on {arch})."))?;
     let exe = exe_name(os);
     let dest = crate::tools::managed_dir("mnemo");
+    // Only ever the app's own copy: a mnemo from pip, npm or brew lives elsewhere and is never
+    // touched here.
+    let update = dest.join(exe).is_file();
     let tag = fetch_and_install(&dest, target, exe, say)?;
     crate::tools::refresh();
     say(format!("mnemo {tag} is installed in {}.", dest.display()));
-    let init = run_init(&dest.join(exe), say);
+    let init = run_init(&dest.join(exe), update, say);
     // `mnemo init` made the vault, or tried: the "no vault" read before it is stale either way.
     crate::vault::forget_no_vault();
     init.map_err(|e| format!("mnemo {tag} is installed, but {e}"))?;
     say(format!("mnemo {tag} is ready."));
     Ok(tag)
+}
+
+/// The latest mnemo release's tag for this system, for Setup to say whether the copy the app
+/// installed is behind. One small request, bounded: a lookup no one clicked for must not hang.
+#[tauri::command]
+pub async fn tools_mnemo_latest() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        let target = target(os, arch).ok_or(format!("mnemo has no build for this system ({os} on {arch})."))?;
+        let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).build().new_agent();
+        let json = agent
+            .get(RELEASE_API)
+            .header("Accept", "application/vnd.github+json")
+            .call()
+            .map_err(|e| net_error("the latest mnemo release", e))?
+            .into_body()
+            .with_config()
+            .limit(1 << 20)
+            .read_to_string()
+            .map_err(|e| format!("Could not read the latest mnemo release from GitHub ({e}). Try again."))?;
+        latest_tag(&json, target)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Installs the latest mnemo, streaming `tools-install` lines. `Ok` is the installed tag.
@@ -510,17 +572,6 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_swap_puts_the_earlier_install_back() {
-        let root = temp_dir("mnemo-install-swap");
-        let dest = root.join("mnemo");
-        earlier_install(&dest);
-        let err = swap_in(&root.join("does-not-exist"), &dest, &root.join("aside")).unwrap_err();
-        assert!(err.contains("Could not put mnemo"), "{err}");
-        assert!(is_earlier_install(&dest));
-        assert!(!root.join("aside").exists());
-    }
-
-    #[test]
     fn a_second_install_is_refused_while_one_runs() {
         let first = Running::claim().unwrap();
         assert!(Running::claim().unwrap_err().contains("already being installed"));
@@ -589,9 +640,9 @@ mod tests {
             "echo args: %*\n>&2 echo settings.json is locked\n\"%SystemRoot%\\System32\\PING.EXE\" -n 2 127.0.0.1 >nul\necho vault ready\nexit /b 3",
         );
         let said = std::sync::Mutex::new(Vec::new());
-        let err = run_init(&exe, &|l| said.lock().unwrap().push(l)).unwrap_err();
+        let err = run_init(&exe, false, &|l| said.lock().unwrap().push(l)).unwrap_err();
         let said = said.into_inner().unwrap();
-        assert_eq!(said[0], "Running mnemo init…");
+        assert_eq!(said[0], "Running mnemo init --yes…");
         assert!(said.contains(&"args: init --yes".to_string()), "{said:?}");
         assert!(said.contains(&"vault ready".to_string()), "{said:?}");
         assert_eq!(err, "mnemo init stopped with code 3: settings.json is locked");
@@ -601,7 +652,76 @@ mod tests {
     fn init_that_succeeds_is_ok() {
         let root = temp_dir("mnemo-install-init-ok");
         let exe = crate::testutil::stand_in(&root, "mnemo", "echo done\n", "echo done");
-        assert_eq!(run_init(&exe, &|_| {}), Ok(()));
+        assert_eq!(run_init(&exe, false, &|_| {}), Ok(()));
+    }
+
+    #[test]
+    fn an_update_refreshes_mnemos_hooks_and_leaves_its_vault_and_settings_alone() {
+        let root = temp_dir("mnemo-install-init-update");
+        let exe = crate::testutil::stand_in(&root, "mnemo", "echo \"args: $*\"\n", "echo args: %*");
+        let said = |update| {
+            let said = std::sync::Mutex::new(Vec::new());
+            run_init(&exe, update, &|l| said.lock().unwrap().push(l)).unwrap();
+            said.into_inner().unwrap()
+        };
+        // `--yes` alone would point the config back at ~/mnemo: only a first install says it.
+        assert!(said(true).contains(&"args: init --hooks-only".to_string()));
+        assert!(said(false).contains(&"args: init --yes".to_string()));
+    }
+
+    /// An earlier copy that runs: a stand-in `mnemo` that says it is the old one.
+    fn runnable_earlier_install(dest: &Path) -> PathBuf {
+        std::fs::create_dir_all(dest.join("_internal")).unwrap();
+        crate::testutil::stand_in(dest, "mnemo", "echo old mnemo\n", "echo old mnemo")
+    }
+
+    fn runs_as_the_earlier_copy(exe: &Path) -> bool {
+        let out = crate::proc::command(exe).output().unwrap();
+        out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "old mnemo"
+    }
+
+    #[test]
+    fn an_update_refused_at_the_swap_leaves_the_earlier_copy_running_and_says_so() {
+        // What Windows does while a mnemo.exe from the managed dir runs: the first rename is
+        // refused. Here it is refused the same way on every OS: there is nowhere to move it.
+        let root = temp_dir("mnemo-install-in-use");
+        let dest = root.join("tools").join("mnemo");
+        let exe = runnable_earlier_install(&dest);
+        let staged = root.join("staged");
+        std::fs::create_dir_all(staged.join("_internal")).unwrap();
+        let err = swap_in(&staged, &dest, &root.join("no-such-dir").join("previous")).unwrap_err();
+        assert!(err.contains("The mnemo you had is still in place."), "{err}");
+        assert!(err.contains("Claude Code sessions"), "{err}");
+        assert!(runs_as_the_earlier_copy(&exe));
+        assert!(staged.is_dir(), "the new copy was not half moved in");
+    }
+
+    #[test]
+    fn an_update_that_fails_after_moving_the_earlier_copy_aside_puts_it_back_running() {
+        let root = temp_dir("mnemo-install-put-back");
+        let dest = root.join("tools").join("mnemo");
+        let exe = runnable_earlier_install(&dest);
+        let err = swap_in(&root.join("does-not-exist"), &dest, &root.join("aside")).unwrap_err();
+        assert!(err.contains("Could not put mnemo"), "{err}");
+        assert!(runs_as_the_earlier_copy(&exe));
+        assert!(!root.join("aside").exists());
+    }
+
+    #[test]
+    fn the_latest_tag_is_offered_only_when_this_system_can_install_it() {
+        let json = r#"{"tag_name":"v1.10.0","assets":[
+            {"name":"mnemo-v1.10.0-darwin-arm64.tar.gz","browser_download_url":"https://example/a"},
+            {"name":"mnemo-v1.10.0-darwin-arm64.tar.gz.sha256","browser_download_url":"https://example/a.sha256"},
+            {"name":"mnemo-v1.10.0-win-x64.tar.gz","browser_download_url":"https://example/w"}]}"#;
+        assert_eq!(latest_tag(json, "darwin-arm64"), Ok("v1.10.0".to_string()));
+        // No install ran, so nothing says one failed.
+        let none = latest_tag(json, "linux-x64").unwrap_err();
+        assert_eq!(none, "mnemo v1.10.0 is out, but has no build for this system (linux-x64) yet.");
+        let unchecked = latest_tag(json, "win-x64").unwrap_err();
+        assert_eq!(unchecked, "mnemo v1.10.0 is out, but without a checksum for this system, so the app will not install it.");
+        for e in [none, unchecked, latest_tag("{}", "win-x64").unwrap_err()] {
+            assert!(!e.contains("installed"), "{e}");
+        }
     }
 
     /// The real thing, against GitHub: `cargo test -- --ignored the_latest_release_installs`.

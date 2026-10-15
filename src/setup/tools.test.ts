@@ -1,4 +1,4 @@
-import { installRoute, needsSetup, osOf, type ToolName, type ToolStatus } from './tools'
+import { installRoute, needsSetup, newerMnemo, osOf, type ToolName, type ToolStatus } from './tools'
 
 const row = (name: ToolName, path: string | null = `/bin/${name}`): ToolStatus => ({ name, path, version: path && `${name} 1.0`, managed: false })
 const all = (missing: ToolName[] = []) => (['git', 'gh', 'claude', 'mnemo'] as ToolName[]).map((n) => row(n, missing.includes(n) ? null : `/bin/${n}`))
@@ -49,4 +49,22 @@ test('brew is only a Mac route: Windows installs with winget, Linux with whichev
   expect(gh).toContain('elif command -v zypper >/dev/null; then sudo zypper install -y gh')
   expect(gh).toMatch(/; else echo "[^"]*https:\/\/github.com\/cli\/cli#installation"; fi'$/)
   expect(installRoute('git', 'linux').command).toContain('then sudo apt-get install -y git')
+})
+
+test('a release is newer than the installed mnemo by its numbers, not its text', () => {
+  // `mnemo --version`'s first line against a release tag.
+  expect(newerMnemo('mnemo 1.9.2', 'v1.10.0')).toBe(true)
+  expect(newerMnemo('mnemo 1.8.0', 'v1.8.1')).toBe(true)
+  expect(newerMnemo('mnemo 1.8.0', 'v2.0.0')).toBe(true)
+  expect(newerMnemo('mnemo 1.8.0', 'v1.8.0')).toBe(false)
+  expect(newerMnemo('mnemo 1.10.0', 'v1.9.2')).toBe(false)
+  expect(newerMnemo('mnemo, version 1.8.0', '1.9.0')).toBe(true)
+})
+
+test('a version either side cannot read is never newer: nothing is offered rather than something wrong', () => {
+  expect(newerMnemo(null, 'v1.9.0')).toBe(false)
+  expect(newerMnemo('mnemo', 'v1.9.0')).toBe(false)
+  expect(newerMnemo('mnemo 1.8.0', 'v1.9.0-rc.1')).toBe(false)
+  expect(newerMnemo('mnemo 1.8.0', 'nightly')).toBe(false)
+  expect(newerMnemo('mnemo 1.8.0', null)).toBe(false)
 })

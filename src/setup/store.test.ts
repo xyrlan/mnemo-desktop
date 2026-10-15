@@ -20,6 +20,7 @@ function fake(over: Partial<SetupClient> = {}) {
   const client: SetupClient = {
     status: async () => (log.push('status'), [mnemo(null)]),
     installMnemo: async () => (log.push('install'), 'v1.6.0'),
+    latestMnemo: async () => (log.push('latest'), 'v1.7.0'),
     addToPath: async () => (log.push('path'), 'Added 2 folders to your PATH in ~/.zshrc.'),
     onInstallLine: async (cb) => {
       log.push('listen')
@@ -101,7 +102,7 @@ test('a failed install shows its error and its lines, and stops listening', asyn
   const s = createSetupStore(f.client)
   await s.getState().installMnemo()
   expect(s.getState().mnemo).toEqual({ running: false, lines: ['downloading'], ok: null, error: 'the release has no .sha256: nothing was installed' })
-  expect(f.log).toEqual(['listen', 'unlisten'])
+  expect(f.log).toEqual(['listen', 'status', 'unlisten'])
   // The next click starts clean.
   f.client.installMnemo = async () => 'v1.6.0'
   await s.getState().installMnemo()
@@ -118,4 +119,58 @@ test('add to PATH shows its sentence, or what failed', async () => {
   }
   await s.getState().addToPath()
   expect(s.getState().path).toEqual({ running: false, lines: [], ok: null, error: 'could not write ~/.zshrc: permission denied' })
+})
+
+test('the latest release is asked for once per run; a failure says why and is asked again', async () => {
+  const f = fake()
+  let fail: string | null = 'GitHub refused to send the latest mnemo release for now (rate limit). Try again in a few minutes.'
+  f.client.latestMnemo = async () => {
+    f.log.push('latest')
+    if (fail) throw fail
+    return 'v1.7.0'
+  }
+  const s = createSetupStore(f.client)
+  await s.getState().lookForUpdate()
+  expect(s.getState().latest).toEqual({ asking: false, tag: null, error: fail })
+  fail = null
+  await s.getState().lookForUpdate()
+  expect(s.getState().latest).toEqual({ asking: false, tag: 'v1.7.0', error: null })
+  // Known for the run: looking again does not ask GitHub again, unless asked to.
+  await s.getState().lookForUpdate()
+  expect(f.log.filter((l) => l === 'latest')).toHaveLength(2)
+  await s.getState().lookForUpdate(true)
+  expect(f.log.filter((l) => l === 'latest')).toHaveLength(3)
+})
+
+test('two looks at once ask GitHub once', async () => {
+  const answer = deferred<string>()
+  const f = fake({ latestMnemo: () => (f.log.push('latest'), answer.promise) })
+  const s = createSetupStore(f.client)
+  const a = s.getState().lookForUpdate()
+  const b = s.getState().lookForUpdate()
+  expect(s.getState().latest.asking).toBe(true)
+  answer.resolve('v1.7.0')
+  await Promise.all([a, b])
+  expect(f.log).toEqual(['latest'])
+})
+
+test('a finished install is the latest release: the tag is known without asking GitHub again', async () => {
+  const f = fake()
+  const s = createSetupStore(f.client)
+  await s.getState().installMnemo()
+  expect(s.getState().latest).toEqual({ asking: false, tag: 'v1.6.0', error: null })
+  await s.getState().lookForUpdate()
+  expect(f.log).not.toContain('latest')
+})
+
+test('an update that failed after its swap (at mnemo init) shows the copy now in place', async () => {
+  const f = fake({ status: async () => [{ ...mnemo('/m/mnemo'), version: 'mnemo 1.7.0' }] })
+  f.client.installMnemo = async () => {
+    throw 'mnemo v1.7.0 is installed, but mnemo init stopped with code 1: no mnemo hooks to refresh'
+  }
+  const s = createSetupStore(f.client)
+  s.setState({ rows: [mnemo('/m/mnemo')] })
+  await s.getState().installMnemo()
+  expect(s.getState().mnemo.error).toMatch(/is installed, but/)
+  expect(s.getState().rows![0].version).toBe('mnemo 1.7.0')
 })

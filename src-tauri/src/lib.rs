@@ -376,6 +376,7 @@ pub fn run() {
             // -- job commands --
             job::job_run,
             tools_install::tools_install_mnemo,
+            tools_install::tools_mnemo_latest,
 
             // -- source-control commands --
             source_control::source_control_status,

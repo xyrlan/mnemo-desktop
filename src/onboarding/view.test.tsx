@@ -8,6 +8,7 @@ const t = vi.hoisted(() => ({
   calls: [] as [string, Record<string, unknown> | undefined][],
   status: [] as ToolStatus[],
   install: null as null | (() => Promise<string>),
+  latest: (async () => 'v1.0.0') as () => Promise<string>,
   answers: {} as Record<string, string[]>,
   on: {} as Record<string, ((e: { payload: unknown }) => void)[]>,
   pane: 0,
@@ -18,6 +19,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     t.calls.push([cmd, args])
     if (cmd === 'tools_status') return t.status
     if (cmd === 'tools_install_mnemo') return t.install!()
+    if (cmd === 'tools_mnemo_latest') return t.latest()
     if (cmd === 'pty_spawn') return ++t.pane
     if (cmd === 'gh_auth') return { installed: false, logged: false, login: null, scopes: [] }
     if (cmd === 'install_review_step') {
@@ -118,6 +120,43 @@ test('with mnemo missing, Continue waits; mnemo installs in the dialog and it ch
   expect(dialog()!.textContent).toContain('mnemo v0.9.0 installed')
   expect(dialog()!.textContent).toContain('Everything is in place.')
   expect(button(dialog()!, 'Continue')!.disabled).toBe(false)
+})
+
+test('the mnemo the app installed is offered a newer release in the dialog; a failed update says why and keeps the one it had', async () => {
+  const { setup } = await import('../setup/app-store')
+  const { NOT_ASKED } = await import('../setup/store')
+  // The store outlives each test: start from no rows, so only this test's tools count.
+  setup.setState({ rows: null, latest: NOT_ASKED })
+  const managed = (version: string): ToolStatus => ({ name: 'mnemo', path: '/app/tools/mnemo/mnemo', version, managed: true })
+  t.status = [tool('git', '/usr/bin/git'), tool('claude', '/bin/claude'), managed('mnemo 1.9.2'), tool('gh', '/bin/gh')]
+  t.latest = async () => 'v1.10.0'
+  t.install = async () => {
+    throw 'Could not replace the mnemo in /app/tools/mnemo (Permission denied). The mnemo you had is still in place.'
+  }
+  await openFromPalette()
+  const mnemo = () => dialog()!.querySelector('[data-tool="mnemo"]')!
+  expect(called('tools_mnemo_latest')).toHaveLength(1)
+  // Found and updatable: nothing about it holds Continue back.
+  expect(button(dialog()!, 'Continue')!.disabled).toBe(false)
+  await click(button(mnemo(), 'Update to v1.10.0'))
+  await flush()
+  expect(called('tools_install_mnemo')).toHaveLength(1)
+  expect(mnemo().querySelector('[data-run]')!.textContent).toContain('updating mnemo failed')
+  expect(mnemo().querySelector('[data-run]')!.textContent).toContain('The mnemo you had is still in place.')
+  expect(mnemo().textContent).toContain('mnemo 1.9.2')
+  expect(button(mnemo(), 'Update to v1.10.0')!.disabled).toBe(false)
+})
+
+test('a mnemo the app did not install gets no offer in the dialog, and GitHub is not asked', async () => {
+  const { setup } = await import('../setup/app-store')
+  const { NOT_ASKED } = await import('../setup/store')
+  // The store outlives each test: start from no rows, so only this test's tools count.
+  setup.setState({ rows: null, latest: NOT_ASKED })
+  t.status = [tool('git', '/usr/bin/git'), tool('claude', '/bin/claude'), tool('mnemo', '/opt/homebrew/bin/mnemo'), tool('gh', '/bin/gh')]
+  t.latest = async () => 'v9.0.0'
+  await openFromPalette()
+  expect(called('tools_mnemo_latest')).toHaveLength(0)
+  expect(dialog()!.querySelector('[data-tool="mnemo"] button')).toBeNull()
 })
 
 test('Claude Code installs in a terminal tab: the dialog steps aside and comes back when the user leaves it', async () => {
