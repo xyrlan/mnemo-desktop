@@ -6,7 +6,6 @@ import type { ReactNode } from 'react'
 import type { AgentState, WaitingFor } from '../fleet/types'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
-import type { RobotClass } from './types'
 
 // ------------------------------------------------------------------ the feed --
 // What `nexus_feed` adds to the snapshot, read from each session's transcript and job.
@@ -50,6 +49,14 @@ export type Feed = { sessions: Record<string, SessionFeed>; prs: Record<string, 
 export type FeedAsk = { key: string; sessionId: string; cwd: string; account: string; jobId: string | null; prUrl: string | null }
 
 // ------------------------------------------------------------------ the ship --
+
+/** The robot's chassis, from the child's model: opus is a heavy mech, sonnet a droid, haiku a
+ *  drone. `unknown` when neither the snapshot nor the transcript names a model. */
+export type RobotClass = 'mech' | 'droid' | 'drone' | 'unknown'
+/** What a robot's body does: the sprite drawn for it. */
+export type RobotPose = 'working' | 'idle' | 'waiting' | 'sleeping'
+/** How many identity accessories the sprite sheet has; `ShipRobot.accessory` is in `[0, ACCESSORIES)`. */
+export const ACCESSORIES = 6
 
 /** Where a robot stands: the room says whether you are needed, never what it is doing. */
 export type Zone = 'flight' | 'hangar' | 'stranded' | 'bridge'

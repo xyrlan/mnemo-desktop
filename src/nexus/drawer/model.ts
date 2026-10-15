@@ -1,9 +1,8 @@
 import type { AgentState, RepoNode } from '../../fleet/types'
 import { basename, norm, within } from '../../path/path'
 import type { SessionRef } from '../../session/host'
-import type { SpriteSheet } from '../types'
 import type { Captain, Deck, Dock, Feed, Ship, ShipRobot } from '../ship-types'
-import { SHIP_SPRITES, SPRITES } from '../sprites'
+import { SHIP_SPRITES, SPRITES, type SpriteSheet } from '../sprites'
 import type { DrawerTab } from '../store'
 
 /** What the drawer reads off the ship: which figure an id is, how its session is shown, and what

@@ -395,7 +395,7 @@ describe('buildShip: decks and docks', () => {
 })
 
 describe('buildShip: the bridge', () => {
-  it('orders exceptions need, red, land, ready (longest wait first), stranded (longest first)', () => {
+  it('orders exceptions need, red, land, ready (longest wait first, a green draft too), stranded (longest first)', () => {
     const done = (id: string, n: number, ago_: number, ci: Pr['ci'], extra: Partial<Pr> = {}) =>
       kid(id, { live: false, state: 'stopped', updated_at: iso(ago_), pr: pr(n, { ci, ...extra }) })
     const kids = [
@@ -416,6 +416,7 @@ describe('buildShip: the bridge', () => {
       ['red', 'x1'],
       ['land', ROOT],
       ['ready', 'r2'],
+      ['ready', 'd1'],
       ['ready', 'r1'],
       ['stranded', 's2'],
       ['stranded', 's1'],

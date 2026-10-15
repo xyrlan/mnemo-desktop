@@ -59,7 +59,7 @@ export function summarize(agents: readonly AgentNode[]): string {
   return `${subject}: ${parts.join(', ')}`
 }
 
-/** Every agent in the fleet, counted by state: the Agent Dashboard entry's numbers. */
+/** Every agent in the fleet, counted by state: the Nexus entry's numbers. */
 export function countByState(repos: readonly RepoNode[]): Record<AgentState, number> {
   const counts: Record<AgentState, number> = { 'needs-you': 0, working: 0, done: 0, idle: 0 }
   for (const r of repos) for (const w of r.worktrees) for (const a of w.agents) counts[a.state]++

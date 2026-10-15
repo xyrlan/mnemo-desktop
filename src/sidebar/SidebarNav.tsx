@@ -1,7 +1,7 @@
 // adapted from stablyai/orca components/sidebar/SidebarNav.tsx [88-152],
 // components/sidebar/AgentDashboardSidebarEntry.tsx and components/ShortcutKeyCombo.tsx (MIT, 122b8c25)
 import React, { useMemo } from 'react'
-import { LayoutDashboard, ListTodo, Orbit, Search, type LucideIcon } from 'lucide-react'
+import { ListTodo, Orbit, Search, type LucideIcon } from 'lucide-react'
 import { cn } from '@/ui/cn'
 import type { AgentState } from '../fleet/types'
 import { AgentQuestionIcon } from './agent-glyphs'
@@ -30,12 +30,11 @@ function ShortcutKeyCombo({ keys }: { keys: string[] }): React.JSX.Element {
 const NAV_ENTRY =
   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8'
 
-function NavEntry({ icon: Icon, label, onClick, children }: { icon: LucideIcon; label: string; onClick: () => void; children?: React.ReactNode }) {
+function NavEntry({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className={NAV_ENTRY}>
       <Icon className="size-4 shrink-0 text-worktree-sidebar-foreground/30" strokeWidth={1.75} />
       <span className="flex-1">{label}</span>
-      {children}
     </button>
   )
 }
@@ -46,30 +45,46 @@ const BUCKETS: { state: Exclude<AgentState, 'idle'>; label: string; dot?: string
   { state: 'done', label: 'Done', dot: 'bg-state-done' },
 ]
 
-/** Every agent's state, counted, beside the entry. Idle is left out, as in Orca by default. */
-function DashboardBucketCounts(): React.JSX.Element | null {
+const COUNT = 'inline-flex items-center gap-1 text-[10px] tabular-nums text-worktree-sidebar-foreground/55'
+
+/** Every agent's state, counted, beside the entry: the fleet's radar. Idle is left out, as in Orca
+ *  by default. The needs-you count is a button of its own: it opens the Nexus, on triage when a
+ *  child waits on you. The other counts are images with their words, and let a click through to the
+ *  entry under them. */
+function BucketCounts(): React.JSX.Element | null {
   const repos = useFleet((f) => f.repos)
   const counts = useMemo(() => countByState(repos), [repos])
   const shown = BUCKETS.filter((b) => counts[b.state] > 0)
   if (shown.length === 0) return null
   return (
-    <span className="flex items-center gap-1.5">
-      {shown.map((b) => (
-        <span
-          key={b.state}
-          aria-label={`${b.label}: ${counts[b.state]}`}
-          data-bucket={b.state}
-          className="inline-flex items-center gap-1 text-[10px] tabular-nums text-worktree-sidebar-foreground/55"
-        >
-          {b.dot ? <span className={cn('size-1.5 rounded-full', b.dot)} /> : <AgentQuestionIcon className="size-2.5" />}
-          {counts[b.state]}
-        </span>
-      ))}
+    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1.5">
+      {shown.map((b) => {
+        const glyph = b.dot ? <span aria-hidden className={cn('size-1.5 rounded-full', b.dot)} /> : <AgentQuestionIcon className="size-2.5" />
+        return b.state === 'needs-you' ? (
+          <button
+            key={b.state}
+            type="button"
+            aria-label={`Open triage: ${counts[b.state]} need${counts[b.state] === 1 ? 's' : ''} you`}
+            title="Open the Nexus on who needs you"
+            data-bucket={b.state}
+            onClick={() => run('nexus.triage')}
+            className={cn(COUNT, 'pointer-events-auto -mx-1 rounded px-1 hover:bg-worktree-sidebar-foreground/10')}
+          >
+            {glyph}
+            {counts[b.state]}
+          </button>
+        ) : (
+          <span key={b.state} role="img" aria-label={`${b.label}: ${counts[b.state]}`} data-bucket={b.state} className={COUNT}>
+            {glyph}
+            {counts[b.state]}
+          </span>
+        )
+      })}
     </span>
   )
 }
 
-/** Search, Tasks, the Agent Dashboard and the Nexus: each hands off to the piece that owns it by action id. */
+/** Search, Tasks and the Nexus: each hands off to the piece that owns it by action id. */
 export const SidebarNav = React.memo(function SidebarNav() {
   return (
     <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
@@ -86,10 +101,10 @@ export const SidebarNav = React.memo(function SidebarNav() {
         </span>
       </button>
       <NavEntry icon={ListTodo} label="Tasks" onClick={() => run('tasks.open')} />
-      <NavEntry icon={LayoutDashboard} label="Agent Dashboard" onClick={() => run('dashboard.toggle')}>
-        <DashboardBucketCounts />
-      </NavEntry>
-      <NavEntry icon={Orbit} label="Nexus" onClick={() => run('nexus.toggle')} />
+      <div className="relative">
+        <NavEntry icon={Orbit} label="Nexus" onClick={() => run('nexus.toggle')} />
+        <BucketCounts />
+      </div>
     </div>
   )
 })

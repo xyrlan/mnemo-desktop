@@ -1,9 +1,29 @@
 /** Synthetic ships for the scene's tests: no real session, repo or transcript. */
-import type { Mission, Pr } from '../../mission/types'
-import { child } from '../scene/fixtures'
+import type { ChildSession, Mission, Pr } from '../../mission/types'
 import type { Captain, Deck, Dock, Ship, ShipRobot } from '../ship-types'
 
 export const ROOT = '/home/dev/mnemo-desktop'
+
+export function child(id: string): ChildSession {
+  return {
+    id,
+    session_id: `s-${id}`,
+    name: null,
+    state: 'running',
+    tempo: 'active',
+    needs: null,
+    detail: '',
+    suggested_reply: null,
+    cwd: `${ROOT}-wt-${id}`,
+    tokens: 0,
+    live: true,
+    updated_at: null,
+    intent: null,
+    branch: null,
+    timeline_len: 0,
+    account: 'default',
+  }
+}
 
 export function pr(number: number, over: Partial<Pr> = {}): Pr {
   return { number, url: `https://github.com/example/mnemo-desktop/pull/${number}`, state: 'OPEN', head: `fix/${number}`, ci: 'pass', ...over }

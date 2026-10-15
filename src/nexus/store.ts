@@ -19,6 +19,13 @@ export type NexusState = {
   clearSelection(): void
   triage: boolean
   setTriage(open: boolean): void
+  /** Triage asked for from outside the view (the sidebar's needs-you count): the Nexus opens, and
+   *  the view opens triage only when its ship has a robot to triage (`settleTriageAsk`). The count
+   *  also counts interactive sessions, which triage has no card for. */
+  triageAsked: boolean
+  askTriage(): void
+  /** The view's answer to `askTriage`, from the ship it built: `needs` robots wait on a decision. */
+  settleTriageAsk(needs: number): void
   /** The ship's log, oldest first, at most `LOG_MAX`; an event already logged (same `id`) is skipped. */
   log: LogEvent[]
   appendLog(events: LogEvent[]): void
@@ -80,6 +87,9 @@ export const nexusStore: StoreApi<NexusState> = createStore<NexusState>((set) =>
   clearSelection: () => set({ selection: new Set() }),
   triage: false,
   setTriage: (triage) => set({ triage }),
+  triageAsked: false,
+  askTriage: () => set({ open: true, triageAsked: true }),
+  settleTriageAsk: (needs) => set({ triageAsked: false, triage: needs > 0 }),
   log: [],
   appendLog: (events) =>
     set((s) => {

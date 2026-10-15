@@ -2,14 +2,15 @@
 import React from 'react'
 import { CircleCheck, MessageCircleQuestion } from 'lucide-react'
 import { cn } from '@/ui/cn'
+import './agent-state-dot.css'
 
-/** The fleet's four states. A finished agent the user has looked at shows `idle` while its card
- *  stays in Done (Orca's rule: green until acknowledged). */
+/** The fleet's four states. A finished agent the user has looked at shows `idle` (Orca's rule:
+ *  green until acknowledged). */
 export type DotState = 'working' | 'needs-you' | 'done' | 'idle'
 
 const LABEL: Record<DotState, string> = { working: 'Working', 'needs-you': 'Needs you', done: 'Done', idle: 'Idle' }
 
-const SPINNER_ANIMATION = 'agent-dashboard-spinner-rotate'
+const SPINNER_ANIMATION = 'agent-state-spinner-rotate'
 
 // Late mounts join the spinners already turning: every spinner's timeline starts at 0, so all of
 // them sit at the same angle. Done on animationstart, not at mount, so no mount forces a style
@@ -20,7 +21,7 @@ function syncSpinnerPhase(e: React.AnimationEvent<HTMLSpanElement>): void {
   if (a) a.startTime = 0
 }
 
-/** The spinner turns in CSS (`.agent-dashboard-spinner`, dashboard.css) on the compositor. Under
+/** The spinner turns in CSS (`.agent-state-spinner`, agent-state-dot.css) on the compositor. Under
  *  reduced motion it stops as a full ring: a frozen ring with a gap reads as broken. */
 function WorkingSpinner({ className }: { className?: string }) {
   return (
@@ -28,7 +29,7 @@ function WorkingSpinner({ className }: { className?: string }) {
       onAnimationStart={syncSpinnerPhase}
       data-agent-spinner=""
       className={cn(
-        'agent-dashboard-spinner block rounded-full border-2 border-state-working border-t-transparent motion-reduce:border-t-state-working',
+        'agent-state-spinner block rounded-full border-2 border-state-working border-t-transparent motion-reduce:border-t-state-working',
         className,
       )}
     />
@@ -36,7 +37,7 @@ function WorkingSpinner({ className }: { className?: string }) {
 }
 
 /** One agent's state as a glyph: a spinner working, a question asking, a check done, a grey dot
- *  idle. Next to the card's heading, it says *what state*; the heading says *who*. */
+ *  idle. Next to a row's heading, it says *what state*; the heading says *who*. */
 export const AgentStateDot = React.memo(function AgentStateDot({ state, className }: { state: DotState; className?: string }) {
   const box = cn('inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center', className)
   const glyph =

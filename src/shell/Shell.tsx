@@ -90,7 +90,7 @@ function LeftColumn() {
   const open = useShell((s) => s.leftOpen)
   const width = useShell((s) => s.leftWidth)
   const setWidth = useShell((s) => s.setLeftWidth)
-  // Orca's name for it, which the dashboard drawer (adapted from Orca) reads to follow a drag.
+  // Orca's name for it: the sidebar's width while a drag is under way.
   const setLiveWidth = useCallback((w: number) => document.documentElement.style.setProperty('--workspace-sidebar-live-width', `${open ? w : 0}px`), [open])
   const { containerRef, onResizeStart, isResizing } = useSidebarResize<HTMLDivElement>({
     isOpen: open,

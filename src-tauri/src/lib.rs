@@ -113,9 +113,6 @@ pub mod build_info;
 // -- usage (src/usage.rs) --
 pub mod usage;
 
-// -- nexus (src/nexus.rs) --
-pub mod nexus;
-
 // -- nexus feed (src/nexus_feed.rs): what Nexus v2 reads beyond the snapshot --
 pub mod nexus_feed;
 
@@ -397,7 +394,6 @@ pub fn run() {
             usage::usage_log,
 
             // -- nexus commands --
-            nexus::nexus_archives,
             nexus_feed::nexus_feed,
 
             // -- install review commands --
