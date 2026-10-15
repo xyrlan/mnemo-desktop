@@ -267,14 +267,14 @@ test('a drawer tab shown again takes its session back when it turns active, with
   act(() => pane.root.unmount())
 })
 
-// chrome.css off disk, as the Nexus scene tests read their stylesheet.
+// terminal.css off disk, as the Nexus scene tests read their stylesheet.
 type Fs = { readFileSync(path: string, encoding: string): string }
 
 test('a view drawn larger than its box (at a bigger owner\'s size) is cut at the box', async () => {
   const pane = mount('100x30')
   expect(pane.host.querySelector('.pane-body')!.classList.contains('terminal-body')).toBe(true)
   const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
-  const css = fs.readFileSync('src/chrome/chrome.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const css = fs.readFileSync('src/terminal/terminal.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
   expect(css).toMatch(/\.terminal-body\s*\{[^}]*overflow:\s*hidden/)
   act(() => pane.root.unmount())
 })

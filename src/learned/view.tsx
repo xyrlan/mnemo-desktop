@@ -1,26 +1,19 @@
 /** "What mnemo learned" (#180, D1 of mnemo's install-review spec): the one screen where the user
  *  decides which pages mnemo recovered from their Claude Code history go live. It asks before
  *  anything reaches a model, shows the run as it goes (the run lives in the core, so leaving
- *  the screen does not stop it), then lists every page checked, grouped by type. Once per
- *  project after setup it is offered by itself, as onboarding's second step
- *  (`src/onboarding/`); ⌘K and the vault's inbox open this pane by hand. */
+ *  the screen does not stop it), then lists every page checked, grouped by type. The vault's
+ *  inbox opens this pane by hand; the launch check (`src/nexus/boot/`) and ⌘K open the Nexus's
+ *  window instead (`src/nexus/windows/learned/`). */
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { useEffect } from 'react'
 import { Button } from '@/ui'
 import { cn } from '@/ui/cn'
-import { store } from '../layout/app-store'
-import { homeStore } from '../home/app-store'
 import { cwdForNewShell } from '../layout/cwd'
 import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
-import { setup } from '../setup/app-store'
-import { afterRestore } from '../setup/launch'
-import { needsSetup } from '../setup/tools'
-import { learned, learnedClient, useLearned } from './app-store'
-import { onboarding } from '../onboarding/app-store'
-import { watchForReview } from './launch'
-import { reviewWhatWasLearned } from './open'
-import { settled, type Count, type Phase } from './store'
+import { learned, useLearned } from './app-store'
+import { showNexusWindow } from '../nexus/boot/show'
+import type { Count, Phase } from './store'
 import { day, groupPages, firstExpiry, type Group, type LearnedPage } from './types'
 
 function Bar({ label, count }: { label: string; count: Count | null }) {
@@ -226,42 +219,4 @@ function LearnedPane(_: PaneViewProps) {
 
 registerPaneView('learned', LearnedPane)
 
-register({ id: 'learned.open', title: 'Review what mnemo learned from your history', run: () => reviewWhatWasLearned(cwdForNewShell()) })
-
-/** Settles once `claude` and `mnemo` are both found: at launch, or when setup installs them. */
-function setupDone(): Promise<void> {
-  return new Promise((resolve) => {
-    const ok = () => {
-      const rows = setup.getState().rows
-      return !!rows && !needsSetup(rows)
-    }
-    if (ok()) return resolve()
-    const stop = setup.subscribe(() => {
-      if (!ok()) return
-      stop()
-      resolve()
-    })
-  })
-}
-
-// Once per app run, not once per hot reload.
-const hot = import.meta.hot?.data as { learnedWatch?: boolean } | undefined
-if (!hot?.learnedWatch) {
-  if (hot) hot.learnedWatch = true
-  watchForReview({
-    client: learnedClient,
-    ready: Promise.all([afterRestore(store), setupDone()]),
-    cwd: () => cwdForNewShell(),
-    // Home's selected repo is the open one while Home is in front.
-    subscribe: (fn) => {
-      const stops = [store.subscribe(fn), homeStore.subscribe(fn)]
-      return () => stops.forEach((s) => s())
-    },
-    show: (target, dry) => {
-      if (!settled(learned.getState().phase)) return
-      learned.getState().ask(target, dry)
-      // A dialog already open at setup reaches the consent on Continue.
-      onboarding.getState().offer('learned')
-    },
-  })
-}
+register({ id: 'learned.open', title: 'Review what mnemo learned from your history', run: () => showNexusWindow('learned') })

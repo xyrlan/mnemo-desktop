@@ -22,13 +22,6 @@ vi.mock('@tauri-apps/api/core', () => ({
     return undefined
   },
 }))
-// The launch check waits for the first burst to pass: the test says when it has.
-const startup = vi.hoisted(() => {
-  let done!: () => void
-  const over = new Promise<void>((r) => (done = r))
-  return { over, done: () => done() }
-})
-vi.mock('../shell/after-startup', () => ({ afterStartup: () => startup.over }))
 vi.mock('@tauri-apps/api/event', () => ({
   listen: async (name: string, h: (e: { payload: unknown }) => void) => {
     t.on[name] = h
@@ -51,34 +44,27 @@ beforeAll(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 })
 
-// The first launch: nothing restored, claude and mnemo missing. The import is the launch.
-test('at launch with claude and mnemo missing, onboarding opens at setup once the workspace is back', async () => {
-  t.status = [tool('git', '/usr/bin/git'), tool('gh', null), tool('claude', null), tool('mnemo', null)]
+// The launch check is the Nexus's now (src/nexus/boot/): the import asks nothing.
+test('the import checks nothing; the palette\'s Setup opens the Nexus\'s Setup window, never a pane', async () => {
+  t.calls.length = 0
   const { store } = await import('../layout/app-store')
-  const { onboarding } = await import('../onboarding/app-store')
+  const { registerWindow, windowStore } = await import('../nexus/ui/windows')
+  const { nexusStore } = await import('../nexus/store')
+  const unregister = registerWindow({ id: 'setup', title: 'Setup', render: () => null })
   await import('./view')
   await flush()
-  expect(onboarding.getState().open).toBe(false)
-  await act(() => store.getState().restore({}))
-  await flush()
-  // Back, but the version probes wait for the launch's burst to pass.
   expect(t.calls).not.toContain('tools_status')
-  expect(onboarding.getState().open).toBe(false)
-  startup.done()
-  await flush()
-  expect(onboarding.getState()).toMatchObject({ open: true, step: 'setup' })
-  // A dialog, not a pane: the workspace stays as it was restored.
-  expect(store.getState().tabs).toHaveLength(0)
+  expect(windowStore.getState().open).toBeNull()
 
+  nexusStore.getState().setOpen(false)
   const { all } = await import('../actions/registry')
   const action = all().find((a) => a.id === 'setup.open')!
-  expect(action).toBeTruthy()
-  // From the palette, with the dialog closed: the same dialog, at setup.
-  onboarding.getState().close()
   await act(() => action.run())
-  expect(onboarding.getState()).toMatchObject({ open: true, step: 'setup' })
+  expect(windowStore.getState().open).toEqual({ id: 'setup', params: {} })
+  expect(nexusStore.getState().open).toBe(true)
   expect(Object.values(store.getState().panes).filter((p) => p.view === 'setup')).toHaveLength(0)
-  onboarding.getState().close()
+  windowStore.setState({ open: null })
+  unregister()
 })
 
 describe('the pane', () => {

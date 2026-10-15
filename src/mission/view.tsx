@@ -161,7 +161,7 @@ const WORD_TONE: Record<Word, string> = {
 
 registerPaneView('mission', MissionPane)
 
-void settingsStore.getState().load()
+// The settings are read at launch by the Nexus (`startNexusApp`, src/nexus/boot/).
 registerProvider(() => {
   const s = settingsStore.getState()
   return [
