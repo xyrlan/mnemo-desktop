@@ -191,33 +191,72 @@ pub fn parent_of(pid: u32) -> Option<u32> {
     rest.next()?.parse().ok()
 }
 
-/// Whether the terminal process `pid` runs on has `pid`'s own process group in the foreground: a
-/// shell at its prompt, whatever it left running in the background (powerlevel10k's `gitstatusd`,
-/// a job started with `&`). False while a program the shell started has the terminal. None for a
-/// process with no terminal, one that has exited, or where the system does not say.
+/// A process's group, and the foreground group of the terminal it runs on: whose turn the
+/// terminal is. A shell with job control puts each job in a group of its own and hands the
+/// terminal to the one in front; one without (pwsh on macOS or Linux, zsh with `no_monitor`)
+/// keeps every program it starts in its own group, which keeps the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Groups {
+    pub pgid: u32,
+    pub foreground: u32,
+}
+
+/// `pid`'s `Groups`. None for a process with no terminal, one that has exited, or where the
+/// system does not say (Windows has no process groups to ask).
 #[cfg(target_os = "macos")]
-pub fn foreground(pid: u32) -> Option<bool> {
+pub fn groups(pid: u32) -> Option<Groups> {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     // SAFETY: `info` is a plain C struct of exactly `size` bytes that the call fills.
     let n = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
     // With no controlling terminal the kernel leaves `e_tpgid` 0.
-    (n == size && info.pbi_status != libc::SZOMB && info.e_tpgid != 0).then_some(info.e_tpgid == info.pbi_pgid)
+    (n == size && info.pbi_status != libc::SZOMB && info.e_tpgid != 0).then_some(Groups { pgid: info.pbi_pgid, foreground: info.e_tpgid })
 }
 
 #[cfg(target_os = "linux")]
-pub fn foreground(pid: u32) -> Option<bool> {
+pub fn groups(pid: u32) -> Option<Groups> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // `pid (comm) state ppid pgrp session tty_nr tpgid …`; `tpgid` is -1 with no terminal.
-    let rest: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().take(6).collect();
-    let [state, _, pgrp, _, tty, tpgid] = rest[..] else { return None };
-    let (pgrp, tpgid) = (pgrp.parse::<i64>().ok()?, tpgid.parse::<i64>().ok()?);
-    (state != "Z" && state != "X" && tty != "0" && tpgid > 0).then_some(tpgid == pgrp)
+    groups_of_stat(&stat)
 }
 
-/// Windows has no foreground process group to ask.
+/// `Groups` from a `/proc/<pid>/stat` line: `pid (comm) state ppid pgrp session tty_nr tpgid …`.
+/// `tpgid` is -1 with no terminal; the name may hold spaces and parentheses.
+#[cfg(any(target_os = "linux", test))]
+fn groups_of_stat(stat: &str) -> Option<Groups> {
+    let rest: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().take(6).collect();
+    let [state, _, pgrp, _, tty, tpgid] = rest[..] else { return None };
+    let (pgid, foreground) = (pgrp.parse::<u32>().ok()?, tpgid.parse::<i64>().ok()?);
+    (state != "Z" && state != "X" && tty != "0" && foreground > 0).then(|| Groups { pgid, foreground: foreground as u32 })
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn foreground(_pid: u32) -> Option<bool> {
+pub fn groups(_pid: u32) -> Option<Groups> {
+    None
+}
+
+/// The file process `pid` was started from, by its full path; None once it is gone, or where it
+/// is not needed (`chrome::real_shell` asks it on Windows only).
+#[cfg(windows)]
+pub fn image_of(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: the handle is checked and closed once; the call writes at most `len` units into `buf`.
+    let ok = unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let ok = QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(process);
+        ok
+    };
+    (ok != 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
+}
+
+#[cfg(not(windows))]
+pub fn image_of(_pid: u32) -> Option<String> {
     None
 }
 
@@ -381,6 +420,18 @@ mod tests {
     /// A table built by hand: (pid, parent) rows, and the creation times known of some.
     fn rows(parents: &[(u32, u32)], created: &[(u32, u64)]) -> Table {
         Table { parents: parents.iter().copied().collect(), created: created.iter().copied().collect() }
+    }
+
+    /// Linux's `/proc/<pid>/stat`, read on every system: a shell at its prompt, a program in
+    /// front, a name with spaces and parentheses, no terminal, a zombie, a short line.
+    #[test]
+    fn groups_are_read_from_a_stat_line() {
+        let g = |pgid, foreground| Some(Groups { pgid, foreground });
+        assert_eq!(groups_of_stat("4242 (bash) S 4200 4242 4242 34816 4242 4194560 0 0"), g(4242, 4242));
+        assert_eq!(groups_of_stat("4242 (my (odd) sh) S 4200 4242 4242 34816 4300 4194560"), g(4242, 4300));
+        assert_eq!(groups_of_stat("4242 (sh) S 1 4242 4242 0 -1 4194560"), None);
+        assert_eq!(groups_of_stat("4242 (sh) Z 1 4242 4242 34816 4242"), None);
+        assert_eq!(groups_of_stat("4242 (sh) S 1"), None);
     }
 
     /// On every system CI builds for, Windows among them: nothing here is behind `cfg(unix)`.

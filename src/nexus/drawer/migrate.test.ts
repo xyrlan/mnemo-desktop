@@ -9,7 +9,7 @@ import { fakeHost } from './fixtures'
 import { launchDrawer } from './launch'
 import { readTabs, TABS_KEY } from './persist'
 import { createDrawer } from './sessions'
-import { createSessions, RESUME_WINDOW_MS } from './start'
+import { createSessions, RESUME_WINDOW_MS, STARTING_MAX_MS } from './start'
 
 /* A workspace the workbench saved, before the Nexus was the app (#459), as a person upgrading has
    it, through the app's own launch order (`launchDrawer`): the restore, then the workbench's tabs
@@ -204,18 +204,60 @@ test('F3: a resume the restore typed is never taken for an idle shell, however s
   await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'stale-2' })
   expect(w.p.spawned).toHaveLength(spawned)
   expect(activeKey()).toBe('pane:2')
-  // At 20 s all three are listed: each pane is its session's, and the tabs on them follow.
+  // At 20 s all three are listed: each pane is its session's, and the tabs on them follow. Pane
+  // 100, which no tab shows, is left to its captain.
   for (const pane of [2, 100, 101]) w.claude.listed.add(pane)
   await vi.advanceTimersByTimeAsync(4000)
   await w.check()
   expect([w.sessions.paneOf('stale-2'), w.sessions.paneOf('off-9'), w.sessions.paneOf('gone-4')]).toEqual([2, 100, 101])
   expect(onPanes().filter(([p]) => p !== 3)).toEqual([
     [2, 'stale-2', 'captain'],
-    [100, 'off-9', 'captain'],
     [101, 'gone-4', 'captain'],
   ])
+  expect(await unreachable(w)).toEqual([])
   expect([holders(w, 'gone-4'), holders(w, 'off-9'), holders(w, 'stale-2')]).toEqual([[101], [100], [2]])
   expect(w.p.writes).toHaveLength(3)
+  w.stop()
+})
+
+test('item 3: after a reboot, a resume the restore typed is left offscreen to its captain until its Claude is up, or its shell is back at its prompt, for at most STARTING_MAX_MS (#460)', async () => {
+  // The daemon went with the reboot, nothing runs elsewhere: the restore types a resume into each
+  // of the four panes that held an id.
+  const w = await launch({ held: [], liveSessions: async () => [] })
+  await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS * 2)
+  const pane = (id: string) => holders(w, id)[0]
+  const [live, stale, gone, off] = ['live-1', 'stale-2', 'gone-4', 'off-9'].map(pane)
+  expect(w.p.writes.map(([id, cmd]) => [id, cmd.trim()]).sort()).toEqual(
+    [
+      [live, 'claude --resume live-1'],
+      [stale, 'claude --resume stale-2'],
+      [gone, 'claude --resume gone-4'],
+      [off, 'claude --resume off-9'],
+    ].sort(),
+  )
+  // Past RESUME_WINDOW_MS none is listed yet: no drawer tab opens for any. The plain shell has one.
+  await vi.advanceTimersByTimeAsync(RESUME_WINDOW_MS + 1000)
+  await w.check()
+  expect([...tabbed()]).toEqual([(Object.values(w.layout.getState().panes) as Pane[]).find((x) => !x.sessionId)!.id])
+  // Two come up: their captains lead to them, still with no tab.
+  w.claude.listed.add(live)
+  w.claude.listed.add(gone)
+  await w.check()
+  expect([w.sessions.paneOf('live-1'), w.sessions.paneOf('gone-4')]).toEqual([live, gone])
+  expect([live, gone].some((p) => tabbed().has(p))).toBe(false)
+  // One's resume ended (the session had nothing to resume): its shell is back at its prompt, gone.
+  w.claude.busy.delete(stale)
+  await w.check()
+  expect(tabbed().has(stale)).toBe(true)
+  // The last is still not listed two minutes on (a question its resume waits on): it gets a tab.
+  await vi.advanceTimersByTimeAsync(STARTING_MAX_MS - RESUME_WINDOW_MS - 3000)
+  await w.check()
+  expect(tabbed().has(off)).toBe(false)
+  await vi.advanceTimersByTimeAsync(2000)
+  await w.check()
+  expect(tabbed().has(off)).toBe(true)
+  expect(await unreachable(w)).toEqual([])
+  expect(tabbed().size).toBe(3)
   w.stop()
 })
 

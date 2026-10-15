@@ -5,7 +5,7 @@ import type { PaneId } from '../../layout/tree'
 import type { NexusState } from '../store'
 import { adoptPanes, adoptShells, lostPanes, readTabs, reopenTabs, tabsToSave, writeTabs } from './persist'
 import type { Drawer } from './sessions'
-import { followPanes, type Sessions } from './start'
+import { followPanes, RESUME_WINDOW_MS, STARTING_MAX_MS, type Sessions } from './start'
 
 export type LaunchDeps = {
   layout: Store
@@ -35,8 +35,9 @@ export type Launch = {
  *     at every session poll: on each launch alike, since what was found is not kept (#460).
  *  From then on, tabs follow the Claude session their pane was found running (`followPanes`); a
  *  pane no tab shows that holds a session id gets a tab of its own, quietly, once no Claude runs
- *  or may be coming up there; one whose session went ends when a tab had let it go, else gets a
- *  tab too. What the drawer shows is kept. */
+ *  or may be coming up there (a resume the restore typed is waited for: `STARTING_MAX_MS`); one
+ *  whose session went ends when a tab had let it go, else gets a tab too. What the drawer shows
+ *  is kept. */
 export function launchDrawer(d: LaunchDeps): Launch {
   let restoring = true
   let checking: Promise<void> | null = null
@@ -53,8 +54,12 @@ export function launchDrawer(d: LaunchDeps): Launch {
       // Its session changed meanwhile, or it went: the next check asks again.
       if (!now || !live(now) || now.sessionId !== p.sessionId) continue
       if (await d.sessions.observe(p.id, runs[i])) continue
-      // A Claude runs there (its captain leads to it), may be coming up, or a tab let it go.
-      if (runs[i] === 'claude' || d.sessions.mayBeStarting(p.id) || d.sessions.isReleased(p.id)) continue
+      // A Claude runs there (its captain leads to it), or a tab let it go.
+      if (runs[i] === 'claude' || d.sessions.isReleased(p.id)) continue
+      // A Claude may be coming up there: a resume the restore typed, still starting while a
+      // program has the terminal, is left to its captain until it is up or its shell is back at
+      // its prompt, for at most `STARTING_MAX_MS` (#460).
+      if (d.sessions.mayBeStarting(p.id, runs[i] === 'idle' ? RESUME_WINDOW_MS : STARTING_MAX_MS)) continue
       adopt.push(now)
     }
     followPanes(d.nexus, panes(), d.sessions)

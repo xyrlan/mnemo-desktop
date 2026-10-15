@@ -39,6 +39,12 @@ export type StartDeps = {
  *  into has nothing coming up (#460). */
 export const RESUME_WINDOW_MS = 15_000
 
+/** How long a pane no tab shows, a command typed into it, is left to the captain its Claude will
+ *  have while a program has its terminal that `claude agents` does not list yet: a resume slow to
+ *  start, as after a reboot that resumes every pane at once. Past it the pane gets a tab of its
+ *  own, since what runs there may be waiting on the person (#460). */
+export const STARTING_MAX_MS = 120_000
+
 export type Sessions = {
   /** Rejects with what could not be done: every caller says it, where it was asked from. */
   openSession(spec: SessionSpec): Promise<void>
@@ -66,8 +72,8 @@ export type Sessions = {
   /** Pane `pane` was found running nothing while holding `sessionId`, and runs no Claude since. */
   isIdle(pane: PaneId, sessionId: string): boolean
   /** A Claude may still be coming up in pane `pane`: a command was given to it less than
-   *  `RESUME_WINDOW_MS` ago (`typedAt`). */
-  mayBeStarting(pane: PaneId): boolean
+   *  `within` (`RESUME_WINDOW_MS`) ago (`typedAt`). */
+  mayBeStarting(pane: PaneId, within?: number): boolean
   /** A drawer tab let pane `pane` go, and it was kept while something may run in it. */
   isReleased(pane: PaneId): boolean
   /** Pane `pane`'s Claude session went (its id cleared). One a drawer tab let go while its Claude
@@ -115,9 +121,9 @@ export function createSessions(d: StartDeps): Sessions {
     return Object.values(panes()).find((p) => alive(p) && p.sessionId === sessionId && !isIdle(p.id, sessionId))?.id ?? null
   }
 
-  function mayBeStarting(pane: PaneId): boolean {
+  function mayBeStarting(pane: PaneId, within = RESUME_WINDOW_MS): boolean {
     const at = d.layout.getState().typedAt(pane)
-    return at !== undefined && d.now() - at < RESUME_WINDOW_MS
+    return at !== undefined && d.now() - at < within
   }
 
   /** What `runs` says of pane `pane`, kept by the session id it holds. */
