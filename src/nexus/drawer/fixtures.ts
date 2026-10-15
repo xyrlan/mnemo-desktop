@@ -157,3 +157,11 @@ export function fakeHost() {
 
 /** Lets the attach's spawn and typing resolve. */
 export const settle = () => new Promise((r) => setTimeout(r, 0))
+
+/** Synthetic screens of a `claude attach`, as its terminal view reads them back. */
+const RULE = '─'.repeat(40)
+export const INPUT = ['● Done: the drawer is wired.', '', RULE, '❯ ', RULE, '  ? for shortcuts']
+export const NORMAL = ['● Done.', '', RULE, '❯ ', RULE, '  -- NORMAL --']
+export const PERMISSION = ['● Bash(pnpm test)', '', RULE, ' Bash command', '   pnpm test', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, and don’t ask again', '   3. No']
+export const QUESTION = ['● AskUserQuestion', '', RULE, ' Which width?', ' ❯ 1. 42%', '   2. 50%', '   3. Type something.']
+export const SHELL = ['you@host ~ % claude attach a1b2c3d4']

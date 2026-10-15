@@ -1,15 +1,20 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view and
- *  diff, and ⌘W claimed while the drawer has the keyboard. */
+ *  diff, its conversations typing into the app's terminals, ⌘W claimed while the Nexus is open and
+ *  ⌘⇧C while the drawer has the keyboard. */
+import { paneRunsClaude } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
 import { tauriDiff } from '../../diff/client'
 import { fleetStore } from '../../fleet/store'
 import { store as layout } from '../../layout/app-store'
 import { attachChild } from '../../mission/rows'
+import { tauriPty } from '../../pty/client'
 import { sessionHost } from '../../session/app-host'
+import { readBuffer } from '../../terminal/buffer'
 import TerminalPane from '../../terminal/view'
 import { nexusStore } from '../store'
+import { sessionAgent, type AgentSinks } from './agent'
 import type { DrawerDeps } from './Drawer'
-import { claimClose } from './keys'
+import { claimClose, claimFace } from './keys'
 import { deepestWorktree } from './model'
 import { createDrawer } from './sessions'
 
@@ -19,6 +24,10 @@ const drawer = createDrawer(sessionHost, nexusStore, {
   closeNexus: () => nexusStore.getState().setOpen(false),
 })
 const unclaim = claimClose(drawer, nexusStore)
+const unclaimFace = claimFace(nexusStore)
+
+const keys = { writePty: (pty: number, data: string) => tauriPty.write(pty, data), screen: readBuffer, sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) }
+const sinks: AgentSinks = { pane: { ...keys, runsClaude: paneRunsClaude }, attach: keys }
 
 export const liveDrawer: DrawerDeps = {
   drawer,
@@ -26,6 +35,7 @@ export const liveDrawer: DrawerDeps = {
   owners: layout,
   terminal: TerminalPane,
   conversation: ConversationView,
+  agent: (session) => sessionAgent(session, sinks),
   diff: tauriDiff,
   worktreeOf: (cwd) => deepestWorktree(cwd, [...fleetStore.getState().repos.flatMap((r) => r.worktrees.map((w) => w.path)), ...layout.getState().worktrees]),
   paneOfSession: (sessionId) =>
@@ -38,5 +48,6 @@ export const liveDrawer: DrawerDeps = {
 
 import.meta.hot?.dispose(() => {
   unclaim()
+  unclaimFace()
   drawer.dispose()
 })
