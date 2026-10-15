@@ -125,6 +125,29 @@ test('a review already on screen is not replaced, and nothing opens for it', asy
   expect(h.opened).toEqual([])
 })
 
+test('Setup never replaces a window the user opened in the first seconds: it opens when that one closes', async () => {
+  const { h, deps, setWindow } = harness({ tools: MISSING })
+  h.window = 'projects'
+  firstRun(deps)
+  await flush()
+  expect(h.opened).toEqual([])
+  expect(h.window).toBe('projects')
+  setWindow('missions')
+  expect(h.opened).toEqual([])
+  setWindow(null)
+  expect(h.opened).toEqual(['setup'])
+
+  // Installed meanwhile (from a terminal of its own): nothing is left for Setup to show.
+  const found = harness({ tools: MISSING })
+  found.h.window = 'projects'
+  firstRun(found.deps)
+  await flush()
+  found.h.rows = FOUND
+  found.h.phase = 'running'
+  found.setWindow(null)
+  expect(found.h.opened).toEqual([])
+})
+
 test('a failed tools check opens nothing', async () => {
   const { h, deps } = harness({ tools: null })
   firstRun(deps)
@@ -137,6 +160,15 @@ test('stopped, nothing opens: not Setup, not the review waiting on a window', as
   firstRun(early.deps)()
   await flush()
   expect(early.h.opened).toEqual([])
+
+  const setupWaits = harness({ tools: MISSING })
+  setupWaits.h.window = 'projects'
+  const stopSetup = firstRun(setupWaits.deps)
+  await flush()
+  stopSetup()
+  setupWaits.setWindow(null)
+  expect(setupWaits.h.opened).toEqual([])
+  expect(setupWaits.h.windowListeners.size).toBe(0)
 
   const late = harness()
   late.h.window = 'missions'

@@ -18,7 +18,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme as ToasterProps['theme']}
-      position="bottom-right"
+      // Bottom-left over the ship, never over the drawer: its terminal's prompt is at its bottom right.
+      position="bottom-left"
       // Why: clear of the strip along the window's bottom edge (the ship's bottom is 24px up), and
       // mobileOffset keeps that clearance below Sonner's 600px breakpoint, which otherwise reverts
       // to Sonner's default 16px.

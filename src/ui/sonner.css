@@ -1,7 +1,11 @@
 /* The toasts in the ship's look (src/nexus/ui/ui.css): a hull with a lit 2px edge and a hard black
    shadow, monospace, colour for state only (a failure's edge is the danger red, a success's the
    done green). Sonner's own sheet draws the rest; the toaster's class outranks it. */
-[data-sonner-toaster].nx-toaster { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Over every Nexus window (60), confirmation (61) and menu (70), so a toast that lands while one is
+   open (the first run opens Setup about when launch toasts come) is read and clicked, not dimmed
+   under a backdrop that closes the window. theme.css pins toasters to --z-index-toast with
+   !important; the class outranks it. Notification cards are 75, the voice indicator 85. */
+[data-sonner-toaster].nx-toaster { z-index: 80 !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 [data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] {
   padding: 10px 12px;
   border: 2px solid var(--normal-border);

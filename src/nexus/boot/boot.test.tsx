@@ -71,6 +71,9 @@ test('a toast lands in the toaster the Nexus mounts, in the ship\'s look', async
   await flush()
   const toaster = document.querySelector('[data-sonner-toaster]')
   expect(toaster?.classList.contains('nx-toaster')).toBe(true)
+  // Bottom-left over the ship: the drawer, on the right, keeps its terminal's prompt in view.
+  expect(toaster?.getAttribute('data-x-position')).toBe('left')
+  expect(toaster?.getAttribute('data-y-position')).toBe('bottom')
   const shown = document.querySelector('[data-sonner-toast]')
   expect(shown?.textContent).toContain('Could not save the workspace layout')
   expect(shown?.getAttribute('data-type')).toBe('error')
@@ -79,4 +82,20 @@ test('a toast lands in the toaster the Nexus mounts, in the ship\'s look', async
   stop()
   await flush()
   expect(host.querySelector('section')).toBeNull()
+})
+
+// The stylesheets off disk, as the Nexus scene tests read theirs: vitest hands CSS imports back empty.
+type Fs = { readFileSync(path: string, encoding: string): string }
+
+test('toasts sit over every Nexus window, confirmation and menu (60, 61, 70), at 80', async () => {
+  const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
+  const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const css = strip(fs.readFileSync('src/ui/sonner.css', 'utf8'))
+  // theme.css pins every toaster to --z-index-toast with !important: the ship's toaster outranks
+  // that rule with a class and !important of its own.
+  expect(strip(fs.readFileSync('src/theme.css', 'utf8'))).toMatch(/\[data-sonner-toaster\]\s*\{[^}]*z-index:[^}]*!important/)
+  expect(css).toMatch(/\[data-sonner-toaster\]\.nx-toaster\s*\{[^}]*z-index:\s*80\s*!important/)
+  const ui = strip(fs.readFileSync('src/nexus/ui/ui.css', 'utf8'))
+  const zs = [...ui.matchAll(/z-index:\s*(\d+)/g)].map((m) => Number(m[1]))
+  expect(Math.max(...zs)).toBeLessThan(80)
 })

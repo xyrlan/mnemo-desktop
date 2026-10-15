@@ -46,35 +46,44 @@ function setupDone(d: FirstRunDeps, stopped: () => boolean): { done: Promise<voi
 /** What the app asks at launch, in the Nexus's windows where the onboarding overlay asked it:
  *  - **Setup**, when `claude` or `mnemo` is missing (`openWindow('setup')`);
  *  - then, once both are found, **What mnemo learned** for the first known repo with history to
- *    read and no decision (`openWindow('learned')`). It never jumps a window the user has open
- *    (Setup, still being read, or any other): it opens when that one closes.
+ *    read and no decision (`openWindow('learned')`).
+ *  Neither jumps a window that is open (one the user opened in the first seconds, or Setup still
+ *  being read): it opens when that one closes, if it still has something to show.
  *  Returns a stop: nothing opens after it. */
 export function firstRun(d: FirstRunDeps): () => void {
   let stopped = false
   const isStopped = () => stopped
   const stops: (() => void)[] = []
 
+  // A window opens only when none is open over the ship (one the user opened, or Setup still being
+  // read), and only while it still has something to show. Each waits for its own turn.
+  const openWhenFree = (id: 'setup' | 'learned', still: () => boolean) => {
+    if (stopped || !still()) return
+    if (d.openWindowId() === null) return d.open(id)
+    const unsubscribe = d.subscribeWindow(() => {
+      if (stopped || d.openWindowId() !== null) return
+      unsubscribe()
+      if (still()) d.open(id)
+    })
+    stops.push(unsubscribe)
+  }
+  const setupNeeded = () => {
+    const rows = d.toolRows()
+    return !!rows && needsSetup(rows)
+  }
+
   void openIfMissing({
     restored: Promise.resolve(),
     check: () => d.checkTools(),
-    open: () => {
-      if (!stopped) d.open('setup')
-    },
+    open: () => openWhenFree('setup', setupNeeded),
   })
 
-  // The review's consent opens when no window is open over the ship, and only while it still asks.
-  let waiting: (() => void) | null = null
+  // The review's consent: the store may hold only one, so it is asked for once.
+  let reviewWaits = false
   const openLearned = () => {
-    if (stopped || !d.stillAsking()) return
-    if (d.openWindowId() === null) return d.open('learned')
-    if (waiting) return
-    waiting = d.subscribeWindow(() => {
-      if (stopped || d.openWindowId() !== null) return
-      waiting?.()
-      waiting = null
-      if (d.stillAsking()) d.open('learned')
-    })
-    stops.push(() => waiting?.())
+    if (reviewWaits) return
+    reviewWaits = true
+    openWhenFree('learned', () => d.stillAsking())
   }
 
   const setup = setupDone(d, isStopped)
