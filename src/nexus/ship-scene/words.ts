@@ -123,11 +123,11 @@ const issueOf = (r: ShipRobot) => r.label.replace(/·[a-z]$/, '')
 
 export type Tone = 'red' | 'lilac' | 'calm'
 
-/** Red for a question or a red CI, lilac when only a merge (or a landing, or a stranded child)
- *  waits, calm when nothing does. */
+/** Red for a question (a child's or a captain's) or a red CI, lilac when only a merge (or a
+ *  landing, or a stranded child) waits, calm when nothing does. */
 export function toneOf(ship: Ship): Tone {
   const x = ship.bridge.exceptions
-  if (ship.bridge.blocked.length || x.some((e) => e.kind === 'need' || e.kind === 'red')) return 'red'
+  if (ship.bridge.blocked.length || x.some((e) => e.kind === 'need' || e.kind === 'captain' || e.kind === 'red')) return 'red'
   return x.length ? 'lilac' : 'calm'
 }
 
@@ -137,7 +137,14 @@ export function bridgeStatus(ship: Ship): string {
 }
 
 export type RowButton = { label: string; go?: boolean } & ({ action: ShipAction } | { open: string } | { triage: true })
-export type Row = { key: string; kind: Exception['kind']; robotId: string | null; icon: string; text: string; buttons: RowButton[] }
+/** `robotId` / `captainId`: the figure the row is about, which a click on it opens. */
+export type Row = { key: string; kind: Exception['kind']; robotId: string | null; captainId?: string; icon: string; text: string; buttons: RowButton[] }
+
+/** What a waiting captain waits on, as its bridge row and triage card say it. */
+export function captainWait(x: Extract<Exception, { kind: 'captain' }>): string {
+  if (x.question) return x.question
+  return x.waitsOn === 'question' ? 'waits on a question' : 'waits on a permission'
+}
 
 /** One bridge row per exception, with the buttons that settle it. */
 export function exceptionRow(x: Exception): Row {
@@ -150,6 +157,16 @@ export function exceptionRow(x: Exception): Row {
         icon: x.need.kind === 'permission' ? '🔒' : '❓',
         text: x.need.kind === 'permission' ? `wants to run: ${x.need.text}` : x.need.text,
         buttons: [{ label: 'answer · Tab', go: true, triage: true }],
+      }
+    case 'captain':
+      return {
+        key: `captain:${x.captainId}`,
+        kind: x.kind,
+        robotId: null,
+        captainId: x.captainId,
+        icon: x.waitsOn === 'permission' ? '🔒' : '❓',
+        text: captainWait(x),
+        buttons: [{ label: 'open', go: true, open: x.captainId }],
       }
     case 'red':
       return {
