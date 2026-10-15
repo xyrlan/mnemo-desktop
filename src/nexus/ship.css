@@ -346,7 +346,22 @@
 .ship-captain[data-pose='offline'] .ship-console img { opacity: 0.55; filter: grayscale(0.6); }
 .ship-captain[data-pose='empty'] .ship-console img { opacity: 0.5; }
 .ship-captain[data-hl] .ship-console img { filter: drop-shadow(0 0 6px var(--ship-lilac)) drop-shadow(0 0 2px #fff); }
-.ship-cname { max-width: 120px; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
+/* A captain's name: an AI title is 3–6 words, so it gets two lines before it is cut. Two to a row
+   stand 100 px apart. */
+.ship-cname {
+  display: -webkit-box;
+  max-width: 120px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-shadow: 1px 1px 0 #000;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ship-captain:not([data-big]) .ship-cname { max-width: 96px; }
 .ship-topic {
   display: -webkit-box;
   width: 112px;
@@ -385,7 +400,7 @@
   font-size: 11px;
   font-weight: 700;
 }
-/* A tab title is often a whole first prompt: a chip keeps to its column and ends in an ellipsis. */
+/* A chip keeps to its column; its name gets two lines, then an ellipsis. */
 .ship-scene .ship-chip-captain {
   display: flex;
   flex: 0 1 120px;
@@ -401,7 +416,16 @@
   white-space: nowrap;
 }
 .ship-scene .ship-chip-captain:hover { border-color: var(--ship-lilac); }
-.ship-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ship-chip-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 /* A 1× window onto the console: the captain's head and screen. */
 .ship-window { position: relative; width: 40px; height: 40px; overflow: hidden; }
 .ship-window img { position: absolute; top: -14px; left: -28px; max-width: none; }
@@ -604,7 +628,17 @@
 .ship-docked[data-focus] { border-color: var(--ship-focus); }
 .ship-docked img { width: 64px; height: 64px; max-width: none; }
 .ship-docked[data-pose='offline'] img { opacity: 0.55; filter: grayscale(0.6); }
-.ship-docked > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.ship-docked > span {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 12px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 
 /* ---------- the ship's log ---------- */
 .ship-log {

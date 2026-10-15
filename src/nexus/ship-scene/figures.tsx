@@ -2,7 +2,7 @@ import type { AnimationEvent, CSSProperties, MouseEvent, ReactNode } from 'react
 import { SHIP_SPRITES, SPRITES, type CaptainSprite } from '../sprites'
 import type { Captain, CaptainPose, ShipRobot } from '../ship-types'
 import { useNewRule, useWalk, type Exit, type Leaver } from './motion'
-import { captainTopic, glyph, particlesOf, poseOf, robotName } from './words'
+import { captainHover, captainTopic, glyph, particlesOf, poseOf, robotName } from './words'
 
 /** The figures on the ship, every sprite at 1× with `image-rendering: pixelated` (`.ship-px`). */
 
@@ -162,6 +162,7 @@ export function CaptainFigure({
       data-focus={on(focused)}
       data-hl={on(lit)}
       style={at(pos.x, pos.y)}
+      title={captainHover(c)}
       aria-label={`${c.name}: ${c.pose === 'empty' ? 'no parent' : c.pose}`}
       onClick={() => c.parent && onOpen(c.id)}
       onMouseEnter={() => onHover(hover)}
@@ -187,10 +188,10 @@ export function CaptainFigure({
   )
 }
 
-/** A captain in a dock: its whole console at 64 px, its name under it. */
+/** A captain in a dock: its whole console at 64 px, its name under it in up to two lines. */
 export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
   return (
-    <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={c.topic ?? c.name} onClick={() => c.parent && onOpen(c.id)}>
+    <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
       <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
       <span>
         <span className="ship-em">{c.emblem}</span> {c.name}
@@ -200,10 +201,10 @@ export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captai
 }
 
 /** A captain as a small chip: a quiet parent on a deck. Its console seen through a window, still
- *  at 1×. */
+ *  at 1×; its name beside it in up to two lines. */
 export function CaptainChip({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
   return (
-    <button type="button" className="ship-chip-captain" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={c.topic ?? c.name} onClick={() => c.parent && onOpen(c.id)}>
+    <button type="button" className="ship-chip-captain" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
       <span className="ship-window" aria-hidden>
         <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
       </span>

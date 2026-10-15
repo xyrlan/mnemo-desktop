@@ -75,6 +75,8 @@ pub struct SessionFeed {
     pub context: Option<u64>,
     pub model: Option<String>,
     pub topic: Option<String>,
+    /// What the session is called: the name a person gave it, else Claude Code's latest AI title.
+    pub title: Option<String>,
     pub contract: Option<ContractRef>,
     pub ask: Option<Ask>,
 }
@@ -337,6 +339,7 @@ mod tests {
                 context: Some(149_000),
                 model: Some("claude-opus".into()),
                 topic: None,
+                title: Some("Second version of the checkout".into()),
                 contract: Some(ContractRef { feature: "nexus".into(), piece: "scene".into(), consumes: vec!["ship".into()] }),
                 ask: Some(Ask { question: "Which?".into(), options: vec!["a".into(), "b".into()] }),
             },
@@ -348,6 +351,7 @@ mod tests {
         f.rate = Some(FleetRate { calls_per_min: 4.0, out_per_min: 2000.0, in_per_min: 90000.0, cache_share: 0.9 });
         let v = serde_json::to_value(&f).unwrap();
         assert_eq!(v["sessions"]["a1"]["activity"], json!({ "tool": "Bash", "target": "pnpm test", "at": 1, "running": true }));
+        assert_eq!(v["sessions"]["a1"]["title"], json!("Second version of the checkout"));
         assert_eq!(v["sessions"]["a1"]["contract"]["consumes"], json!(["ship"]));
         assert_eq!(v["sessions"]["a1"]["ask"]["options"], json!(["a", "b"]));
         assert_eq!(v["prs"]["https://github.com/o/r/pull/1"]["mergedAt"], json!(9));

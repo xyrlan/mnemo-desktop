@@ -1,5 +1,5 @@
-import { mission, pr, robot, ship } from './fixtures'
-import { ago, bridgeStatus, chips, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
+import { captain, mission, pr, robot, ship } from './fixtures'
+import { ago, captainHover, bridgeStatus, chips, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
 
 test('ago reads like the prototype', () => {
   expect(ago(40_000)).toBe('40s')
@@ -144,4 +144,11 @@ test('a read that failed is a lilac row with nothing to press, the backend line 
   const x = { kind: 'snapshot', source: 'prs', text: 'Pull requests could not be read: gh is not logged in.', detail: 'gh pr list: gh auth login' } as const
   expect(exceptionRow(x)).toEqual({ key: `snapshot:${x.text}`, kind: 'snapshot', robotId: null, icon: '⚠', text: x.text, title: x.detail, buttons: [] })
   expect(toneOf(ship({ bridge: { exceptions: [x], blocked: [] } }))).toBe('lilac')
+})
+
+test("a captain's hover: its whole name, then its latest prompt", () => {
+  const long = 'Name each captain by its session AI title, readable on the deck and in the dock'
+  expect(captainHover(captain('c', { name: long, topic: '[Pasted text #1 +12 lines]' }))).toBe(`${long}\n“[Pasted text #1 +12 lines]”`)
+  expect(captainHover(captain('c', { name: 'Subscriber cohort analysis', topic: null }))).toBe('Subscriber cohort analysis')
+  expect(captainHover(captain('c', { pose: 'empty' }))).toMatch(/^no parent/)
 })

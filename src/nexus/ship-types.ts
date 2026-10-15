@@ -32,6 +32,10 @@ export type SessionFeed = {
   model: string | null
   /** Parents: the latest user prompt, at most 200 characters. Null for children. */
   topic: string | null
+  /** Parents: what the session is called, at most 200 characters: the name a person gave it
+   *  (`custom-title`: `/rename`, `claude --name`), else Claude Code's latest `ai-title`. Null for
+   *  children, and when the transcript has neither. */
+  title: string | null
   /** Children dispatched from a contract. Null otherwise. */
   contract: ContractRef | null
   ask: Ask | null
@@ -115,7 +119,8 @@ export type Captain = {
   /** The parent's session id, or `orphanCaptainId(root)`. */
   id: string
   parent: ParentSession | null
-  /** The tab title when the session is open in a pane, else its `claude agents` name. */
+  /** The feed's `title` (the name a person gave the session, else its AI title); else Home's
+   *  title (its first prompt), its `claude agents` name, `session <id>`. */
   name: string
   /** ◆ ● ▲ ■ ★ ✚ ♦ ✦ in order of first sight within the repo; `?` for the empty chair. */
   emblem: string
