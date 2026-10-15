@@ -1,36 +1,24 @@
 /** Voice dictation (issue #10). Voice has no pane view: it lives in `view.tsx` because
  *  App imports every `src/*\/view.tsx`, and that import is where it installs the ⌥Space
  *  chord, registers `dictation.toggle` (Mod+E, bound by the keymap) and the language actions,
- *  and mounts Orca's indicator in the shell's overlay slot. */
-import { store } from '../layout/app-store'
+ *  and mounts Orca's indicator in the shell's overlay slot, over the Nexus. It types into the
+ *  drawer's active terminal or the focused field (`./target`, Q12). */
 import { tauriPty } from '../pty/client'
 import { register, registerProvider } from '../actions/registry'
 import { detectPlatform, shortcutKeys } from '../actions/chords'
 import { tauriVoice, type Language } from './client'
 import { createVoice, firstLanguage, LANGUAGE_NAMES, LANGUAGES } from './controller'
-import { insert, resolveTarget, withSeparator } from './route'
+import { insert } from './route'
+import { dictationTarget } from './target'
 import { settingsStore } from '../settings/app-store'
 import { tauriMission } from '../mission/client'
 import { holdKeys, installChord } from './chord'
 import { mountInSlot } from '../shell/slots'
 import { Indicator } from './Indicator'
 
-async function typeInMonaco(el: HTMLElement, text: string): Promise<boolean> {
-  // Already loaded: a Monaco element exists only after the editor pane imported it.
-  const { monaco } = await import('../editor/monaco')
-  const ed = monaco.editor.getEditors().find((e) => e.getDomNode() === el || e.getContainerDomNode().contains(el))
-  const model = ed?.getModel()
-  const pos = ed?.getPosition()
-  if (!ed || !model || !pos) return false
-  const before = model.getLineContent(pos.lineNumber).slice(0, pos.column - 1)
-  ed.focus()
-  ed.trigger('voice', 'type', { text: withSeparator(before, text) })
-  return true
-}
-
 const voice = createVoice({
   client: tauriVoice,
-  target: () => resolveTarget(document.activeElement, store.getState()),
+  target: dictationTarget,
   insert: async (target, text) => {
     let out = text
     if (settingsStore.getState().outgoing === 'en') {
@@ -41,7 +29,7 @@ const voice = createVoice({
         /* dictation still lands, untranslated */
       }
     }
-    return insert(target, out, { writePty: (id, t) => tauriPty.write(id, t), typeInMonaco })
+    return insert(target, out, { writePty: (id, t) => tauriPty.write(id, t) })
   },
 })
 

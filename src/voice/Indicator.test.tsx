@@ -107,7 +107,7 @@ describe('dictation indicator', () => {
   it('says when the text had nowhere to land, and shows notes and errors', async () => {
     await draw()
     set({ kind: 'done', text: 'lost words', landed: false })
-    expect(status()).toBe('No text field focused')
+    expect(status()).toBe('Not typed: the field it was for is gone')
     expect(host.querySelector('p')?.textContent).toBe('lost words')
 
     set({ kind: 'note', text: 'no speech heard' })
@@ -162,5 +162,25 @@ describe('dictation indicator', () => {
     expect(alert()).toBe('model download: stalled, nothing arrived in 30 s')
     await act(async () => voice.dismiss())
     expect(indicator()).toBeNull()
+  })
+
+  it("draws over every window, confirmation, menu and Triage, under its own tooltip", async () => {
+    await draw()
+    set({ kind: 'listening', device: null })
+    const z = Number(/(?:^|\s)z-\[(\d+)\]/.exec(indicator()!.className)?.[1])
+    // Read from the sheets that set them, so a layer raised there fails here. `node:` is put
+    // together so tsc does not resolve a package the project has no types for.
+    const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as { readFileSync(path: string, encoding: string): string }
+    const read = (file: string) => fs.readFileSync(file, 'utf8')
+    const ui = read('src/nexus/ui/ui.css')
+    const theme = read('src/theme.css')
+    const rule = (selector: string) => Number(new RegExp(`\\${selector}\\s*\\{[^}]*?z-index:\\s*(\\d+)`).exec(ui)?.[1])
+    const token = (name: string) => Number(new RegExp(`--z-index-${name}:\\s*(\\d+)`).exec(theme)?.[1])
+    const below = { window: rule('.nx-backdrop'), confirmation: rule('.nx-confirm-layer'), menu: rule('.nx-menu'), triage: token('modal') }
+    for (const [layer, under] of Object.entries(below)) {
+      expect(under, layer).toBeGreaterThan(0)
+      expect(z, layer).toBeGreaterThan(under)
+    }
+    expect(z).toBeLessThan(token('tooltip'))
   })
 })

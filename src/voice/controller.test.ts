@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VoiceClient } from './client'
 import { createVoice, firstLanguage, LANGUAGES, type VoiceDeps } from './controller'
-import { insert, type Target } from './route'
+import { insert, NOWHERE, type DictationTarget } from './route'
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -10,7 +10,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-const PTY: Target = { kind: 'pty', pane: 1 }
+const PTY: DictationTarget = { kind: 'pty', pane: 1 }
 
 function setup(overrides: Partial<VoiceClient> = {}, landed = true) {
   const client: VoiceClient = {
@@ -21,7 +21,7 @@ function setup(overrides: Partial<VoiceClient> = {}, landed = true) {
     onLost: vi.fn(async () => () => {}),
     ...overrides,
   }
-  const deps: VoiceDeps = { client, target: vi.fn(() => PTY), insert: vi.fn(async () => landed), linger: 2000 }
+  const deps: VoiceDeps = { client, target: vi.fn((): DictationTarget | null => PTY), insert: vi.fn(async () => landed), linger: 2000 }
   const voice = createVoice(deps)
   return { voice, client, deps, phase: () => voice.store.getState().phase }
 }
@@ -103,7 +103,7 @@ describe('voice controller', () => {
     const voice = createVoice({
       client: setup().client,
       target: () => PTY,
-      insert: (target, text) => insert(target, text, { writePty, typeInMonaco: async () => true }),
+      insert: (target, text) => insert(target, text, { writePty }),
       linger: 2000,
     })
     voice.begin()
@@ -130,6 +130,25 @@ describe('voice controller', () => {
     voice.begin()
     await voice.end()
     expect(phase()).toEqual({ kind: 'done', text: 'hello world', landed: false })
+  })
+
+  it('with nowhere to type, says so and records nothing, for the hold and for Mod+E', async () => {
+    const { voice, client, deps, phase } = setup()
+    vi.mocked(deps.target).mockReturnValue(null)
+    voice.begin()
+    expect(phase()).toEqual({ kind: 'note', text: NOWHERE })
+    await voice.end()
+    await voice.toggle()
+    expect(phase()).toEqual({ kind: 'note', text: NOWHERE })
+    expect(client.start).not.toHaveBeenCalled()
+    expect(client.stop).not.toHaveBeenCalled()
+    expect(deps.insert).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(2000)
+    expect(phase()).toEqual({ kind: 'idle' })
+    // Somewhere to type now: the next press records.
+    vi.mocked(deps.target).mockReturnValue(PTY)
+    voice.begin()
+    expect(client.start).toHaveBeenCalledOnce()
   })
 
   it('toggle starts, then stops (Mod+E)', async () => {
