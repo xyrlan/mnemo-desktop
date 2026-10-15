@@ -1,5 +1,6 @@
 import type { Exception, Parsed, Ship, ShipAction, ShipRobot } from '../ship-types'
-import { baseName, captainsOf, isGreen, isRunning, reposOf, robotsOf } from './find'
+import { basename, samePath } from '../../path/path'
+import { captainsOf, isGreen, isRunning, reposOf, robotsOf } from './find'
 
 /** How long a batch verb waits for `/yes`. */
 export const CONFIRM_MS = 20_000
@@ -18,13 +19,14 @@ const labels = (rs: ShipRobot[]) => rs.map((r) => r.label).join(' ')
 const issueOf = (label: string) => label.replace(/·[a-z]+$/, '')
 
 function dispatch(rest: string, ship: Ship): Parsed {
-  const m = /^(\S+)\s+((?:#?\d+[\s,]*)+)$/.exec(rest)
-  if (!m) return { error: 'usage: /dispatch <repo> #<issue> [#<issue>…]' }
-  const want = m[1].toLowerCase()
+  // Word by word, each word checked alone: a pattern over the whole list backtracks.
+  const [name, ...words] = rest.split(/[\s,]+/).filter(Boolean)
+  if (!name || !words.length || !words.every((w) => /^#?\d+$/.test(w))) return { error: 'usage: /dispatch <repo> #<issue> [#<issue>…]' }
+  const want = name.toLowerCase()
   const repos = reposOf(ship)
-  const repo = repos.find((r) => r.name.toLowerCase() === want) ?? repos.find((r) => r.root === m[1] || baseName(r.root).toLowerCase() === want)
-  if (!repo) return { error: repos.length ? `no repo called ${m[1]} on the ship — repos: ${repos.map((r) => r.name).join(', ')}` : 'no repo is on the ship right now' }
-  const issues = [...new Set((m[2].match(/\d+/g) ?? []).map(Number))]
+  const repo = repos.find((r) => r.name.toLowerCase() === want) ?? repos.find((r) => samePath(r.root, name) || basename(r.root).toLowerCase() === want)
+  if (!repo) return { error: repos.length ? `no repo called ${name} on the ship — repos: ${repos.map((r) => r.name).join(', ')}` : 'no repo is on the ship right now' }
+  const issues = [...new Set(words.map((w) => Number(w.replace('#', ''))))]
   return { action: { kind: 'dispatch', root: repo.root, issues } }
 }
 

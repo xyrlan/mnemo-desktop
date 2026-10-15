@@ -4,6 +4,8 @@ import { cockpitStore } from '../../cockpit/app-store'
 import { runJob } from '../../cockpit/job'
 import { mergeChecked } from '../../cockpit/merge'
 import { jobState, type Job } from '../../cockpit/store'
+import { ptySendPrompt } from '../../chat-input/pty'
+import { fleetStore } from '../../fleet/store'
 import { dispatchIssues, dispatchKey } from '../../github/actions'
 import { store as layout } from '../../layout/app-store'
 import { stopCmd } from '../../mission/account'
@@ -11,7 +13,9 @@ import { answerQuestion, answerQuestionOther } from '../../mission/ask'
 import { tauriMission } from '../../mission/client'
 import type { ChildSession } from '../../mission/types'
 import { paneShell, type Shell } from '../../pty/typed'
+import { currentOs, type Os } from '../../setup/tools'
 import type { ActionResult, Ship, ShipAction } from '../ship-types'
+import { basename } from '../../path/path'
 import { act, type Outcome, type Paths } from './run'
 
 /** What a job ended with, as one line: its error, else the last thing it printed. */
@@ -43,10 +47,24 @@ const running = (key: string) => cockpitStore.getState().jobs[key]?.running === 
 /** The key `land` runs under, one per contract. */
 export const landKey = (root: string, contract: string) => `land:${root}#${contract}`
 
+/** The suite `mnemo land`'s rehearsal runs after each merge, by repo: without `--suite` it runs
+ *  mnemo's own default (`python -m pytest -q`), right for mnemo and red for any other repo. A
+ *  rehearsal tree is a fresh worktree, so a pnpm repo installs first. On macOS this repo's suite
+ *  takes the `DEVELOPER_DIR` / `PATH` prefix its `CLAUDE.md` gives. `mnemo land` splits the suite
+ *  into argv and runs no shell, so the `&&`s go to one. */
+const PNPM = 'pnpm install --frozen-lockfile && pnpm test && pnpm build'
+const MAC_TOOLS = 'export DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH=/Library/Developer/CommandLineTools/usr/bin:"$PATH"; '
+export const LAND_SUITES: Record<string, Record<Os, string>> = {
+  'mnemo-desktop': { mac: `sh -c '${MAC_TOOLS}${PNPM}'`, linux: `sh -c '${PNPM}'`, windows: `cmd /d /c "${PNPM}"` },
+}
+
 /** `mnemo land <contract> --merge`: the rehearsal (each piece merged in order in a throwaway
- *  worktree, the suite after each), then the PRs merged in that order. It stops with nothing
- *  landed at the first conflict, missing signature or red suite. */
-export const landArgv = (contract: string) => ['mnemo', 'land', contract, '--merge']
+ *  worktree, the repo's suite after each), then the PRs merged in that order. It stops with
+ *  nothing landed at the first conflict, missing signature or red suite. */
+export function landArgv(root: string, contract: string, os: Os = currentOs()): string[] {
+  const suite = LAND_SUITES[basename(root)]?.[os]
+  return ['mnemo', 'land', contract, '--merge', ...(suite ? ['--suite', suite] : [])]
+}
 
 /** Commands typed on one line, one after the other whatever the last one did. */
 const SEPARATOR: Record<Shell, string> = { posix: '; ', powershell: '; ', cmd: ' & ' }
@@ -54,8 +72,8 @@ export const stopLine = (children: ChildSession[], shell: Shell = paneShell()) =
 
 /** The app's own paths (contract `command`): the mission's dialog answer, the cockpit's permission
  *  answer and checks-gated merge, `mnemo land` as a cockpit job, `claude stop` on each child's
- *  account typed into a terminal (as the home screen stops one), the inbox socket, and the GitHub
- *  view's dispatch. */
+ *  account typed into a terminal (as the home screen stops one), the inbox socket or a captain's
+ *  pane (the chat input's prompt), and the GitHub view's dispatch. */
 export const appPaths: Paths = {
   answerQuestion: (child, index) => answerQuestion(child, index),
   answerQuestionOther: (child, text) => answerQuestionOther(child, text),
@@ -71,14 +89,19 @@ export const appPaths: Paths = {
   async land(root, mission) {
     const key = landKey(root, mission.contract_path)
     if (running(key)) return { ok: false, why: 'it is already landing' }
-    void runJob(key, `land · ${mission.feature}`, root, landArgv(mission.contract_path))
+    void runJob(key, `land · ${mission.feature}`, root, landArgv(root, mission.contract_path))
     return outcomeOf(await jobEnded(key))
   },
-  async stop(children) {
-    await layout.getState().openCommandTab(undefined, stopLine(children))
+  async stop(root, children) {
+    await layout.getState().openCommandTab(root, stopLine(children))
     return { ok: true, why: '(typed in a terminal tab)' }
   },
   reply: (id, text) => tauriMission.reply(id, text),
+  paneOf(sessionId) {
+    for (const r of fleetStore.getState().repos) for (const w of r.worktrees) for (const a of w.agents) if (a.sessionId === sessionId && a.paneId !== null) return a.paneId
+    return null
+  },
+  prompt: (pane, text) => ptySendPrompt(pane, text),
   async dispatch(root, issues) {
     const key = dispatchKey(root, issues)
     if (running(key)) return { ok: false, why: 'the same dispatch is already running' }

@@ -1,7 +1,7 @@
 import type { Choice } from '../../cockpit/prompt'
 import type { ChildSession, Mission, Pr } from '../../mission/types'
 import type { ActionResult, Captain, Exception, LogEvent, Ship, ShipAction, ShipRobot } from '../ship-types'
-import { captainById, captainLabel, isRunning, reposOf, robotById, rootOf } from './find'
+import { captainById, captainLabel, isRunning, otherRepo, reposOf, repoRootOf, robotById } from './find'
 
 /** The app's own paths to the fleet, one per thing the Nexus does (contract `command`). `actions.ts`
  *  wires the real ones; a test hands in its own. Each resolves with how it went or rejects with
@@ -17,10 +17,14 @@ export type Paths = {
   merge(root: string, pr: Pr): Promise<Outcome>
   /** `mnemo land` on a contract, as an app job, once it has ended. */
   land(root: string, mission: Mission): Promise<Outcome>
-  /** `claude stop` on each child's own account. */
-  stop(children: ChildSession[]): Promise<Outcome>
-  /** One user turn into a session's inbox (`mission_reply`), by its short id. */
+  /** `claude stop` on each child's own account, run from `root`. */
+  stop(root: string, children: ChildSession[]): Promise<Outcome>
+  /** One user turn into a background session's inbox (`mission_reply`), by its short id. */
   reply(id: string, text: string): Promise<void>
+  /** The terminal pane a session runs in, when one of the app's panes does. */
+  paneOf(sessionId: string): number | null
+  /** Types `text` into pane `pane`'s Claude as a prompt and submits it (the chat input's way). */
+  prompt(pane: number, text: string): Promise<void>
   /** `mnemo dispatch` of the issues in `root`, once it has ended. */
   dispatch(root: string, issues: number[]): Promise<Outcome>
   now(): number
@@ -91,7 +95,14 @@ async function merge(p: Paths, ship: Ship, ids: string[]): Promise<ActionResult>
       continue
     }
     const pr = `PR #${r.pr.number}`
-    const o = await p.merge(rootOf(ship, r), r.pr).catch((e): Outcome => ({ ok: false, why: why(e) }))
+    // The child's own repo: its captain's deck can be another one, and gh reads the repo from the cwd.
+    const root = repoRootOf(ship, r.child)
+    const elsewhere = otherRepo(root, r.pr)
+    if (elsewhere) {
+      not.push(`${pr} (${r.label}): ${elsewhere}`)
+      continue
+    }
+    const o = await p.merge(root, r.pr).catch((e): Outcome => ({ ok: false, why: why(e) }))
     if (o.ok) {
       merged.push(`${pr} (${r.label})`)
       log.push(you(p.now(), `you merged ${pr} (${r.label})`, r.id, r.captainId))
@@ -104,7 +115,11 @@ async function merge(p: Paths, ship: Ship, ids: string[]): Promise<ActionResult>
 async function land(p: Paths, ship: Ship, root: string, feature: string): Promise<ActionResult> {
   const x = ship.bridge.exceptions.find((e): e is Extract<Exception, { kind: 'land' }> => e.kind === 'land' && e.root === root && e.mission.feature === feature)
   if (!x) return result(false, `mission ${feature} is not landable now: nothing was run`)
-  const o = await p.land(root, x.mission).catch((e): Outcome => ({ ok: false, why: why(e) }))
+  // Where its pieces' children work, when the ship still has one; every piece's PR must be there.
+  const at = x.mission.pieces.flatMap((piece) => (piece.child ? [repoRootOf(ship, piece.child)] : []))[0] ?? root
+  const elsewhere = x.mission.pieces.map((piece) => (piece.pr ? otherRepo(at, piece.pr) : null)).find(Boolean)
+  if (elsewhere) return result(false, `mission ${feature} did not land: ${elsewhere}`)
+  const o = await p.land(at, x.mission).catch((e): Outcome => ({ ok: false, why: why(e) }))
   if (!o.ok) return result(false, `mission ${feature} did not land: ${o.why}`)
   return result(true, `⇪ mission ${feature} landed`, [you(p.now(), `you landed mission ${feature}`)])
 }
@@ -112,7 +127,7 @@ async function land(p: Paths, ship: Ship, root: string, feature: string): Promis
 async function stop(p: Paths, ship: Ship, ids: string[]): Promise<ActionResult> {
   const robots = ids.map((id) => robotById(ship, id)).filter((r): r is ShipRobot => !!r && isRunning(r))
   if (!robots.length) return result(false, 'none of them is running: nothing was stopped')
-  const o = await p.stop(robots.map((r) => r.child)).catch((e): Outcome => ({ ok: false, why: why(e) }))
+  const o = await p.stop(repoRootOf(ship, robots[0].child), robots.map((r) => r.child)).catch((e): Outcome => ({ ok: false, why: why(e) }))
   if (!o.ok) return result(false, `not stopped: ${o.why}`)
   const at = p.now()
   return result(
@@ -122,13 +137,20 @@ async function stop(p: Paths, ship: Ship, ids: string[]): Promise<ActionResult> 
   )
 }
 
-/** A session's inbox is reached by its short id: a child's own, a captain's from its session id. */
-function inboxOf(ship: Ship, id: string): { label: string; inbox: string | null; robot?: ShipRobot; captain?: Captain } {
-  const r = robotById(ship, id)
-  if (r) return { label: r.label, inbox: r.id, robot: r }
-  const c = captainById(ship, id)
-  if (c) return { label: captainLabel(c), inbox: c.parent ? c.parent.session_id.slice(0, 8) : null, captain: c }
-  return { label: id, inbox: null }
+type Recipient = { label: string; robot?: ShipRobot; captain?: Captain }
+
+/** Writes to one session: a child through its inbox; a captain typed into the pane it runs in,
+ *  else through its inbox when it is a background session. Rejects with why it did not. */
+async function send(p: Paths, to: Recipient, text: string): Promise<void> {
+  if (to.robot) return p.reply(to.robot.id, text)
+  const parent = to.captain?.parent
+  if (!parent) throw new Error('no session: nothing was sent')
+  const pane = p.paneOf(parent.session_id)
+  if (pane !== null) return p.prompt(pane, text)
+  // A parent only reaches the inbox through the daemon's roster, which lists background sessions.
+  await p.reply(parent.session_id.slice(0, 8), text).catch(() => {
+    throw new Error('not open in a pane here, and not a background session with an inbox: nothing was sent')
+  })
 }
 
 async function message(p: Paths, ship: Ship, ids: string[], text: string): Promise<ActionResult> {
@@ -138,17 +160,19 @@ async function message(p: Paths, ship: Ship, ids: string[], text: string): Promi
   const not: string[] = []
   const log: LogEvent[] = []
   for (const id of ids) {
-    const t = inboxOf(ship, id)
-    if (!t.inbox) {
-      not.push(`${t.label} (${t.captain ? 'no session' : 'not on the ship any more'})`)
+    const robot = robotById(ship, id)
+    const captain = robot ? undefined : captainById(ship, id)
+    if (!robot && !captain) {
+      not.push(`${id} (not on the ship any more)`)
       continue
     }
+    const to: Recipient = { label: robot ? robot.label : captainLabel(captain!), robot, captain }
     try {
-      await p.reply(t.inbox, words)
-      sent.push(t.label)
-      log.push(you(p.now(), `you wrote to ${t.label}: ${words}`, t.robot?.id ?? null, t.robot?.captainId ?? t.captain?.id ?? null))
+      await send(p, to, words)
+      sent.push(to.label)
+      log.push(you(p.now(), `you wrote to ${to.label}: ${words}`, robot?.id ?? null, robot?.captainId ?? captain?.id ?? null))
     } catch (e) {
-      not.push(`${t.label}: ${why(e)}`)
+      not.push(`${to.label}: ${why(e)}`)
     }
   }
   const parts = [sent.length ? `✉ sent to ${sent.length > 3 ? plural(sent.length, 'session') : sent.join(', ')}` : '', not.length ? `not sent: ${not.join(' · ')}` : ''].filter(Boolean)

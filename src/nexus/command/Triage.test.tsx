@@ -104,3 +104,29 @@ test('it closes itself once none is left', async () => {
   await act(async () => vi.advanceTimersByTime(SETTLED_MS + 1))
   expect(closed).toBe(1)
 })
+
+test('a card settled elsewhere leaves a notice, and its key does not answer the card behind it', async () => {
+  await draw()
+  expect(card()).toBe('101')
+  const after = ship()
+  after.bridge = { exceptions: after.bridge.exceptions.filter((x) => !('robotId' in x) || x.robotId !== '101'), blocked: after.bridge.blocked.filter((r) => r.id !== '101') }
+  await draw(after)
+  expect(card()).toBeUndefined()
+  expect(host.querySelector('[data-triage-gone]')!.textContent).toBe('#101 was settled elsewhere — ← → for the next')
+  await key('y')
+  await key('1')
+  expect(ran).toEqual([])
+  await key('ArrowRight')
+  expect(card()).toBe('102')
+})
+
+test('"always" takes a second press', async () => {
+  await draw()
+  await key('ArrowRight')
+  await key('a')
+  expect(ran).toEqual([])
+  expect(host.querySelector('[data-triage-out]')!.textContent).toBe('press A again within 4 s to allow it always: Bash: rm -rf build')
+  expect(host.querySelector('[data-triage-option="always"]')!.textContent).toBe('AA again: always')
+  await key('a')
+  expect(ran).toEqual([{ kind: 'answer', robotId: '102', text: 'always' }])
+})

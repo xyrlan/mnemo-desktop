@@ -1,41 +1,28 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
+import type { JSX } from 'react'
+import { useArm } from '../../cockpit/actions'
 import type { SelectionBarProps, ShipAction, ShipRobot } from '../ship-types'
 import { isGreen, isRunning, robotById } from './find'
 
-/** How long a merge or a stop waits for its second click. */
+/** How long a merge or a stop waits for its second click: the app's two-press confirmation
+ *  (`useArm`), the one the cockpit's merge takes. */
 export const ARM_MS = 4_000
-
-type Armed = 'merge' | 'stop' | null
 
 /** What can be done to the shift+clicked robots (spec "Selection"): *merge N green · stop N · open
  *  N · clear*, while there is a selection. A merge and a stop cannot be undone, so each takes a
  *  second click within 4 s; either one, or opening, clears the selection. */
 export function SelectionBar({ ship, selection, onClear, run }: SelectionBarProps): JSX.Element | null {
-  const [armed, setArmed] = useState<Armed>(null)
-  const timer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const { armed, fire: arm } = useArm(ARM_MS)
 
   const robots = [...selection].map((id) => robotById(ship, id)).filter((r): r is ShipRobot => !!r)
   const green = robots.filter(isGreen)
   const running = robots.filter(isRunning)
-
-  // A new selection is a new question: an armed button does not carry over.
-  const key = [...selection].join(',')
-  useEffect(() => {
-    window.clearTimeout(timer.current)
-    setArmed(null)
-  }, [key])
-
   if (!robots.length) return null
 
-  const fire = (what: Exclude<Armed, null>, action: ShipAction) => {
-    window.clearTimeout(timer.current)
-    if (armed !== what) {
-      setArmed(what)
-      timer.current = window.setTimeout(() => setArmed(null), ARM_MS)
-      return
-    }
-    setArmed(null)
+  // Armed for these robots only: a selection that changed is a new question.
+  const mergeKey = `merge:${green.map((r) => r.id).join(',')}`
+  const stopKey = `stop:${running.map((r) => r.id).join(',')}`
+  const fire = (key: string, action: ShipAction) => {
+    if (!arm(key)) return
     onClear()
     void run(action).catch(() => {})
   }
@@ -59,9 +46,9 @@ export function SelectionBar({ ship, selection, onClear, run }: SelectionBarProp
         disabled={!green.length}
         title={green.length ? `merges ${green.map((r) => r.label).join(' ')} through the checks-gated merge` : 'no selected PR is green'}
         className={`${btn} border-state-done bg-green-900 text-green-100`}
-        onClick={() => fire('merge', { kind: 'merge', robotIds: green.map((r) => r.id) })}
+        onClick={() => fire(mergeKey, { kind: 'merge', robotIds: green.map((r) => r.id) })}
       >
-        {armed === 'merge' ? `confirm merge of ${green.length}?` : `✈ merge ${green.length} green`}
+        {armed === mergeKey ? `confirm merge of ${green.length}?` : `✈ merge ${green.length} green`}
       </button>
       <button
         type="button"
@@ -69,9 +56,9 @@ export function SelectionBar({ ship, selection, onClear, run }: SelectionBarProp
         disabled={!running.length}
         title={running.length ? `claude stop ${running.map((r) => r.label).join(' ')}: each keeps its conversation` : 'none of them is running'}
         className={`${btn} border-red-900 bg-[#18213f] text-red-200`}
-        onClick={() => fire('stop', { kind: 'stop', robotIds: running.map((r) => r.id) })}
+        onClick={() => fire(stopKey, { kind: 'stop', robotIds: running.map((r) => r.id) })}
       >
-        {armed === 'stop' ? `confirm stop of ${running.length}?` : `■ stop ${running.length}`}
+        {armed === stopKey ? `confirm stop of ${running.length}?` : `■ stop ${running.length}`}
       </button>
       <button type="button" data-b="open" className={`${btn} border-[#26335c] bg-[#18213f]`} onClick={open}>
         ⤢ open {robots.length}

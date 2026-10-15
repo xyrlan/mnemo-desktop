@@ -22,6 +22,13 @@ test('/dispatch names a repo on the ship and one or more issues', () => {
   expect(err('/dispatch mnemo #x')).toMatch(/^usage: \/dispatch/)
 })
 
+test('a long /dispatch with a stray word is refused at once', () => {
+  const line = `/dispatch mnemo ${Array.from({ length: 40 }, (_, i) => `#${i + 1}`).join(' ')} please`
+  const t = performance.now()
+  expect(err(line)).toMatch(/^usage: \/dispatch/)
+  expect(performance.now() - t).toBeLessThan(50)
+})
+
 test('/msg writes to one issue, all its twins, one twin, a piece, a captain', () => {
   expect(parseCommand('/msg #103 rebase on main', s)).toEqual({ action: { kind: 'message', ids: ['103'], text: 'rebase on main' } })
   expect(parseCommand('/msg #104 both of you', s)).toEqual({ action: { kind: 'message', ids: ['104a', '104b'], text: 'both of you' } })

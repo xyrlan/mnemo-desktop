@@ -1,4 +1,4 @@
-import { MNEMO, ROOT, ship } from './fixtures'
+import { child, MNEMO, pr, ROOT, ship } from './fixtures'
 import { act, type Outcome, type Paths } from './run'
 
 type Call = [string, ...unknown[]]
@@ -13,8 +13,10 @@ function paths(over: Partial<Paths> = {}) {
     answerPrompt: async (c, choice) => (calls.push(['answerPrompt', c.id, choice]), ok),
     merge: async (root, pr) => (calls.push(['merge', root, pr.number]), ok),
     land: async (root, m) => (calls.push(['land', root, m.contract_path]), ok),
-    stop: async (cs) => (calls.push(['stop', ...cs.map((c) => c.id)]), { ok: true, why: '(typed in a terminal tab)' }),
+    stop: async (root, cs) => (calls.push(['stop', root, ...cs.map((c) => c.id)]), { ok: true, why: '(typed in a terminal tab)' }),
     reply: async (id, text) => void calls.push(['reply', id, text]),
+    paneOf: (sessionId) => (sessionId.startsWith('cap-1') ? 7 : null),
+    prompt: async (pane, text) => void calls.push(['prompt', pane, text]),
     dispatch: async (root, issues) => (calls.push(['dispatch', root, ...issues]), ok),
     now: () => 5_000,
     ...over,
@@ -84,7 +86,7 @@ test('land runs on the landable mission only', async () => {
 test('stop reaches only running children, and logs each', async () => {
   const { p, calls } = paths()
   const r = await act(p, { kind: 'stop', robotIds: ['103', '105', '107'] }, ship())
-  expect(calls).toEqual([['stop', '103', '107']])
+  expect(calls).toEqual([['stop', ROOT, '103', '107']])
   expect(r.say).toBe('■ claude stop for #103 #107 (typed in a terminal tab) — each keeps its conversation')
   expect(r.log.map((e) => [e.robotId, e.text])).toEqual([
     ['103', 'you stopped #103'],
@@ -93,23 +95,36 @@ test('stop reaches only running children, and logs each', async () => {
   expect(await act(p, { kind: 'stop', robotIds: ['105'] }, ship())).toMatchObject({ ok: false, say: 'none of them is running: nothing was stopped' })
 })
 
-test('a message goes to each inbox by short id: a child’s own, a captain’s from its session', async () => {
+test('a child is written to through its inbox, a captain in the pane it runs in', async () => {
   const { p, calls } = paths({
     reply: async (id, text) => {
       if (id === '104b') throw 'no inbox socket found for 104b'
       calls.push(['reply', id, text])
     },
   })
-  const r = await act(p, { kind: 'message', ids: ['103', 'cap-2-0000-4000-8000-000000000000', '104b'], text: ' rebase ' }, ship())
+  const r = await act(p, { kind: 'message', ids: ['103', 'cap-1-0000-4000-8000-000000000000', '104b'], text: ' rebase ' }, ship())
   expect(calls).toEqual([
     ['reply', '103', 'rebase'],
-    ['reply', 'cap-2-00', 'rebase'],
+    ['prompt', 7, 'rebase'],
   ])
-  expect(r).toMatchObject({ ok: false, say: '✉ sent to #103, ● reviewer · not sent: #104·b: no inbox socket found for 104b' })
+  expect(r).toMatchObject({ ok: false, say: '✉ sent to #103, ◆ fleet lead · not sent: #104·b: no inbox socket found for 104b' })
   expect(r.log.map((e) => [e.robotId, e.captainId, e.text])).toEqual([
     ['103', 'cap-1-0000-4000-8000-000000000000', 'you wrote to #103: rebase'],
-    [null, 'cap-2-0000-4000-8000-000000000000', 'you wrote to ● reviewer: rebase'],
+    [null, 'cap-1-0000-4000-8000-000000000000', 'you wrote to ◆ fleet lead: rebase'],
   ])
+})
+
+test('a captain in no pane is tried as a background session, and refused clearly when it is not one', async () => {
+  const roster = new Set(['cap-3-00'])
+  const { p, calls } = paths({
+    reply: async (id, text) => {
+      if (!roster.has(id)) throw new Error(`${id} is not in the daemon roster`)
+      calls.push(['reply', id, text])
+    },
+  })
+  const r = await act(p, { kind: 'message', ids: ['cap-2-0000-4000-8000-000000000000', 'cap-3-0000-4000-8000-000000000000'], text: 'hi' }, ship())
+  expect(calls).toEqual([['reply', 'cap-3-00', 'hi']])
+  expect(r.say).toBe('✉ sent to ▲ mnemo main · not sent: ● reviewer: not open in a pane here, and not a background session with an inbox: nothing was sent')
 })
 
 test('dispatch runs in the repo and names it', async () => {
@@ -131,4 +146,33 @@ test('two of the same thing you did are two milestones', async () => {
   const a = await act(p, { kind: 'message', ids: ['103'], text: 'hi' }, ship())
   const b = await act(p, { kind: 'message', ids: ['103'], text: 'hi' }, ship())
   expect(a.log[0].id).not.toBe(b.log[0].id)
+})
+
+test('a merge runs in the child’s own repo, not its captain’s, and refuses a PR of another repo', async () => {
+  const s = ship()
+  // A mnemo-desktop child dispatched by a captain of mnemo stands on mnemo's deck.
+  s.decks[0] = { ...s.decks[0], root: MNEMO, name: 'mnemo' }
+  s.docks = [{ root: ROOT, name: 'mnemo-desktop', captains: [] }]
+  const roots: string[] = []
+  const { p } = paths({ merge: async (root) => (roots.push(root), { ok: true, why: '' }) })
+  expect(await act(p, { kind: 'merge', robotIds: ['105'] }, s)).toMatchObject({ ok: true })
+  expect(roots).toEqual([ROOT])
+  const stray = ship()
+  stray.decks[0].hangar[0] = { ...stray.decks[0].hangar[0], pr: pr(205, { url: 'https://github.com/you/mnemo/pull/205' }) }
+  const r = await act(p, { kind: 'merge', robotIds: ['105'] }, stray)
+  expect(r).toMatchObject({ ok: false, say: 'not merged: PR #205 (#105): PR #205 is in you/mnemo, not in mnemo-desktop' })
+  expect(roots).toHaveLength(1)
+})
+
+test('land runs where its pieces work, and refuses a piece whose PR is in another repo', async () => {
+  const s = ship()
+  const x = s.bridge.exceptions.find((e) => e.kind === 'land')!
+  if (x.kind !== 'land') throw new Error('no land row')
+  x.mission.pieces = [{ name: 'feed', branch: 'feat/x/feed', child: child('f1', { cwd: `${ROOT}/.claude/worktrees/feed` }), pr: pr(301) }]
+  const { p, calls } = paths()
+  await act(p, { kind: 'land', root: ROOT, feature: 'nexus-v2' }, s)
+  expect(calls[0].slice(0, 2)).toEqual(['land', ROOT])
+  x.mission.pieces[0].pr = pr(301, { url: 'https://github.com/you/mnemo/pull/301' })
+  expect(await act(p, { kind: 'land', root: ROOT, feature: 'nexus-v2' }, s)).toMatchObject({ ok: false, say: 'mission nexus-v2 did not land: PR #301 is in you/mnemo, not in mnemo-desktop' })
+  expect(calls).toHaveLength(1)
 })

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { useArm } from '../../cockpit/actions'
 import { tauriMission } from '../../mission/client'
 import { SPRITES } from '../sprites'
 import type { Need, Ship, ShipAction, ShipRobot, TriageProps } from '../ship-types'
@@ -6,6 +7,8 @@ import { captainById, captainLabel, repoNameOf, robotById } from './find'
 
 /** How long "all settled" shows before the card closes itself. */
 export const SETTLED_MS = 1_100
+/** How long "always" waits for its second press: the app's two-press confirmation (`useArm`). */
+export const ALWAYS_MS = 4_000
 /** How many of the child's timeline lines the card shows. */
 const LAST_LINES = 4
 
@@ -62,28 +65,45 @@ function useLastLines(robot: ShipRobot | undefined): string[] | null {
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 
 /** One card per pending decision, answered from the keyboard (spec "Triage"): `1`–`9` and `Y`/`N`
- *  answer, `←`/`→` move, `T` opens the robot, `Esc` closes. It closes itself when none is left. */
+ *  answer, `←`/`→` move, `T` opens the robot, `Esc` closes. It closes itself when none is left.
+ *
+ *  The card shown is pinned by its robot's id, never by its place in the list: a decision settled
+ *  elsewhere takes its card away, and the key meant for it must not answer the card that slid into
+ *  its place. Such a card leaves a notice until `←`/`→`. Before an answer goes, the robot's need
+ *  is read again from the ship. "Always" takes a second press. */
 export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.Element | null {
   const all = useMemo(() => cardsOf(ship), [ship])
   // Answered here: hidden until the ship stops listing them, so the next card comes up at once.
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set())
   const cards = all.filter((c) => !answered.has(c.robot.id))
-  const [at, setAt] = useState(0)
+  const [pinned, setPinned] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [out, setOut] = useState<{ text: string; err: boolean } | null>(null)
   const [words, setWords] = useState('')
-  const i = cards.length ? ((at % cards.length) + cards.length) % cards.length : 0
-  const card = cards[i]
+  const { armed, fire: arm } = useArm(ALWAYS_MS)
+  const card = pinned === null ? cards[0] : cards.find((c) => c.robot.id === pinned)
+  const i = card ? cards.indexOf(card) : -1
+  // Where the shown card stood, and what it was called, for when it is gone.
+  const last = useRef<{ index: number; label: string }>({ index: 0, label: '' })
+  if (card) last.current = { index: i, label: card.robot.label }
+  const gone = !card && cards.length > 0 ? last.current.label : null
   const lines = useLastLines(card?.robot)
+  const shipNow = useRef(ship)
+  shipNow.current = ship
 
   // A fresh triage starts on the first card, with nothing hidden.
   useEffect(() => {
     if (!open) return
-    setAt(0)
+    setPinned(null)
     setAnswered(new Set())
     setOut(null)
     setWords('')
   }, [open])
+
+  // The card on screen is the one the keys answer: pin it as soon as it shows.
+  useEffect(() => {
+    if (open && pinned === null && cards[0]) setPinned(cards[0].robot.id)
+  }, [open, pinned, cards])
 
   // Forget answers the ship no longer lists, so a child that asks again shows again.
   useEffect(() => {
@@ -102,18 +122,37 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
     return () => window.clearTimeout(t)
   }, [settled])
 
-  const answer = async (text: string) => {
-    if (!card || busy) return
-    const id = card.robot.id
+  /** Moves `by` cards from the shown one, or from where a vanished one stood. */
+  const move = (by: 1 | -1) => {
+    if (!cards.length) return
+    const from = card ? i + by : by === 1 ? last.current.index : last.current.index - 1
+    setPinned(cards[((from % cards.length) + cards.length) % cards.length].robot.id)
+  }
+
+  const answer = async (c: Card, text: string) => {
+    if (busy) return
+    const id = c.robot.id
+    const now = cardsOf(shipNow.current).find((x) => x.robot.id === id)
+    if (!now || now.need.kind !== c.need.kind || now.need.text !== c.need.text) {
+      setOut({ text: `${c.robot.label}'s ${c.need.kind} changed or was settled elsewhere: nothing was sent`, err: true })
+      return
+    }
+    if (c.need.kind === 'permission' && text === 'always' && !arm(`always:${id}`)) {
+      setOut({ text: `press A again within ${ALWAYS_MS / 1000} s to allow it always: ${c.need.text}`, err: false })
+      return
+    }
     const action: ShipAction = { kind: 'answer', robotId: id, text }
     setBusy(true)
-    setOut({ text: `answering ${card.robot.label}…`, err: false })
+    setOut({ text: `answering ${c.robot.label}…`, err: false })
     try {
       const r = await run(action)
       setOut({ text: r.say, err: !r.ok })
       if (r.ok) {
         setWords('')
         setAnswered((a) => new Set(a).add(id))
+        // The card that comes up next is the one after it, pinned.
+        const rest = cards.filter((x) => x.robot.id !== id)
+        setPinned(rest.length ? rest[Math.max(0, cards.findIndex((x) => x.robot.id === id)) % rest.length].robot.id : null)
       }
     } catch (e) {
       setOut({ text: e instanceof Error ? e.message : String(e), err: true })
@@ -123,26 +162,28 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   }
 
   const keys = card ? keysOf(card.need) : []
-  const state = useRef({ card, keys, answer, cards })
-  state.current = { card, keys, answer, cards }
+  const state = useRef({ card, keys, answer, move })
+  state.current = { card, keys, answer, move }
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const { card, keys, answer } = state.current
+      const { card, keys, answer, move } = state.current
       if (e.key === 'Escape') onClose()
       else if (typing(e.target)) return
-      else if (e.key === 'ArrowRight') setAt((n) => n + 1)
-      else if (e.key === 'ArrowLeft') setAt((n) => n - 1)
-      else if (e.key.toLowerCase() === 't' && card) {
+      else if (e.key === 'ArrowRight') move(1)
+      else if (e.key === 'ArrowLeft') move(-1)
+      // No card shown (one settled elsewhere): only the arrows and Esc do anything.
+      else if (!card) return
+      else if (e.key.toLowerCase() === 't') {
         onClose()
         onOpen(card.robot.id)
       } else {
         const k = e.key.toLowerCase()
-        const o = keys.find((x) => x.key === k) ?? (card?.need.kind === 'permission' && /^[1-9]$/.test(k) ? keys[Number(k) - 1] : undefined)
+        const o = keys.find((x) => x.key === k) ?? (card.need.kind === 'permission' && /^[1-9]$/.test(k) ? keys[Number(k) - 1] : undefined)
         if (!o) return
-        void answer(o.text)
+        void answer(card, o.text)
       }
       e.preventDefault()
       e.stopPropagation()
@@ -180,7 +221,11 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
             esc
           </button>
         </div>
-        {!card ? (
+        {gone ? (
+          <div data-triage-gone="" className="py-8 text-center text-[14px] text-rose-200">
+            {gone} was settled elsewhere — ← → for the next
+          </div>
+        ) : !card ? (
           <div data-triage-settled="" className="py-8 text-center text-[16px] text-green-300">
             ✓ all settled — the fleet flies on
           </div>
@@ -220,10 +265,10 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
                   disabled={busy}
                   data-triage-option={o.text}
                   className={`rounded-sm border-2 border-rose-600 px-2.5 py-1 font-bold disabled:opacity-50 ${k === 0 ? 'bg-rose-600 text-white' : 'bg-[#2a0a17] text-rose-200'}`}
-                  onClick={() => void answer(o.text)}
+                  onClick={() => void answer(card, o.text)}
                 >
                   <kbd className="mr-1.5 rounded-sm border border-gray-500 bg-black px-1 text-[10px] text-gray-200">{o.key.toUpperCase()}</kbd>
-                  {o.label}
+                  {armed === `always:${card.robot.id}` && o.text === 'always' ? `${o.key.toUpperCase()} again: always` : o.label}
                 </button>
               ))}
             </div>
@@ -232,7 +277,7 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
                 className="flex gap-1.5"
                 onSubmit={(e) => {
                   e.preventDefault()
-                  if (words.trim()) void answer(words.trim())
+                  if (words.trim()) void answer(card, words.trim())
                 }}
               >
                 <input

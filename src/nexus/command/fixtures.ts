@@ -29,7 +29,7 @@ export function child(id: string, over: Partial<ChildSession> = {}): ChildSessio
 }
 
 export const pr = (number: number, over: Partial<Pr> = {}): Pr => ({ number, url: `https://github.com/you/mnemo-desktop/pull/${number}`, state: 'OPEN', head: `fix/${number}`, ci: 'pass', ...over })
-const open: PrFate = { state: 'OPEN', mergedAt: null, closedAt: null, checks: [] }
+const open: PrFate = { state: 'OPEN', mergedAt: null, closedAt: null, checks: [{ name: 'test', startedAt: 500, completedAt: 900, conclusion: 'SUCCESS' }] }
 
 export function robot(id: string, over: Partial<ShipRobot> = {}): ShipRobot {
   return {

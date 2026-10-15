@@ -29,8 +29,14 @@ test('jobEnded waits for the job to stop running', async () => {
   expect(await jobEnded('nexus-test')).toMatchObject({ code: 0 })
 })
 
-test('land lands: the rehearsal first, then the merges', () => {
-  expect(landArgv('docs/superpowers/contracts/x.md')).toEqual(['mnemo', 'land', 'docs/superpowers/contracts/x.md', '--merge'])
+test('land lands with the repo’s own suite: mnemo’s default, or this repo’s pnpm suite', () => {
+  const c = 'docs/superpowers/contracts/x.md'
+  expect(landArgv('/Users/you/github/mnemo', c, 'mac')).toEqual(['mnemo', 'land', c, '--merge'])
+  expect(landArgv('/Users/you/github/mnemo-desktop', c, 'mac')).toEqual([
+    'mnemo', 'land', c, '--merge', '--suite',
+    `sh -c 'export DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH=/Library/Developer/CommandLineTools/usr/bin:"$PATH"; pnpm install --frozen-lockfile && pnpm test && pnpm build'`,
+  ])
+  expect(landArgv('C:\\src\\mnemo-desktop', c, 'windows').at(-1)).toBe('cmd /d /c "pnpm install --frozen-lockfile && pnpm test && pnpm build"')
 })
 
 test('a stop is claude stop on each child’s own account, one line for the shell', () => {
