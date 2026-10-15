@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { ShipScene } from '../ShipScene'
 import { SHIP_SPRITES, SPRITES } from '../sprites'
 import type { LogEvent, Ship, ShipAction, ShipSceneProps } from '../ship-types'
+import type { MenuTarget } from '../ui/menus'
+import { closeWindow, registerWindow, windowStore } from '../ui/windows'
 import { captain, deck, dock, mission, pr, ROOT, robot, ship } from './fixtures'
 import { CONFIRM_MS } from './Bridge'
 import { TURN_MS } from './voices'
@@ -42,7 +44,13 @@ function fleet(): Ship {
 
 let root: Root | null = null
 let host: HTMLElement
-const calls: { open: string[]; select: string[]; action: ShipAction[]; triage: number } = { open: [], select: [], action: [], triage: 0 }
+const calls: { open: string[]; select: string[]; action: ShipAction[]; triage: number; menu: { target: MenuTarget; x: number; y: number }[] } = {
+  open: [],
+  select: [],
+  action: [],
+  triage: 0,
+  menu: [],
+}
 
 function draw(over: Partial<ShipSceneProps> = {}) {
   const props: ShipSceneProps = {
@@ -54,6 +62,7 @@ function draw(over: Partial<ShipSceneProps> = {}) {
     onSelect: (id) => void calls.select.push(id),
     onAction: (a) => void calls.action.push(a),
     onTriage: () => void calls.triage++,
+    onMenu: (target, x, y) => void calls.menu.push({ target, x, y }),
     bridge: (
       <div data-fleet-prompt="">
         <input />
@@ -77,6 +86,7 @@ beforeEach(() => {
   calls.select = []
   calls.action = []
   calls.triage = 0
+  calls.menu = []
 })
 /** `navigator.platform`, for ⌥1–9 (macOS only). */
 const platform = (p: string) => Object.defineProperty(navigator, 'platform', { value: p, configurable: true })
@@ -587,4 +597,40 @@ test('a captain waiting on you has a row, ⌥N and an open button, tagged with i
   expect(calls.open).toEqual(['cap-d', 'cap-d'])
   expect(calls.action).toEqual([])
   expect($('.ship-bridge')!.dataset.tone).toBe('red')
+})
+
+test('a right-click names what it landed on: a robot, a captain, else the deck or the dock; empty hull keeps the native menu', async () => {
+  await draw()
+  const right = (el: Element) => {
+    const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 34 })
+    el.dispatchEvent(e)
+    return e.defaultPrevented
+  }
+  expect(right(robotEl('359')!)).toBe(true)
+  expect(right($('.ship-captain[data-ship-id="cap-1"]')!)).toBe(true)
+  expect(right($('[data-deck="/home/dev/mnemo-desktop"]')!)).toBe(true)
+  expect(right($('.ship-docked[data-ship-id="cap-d"]')!)).toBe(true)
+  expect(right($('[data-dock="/home/dev/mnemo"]')!)).toBe(true)
+  expect(right($('.ship-brand')!)).toBe(false)
+  expect(calls.menu).toEqual([
+    { target: { kind: 'robot', id: '359' }, x: 12, y: 34 },
+    { target: { kind: 'captain', id: 'cap-1' }, x: 12, y: 34 },
+    { target: { kind: 'deck', id: '/home/dev/mnemo-desktop' }, x: 12, y: 34 },
+    { target: { kind: 'captain', id: 'cap-d' }, x: 12, y: 34 },
+    { target: { kind: 'dock', id: '/home/dev/mnemo' }, x: 12, y: 34 },
+  ])
+})
+
+test('the bar opens PROJECTS and MISSIONS as windows and SYSTEMS as a menu', async () => {
+  const offs = ['projects', 'missions'].map((id) => registerWindow({ id, title: id, render: () => null }))
+  await draw()
+  const nav = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.ship-navbtn')].find((b) => b.textContent!.startsWith(label))!
+  await click(nav('PROJECTS'))
+  expect(windowStore.getState().open?.id).toBe('projects')
+  await click(nav('MISSIONS'))
+  expect(windowStore.getState().open?.id).toBe('missions')
+  await click(nav('SYSTEMS'))
+  expect(calls.menu.map((m) => m.target)).toEqual([{ kind: 'systems', id: '' }])
+  closeWindow()
+  for (const off of offs) off()
 })

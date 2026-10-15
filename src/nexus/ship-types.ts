@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import type { AgentState, WaitingFor } from '../fleet/types'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
+import type { MenuTarget } from './ui/menus'
 
 // ------------------------------------------------------------------ the feed --
 // What `nexus_feed` adds to the snapshot, read from each session's transcript and job.
@@ -229,6 +230,9 @@ export type ShipSceneProps = {
   onAction(action: ShipAction): void
   /** The `! N need you` chip. */
   onTriage(): void
+  /** A right-click on a captain, a robot, a deck or a dock, or the bar's SYSTEMS button: the view
+   *  opens the menu at (x, y), in viewport px. */
+  onMenu(target: MenuTarget, x: number, y: number): void
   /** The fleet prompt, drawn inside the bridge. */
   bridge: ReactNode
   reducedMotion: boolean

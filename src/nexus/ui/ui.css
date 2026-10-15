@@ -1,0 +1,76 @@
+/* The Nexus's own interface kit (`src/nexus/ui/`): every window, menu and dialog the app opens looks
+   like the ship (spec `2026-10-15-nexus-app-design.md`). Colour means state only; the frame is the
+   ship's hull. Mounted anywhere, so it carries its tokens itself. */
+
+.nx {
+  --nx-space: #070b17;
+  --nx-hull: #0e1529;
+  --nx-hull-2: #121a33;
+  --nx-edge: #2b3a6b;
+  --nx-edge-hi: #a5b4fc;
+  --nx-ink: #dfe6ff;
+  --nx-dim: #7f8bb3;
+  --nx-faint: #4a5680;
+  --nx-pale: #c7d2fe;
+  --nx-danger: var(--state-needs-you, #fb7185);
+  --nx-ok: var(--state-done, #4ade80);
+  color: var(--nx-ink);
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.nx button { font: inherit; color: inherit; cursor: pointer; }
+.nx button:disabled { cursor: default; opacity: 0.45; }
+.nx kbd { font: 10px ui-monospace, monospace; padding: 0 4px; border: 1px solid var(--nx-faint); border-radius: 2px; background: #000; color: var(--nx-pale); }
+
+/* ---------- a window: over the ship, the ship dimmed behind it ---------- */
+.nx-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: #050812b3; }
+.nx-window {
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 72px);
+  border: 2px solid var(--nx-edge-hi);
+  border-radius: 4px;
+  background: var(--nx-hull);
+  box-shadow: 0 0 0 3px #000, 8px 8px 0 #000, 0 0 40px #6366f133;
+}
+.nx-window-bar { display: flex; flex: none; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 2px solid var(--nx-edge); background: var(--nx-hull-2); }
+.nx-window-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; color: var(--nx-pale); text-transform: uppercase; }
+.nx-window-sub { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
+.nx-window-close { margin-left: auto; padding: 0 6px; border: 2px solid var(--nx-edge); border-radius: 2px; background: none; color: var(--nx-dim); }
+.nx-window-close:hover { border-color: var(--nx-edge-hi); color: #fff; }
+.nx-window-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+
+/* ---------- a menu: right-click on a figure, or under a bar button ---------- */
+.nx-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 200px;
+  padding: 4px 0;
+  border: 2px solid var(--nx-edge-hi);
+  border-radius: 3px;
+  background: var(--nx-hull);
+  box-shadow: 0 0 0 2px #000, 5px 5px 0 #000;
+}
+.nx-menu-head { padding: 3px 10px 5px; border-bottom: 1px solid var(--nx-edge); color: var(--nx-dim); white-space: nowrap; }
+.nx-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 10px; border: 0; background: none; text-align: left; white-space: nowrap; }
+.nx-menu-item[data-active] { background: #1d2750; color: #fff; }
+.nx-menu-item[data-danger] { color: var(--nx-danger); }
+.nx-menu-item .nx-hint { margin-left: auto; color: var(--nx-faint); }
+.nx-menu-sep { height: 1px; margin: 4px 0; background: var(--nx-edge); }
+
+/* ---------- the pieces' shared bits ---------- */
+.nx-btn { padding: 1px 9px; border: 2px solid var(--nx-edge); border-radius: 2px; background: #18213f; font-weight: 700; }
+.nx-btn:hover:not(:disabled) { border-color: var(--nx-edge-hi); }
+.nx-btn[data-tone='go'] { border-color: var(--nx-ok); background: #14532d; color: #dcfce7; }
+.nx-btn[data-tone='danger'] { border-color: #7f1d1d; color: #fecaca; }
+.nx-input { padding: 3px 8px; border: 2px solid var(--nx-edge); border-radius: 2px; background: #0b0d22; color: #fff; font: inherit; outline: 0; }
+.nx-input:focus { border-color: var(--nx-edge-hi); }
+.nx-section { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--nx-pale); text-transform: uppercase; }
+.nx-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-left: 3px solid var(--nx-edge); background: #0b0d22cc; }
+.nx-row + .nx-row { margin-top: 2px; }
+.nx-muted { color: var(--nx-dim); }
+
+/* A confirmation, above any window. */
+.nx-confirm-layer { z-index: 61; }
+.nx-confirm-body { margin: 0 0 12px; white-space: pre-wrap; }
+.nx-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
