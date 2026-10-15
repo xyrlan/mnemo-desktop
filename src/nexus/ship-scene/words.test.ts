@@ -1,16 +1,11 @@
 import { captain, mission, pr, robot, ship } from './fixtures'
-import { ago, captainHover, bridgeStatus, chips, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
+import { ago, captainHover, bridgeStatus, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
 
 test('ago reads like the prototype', () => {
   expect(ago(40_000)).toBe('40s')
   expect(ago(48 * 60_000)).toBe('48 min')
   expect(ago(5.1 * 3_600_000)).toBe('5.1 h')
   expect(ago(2 * 3_600_000)).toBe('2 h')
-})
-
-test('chips count, with one robot that needs you in the singular', () => {
-  expect(chips({ working: 2, need: 1, ready: 12 })).toEqual({ working: '⚙ 2 working', need: '! 1 needs you', ready: '✓ 12 ready' })
-  expect(chips({ working: 0, need: 3, ready: 0 }).need).toBe('! 3 need you')
 })
 
 test('the rate chip: calls and output a minute, input and cache share on hover, no cost', () => {

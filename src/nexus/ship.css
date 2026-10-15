@@ -86,10 +86,6 @@
   font-weight: 700;
   white-space: nowrap;
 }
-.ship-chip[data-chip='working'] { color: var(--ship-working); }
-.ship-chip[data-chip='need'] { color: var(--ship-need); }
-.ship-chip[data-chip='need'][data-zero] { opacity: 0.35; }
-.ship-chip[data-chip='ready'] { color: var(--ship-done); }
 .ship-chip[data-chip='rate'] { color: #c4b5fd; cursor: help; }
 /* The account switcher, as wide as in a sidebar, then the bar's buttons. With the drawer open the
    bar is narrow: the rate chip (its title has it all) and the switcher give way first. */
