@@ -1,0 +1,30 @@
+/* The PROJECTS window, in the ship's look (`src/nexus/ui/ui.css`'s tokens and classes). */
+
+.nx-projects { display: flex; flex-direction: column; gap: 8px; }
+.nx-projects-bar { display: flex; align-items: center; gap: 8px; margin: 0; }
+.nx-projects-filter { flex: 1; min-width: 0; }
+.nx-projects-base { flex: 0 1 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-projects-error { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 4px 8px; border-left: 3px solid var(--nx-danger); background: #2a0f1a; color: #fecaca; white-space: pre-wrap; }
+.nx .nx-projects-error .nx-projects-x { margin-left: auto; }
+.nx-projects-empty { margin: 8px 0; }
+.nx-projects-list { display: flex; flex-direction: column; }
+.nx-projects-folds { display: flex; gap: 14px; }
+.nx .nx-projects-link { padding: 0; border: 0; background: none; color: var(--nx-dim); }
+.nx .nx-projects-link:hover { color: var(--nx-pale); }
+.nx .nx-projects-x { padding: 0 4px; border: 0; background: none; color: var(--nx-faint); }
+.nx .nx-projects-x:hover { color: var(--nx-danger); }
+
+.nx-row.nx-project { flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 8px; }
+.nx-project-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nx-project-name { flex: none; font-weight: 700; color: #fff; }
+.nx-project-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-project-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; }
+.nx-project-line .nx-faint { color: var(--nx-faint); }
+.nx-project-session { white-space: nowrap; }
+.nx-project-session[data-live='here'] { color: var(--nx-ok); }
+.nx-project-session[data-live='bg'] { color: var(--nx-pale); }
+.nx-project-cmd { display: inline-flex; align-items: center; border: 1px solid var(--nx-edge); border-radius: 2px; }
+.nx .nx-project-run { padding: 0 6px; border: 0; background: none; }
+.nx .nx-project-run:hover { color: #fff; }
+.nx-project-label { width: 140px; }
+.nx-project-command { flex: 1; min-width: 160px; }
