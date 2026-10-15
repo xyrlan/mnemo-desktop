@@ -1,10 +1,11 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view (for a
- *  read-only tab) and diff, ⌘W claimed while the Nexus is open; the sessions the Nexus starts
- *  (`./start`), their Claude session learnt while no pane bar asks for it, and the tabs kept across
- *  a restart (`./persist`). Nothing here shows the workbench: a repo opens as a shell in a tab. */
+ *  read-only tab) and diff, ⌘W claimed; the sessions the Nexus starts (`./start`), the Claude
+ *  session each terminal runs, learnt here, and the tabs kept across a restart. Every terminal the
+ *  app keeps is reachable: in a drawer tab, or through its live Claude's captain (`./persist`). A
+ *  repo opens as a shell in a tab. */
 import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
-import { paneRunsClaude } from '../../chrome/running'
+import { paneRuns } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
 import { tauriDiff } from '../../diff/client'
 import { fleetStore } from '../../fleet/store'
@@ -17,9 +18,9 @@ import { nexusStore } from '../store'
 import type { DrawerDeps } from './Drawer'
 import { claimClose } from './keys'
 import { deepestWorktree } from './model'
-import { readTabs, reopenTabs, tabsToSave, writeTabs } from './persist'
+import { launchDrawer, type Launch } from './launch'
 import { createDrawer } from './sessions'
-import { createSessions, followPanes, type Sessions } from './start'
+import { createSessions, type Sessions } from './start'
 
 function storage(): Storage | null {
   try {
@@ -49,31 +50,22 @@ export const liveSessions: Sessions = (sessions = createSessions({
   nexus: nexusStore,
   skipPermissions: () => (settingsStore.getState() as { skipPermissions?: boolean }).skipPermissions !== false,
   newId,
-  runsClaude: paneRunsClaude,
+  runs: paneRuns,
+  now: Date.now,
 }))
 
-// The tabs kept from the last run come back once the layout store has its panes back; from then on
-// what the drawer shows is kept. Tabs follow the Claude session their pane runs.
-const kept = storage()
-let restoring = true
-const reopen = () => {
-  if (!restoring || !layout.getState().restored) return
-  restoring = false
-  reopenTabs(readTabs(kept), layout.getState().panes, drawer, nexusStore)
-}
-const unwatchLayout = layout.subscribe((s, prev) => {
-  reopen()
-  if (s.panes !== prev.panes) followPanes(nexusStore, s.panes)
-})
-reopen()
-const unwatchTabs = nexusStore.subscribe((s, prev) => {
-  if (restoring || (s.tabs === prev.tabs && s.activeTab === prev.activeTab)) return
-  writeTabs(kept, tabsToSave(s))
-})
+// The drawer's part of the launch: the workbench's tabs pocketed, the tabs kept from the last run
+// back, every terminal reachable; from then on tabs follow their pane's Claude session.
+const launch: Launch = launchDrawer({ layout, drawer, nexus: nexusStore, sessions: liveSessions, runs: paneRuns, storage: storage() })
 
-// An offscreen pane has no pane bar to learn which Claude session it runs: asked here, as often.
+// Which Claude session each terminal runs, shown in a tab or not, then what runs in each
+// (`Launch.check`): tabs follow it (`followPanes`), and the restore resumes it. A pane whose
+// session could not be learnt keeps the one it had, and is still checked.
 const stopLearning = pollWhileShown(
-  () => Promise.all(Object.values(layout.getState().panes).flatMap((p) => (p.offscreen ? [learnSession(p.id, tauriSession, layout)] : []))),
+  async () => {
+    await Promise.allSettled(Object.values(layout.getState().panes).flatMap((p) => (p.view === 'terminal' ? [learnSession(p.id, tauriSession, layout)] : [])))
+    await launch.check()
+  },
   SESSION_POLL_MS,
   { hiddenMs: SESSION_HIDDEN_MS, wait: true },
 )
@@ -91,9 +83,8 @@ export const liveDrawer: DrawerDeps = {
 }
 
 import.meta.hot?.dispose(() => {
+  launch.stop()
   unclaim()
   drawer.dispose()
-  unwatchLayout()
-  unwatchTabs()
   stopLearning()
 })

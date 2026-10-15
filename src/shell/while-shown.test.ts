@@ -148,7 +148,7 @@ describe('pollWhileShown', () => {
 })
 
 // Every timer left in the app, read from disk. A new poll goes through `pollWhileShown` (or
-// reads `document.hidden` itself, as the mission poll and the Checks tab do); one that should
+// reads `document.hidden` itself, as the mission poll does); one that should
 // run while nobody looks is named here with why. The app has no Node types: fs is typed here.
 type Fs = {
   readdirSync(p: string, o: { withFileTypes: true }): { name: string; isDirectory(): boolean }[]
@@ -167,15 +167,7 @@ function sources(dir = `${cwd}/src`): [string, string][] {
 /** What may still `setInterval`, and why it starts no process or read. */
 const UNPOLLED: Record<string, string> = {
   // Clocks: they move "3 min ago" on screen, nothing more.
-  'src/accounts/AccountSwitcher.tsx': 'clock',
   'src/conversation/ConversationView.tsx': 'clock',
-  'src/dispatch/pane.tsx': 'clock',
-  'src/sidebar/WorktreeCardAgents.tsx': 'clock',
-  'src/vault/HealthTable.tsx': 'clock',
-  // Counts focused time, and reads document.hasFocus() on each beat already.
-  'src/conversation/usage.ts': 'focus counter',
-  // `watchLogin`: 60 tries while someone logs in to gh in a pane, then stops.
-  'src/github/store.ts': 'bounded login watch',
 }
 
 test('every setInterval left in the app is a clock or named with why it runs while hidden', () => {

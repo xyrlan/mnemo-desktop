@@ -3,32 +3,10 @@ import type { MemoryFeed } from '../memory/types'
 import type { ReviewProject } from '../learned/client'
 import { parseDecided } from '../learned/types'
 import type { RunResult } from '../vault/types'
-import type { RepoNode } from '../fleet/types'
-import type { Pane, Tab } from '../layout/store'
 
-/** What the Memory panel reads for: the worktree on screen and the session in its focused pane. */
+/** What the Memory window reads for: a repo's folder, and the Claude session it is about (none
+ *  there: the window picks a repo, not a session). */
 export type MemoryTarget = { cwd: string; sessionId: string | null }
-
-/** The layout fields the target is read from. `activeWorktree` is optional: before the
- *  workspace model it did not exist. */
-export type LayoutView = { activeWorktree?: string | null; tabs: Tab[]; activeTab: string; panes: Record<number, Pane> }
-
-/** The worktree on screen — the one chosen, else (as the shell shows it) the first repo's main
- *  checkout, else the focused pane's folder — and the Claude session its focused pane runs: the
- *  one the pane was opened for, else the one the fleet found running in it. Null with nothing
- *  to read for. */
-export function targetOf(layout: LayoutView, repos: RepoNode[]): MemoryTarget | null {
-  const tab = layout.activeTab ? layout.tabs.find((t) => t.id === layout.activeTab) : undefined
-  const pane = tab ? layout.panes[tab.focused] : undefined
-  const firstMain = repos[0] && (repos[0].worktrees.find((w) => w.kind === 'main')?.path ?? repos[0].root)
-  const cwd = layout.activeWorktree ?? firstMain ?? pane?.cwd ?? null
-  if (!cwd) return null
-  let sessionId = pane?.sessionId ?? null
-  if (!sessionId && pane) {
-    for (const r of repos) for (const w of r.worktrees) for (const a of w.agents) if (a.paneId === pane.id) sessionId ??= a.sessionId
-  }
-  return { cwd, sessionId }
-}
 
 export const sameTarget = (a: MemoryTarget | null, b: MemoryTarget | null) => a?.cwd === b?.cwd && a?.sessionId === b?.sessionId
 

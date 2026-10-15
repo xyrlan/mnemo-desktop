@@ -6,20 +6,11 @@ import { useStore } from 'zustand'
  * Where a screen draws into the shell. Each piece mounts itself from its own
  * `src/<dir>/view.tsx` (which `App.tsx` imports by glob), so no piece edits the shell:
  *
- *     mountInSlot('status-bar', StatusBar)
+ *     mountInSlot('overlay', Nexus)
  *
- * - `left-sidebar`, `right-sidebar`: the sidebar's content. The shell draws the column — its
- *   width (`useShell`), its collapse, its border and the resize handle on the seam — and the
- *   component fills it (`h-full`); a closed sidebar's component stays mounted, hidden. Nothing
- *   mounted there: no column at all.
- * - `status-bar`: the bar along the bottom. The component draws the whole bar (Orca's h-6,
- *   `border-t`); with none mounted, the shell holds the row with an empty strip of that height.
- * - `titlebar-right`: a cluster at the right end of the window's top band (the top-right group's
- *   tab row), before the right-sidebar toggle. The tab rows themselves are the workbench's own:
- *   one per group (src/tab-group), not a slot.
- * - `overlay`: drawers, dialogs, palettes, the pet, notification stacks — rendered once at the
- *   root after everything else, inside the shell's `TooltipProvider`; each positions itself
- *   (fixed, or a Radix portal).
+ * - `overlay`: the Nexus, its toaster, the notification stack, the dictation indicator —
+ *   rendered at the root, inside the shell's `TooltipProvider`; each positions itself (fixed, or
+ *   a Radix portal). It is the one slot: the workbench's columns, bars and rows went with it.
  *
  * A slot draws its components in the order they were mounted, each inside its own error
  * boundary. Mounting the same component in the same slot twice draws it once, until both
@@ -30,9 +21,9 @@ import { useStore } from 'zustand'
  * of drawing a second copy; the earlier mount's undo then does nothing. So in dev two different
  * components in one slot need different names; a component with no name is never replaced.
  */
-export type ShellSlot = 'left-sidebar' | 'right-sidebar' | 'status-bar' | 'titlebar-right' | 'overlay'
+export type ShellSlot = 'overlay'
 
-export const SLOTS: readonly ShellSlot[] = ['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-right', 'overlay']
+export const SLOTS: readonly ShellSlot[] = ['overlay']
 
 /** One component in one slot; `key` tells React two entries apart. */
 export type SlotEntry = { key: number; component: ComponentType }

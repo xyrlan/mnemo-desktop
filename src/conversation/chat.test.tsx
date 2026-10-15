@@ -32,7 +32,6 @@ vi.mock('react-virtuoso', async () => {
 })
 
 import { ConversationView } from './ConversationView'
-import ConversationFace from './Face'
 import { ChatInputContext, type ApprovalCardProps, type ChatInputParts, type ComposerProps, type QuestionCardProps } from './chat-input'
 import { paneAgent, type ChatAgent, type PaneSinks } from './agent'
 import { makeChatPty } from '../chat-input/pty'
@@ -41,11 +40,6 @@ import { approvalDetail, approvalSummary, askQuestions, proposedHunks, runSenten
 import type { ConversationClient } from './client'
 import type { Card, ContextUsage, FollowEvent, SessionStatus } from './types'
 import type { ToolCard } from './stream'
-import { store } from '../layout/app-store'
-import { leaf } from '../layout/tree'
-import { missionStore } from '../mission/app-store'
-import { parent } from '../mission/fixtures'
-import type { Snapshot } from '../mission/types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -455,40 +449,6 @@ test.each([
   const { a, keys } = typed(runs)
   for (const write of [() => a.send('rm -rf /'), () => a.bash!('rm -rf /'), () => a.allow(), () => a.deny(), () => a.answer(0)]) await expect(write()).rejects.toThrow()
   expect(keys).toEqual([])
-})
-
-const PANE = 5
-const snapWith = (status: string, waiting_for?: string | null): Snapshot => ({
-  repos: [{ root: '/repo', name: 'repo', parents: [parent({ session_id: 's1', status, cwd: '/repo', waiting_for })], missions: [], children: [] }],
-  errors: [],
-  at: '',
-})
-
-test('the face answers through its pane, and its terminal button flips back to the terminal', async () => {
-  store.setState({
-    tabs: [{ id: 't', root: leaf(PANE), focused: PANE }],
-    activeTab: 't',
-    panes: { [PANE]: { id: PANE, view: 'terminal', cwd: '/repo', sessionId: 's1', face: 'conversation' } },
-  })
-  missionStore.setState({ snapshot: snapWith('waiting', 'permission prompt') })
-  const { tauriConversation } = await import('./client')
-  vi.spyOn(tauriConversation, 'follow').mockImplementation(async (_s, _c, _t, on) => {
-    on(lines([user('u1', 0, 'go'), tool('t1', 'Bash', { command: 'make' })]))
-    return () => {}
-  })
-  const { p, seen } = parts()
-  const { s, writes } = sinks()
-  await render(
-    <ChatInputContext.Provider value={p}>
-      <ConversationFace paneId={PANE} sinks={s} />
-    </ChatInputContext.Provider>,
-  )
-  expect(q('.conversation-face')?.hasAttribute('data-ui')).toBe(true)
-  await act(() => seen.approval!.onAllow())
-  expect(writes).toEqual([`approval ${PANE} true`])
-
-  await act(async () => q('.cv-to-terminal')!.click())
-  expect(store.getState().panes[PANE].face).toBe('terminal')
 })
 
 // ---- the context ring -------------------------------------------------------------------------

@@ -1,6 +1,17 @@
 import dagre from '@dagrejs/dagre'
 import type { Edge, Node } from '@xyflow/react'
 
+/** What a `card` node shows. `tone` colours the border, `pulse` animates it (BLOCKED). */
+export type CardData = {
+  label: string
+  sub?: string
+  badge?: string
+  tone?: 'ok' | 'warn' | 'bad' | 'muted' | 'accent'
+  pulse?: boolean
+  [key: string]: unknown
+}
+export type CardNode = Node<CardData, 'card'>
+
 export type Rankdir = 'LR' | 'TB'
 export type LayoutOptions = { rankdir?: Rankdir; width?: number; height?: number; gap?: number }
 

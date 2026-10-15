@@ -19,18 +19,14 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 const emit = (name: 'job-line' | 'job-exit', payload: unknown) => jobs.on[name]({ payload })
 
-import { store as layout } from '../layout/app-store'
 import { cockpitStore } from '../cockpit/app-store'
 import { dispatchContract, dispatchIssue, dispatchIssues, dispatchKey, resumeChildren } from './actions'
 
-const typed: [string | undefined, string][] = []
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
-  typed.length = 0
   jobs.runs = []
   jobs.refuse = null
-  layout.setState({ openCommandTab: async (cwd, cmd) => void typed.push([cwd, cmd]) })
   cockpitStore.setState({ drawer: null, jobs: {} })
 })
 
@@ -38,7 +34,6 @@ test('dispatchIssue runs the single-issue command headless, unchanged', async ()
   dispatchIssue('/repo', 45)
   await flush()
   expect(jobs.runs).toEqual([{ id: dispatchKey('/repo', [45]), cwd: '/repo', argv: ['mnemo', 'dispatch', '45'] }])
-  expect(typed).toEqual([])
 })
 
 test('dispatchIssues runs every issue in one command, in the order given, and opens its drawer', async () => {

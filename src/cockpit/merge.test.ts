@@ -30,8 +30,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   },
 }))
 
-import { checkVerdict, gate, mergeKey, type Check, type PrRead } from './merge'
-import { mergePr } from './actions'
+import { checkVerdict, gate, mergeChecked, mergeKey, type Check, type PrRead } from './merge'
 import { cockpitStore } from './app-store'
 import { jobState } from './store'
 import type { Pr } from '../mission/types'
@@ -61,9 +60,9 @@ function script({ reads, merge = {}, ready = {} }: { reads: PrRead[]; merge?: An
 
 const job = () => cockpitStore.getState().jobs[KEY]
 const verbs = () => gh.runs.map((r) => r.argv.slice(2, 3)[0])
-/** Runs `mergePr` to its end. */
+/** Runs `mergeChecked` to its end. */
 async function merge(p: Pr = pr) {
-  mergePr(ROOT, p)
+  void mergeChecked(ROOT, p)
   await vi.waitFor(() => expect(job()?.running).toBe(false))
 }
 
@@ -198,8 +197,8 @@ test('a merge that cannot read the PR, or cannot start gh, fails with the reason
 
 test('a second press while the merge runs starts nothing', async () => {
   script({ reads: [view(), view({ state: 'MERGED' })] })
-  mergePr(ROOT, pr)
-  mergePr(ROOT, pr)
+  void mergeChecked(ROOT, pr)
+  void mergeChecked(ROOT, pr)
   await vi.waitFor(() => expect(job()?.running).toBe(false))
   expect(verbs()).toEqual(['view', 'merge', 'view'])
 })

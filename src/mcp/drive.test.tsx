@@ -138,16 +138,16 @@ describe('parseKeys', () => {
 })
 
 describe('key', () => {
-  it('reaches the app chords the way a real ⌘K does', async () => {
+  it('reaches the app chords the way a real ⌘W does', async () => {
     const got: (string | null)[] = []
     const onKey = (e: KeyboardEvent) => got.push(actionForKey(e, 'mac'))
     window.addEventListener('keydown', onKey, true)
     try {
-      expect(await drive({ action: 'key', keys: 'Meta+k Meta+Shift+d Meta+Alt+ArrowLeft' })).toMatchObject({ ok: true })
+      expect(await drive({ action: 'key', keys: 'Meta+w Meta+Shift+w Meta+e Meta+Alt+ArrowLeft' })).toMatchObject({ ok: true })
     } finally {
       window.removeEventListener('keydown', onKey, true)
     }
-    expect(got).toEqual(['palette.open', 'pane.split.col', 'focus.left'])
+    expect(got).toEqual(['pane.close', 'tab.close', 'dictation.toggle', null])
   })
 
   it('carries the legacy key codes xterm reads', async () => {

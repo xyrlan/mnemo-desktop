@@ -10,7 +10,7 @@ pnpm --dir tools/preview install               # playwright, on its own lockfile
 pnpm --dir tools/preview exec playwright install chromium   # once per machine
 
 node tools/preview/shot.mjs --scenario terminal-pane --out /tmp/terminal.png
-node tools/preview/shot.mjs --scenario empty-workspace --out /tmp/home.png --size 1280x800
+node tools/preview/shot.mjs --scenario empty-workspace --out /tmp/nexus.png --size 1280x800
 node tools/preview/shot.mjs --list
 ```
 
@@ -52,9 +52,10 @@ scenario('job-running', {
   give it an `afterMs`. The shot waits for the last one.
 - Events the page itself emits reach its own listeners and never reach `ipc`.
 
-`fixtures/app.mjs` is the launch state with nothing going on; the first two scenarios are the app
-as it stands today. `terminal-pane` restores its tab through `workspace_read`, so a change to the
-saved workspace format means updating that fixture.
+`fixtures/app.mjs` is the launch state with nothing going on. `empty-workspace` is the app as a
+fresh boot opens it: the Nexus, empty. `terminal-pane` restores a saved tab through
+`workspace_read` and shows it as a drawer session, so a change to the saved workspace format means
+updating that fixture.
 
 ## Tests
 
@@ -62,4 +63,6 @@ saved workspace format means updating that fixture.
 pnpm --dir tools/preview test
 ```
 
-The last of them shoot both scenarios through the real vite, so they need the repo's deps too.
+The last of them shoot `nexus`, `empty-workspace` and `terminal-pane` through the real vite and
+look at the page they drew (no workbench element, the drawer's tabs), so they need the repo's deps
+too.

@@ -16,9 +16,8 @@ function localStorageOrNull(): Storage | null {
   }
 }
 
-/** The app's one diff store: every worktree's changes as last read, and the notes not sent yet.
- *  The workbench's diff pane and the Nexus's Changes window share it, so a note written in one
- *  shows in the other. */
+/** The app's one diff store: every worktree's changes as last read, and the notes not sent yet,
+ *  which the Changes window keeps across its openings. */
 export const diffStore = createDiffStore({
   client: tauriDiff,
   target: (worktree) => {

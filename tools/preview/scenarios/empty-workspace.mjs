@@ -1,4 +1,4 @@
-// The app as it opens with no saved workspace and nothing in history: Home, empty.
+// The app as it opens with no saved workspace and nothing in history: the Nexus, empty.
 import { scenario } from '../scenario.mjs'
 import { appIpc } from '../fixtures/app.mjs'
 

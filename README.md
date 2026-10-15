@@ -2,7 +2,7 @@
 
 # mnemo-desktop
 
-Desktop shell for the mnemo agentic development environment. Sub-project 1: a terminal with tabs, splits and a command palette, enough to replace your daily terminal so the mission cockpit (sub-project 2) can live on screen.
+Desktop app for the mnemo agentic development environment: the Nexus, a ship that shows every Claude Code session you run and every child you dispatch, with each session's live terminal in a drawer beside it.
 
 ## Dev
 
@@ -10,15 +10,15 @@ Desktop shell for the mnemo agentic development environment. Sub-project 1: a te
     pnpm install
     pnpm tauri dev
 
-Run your parent Claude Code session inside the app from the repo whose project memory you want (`cd ~/github/mnemo && claude --continue`); dispatch children then appear in the mission sidebar.
+Start a session from the app (right-click a deck or a dock: *New session*, or type `/new <repo>` in the bridge's prompt), or run your parent Claude Code session in a terminal of its own; its captain, and the children it dispatches, then appear on the ship.
 
 ## Install
 
     pnpm run install-app
 
-Builds the release bundle, quits the running app, swaps it into `/Applications/mnemo.app` and relaunches it — one command, and the one to run after every merge. Safe to run from a pane of the app it is replacing: the swap runs detached, so quitting the app cannot kill the install halfway. `--no-launch` leaves the app closed.
+Builds the release bundle, quits the running app, swaps it into `/Applications/mnemo.app` and relaunches it — one command, and the one to run after every merge. Safe to run from a terminal of the app it is replacing: the swap runs detached, so quitting the app cannot kill the install halfway. `--no-launch` leaves the app closed.
 
-The app then says which commit it is: the short sha and the build time are stamped in at build time, and shown in the command palette's about line and by `mnemo-desktop --version`.
+The app then says which commit it is: the short sha and the build time are stamped in at build time, and shown at the bottom of *SYSTEMS › Settings* and by `mnemo-desktop --version`.
 
     /Applications/mnemo.app/Contents/MacOS/mnemo-desktop --version
     mnemo-desktop 0.1.0 (948abbe, built 2026-09-15 16:41 UTC)
@@ -38,7 +38,7 @@ An installed app keeps a log, warnings, errors and any crash with where it happe
 
 [Releases](https://github.com/xyrlan/mnemo-desktop/releases) carry a `.dmg` for macOS, a `.deb`, `.rpm` and `.AppImage` for Linux, and one installer for Windows: `mnemo_<version>_x64-setup.exe`, per user, into `%LOCALAPPDATA%\mnemo`, no administrator needed. Releases up to v0.5.3 also had an `.msi`, which installs per machine under Program Files; the `setup.exe` finds that install and offers to remove it first, so take that offer rather than keep both.
 
-The app has no updater. At each start it asks GitHub for the latest release, and when that is newer than itself it says so once per version, with the link; after that the command palette's about line names it. Being offline says nothing.
+The app has no updater. At each start it asks GitHub for the latest release, and when that is newer than itself it says so once per version, with the link; after that the about line at the bottom of *SYSTEMS › Settings* names it. Being offline says nothing.
 
 Starting the app while it runs brings the running window forward instead of opening a second app on the same state (`instance.lock` and `instance.port` in the state dir, below). A dev build, with its own state dir, runs beside the installed app.
 
@@ -46,9 +46,9 @@ Starting the app while it runs brings the running window forward instead of open
 
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Settings, layout, accounts, logs, the managed `mnemo`, voice models | `~/.mnemo-desktop` | `~/.mnemo-desktop` | `%USERPROFILE%\.mnemo-desktop` |
+| Settings, sessions, accounts, logs, the managed `mnemo`, voice models | `~/.mnemo-desktop` | `~/.mnemo-desktop` | `%USERPROFILE%\.mnemo-desktop` |
 | A dev build's own (debug build) | `~/.mnemo-desktop-dev` | `~/.mnemo-desktop-dev` | `%USERPROFILE%\.mnemo-desktop-dev` |
-| Browser panes' logins and cache | `~/Library/WebKit/sh.mnemo.desktop`, `~/Library/Caches/sh.mnemo.desktop` | `~/.local/share/sh.mnemo.desktop` | `%LOCALAPPDATA%\sh.mnemo.desktop` |
+| The webview's own storage and cache (and, from versions that had browser panes, their logins) | `~/Library/WebKit/sh.mnemo.desktop`, `~/Library/Caches/sh.mnemo.desktop` | `~/.local/share/sh.mnemo.desktop` | `%LOCALAPPDATA%\sh.mnemo.desktop` |
 
 Outside those, only what you asked for or what Claude Code reads: the app's hook entries in `~/.claude/settings.json` (each runs `…/mnemo-desktop-hook`), the `desktop` MCP server it registered with `claude mcp add --scope user`, and, if you pressed *Add to PATH* in setup, a marked block (`# >>> mnemo-desktop: put mnemo and claude on PATH >>>`) in your shell's rc file, or on Windows an entry in your user `Path` (`HKCU\Environment`).
 
@@ -60,35 +60,47 @@ To remove mnemo-desktop: quit it, delete the app (`/Applications/mnemo.app`; the
     cargo test --manifest-path src-tauri/Cargo.toml  # core
     MNEMO_DESKTOP_SMOKE=1 ../.mnemo-desktop-target/debug/mnemo-desktop   # shell round-trip, exit 0 (target dir is shared across worktrees, see .cargo/config.toml)
 
+## Using it
+
+The ship's bar counts the agents working, waiting on you and ready, and holds the account switcher and three buttons:
+
+- **PROJECTS**: every repo the app knows, with *New session*, a terminal, its saved commands, and *Add · Clone · Open folder*.
+- **MISSIONS**: each repo's open issues and PRs, *Dispatch* (with model, effort and may) and *Dispatch contract*.
+- **SYSTEMS**: *Memory* (the vault's pages, health, inbox and level), *What mnemo learned*, *Setup*, *Accounts* and *Settings*.
+
+The bridge lists what waits on you: an answer, a merge, a stalled child (⌥1–9 on a Mac; Tab triages them one card at a time). Its prompt takes orders for the fleet: `/new <repo>`, `/dispatch <repo> #<issue>`, `/msg #<issue> | captain | all <text>`, `/merge green`, `/stop all`, `/land <feature>`. A right-click on a captain, a robot, a deck or a dock opens what can be done with it (open, close, resume, stop, merge, open the PR, its changes, copy its id, a new session or a terminal there).
+
+A click on a figure opens its session in the drawer: its live terminal (a robot's through `claude attach`, on its own account), or its conversation read-only when the session runs outside the app. ⌘\ collapses and expands the drawer, ⌘W closes what is on top (a confirmation, a window, else the drawer's tab), Esc collapses it. A drawer tab's × ends a shell; a Claude session runs on, and its captain opens it again.
+
+The terminals the app runs survive a restart: the core keeps their shells, the app restores them, and the drawer shows its tabs again.
+
 ## Shortcuts
 
-⌘T new tab · ⌘W close pane · ⌘⇧W close tab · ⌘D split right · ⌘⇧D split down · ⌘⌥arrows focus · ⌘1-9 tab · ⌘⇧[ ] cycle · ⌘K palette · ⌘B mission sidebar · ⌘⇧B cockpit · ⌥Space hold to dictate
+⌘W close · ⌘⇧W close · ⌘\ drawer · ⌘E dictate · ⌥Space hold to dictate · ⌥1–9 the bridge's Nth row · Tab triage · `/` the bridge's prompt · Esc collapse the drawer
 
-On Windows and Linux plain Ctrl is the shell's, so the app's chords are Ctrl+Shift where a Mac has ⌘ (Ctrl+Shift+T new tab · Ctrl+Shift+W close pane · Ctrl+Shift+D split right · Ctrl+Shift+K palette · Ctrl+Shift+1-9 workspace), Alt+Shift for split down, close tab, browser tab, the conversation face (D, W, B, C) and for focus (arrows), Alt+1-9 for tabs, Alt+Space to dictate. The palette prints each action's chord; `src/actions/chords.ts` is the table.
+On Windows and Linux plain Ctrl is the shell's, so the app's chords are Ctrl+Shift where a Mac has ⌘ (Ctrl+Shift+W close, Ctrl+Shift+E dictate, Ctrl+Shift+\ drawer), Alt+Shift+W to close as ⇧⌘W does, and Alt+Space to dictate. `src/actions/chords.ts` is the table.
 
 In a terminal: ⌘←/⌘→ line start/end, ⌘⌫ kill line, ⌥⌫ kill word, ⌘C/⌘V clipboard, Shift+Enter newline (Claude Code). On Windows and Linux: Ctrl+C copies a selection and interrupts without one, Ctrl+V pastes, Ctrl+Shift+C / Ctrl+Shift+V copy and paste.
 
-Panes: terminal, editor (Monaco), browser (native webview), mission (a dispatch child's timeline), cockpit (all repos), vault (mnemo rules with the native actions as buttons), marketplace (shared rule sets). Open them from ⌘K.
+A file or a link opens in your own editor or browser.
 
 ## Replying to a child
 
-A blocked child's reply box has two ways out. **send** posts to the child's inbox socket; Claude Code hands that to the child as another session's message, which can never approve a push, a merge or a PR. **reply as me** types the draft, exactly as written (no English rewrite, no language footer), into a hidden `claude attach <id>`, presses Enter and detaches with Ctrl+Z, so the child reads it as its user's typed turn. It refuses, and types nothing, when the child is on a permission or other prompt (Enter there picks "1. Yes" and the text is lost), when the child's input box already holds text (every attach shares that box, and Enter would send both), and when the draft is still the child's own suggested reply.
+From the bridge, a child's question is answered with its options or in words, and its permission prompt with Allow or Deny: the app presses the key in a hidden `claude attach <id>`, on the child's own account, and detaches. It refuses, and presses nothing, when the prompt on screen is not the one the card shows; then the attach opens in a drawer tab for you to answer by hand. `/msg` posts to the child's inbox socket instead; Claude Code hands that to the child as another session's message, which can never approve a push, a merge or a PR. To type to a child as yourself, open its robot: its drawer tab is a `claude attach`.
 
 ## Settings
 
-`~/.mnemo-desktop/settings.json`, toggled from ⌘K: `outgoing` (`en` rewrites replies and dictation in English through your own `claude -p` before they leave, keeping the text as typed when it is under four words or the answer does not look like a rewrite; `as-typed` sends verbatim), `replyLanguage` (`pt`/`en`/`unchanged`, asks a child to answer in that language), `sidebarScope` (`repo`/`all`).
+`~/.mnemo-desktop/settings.json`, chosen in *SYSTEMS › Settings*: `outgoing` (`en` rewrites replies and dictation in English through your own `claude -p` before they leave, keeping the text as typed when it is under four words or the answer does not look like a rewrite; `as-typed` sends verbatim), `replyLanguage` (`pt`/`en`/`unchanged`, asks a child to answer in that language), `skipPermissions`, `windowsShell`, `cloneBase` and each repo's setup command. The dictation language is the machine's, kept beside it in the window.
 
 ## Desktop MCP
 
-The app serves the Claude Code sessions it hosts an MCP server named `desktop`, so an agent can look at the other panes instead of asking you to paste them:
+The app serves the Claude Code sessions it hosts an MCP server named `desktop`, so an agent can look at the other sessions instead of asking you to paste them:
 
-- `desktop_list_panes`: every pane with its id, view, title, cwd, url (browser panes), tab and focus.
-- `desktop_terminal_read(pane, lines)`: the last `lines` (default 100) of a terminal, scrollback included.
-- `desktop_browser_read(pane)`: a browser pane's page as text (title, url, visible content as light markdown), logins included.
-- `desktop_pane_snapshot(pane)`: a screenshot of a browser pane (macOS).
+- `desktop_list_panes`: the Nexus's sessions: the drawer's tabs in order, then the terminals the app runs that no tab shows, each with the pane to read, its kind, label, cwd, Claude session and whether it is on screen.
+- `desktop_terminal_read(pane, lines)`: the last `lines` (default 100) of any of them, scrollback included, shown or not.
 - `desktop_app_snapshot`: a screenshot of the app's own window (macOS).
 
-What works where: on macOS, every tool. On Linux, every tool but the two snapshots, which are not listed there. On Windows, none: the server needs a Unix socket and Windows has no server for it yet, so the app registers nothing, sets no `MNEMO_DESKTOP_MCP_SOCKET` in its panes, and says so once when it first starts; `mnemo-desktop-mcp.exe`, registered by hand, refuses to start with that reason (`/mcp` shows it failed).
+What works where: on macOS, every tool. On Linux, every tool but the snapshot, which is not listed there. On Windows, none: the server needs a Unix socket and Windows has no server for it yet, so the app registers nothing, sets no `MNEMO_DESKTOP_MCP_SOCKET` in its panes, and says so once when it first starts; `mnemo-desktop-mcp.exe`, registered by hand, refuses to start with that reason (`/mcp` shows it failed).
 
 The server is a second binary, `mnemo-desktop-mcp`, that Claude Code starts over stdio; it relays each call to the running app over `~/.mnemo-desktop/mcp.sock` (owner-only). On start the app links the binary of the build you launched to `~/.mnemo-desktop/bin/mnemo-desktop-mcp`, writes `~/.mnemo-desktop/mcp.json`, and, if your Claude config has no user-scope server named `desktop`, runs the one-time equivalent of:
 
@@ -96,11 +108,11 @@ The server is a second binary, `mnemo-desktop-mcp`, that Claude Code starts over
 
 New sessions then have the tools; `/mcp` in a session shows it. That happens once (`~/.mnemo-desktop/mcp-registered` remembers it), so `claude mcp remove --scope user desktop` sticks. To add it by hand instead, or for one project only (`--scope local`), run that line yourself; to try it without touching your Claude config, `claude --mcp-config ~/.mnemo-desktop/mcp.json`. With the app closed the tools answer "the mnemo desktop app is not running"; with several apps open, the one started last serves. `tauri dev` builds only the app binary, so run `cargo build --manifest-path src-tauri/Cargo.toml --bin mnemo-desktop-mcp` (same target dir) before trying it from a dev build.
 
-A debug build (`tauri dev`) keeps all of this in `~/.mnemo-desktop-dev/` instead: its own workspace, settings, usage log, marketplace, shell integration, `mcp.sock` and `mcp.json`, so it never restores, overwrites or serves over the installed app's. Only the downloads are shared (`tools/`, voice `models/`). Every pane (on macOS and Linux) gets `MNEMO_DESKTOP_MCP_SOCKET` set to its own app's socket, so a session reaches the app it runs in, whichever build's binary it started. On restore, a saved session that a running `claude` already holds (`claude agents --json` gives it a pid) is not resumed: the pane keeps the session id and opens a plain shell. When the lookup fails, no session is resumed.
+A debug build (`tauri dev`) keeps all of this in `~/.mnemo-desktop-dev/` instead: its own workspace, settings, usage log, shell integration, `mcp.sock` and `mcp.json`, so it never restores, overwrites or serves over the installed app's. Only the downloads are shared (`tools/`, voice `models/`). Every terminal (on macOS and Linux) gets `MNEMO_DESKTOP_MCP_SOCKET` set to its own app's socket, so a session reaches the app it runs in, whichever build's binary it started. On restore, a saved session that a running `claude` already holds (`claude agents --json` gives it a pid) is not resumed: the terminal keeps the session id and opens a plain shell. When the lookup fails, no session is resumed.
 
 ## Shell integration
 
-⌘D and ⌘T open the new shell where you are: the focused terminal's directory, an editor's root, a mission pane's worktree, or on Home the selected repo; otherwise your home directory. Terminals report their directory with OSC 7 at each prompt, which the app turns on for your default shell without touching your dotfiles:
+A new session or terminal starts in the repo it was opened from (a deck, a dock, PROJECTS), or your home directory. Terminals report their directory with OSC 7 at each prompt, which the app turns on for your default shell without touching your dotfiles:
 
 - **zsh**: starts with `ZDOTDIR=~/.mnemo-desktop/shell/zsh`. Those files source your own `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` (from your `ZDOTDIR`, else `$HOME`), add a `precmd` hook, and put `ZDOTDIR` back once startup is done.
 - **bash**: starts as `bash --rcfile ~/.mnemo-desktop/shell/bash/mnemo.bashrc`, which loads `/etc/profile` and your `~/.bash_profile` (or `~/.bash_login`, `~/.profile`) and prepends a hook to `PROMPT_COMMAND`.

@@ -1,20 +1,5 @@
-import type { ComponentType } from 'react'
-
-/** A pane view renders one leaf of the layout tree. `terminal` is built in;
- *  sub-projects register their own (editor, browser, mission) without touching
- *  SplitView or the store. */
+/** What a view of one pane of the layout store is given: its id, and the props it was opened with
+ *  (a presentation's `present`, `name`, `active`, `close`: `src/terminal/view.tsx`). The registry of
+ *  views by name went with the workbench, which drew every pane through it: the drawer draws its
+ *  terminals directly. */
 export type PaneViewProps = { id: number; props: Record<string, unknown> }
-
-const views = new Map<string, ComponentType<PaneViewProps>>()
-
-export function registerPaneView(view: string, component: ComponentType<PaneViewProps>) {
-  views.set(view, component)
-}
-
-export function paneView(view: string): ComponentType<PaneViewProps> | undefined {
-  return views.get(view)
-}
-
-export function paneViews(): string[] {
-  return [...views.keys()]
-}

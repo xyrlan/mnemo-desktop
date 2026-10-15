@@ -9,13 +9,14 @@ const tool = (name, version) => ({ name, path: `/opt/homebrew/bin/${name}`, vers
 
 /** Each entry answers one command; a function gets the command's args. */
 export const BASE = {
-  // The app opens on the Nexus; the shots are of other screens, so it starts on the workbench.
-  settings_read: () => ({ nexusAtLaunch: false }),
+  // No settings file yet: the defaults.
+  settings_read: () => ({}),
   settings_write: () => null,
   // A first run with no saved dictation language sets the one the system's languages suggest (#357).
   voice_set_language: () => null,
   tools_status: () => [tool('git', 'git version 2.50.1'), tool('claude', '2.4.0 (Claude Code)'), tool('mnemo', 'mnemo 0.9.0'), tool('gh', 'gh version 2.80.0')],
-  mcp_socket_path: () => `${HOME}/.mnemo-desktop/mcp.sock`,
+  // The desktop MCP served, as on macOS (`Serving`, src/mcp/serving.ts).
+  mcp_socket_path: () => ({ socket: `${HOME}/.mnemo-desktop/mcp.sock`, unavailable: null }),
   pulse_start: () => null,
   vault_level_best: ({ xp }) => xp,
   vault_level: () => ({
@@ -38,9 +39,7 @@ export const BASE = {
   workspace_write: () => null,
   home_snapshot: () => ({ repos: [], clone_base: `${HOME}/code`, errors: [], protected: 0 }),
   home_refresh_github: () => null,
-  // A pane's chrome: outside any repo, no Claude Code session in it.
-  chrome_repo: () => null,
-  chrome_branch: () => null,
+  // No Claude Code session in any terminal.
   chrome_session: () => null,
   // No terminal sessions survive from an earlier run; the Memory panel has nothing for the project.
   pty_list: () => [],
@@ -51,8 +50,6 @@ export const BASE = {
   plan_usage: () => ({ limits: [], plan: null, fetchedAt: Date.now(), stale: null }),
   // No project to offer "what mnemo learned" for, so that screen never opens by itself.
   install_review_project: () => null,
-  // Off a Mac the app hands its chord table to the host for browser panes (src/actions/keys.ts).
-  browser_chords: () => null,
   // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
   nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
   usage_log: () => null,

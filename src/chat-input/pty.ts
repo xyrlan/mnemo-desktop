@@ -153,7 +153,7 @@ export function makeChatPty(s: PtySinks): ChatPty {
   }
 }
 
-/** The app's terminals, asked the way Design Mode asks (`src/browser/design-live.ts`). */
+/** The app's terminals. */
 export const chatPty = makeChatPty({
   writePty: (pane, data) => tauriPty.write(pane, data),
   paneRunsClaude,

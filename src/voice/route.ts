@@ -1,4 +1,4 @@
-import type { Pane, Tab } from '../layout/store'
+import type { Pane } from '../layout/store'
 import type { PaneId } from '../layout/tree'
 import type { HostedSession, SessionKey } from '../session/host'
 import type { DrawerTab } from '../nexus/store'
@@ -13,12 +13,11 @@ export type DictationTarget =
   | { kind: 'editable'; el: HTMLElement }
 
 /** What a target is resolved from: the Nexus's drawer, the session host's PTYs and the layout's
- *  panes (the session registry). `tabs`, `activeTab` and `activeTab`'s focused pane are the
- *  workbench's, read only while the Nexus is closed. */
+ *  panes (the session registry). */
 export type Where = {
-  nexus: { open: boolean; tabs: DrawerTab[]; activeTab: string | null; collapsed: boolean }
+  nexus: { tabs: DrawerTab[]; activeTab: string | null; collapsed: boolean }
   sessions: Record<SessionKey, HostedSession>
-  layout: { tabs: Tab[]; activeTab: string; panes: Record<PaneId, Pane> }
+  layout: { panes: Record<PaneId, Pane> }
 }
 
 const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel'])
@@ -41,41 +40,28 @@ function live(pty: PaneId | null | undefined, panes: Record<PaneId, Pane>): Dict
   return { kind: 'pty', pane: pty }
 }
 
-/** The drawer's active tab's terminal, while the drawer is shown: a tab showing a conversation
+/** The drawer's active tab's terminal, while the drawer is expanded: a tab showing a conversation
  *  read-only, or an attach still starting, has none. */
 function drawerTerminal(w: Where): DictationTarget | null {
-  const { open, tabs, activeTab, collapsed } = w.nexus
-  if (!open || collapsed) return null
+  const { tabs, activeTab, collapsed } = w.nexus
+  if (collapsed) return null
   const tab = tabs.find((t) => t.id === activeTab)
   if (!tab?.key) return null
   return live(w.sessions[tab.key]?.pty, w.layout.panes)
 }
 
-/** The workbench's active tab's focused terminal. Only while the Nexus is closed: after wave 2b
- *  nothing closes it, and this goes with the workbench. */
-function workbenchTerminal(w: Where): DictationTarget | null {
-  const tab = w.layout.tabs.find((t) => t.id === w.layout.activeTab)
-  return tab ? live(tab.focused, w.layout.panes) : null
-}
-
-/** Where dictation types (Q12). DOM focus first: a terminal is its PTY, a text field (the bridge's
- *  prompt, `[data-fleet-prompt] input`, among them) or a contenteditable is itself. With nothing
- *  typeable focused, the drawer's active terminal. With neither, null: dictation says so and
- *  records nothing. A palette's or a prompt's field (`data-palette`) is for choosing, not for
- *  dictating into. */
+/** Where dictation types (Q12). DOM focus first: a text field (the bridge's prompt,
+ *  `[data-fleet-prompt] input`, among them) or a contenteditable is itself. A focused terminal,
+ *  and nothing typeable focused, are the drawer's active terminal: only the active tab's is on
+ *  screen. With none, null: dictation says so and records nothing. */
 export function resolveTarget(active: Element | null, w: Where): DictationTarget | null {
-  const el = active instanceof HTMLElement && !active.closest('[data-palette]') ? active : null
-  if (el?.closest('.xterm')) {
-    // Only the active tab's terminal is on screen in the drawer; a workbench pane says its PTY.
-    if (el.closest('[data-nexus-drawer]')) return drawerTerminal(w)
-    const paneEl = w.nexus.open ? null : el.closest<HTMLElement>('.pane[data-pane]')
-    const t = paneEl ? live(Number(paneEl.dataset.pane), w.layout.panes) : null
-    if (t) return t
-  } else if (el) {
+  const el = active instanceof HTMLElement ? active : null
+  // A terminal's own input is a textarea: it is the terminal, not a field.
+  if (el && !el.closest('.xterm')) {
     if (isTextField(el)) return { kind: 'field', el }
     if (isEditable(el)) return { kind: 'editable', el }
   }
-  return w.nexus.open ? drawerTerminal(w) : workbenchTerminal(w)
+  return drawerTerminal(w)
 }
 
 /** What the indicator says when dictation has nowhere to type. */

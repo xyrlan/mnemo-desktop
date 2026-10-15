@@ -43,7 +43,7 @@ pub const APP_SNAPSHOT: &str = "desktop_app_snapshot";
 pub const APP_DRIVE: &str = "desktop_app_drive";
 
 /// Why no tool works on Windows. Keep in step with `UNAVAILABLE` in `src/bin/mnemo-desktop-mcp.rs`,
-/// which lists the tools. Design Mode's snapshot does not go through the MCP and works there.
+/// which lists the tools.
 pub const UNAVAILABLE: &str =
     "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
 
@@ -335,31 +335,13 @@ pub fn relink(target: &Path, link: &Path) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------------------
-// Browser panes: the page's own reads, which only the child webview can make. Design Mode makes
-// them (`src/browser/design-live.ts`); no MCP tool does any more.
-
-fn browser_webview<R: Runtime>(app: &AppHandle<R>, id: i64) -> Result<tauri::Webview<R>, String> {
-    app.get_webview(&crate::browser::label_for(id)).ok_or_else(|| format!("browser pane {id} has no page open"))
-}
+// Pictures of the app's own webview.
 
 async fn wait<T: Send + 'static>(rx: mpsc::Receiver<T>, what: &'static str) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(PAGE_TIMEOUT))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|_| format!("the page did not answer the {what} in time"))
-}
-
-/// Runs `script` in the pane's page and returns WebKit's JSON of its value ("" when the
-/// script threw). The main webview already has full rights, so this widens nothing.
-#[tauri::command]
-pub async fn mcp_browser_eval<R: Runtime>(app: AppHandle<R>, id: i64, script: String) -> Result<String, String> {
-    let (tx, rx) = mpsc::channel();
-    browser_webview(&app, id)?
-        .eval_with_callback(script, move |json| {
-            let _ = tx.send(json);
-        })
-        .map_err(|e| e.to_string())?;
-    wait(rx, "read").await
 }
 
 /// PNGs past this size are re-encoded as JPEG, which keeps a retina page under the size
@@ -371,19 +353,9 @@ fn base64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// What the pane's page shows, as `{ mime, data }` with base64 data.
-#[tauri::command]
-pub async fn mcp_browser_snapshot<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<Value, String> {
-    let webview = browser_webview(&app, id)?;
-    let (mime, bytes) = snapshot(&webview).await?;
-    Ok(json!({ "mime": mime, "data": base64(&bytes) }))
-}
-
-/// `desktop_app_snapshot`: the app's main webview as MCP image content. Browser panes are
-/// webviews of their own laid over it, so they show as the space they leave. A WebGL canvas
-/// without `preserveDrawingBuffer`
-/// (xterm's renderer) has nothing to paint by the time WebKit draws the snapshot, and comes
-/// out blank. Blocks: it runs on the socket's thread.
+/// `desktop_app_snapshot`: the app's main webview as MCP image content. A WebGL canvas without
+/// `preserveDrawingBuffer` (xterm's renderer) has nothing to paint by the time WebKit draws the
+/// snapshot, and comes out blank. Blocks: it runs on the socket's thread.
 fn app_snapshot<R: Runtime>(app: &AppHandle<R>) -> Answer {
     let webview = app.get_webview(MAIN).ok_or("the app window is not open")?;
     let (mime, bytes) = tauri::async_runtime::block_on(snapshot(&webview))?;
@@ -400,7 +372,7 @@ async fn snapshot<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(&'static s
     webview
         .with_webview(move |platform| {
             let wk = platform.inner() as *mut objc2::runtime::AnyObject;
-            // SAFETY: `inner` is the pane's live WKWebView and this closure runs on the main
+            // SAFETY: `inner` is the webview's live WKWebView and this closure runs on the main
             // thread, where WebKit calls the completion handler as well.
             unsafe { macos::take_snapshot(wk, tx) }
         })
@@ -438,8 +410,8 @@ async fn snapshot<R: Runtime>(_webview: &tauri::Webview<R>) -> Result<(&'static 
 }
 
 /// `MNEMO_DESKTOP_SMOKE=snapshot`: the built app takes a picture of its own window through the
-/// same `snapshot` Design Mode uses, and exits 0 when it is an image,
-/// 1 otherwise. CI runs it on all three systems: the only real webview a test can capture there.
+/// same `snapshot` `desktop_app_snapshot` uses, and exits 0 when it is an image, 1 otherwise. CI
+/// runs it on all three systems: the only real webview a test can capture there.
 /// The process exits itself: `AppHandle::exit(1)` was seen to end it with 0 on macOS.
 pub fn smoke_snapshot<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {

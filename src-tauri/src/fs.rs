@@ -1,11 +1,11 @@
-//! File commands for the editor pane. Every path is resolved (symlinks included) and refused
-//! unless it lands inside the user's home directory, inside a saved project's folder, or inside
-//! one of that project's worktrees as git lists them — a project outside `$HOME` (`/Volumes/…`,
-//! `/opt/src/…`) keeps its worktrees beside it. A project or worktree that is `/`, a system
-//! folder, or a folder that holds the home directory widens nothing.
+//! File reads for the front end: a file's text and a folder's entries. Every path is resolved
+//! (symlinks included) and refused unless it lands inside the user's home directory, inside a
+//! saved project's folder, or inside one of that project's worktrees as git lists them — a
+//! project outside `$HOME` (`/Volumes/…`, `/opt/src/…`) keeps its worktrees beside it. A project
+//! or worktree that is `/`, a system folder, or a folder that holds the home directory widens
+//! nothing.
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub struct Entry {
     pub is_dir: bool,
 }
 
-/// Files above this size are refused by `fs_read`; Monaco is not a log viewer.
+/// Files above this size are refused by `fs_read`: it reads text, not logs.
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
 
 fn home() -> Result<PathBuf, String> {
@@ -147,8 +147,8 @@ impl Scope {
     }
 }
 
-/// Resolves `path` and returns it if it lies in `scope`. A path that does not exist yet (a new
-/// file) is checked through its parent, which must exist.
+/// Resolves `path` and returns it if it lies in `scope`. A path that does not exist is checked
+/// through its parent, which must exist.
 pub fn guard(path: &str, scope: &Scope) -> Result<PathBuf, String> {
     let raw = Path::new(path);
     if !raw.is_absolute() {
@@ -172,34 +172,7 @@ pub fn guard(path: &str, scope: &Scope) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
-/// A file as the editor opened it: its text, and the stamp of the bytes that text came from.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct Loaded {
-    pub text: String,
-    pub stamp: String,
-}
-
-/// What a save did. A save that names the stamp its buffer was loaded (or last saved) with
-/// writes nothing when the file on disk has changed since, or is gone.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum Saved {
-    Written { stamp: String },
-    Changed,
-    Gone,
-}
-
-/// The SHA-256 of `bytes`, in hex. The content itself, not the size or mtime: a rewrite that
-/// keeps the size, or lands within the timestamp's resolution of the load, still changes it.
-fn stamp(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
-}
-
 pub fn read_in(path: &str, scope: &Scope) -> Result<String, String> {
-    load_in(path, scope).map(|l| l.text)
-}
-
-pub fn load_in(path: &str, scope: &Scope) -> Result<Loaded, String> {
     let p = guard(path, scope)?;
     let meta = std::fs::metadata(&p).map_err(|e| format!("{path}: {e}"))?;
     if meta.is_dir() {
@@ -209,44 +182,7 @@ pub fn load_in(path: &str, scope: &Scope) -> Result<Loaded, String> {
         return Err(format!("{path} is too large to open ({} MB)", meta.len() / (1024 * 1024)));
     }
     let bytes = std::fs::read(&p).map_err(|e| format!("{path}: {e}"))?;
-    let stamp = stamp(&bytes);
-    let text = String::from_utf8(bytes).map_err(|_| format!("{path} is not a UTF-8 text file"))?;
-    Ok(Loaded { text, stamp })
-}
-
-pub fn write_in(path: &str, contents: &str, scope: &Scope) -> Result<(), String> {
-    let p = guard(path, scope)?;
-    if p.is_dir() {
-        return Err(format!("{path} is a directory"));
-    }
-    std::fs::write(&p, contents).map_err(|e| format!("{path}: {e}"))
-}
-
-/// Writes `contents` unless `expected` names a stamp the file no longer has. A file that already
-/// holds exactly `contents` is written over either way: nothing on it is lost. `None` writes
-/// whatever is there. The check and the write are not atomic: a change landing between them,
-/// within this call, is still overwritten.
-pub fn save_in(path: &str, contents: &str, expected: Option<&str>, scope: &Scope) -> Result<Saved, String> {
-    if let Some(expected) = expected {
-        let p = match guard(path, scope) {
-            Ok(p) => p,
-            // Its folder is gone too: moved or deleted with it.
-            Err(_) if !Path::new(path).exists() && Path::new(path).parent().is_some_and(|d| !d.exists()) => return Ok(Saved::Gone),
-            Err(e) => return Err(e),
-        };
-        match std::fs::read(&p) {
-            Ok(bytes) => {
-                if stamp(&bytes) != expected && bytes != contents.as_bytes() {
-                    return Ok(Saved::Changed);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Saved::Gone),
-            // A directory now, or unreadable: `write_in` says which.
-            Err(_) => {}
-        }
-    }
-    write_in(path, contents, scope)?;
-    Ok(Saved::Written { stamp: stamp(contents.as_bytes()) })
+    String::from_utf8(bytes).map_err(|_| format!("{path} is not a UTF-8 text file"))
 }
 
 /// Directories first, then files, each group sorted case-insensitively.
@@ -268,16 +204,6 @@ pub fn list_in(dir: &str, scope: &Scope) -> Result<Vec<Entry>, String> {
 #[tauri::command]
 pub async fn fs_read(path: String) -> Result<String, String> {
     read_in(&path, &Scope::current()?)
-}
-
-#[tauri::command]
-pub async fn fs_load(path: String) -> Result<Loaded, String> {
-    load_in(&path, &Scope::current()?)
-}
-
-#[tauri::command]
-pub async fn fs_write(path: String, contents: String, expected: Option<String>) -> Result<Saved, String> {
-    save_in(&path, &contents, expected.as_deref(), &Scope::current()?)
 }
 
 #[tauri::command]
@@ -325,79 +251,13 @@ mod tests {
     }
 
     #[test]
-    fn read_write_round_trip() {
-        let s = Sandbox::new("rw");
+    fn read_gives_the_text_as_it_is_on_disk() {
+        let s = Sandbox::new("read");
         let f = s.in_home("a.txt");
-        write_in(&f, "hello\nworld", &s.scope()).unwrap();
+        std::fs::write(&f, "hello\nworld").unwrap();
         assert_eq!(read_in(&f, &s.scope()).unwrap(), "hello\nworld");
-        write_in(&f, "changed", &s.scope()).unwrap();
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "changed");
-    }
-
-    #[test]
-    fn save_refuses_a_file_changed_since_it_was_loaded() {
-        let s = Sandbox::new("save-changed");
-        let f = s.in_home("a.ts");
-        std::fs::write(&f, "const a = 1\n").unwrap();
-        let loaded = load_in(&f, &s.scope()).unwrap();
-        // An agent's rewrite, right after the load and of the same size: mtime and length can't tell.
-        std::fs::write(&f, "const a = 9\n").unwrap();
-        let saved = save_in(&f, "const a = 1\n// mine\n", Some(&loaded.stamp), &s.scope()).unwrap();
-        assert_eq!(saved, Saved::Changed);
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "const a = 9\n");
-        // Asked to, it writes over it.
-        assert!(matches!(save_in(&f, "mine", None, &s.scope()).unwrap(), Saved::Written { .. }));
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "mine");
-    }
-
-    #[test]
-    fn save_over_an_untouched_file_writes_the_bytes_as_given() {
-        let s = Sandbox::new("save-same");
-        let f = s.in_home("a.ps1");
-        std::fs::write(&f, "\u{FEFF}one\r\n").unwrap();
-        let loaded = load_in(&f, &s.scope()).unwrap();
-        let saved = save_in(&f, "\u{FEFF}one\r\ntwo\r\n", Some(&loaded.stamp), &s.scope()).unwrap();
-        assert_eq!(std::fs::read(&f).unwrap(), "\u{FEFF}one\r\ntwo\r\n".as_bytes());
-        // The stamp it returns is the one the next load sees, so the next save is checked against it.
-        let again = load_in(&f, &s.scope()).unwrap();
-        assert_eq!(saved, Saved::Written { stamp: again.stamp.clone() });
-        assert!(matches!(save_in(&f, "three", Some(&again.stamp), &s.scope()).unwrap(), Saved::Written { .. }));
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "three");
-    }
-
-    #[test]
-    fn save_over_a_file_that_already_holds_the_same_text_writes() {
-        let s = Sandbox::new("save-equal");
-        let f = s.in_home("a.ts");
-        std::fs::write(&f, "old").unwrap();
-        let loaded = load_in(&f, &s.scope()).unwrap();
-        std::fs::write(&f, "new").unwrap();
-        assert!(matches!(save_in(&f, "new", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Written { .. }));
-    }
-
-    #[test]
-    fn save_of_a_file_deleted_or_moved_since_it_was_loaded_writes_nothing() {
-        let s = Sandbox::new("save-gone");
-        let dir = s.home.join("src");
-        std::fs::create_dir(&dir).unwrap();
-        let f = dir.join("a.ts").to_string_lossy().into_owned();
-        std::fs::write(&f, "a").unwrap();
-        let loaded = load_in(&f, &s.scope()).unwrap();
-        std::fs::remove_file(&f).unwrap();
-        assert_eq!(save_in(&f, "mine", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Gone);
-        assert!(!Path::new(&f).exists());
-        // Its folder gone with it is the same thing, not an error.
-        std::fs::remove_dir(&dir).unwrap();
-        assert_eq!(save_in(&f, "mine", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Gone);
-        assert!(!dir.exists());
-    }
-
-    #[test]
-    fn write_creates_new_file_in_existing_dir_only() {
-        let s = Sandbox::new("new");
-        write_in(&s.in_home("fresh.rs"), "fn main() {}", &s.scope()).unwrap();
-        assert!(s.home.join("fresh.rs").is_file());
-        assert!(write_in(&s.in_home("missing/dir/x.rs"), "", &s.scope()).is_err());
+        std::fs::write(&f, "changed").unwrap();
+        assert_eq!(read_in(&f, &s.scope()).unwrap(), "changed");
     }
 
     #[test]
@@ -419,12 +279,9 @@ mod tests {
         std::fs::write(&out, "nope").unwrap();
         let out = out.to_string_lossy().into_owned();
         assert!(read_in(&out, &s.scope()).unwrap_err().contains("outside the home"));
-        assert!(write_in(&out, "x", &s.scope()).is_err());
-        assert_eq!(std::fs::read_to_string(&out).unwrap(), "nope");
         assert!(list_in(&s.outside.to_string_lossy(), &s.scope()).is_err());
-        // A new file outside home is refused too, not just existing ones.
-        assert!(write_in(&s.outside.join("new.txt").to_string_lossy(), "x", &s.scope()).is_err());
-        assert!(!s.outside.join("new.txt").exists());
+        // A missing file outside home is refused by the guard too, not only existing ones.
+        assert!(read_in(&s.outside.join("new.txt").to_string_lossy(), &s.scope()).unwrap_err().contains("outside the home"));
     }
 
     #[test]
@@ -433,7 +290,7 @@ mod tests {
         std::fs::write(s.outside.join("secret.txt"), "nope").unwrap();
         let sneaky = s.in_home("../outside/secret.txt");
         assert!(read_in(&sneaky, &s.scope()).is_err());
-        assert!(write_in(&s.in_home("../outside/new.txt"), "x", &s.scope()).is_err());
+        assert!(list_in(&s.in_home("../outside"), &s.scope()).is_err());
     }
 
     #[test]
@@ -452,7 +309,6 @@ mod tests {
         std::fs::write(s.outside.join("secret.txt"), "nope").unwrap();
         std::os::unix::fs::symlink(&s.outside, s.home.join("link")).unwrap();
         assert!(read_in(&s.in_home("link/secret.txt"), &s.scope()).is_err());
-        assert!(write_in(&s.in_home("link/new.txt"), "x", &s.scope()).is_err());
         assert!(list_in(&s.in_home("link"), &s.scope()).is_err());
     }
 
@@ -468,20 +324,6 @@ mod tests {
         std::fs::write(s.home.join("x.bin"), [0xff, 0xfe, 0x00, 0x80]).unwrap();
         assert!(read_in(&s.in_home("x.bin"), &s.scope()).unwrap_err().contains("UTF-8"));
         assert!(read_in(&s.home.to_string_lossy(), &s.scope()).unwrap_err().contains("directory"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn write_to_read_only_file_errors() {
-        use std::os::unix::fs::PermissionsExt;
-        let s = Sandbox::new("ro");
-        let f = s.home.join("ro.txt");
-        std::fs::write(&f, "keep").unwrap();
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
-        let err = write_in(&f.to_string_lossy(), "x", &s.scope());
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(err.is_err());
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "keep");
     }
 
     fn git(dir: &Path, args: &[&str]) {
@@ -507,12 +349,13 @@ mod tests {
         std::fs::create_dir_all(proj.join("src")).unwrap();
         std::fs::write(proj.join("src/a.rs"), "fn a() {}").unwrap();
         let scope = s.with(&[&proj]);
+        std::fs::write(proj.join("src/b.rs"), "fn b() {}").unwrap();
         assert_eq!(read_in(&at(&proj.join("src/a.rs")), &scope).unwrap(), "fn a() {}");
-        write_in(&at(&proj.join("src/b.rs")), "fn b() {}", &scope).unwrap();
         let names: Vec<_> = list_in(&at(&proj.join("src")), &scope).unwrap().into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["a.rs", "b.rs"]);
         // Home still opens beside it.
-        write_in(&s.in_home("h.txt"), "h", &scope).unwrap();
+        std::fs::write(s.home.join("h.txt"), "h").unwrap();
+        assert_eq!(read_in(&s.in_home("h.txt"), &scope).unwrap(), "h");
         // Its neighbours do not, nor a way out of it.
         std::fs::write(s.outside.join("secret.txt"), "nope").unwrap();
         assert!(read_in(&at(&s.outside.join("secret.txt")), &scope).unwrap_err().contains("outside the home directory"));
@@ -534,7 +377,7 @@ mod tests {
         std::os::unix::fs::symlink(&other, proj.join("link")).unwrap();
         let scope = s.with(&[&proj]);
         assert!(read_in(&at(&proj.join("link/secret.txt")), &scope).is_err());
-        assert!(write_in(&at(&proj.join("link/new.txt")), "x", &scope).is_err());
+        assert!(list_in(&at(&proj.join("link")), &scope).is_err());
     }
 
     #[test]
@@ -550,7 +393,7 @@ mod tests {
         git(&proj, &["worktree", "add", "-q", "-b", "one", &plain(&wt)]);
         let scope = s.with(&[&proj]);
         assert_eq!(read_in(&at(&wt.join("a.txt")), &scope).unwrap(), "a");
-        write_in(&at(&wt.join("b.txt")), "b", &scope).unwrap();
+        std::fs::write(wt.join("b.txt"), "b").unwrap();
         assert_eq!(list_in(&at(&wt), &scope).unwrap().len(), 3); // .git, a.txt, b.txt
         // A folder named like a worktree that git does not list stays shut.
         let fake = s.outside.join("repo-wt-two");
@@ -633,8 +476,8 @@ mod tests {
         }
     }
 
-    /// The whole way through, on a real folder: a project saved under `C:\dev` is read, written
-    /// and listed (#333). Where the drive's root cannot be written to there is nothing to try
+    /// The whole way through, on a real folder: a project saved under `C:\dev` is read and
+    /// listed (#333). Where the drive's root cannot be written to there is nothing to try
     /// this on; on CI it can, and there the test does not skip.
     #[cfg(windows)]
     #[test]
@@ -649,9 +492,9 @@ mod tests {
             return;
         }
         std::fs::write(proj.join("src").join("a.rs"), "fn a() {}").unwrap();
+        std::fs::write(proj.join("src").join("b.rs"), "fn b() {}").unwrap();
         let scope = s.with(&[&proj]);
         let read = read_in(&at(&proj.join("src").join("a.rs")), &scope);
-        let wrote = write_in(&at(&proj.join("src").join("b.rs")), "fn b() {}", &scope);
         let listed = list_in(&at(&proj.join("src")), &scope);
         // The drive itself, saved as a project, still opens nothing beside the project.
         std::fs::write(dev.join(format!("mnemo-desktop-fs-{}.txt", std::process::id())), "nope").unwrap();
@@ -664,7 +507,6 @@ mod tests {
             let _ = std::fs::remove_dir(&dev);
         }
         assert_eq!(read.unwrap(), "fn a() {}");
-        wrote.unwrap();
         let names: Vec<_> = listed.unwrap().into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["a.rs", "b.rs"]);
         assert!(through_root.unwrap_err().contains("outside the home directory"));

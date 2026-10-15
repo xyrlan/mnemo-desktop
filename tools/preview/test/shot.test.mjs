@@ -22,21 +22,55 @@ async function pngSize(file) {
   return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) }
 }
 
-test('empty-workspace: Home, every launch command answered, no page error', async () => {
+/** What the workbench drew (its shell's columns and slots, tab groups, sidebar, panes, palette),
+ *  and the `inert` it put under the Nexus: none of it is in the app since #459. */
+const WORKBENCH = '[data-shell], [data-shell-main], [data-shell-column], [data-shell-slot], [data-shell-workbench], [data-tab-groups], [data-tab-group-id], [data-left-sidebar], .pane[data-pane], [data-palette], [inert]'
+
+/** The page's Nexus, drawer and workbench, as a test reads them after the shot. */
+const look = (page) =>
+  page.evaluate((workbench) => {
+    const drawer = document.querySelector('[data-nexus-drawer]')
+    return {
+      nexus: !!document.querySelector('[data-nexus-view] [data-ship-scene]'),
+      workbench: [...document.querySelectorAll(workbench)].map((e) => e.outerHTML.slice(0, 80)),
+      drawer: drawer && getComputedStyle(drawer).display !== 'none',
+      tabs: [...document.querySelectorAll('[data-drawer-tab]')].map((t) => t.getAttribute('data-drawer-tab')),
+      text: drawer?.textContent ?? '',
+    }
+  }, WORKBENCH)
+
+test('nexus: the Nexus renders with no page error and no workbench element in the DOM', async () => {
+  const out = path.join(dir, 'nexus.png')
+  const { pageErrors, inspected } = await shoot({ scenario: 'nexus', out, log: () => {}, inspect: look })
+  assert.deepEqual(pageErrors, [])
+  assert.equal(inspected.nexus, true)
+  assert.deepEqual(inspected.workbench, [])
+  assert.deepEqual(await pngSize(out), { width: 1440, height: 900 })
+})
+
+test('empty-workspace: a fresh boot renders the Nexus, every launch command answered, no page error', async () => {
   const out = path.join(dir, 'nested', 'empty.png')
-  const { unanswered, pageErrors } = await shoot({ scenario: 'empty-workspace', out, size: { width: 1024, height: 640 }, log: () => {} })
+  const { unanswered, pageErrors, inspected } = await shoot({ scenario: 'empty-workspace', out, size: { width: 1024, height: 640 }, log: () => {}, inspect: look })
   assert.deepEqual(unanswered, [])
   assert.deepEqual(pageErrors, [])
+  assert.equal(inspected.nexus, true)
+  assert.deepEqual(inspected.workbench, [])
+  assert.deepEqual(inspected.tabs, [])
   assert.deepEqual(await pngSize(out), { width: 1024, height: 640 })
 })
 
-test('terminal-pane: the saved tab restores into a spawned pty that gets the fixture output', async () => {
+test('terminal-pane: a saved workspace’s pane comes back as a drawer session, its pty spawned and showing the fixture output', async () => {
   const out = path.join(dir, 'terminal.png')
   const lines = []
-  const { unanswered, pageErrors } = await shoot({ scenario: 'terminal-pane', out, trace: true, log: (l) => lines.push(l) })
+  const { unanswered, pageErrors, inspected } = await shoot({ scenario: 'terminal-pane', out, trace: true, log: (l) => lines.push(l), inspect: look })
   assert.deepEqual(unanswered, [])
   assert.deepEqual(pageErrors, [])
-  assert.ok(lines.some((l) => l.startsWith('ipc pty_spawn ') && l.includes('__CHANNEL__:')), 'the terminal pane spawned a pty with an output channel')
+  assert.ok(lines.some((l) => l.startsWith('ipc pty_spawn ') && l.includes('__CHANNEL__:')), 'the restored pane spawned a pty with an output channel')
+  assert.equal(inspected.nexus, true)
+  assert.deepEqual(inspected.workbench, [])
+  assert.equal(inspected.drawer, true)
+  assert.deepEqual(inspected.tabs, ['session:1'])
+  assert.match(inspected.text, /shell · mnemo-desktop/)
   assert.deepEqual(await pngSize(out), { width: 1440, height: 900 })
 })
 

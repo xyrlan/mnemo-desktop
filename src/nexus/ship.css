@@ -91,27 +91,14 @@
 .ship-chip[data-chip='need'][data-zero] { opacity: 0.35; }
 .ship-chip[data-chip='ready'] { color: var(--ship-done); }
 .ship-chip[data-chip='rate'] { color: #c4b5fd; cursor: help; }
-/* The account switcher, as wide as in a sidebar, then the way back to the workbench. With the drawer
-   open the bar is narrow: the rate chip (its title has it all) and the switcher give way first. */
+/* The account switcher, as wide as in a sidebar, then the bar's buttons. With the drawer open the
+   bar is narrow: the rate chip (its title has it all) and the switcher give way first. */
 .ship-scene .ship-chip[data-chip='rate'] { flex-shrink: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ship-accounts {
   flex: 0 1 224px;
   min-width: 96px;
   margin-left: auto;
 }
-.ship-scene .ship-exit {
-  flex: none;
-  padding: 2px 7px;
-  border: 2px solid var(--ship-edge);
-  border-radius: 2px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  white-space: nowrap;
-  color: var(--ship-dim);
-}
-.ship-scene .ship-exit:hover { border-color: var(--ship-lilac); color: var(--ship-ink); }
-.ship-exit kbd { margin-left: 4px; font: inherit; letter-spacing: 0; color: var(--ship-faint); }
 
 /* ---------- space and the stage ---------- */
 .ship-space {

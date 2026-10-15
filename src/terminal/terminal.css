@@ -1,5 +1,5 @@
-/* A terminal wherever it is drawn: in a workbench pane, or in the Nexus's drawer, which has no pane
-   frame around it (moved out of chrome/chrome.css, which goes with the workbench). */
+/* A terminal as the Nexus's drawer draws it, with no pane frame around it (moved out of the
+   workbench's chrome/chrome.css, #458). */
 
 /* A view's body, filling what holds it. */
 .pane-body { position: relative; height: 100%; outline: none; }

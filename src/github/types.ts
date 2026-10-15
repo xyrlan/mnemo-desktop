@@ -1,7 +1,6 @@
 import { childWord, type ChildSession, type Mission, type Piece, type Pr, type RepoGroup } from '../mission/types'
 
 /** Mirrors `src-tauri/src/github.rs`. */
-export type Auth = { installed: boolean; logged: boolean; login: string | null; scopes: string[] }
 export type IssuePiece = { contract_path: string; piece: string }
 export type Issue = {
   number: number
@@ -17,13 +16,6 @@ export type Issue = {
   /** Contract pieces whose section names the issue. */
   pieces: IssuePiece[]
 }
-export type BoardItem = { id: string; title: string; number: number | null; url: string | null; kind: 'Issue' | 'PullRequest' | 'DraftIssue' | string }
-export type BoardColumn = { name: string; items: BoardItem[] }
-export type Board = { title: string; url: string; columns: BoardColumn[] }
-
-/** `gh_project` rejects with this when the token lacks the `project` scope. */
-export const NEEDS_SCOPE = 'needs_scope'
-export const SCOPE_FIX = 'gh auth refresh -s project'
 /** How many recent issues (after the label filter) the cockpit shows beside the linked ones. */
 export const RECENT = 10
 

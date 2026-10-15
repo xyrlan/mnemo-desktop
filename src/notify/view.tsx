@@ -26,7 +26,7 @@ export const notifier = createNotifier({
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
     const offs = [
-      nexusStore.subscribe((s, p) => void ((s.open !== p.open || s.collapsed !== p.collapsed || s.activeTab !== p.activeTab || s.tabs !== p.tabs) && cb())),
+      nexusStore.subscribe((s, p) => void ((s.collapsed !== p.collapsed || s.activeTab !== p.activeTab || s.tabs !== p.tabs) && cb())),
       fleetStore.subscribe((s, p) => void (s.repos !== p.repos && cb())),
     ]
     return () => {
