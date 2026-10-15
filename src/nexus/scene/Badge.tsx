@@ -5,13 +5,27 @@ import type { Badge as BadgeKind } from '../types'
 /** The badges over a robot's head (spec Q14, Q18), drawn in code as pixel grids on the art's own
  *  grid: one badge pixel is two art pixels. Colour means state only (Q11): `alert` is the
  *  needs-you token and the flags the working (checks running) and done (checks passed) tokens;
- *  `fire` and `zzz` carry no state colour, so they use red and the palette's pale lavender. */
-const GRIDS: Record<Exclude<BadgeKind, null>, string[]> = {
-  alert: ['..kkk..', '.kOOOk.', 'kOOwOOk', 'kOOwOOk', 'kOOwOOk', 'kOOOOOk', 'kOOwOOk', '.kOOOk.', '..kkk..'],
-  zzz: ['.....ZZZZ', '........Z', '.......Z.', '......Z..', '.....ZZZZ', 'ZZZ......', '..Z......', '.Z.......', 'ZZZ......'],
-  'flag-pending': ['pkkkkk.', 'pkPPPPk', 'pkPPPPk', 'pkPPPk.', 'pkkkk..', 'p......', 'p......', 'p......', 'pp.....'],
-  'flag-ready': ['pkkkkk.', 'pkDDDDk', 'pkDDDDk', 'pkDDDk.', 'pkkkk..', 'p......', 'p......', 'p......', 'pp.....'],
-  fire: ['...k...', '..kRk..', '..kRRk.', '.kRRRRk', 'kRRYRRk', 'kRYYYRk', 'kRYYYRk', '.kRYRk.', '..kkk..'],
+ *  `fire` and `zzz` carry no state colour, so they use red and the palette's pale lavender, and
+ *  `flag-draft` none either: its cloth is an empty outline at half-mast, no state yet.
+ *
+ *  A badge is layers of one size. `flag-pending` is the pole and an hourglass that hold still,
+ *  plus the cloth in two frames, `wave-a` and `wave-b`: the stylesheet swaps them while checks
+ *  run, and with reduced motion only `wave-a` shows, so the flag stops and the hourglass stays. */
+type Layer = { rows: string[]; part?: 'wave-a' | 'wave-b' }
+
+const one = (rows: string[]): Layer[] => [{ rows }]
+
+const GRIDS: Record<Exclude<BadgeKind, null>, Layer[]> = {
+  alert: one(['..kkk..', '.kOOOk.', 'kOOwOOk', 'kOOwOOk', 'kOOwOOk', 'kOOOOOk', 'kOOwOOk', '.kOOOk.', '..kkk..']),
+  zzz: one(['.....ZZZZ', '........Z', '.......Z.', '......Z..', '.....ZZZZ', 'ZZZ......', '..Z......', '.Z.......', 'ZZZ......']),
+  'flag-pending': [
+    { rows: ['p...........', 'p......kkkkk', 'p......kPPPk', 'p.......kPk.', 'p........P..', 'p.......kwk.', 'p......kwPwk', 'p......kPPPk', 'pp.....kkkkk'] },
+    { part: 'wave-a', rows: ['.kkkkk......', '.kPPPPk.....', '.kPPPPk.....', '.kPPPk......', '.kkkk.......', '............', '............', '............', '............'] },
+    { part: 'wave-b', rows: ['.kkk........', '.kPPkkk.....', '.kPPPPk.....', '.kPPPPk.....', '.kkPPk......', '...kk.......', '............', '............', '............'] },
+  ],
+  'flag-ready': one(['pkkkkk.', 'pkDDDDk', 'pkDDDDk', 'pkDDDk.', 'pkkkk..', 'p......', 'p......', 'p......', 'pp.....']),
+  'flag-draft': one(['p......', 'p......', 'p......', 'pw.w.w.', 'p.....w', 'pw.....', 'p.w.w.w', 'p......', 'pp.....']),
+  fire: one(['...k...', '..kRk..', '..kRRk.', '.kRRRRk', 'kRRYRRk', 'kRYYYRk', 'kRYYYRk', '.kRYRk.', '..kkk..']),
 }
 
 const INK: Record<string, string> = {
@@ -29,15 +43,15 @@ const INK: Record<string, string> = {
 /** Art pixels per badge pixel. */
 const BADGE_PX = 2
 
-export function Badge({ kind, scale }: { kind: Exclude<BadgeKind, null>; scale: number }) {
-  const rows = GRIDS[kind]
-  const cols = rows[0].length
-  const rects: ReactElement[] = []
-  rows.forEach((row, y) =>
-    [...row].forEach((c, x) => {
-      if (c !== '.') rects.push(<rect key={`${x}.${y}`} x={x} y={y} width={1} height={1} fill={INK[c]} />)
-    }),
+const pixels = (rows: string[], at: string): ReactElement[] =>
+  rows.flatMap((row, y) =>
+    [...row].flatMap((c, x) => (c === '.' ? [] : [<rect key={`${at}${x}.${y}`} x={x} y={y} width={1} height={1} fill={INK[c]} />])),
   )
+
+export function Badge({ kind, scale }: { kind: Exclude<BadgeKind, null>; scale: number }) {
+  const layers = GRIDS[kind]
+  const { rows } = layers[0]
+  const cols = rows[0].length
   return (
     <svg
       className="nexus-badge"
@@ -48,7 +62,15 @@ export function Badge({ kind, scale }: { kind: Exclude<BadgeKind, null>; scale: 
       shapeRendering="crispEdges"
       aria-hidden
     >
-      {rects}
+      {layers.map((l, i) =>
+        l.part ? (
+          <g key={l.part} className={`nexus-${l.part}`}>
+            {pixels(l.rows, l.part)}
+          </g>
+        ) : (
+          pixels(l.rows, String(i))
+        ),
+      )}
     </svg>
   )
 }

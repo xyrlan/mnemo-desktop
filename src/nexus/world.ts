@@ -75,6 +75,14 @@ const finished = (c: Pick<ChildSession, 'state' | 'live'>) => !c.live || c.state
 
 const at = (iso: string | null): number => (iso ? Date.parse(iso) : NaN)
 
+/** An open PR's badge (spec Q18): failing checks burn, a draft is a draft, passed checks are
+ *  ready, and anything else (running, or none reported yet) is checks running. */
+export function prBadge(pr: Pick<Pr, 'ci' | 'draft'>): Badge {
+  if (pr.ci === 'fail') return 'fire'
+  if (pr.draft) return 'flag-draft'
+  return pr.ci === 'pass' ? 'flag-ready' : 'flag-pending'
+}
+
 /** A child's robot without its world: pose, halo, badge and exit per the spec's Q18 table and
  *  Q12. `pr` is the child's own or its piece's. null when the robot has left the world: its exit
  *  played out, or it finished long enough ago that it is history (Q5) and no open PR holds it. */
@@ -94,8 +102,9 @@ export function robotOf(c: ChildSession, pr: Pr | null, piece: string | null, no
   const pose: RobotPose = asks ? 'waiting' : rate ? 'sleeping' : busy ? 'working' : 'idle'
   const ready = open && pr.ci === 'pass' && !pr.draft
   // Red checks or a conflict wake the child through pr-follow: `fire`, never the needs-you halo,
-  // which only the child's own ask lights.
-  const badge: Badge = asks ? 'alert' : rate ? 'zzz' : open ? (pr.ci === 'fail' ? 'fire' : ready ? 'flag-ready' : 'flag-pending') : null
+  // which only the child's own ask lights. A draft outranks its running checks: they cannot make
+  // it ready, only marking it ready can, so the hourglass would promise what it will not bring.
+  const badge: Badge = asks ? 'alert' : rate ? 'zzz' : open ? prBadge(pr) : null
   const halo: Halo =
     exit === 'powered-down' ? null : asks ? 'needs-you' : ready || exit === 'merged' ? 'done' : pose === 'working' ? 'working' : 'idle'
 

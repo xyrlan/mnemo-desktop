@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { child, parent } from '../mission/fixtures'
 import type { ChildSession, ParentSession, Pr, RepoGroup, Snapshot } from '../mission/types'
 import { ACCESSORIES, type ArchiveCounts, type Robot, type World } from './types'
-import { accessoryOf, buildWorld, classOf, EXIT_MS, isRateLimited, labelOf, levelOf, robotOf, tierOf, TIER_FULL, TIER_GROWN, toolOf, UNKNOWN_PARENT } from './world'
+import { accessoryOf, buildWorld, classOf, EXIT_MS, isRateLimited, labelOf, levelOf, prBadge, robotOf, tierOf, TIER_FULL, TIER_GROWN, toolOf, UNKNOWN_PARENT } from './world'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -230,7 +230,35 @@ describe('robots: Q18 states', () => {
 
   it('flags a ready PR with the done halo; a draft is not ready', () => {
     expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'pass' }))).toEqual(['idle', 'done', 'flag-ready', null])
-    expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'pass', draft: true }))).toEqual(['idle', 'idle', 'flag-pending', null])
+    expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'pass', draft: true }))).toEqual(['idle', 'idle', 'flag-draft', null])
+  })
+
+  it('a draft whose checks still run is a draft, not checks running', () => {
+    expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'pending', draft: true }))).toEqual(['idle', 'idle', 'flag-draft', null])
+    expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'none', draft: true }))[2]).toBe('flag-draft')
+  })
+
+  it('a draft with failing checks burns', () => {
+    expect(look(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci: 'fail', draft: true }))).toEqual(['idle', 'idle', 'fire', null])
+  })
+
+  it.each([
+    ['pending', false, 'flag-pending'],
+    ['none', false, 'flag-pending'],
+    ['pass', false, 'flag-ready'],
+    ['fail', false, 'fire'],
+    ['pending', true, 'flag-draft'],
+    ['none', true, 'flag-draft'],
+    ['pass', true, 'flag-draft'],
+    ['fail', true, 'fire'],
+  ] as const)('an open PR with checks %s, draft %s, is %s', (ci, draft, badge) => {
+    expect(prBadge({ ci, draft })).toBe(badge)
+    expect(robot(kid({ id: 'a1', live: false, state: 'done' }), pr({ ci, draft })).badge).toBe(badge)
+  })
+
+  it('an ask or a rate limit outranks any PR badge', () => {
+    expect(look(kid({ id: 'a1', tempo: 'blocked', needs: 'may I?' }), pr({ ci: 'pending', draft: true }))[2]).toBe('alert')
+    expect(look(kid({ id: 'a1', tempo: 'blocked', needs: 'rate limited — wait and retry' }), pr({ ci: 'pending' }))[2]).toBe('zzz')
   })
 
   it('burns on failing checks without the needs-you halo, while pr-follow wakes the child', () => {
