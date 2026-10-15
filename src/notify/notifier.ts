@@ -2,11 +2,13 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { AgentEvent } from '../agents/events'
 import type { PolledMove } from '../fleet/create'
 import type { RepoNode } from '../fleet/types'
-import { alertFor, alertOf, cardKey, looking, paneOf, placeOf, quietPrompt, shownWorktree, type Alert } from './decide'
+import { alertFor, alertOf, cardKey, onScreen, placeOf, quietPrompt, type Alert, type Shown } from './decide'
 
 /** A card in the stack: one per `key` (a dispatched child's worktree, else a session), the newest
  *  alert about it. A newer alert keeps the card's `id`, so the stack updates it in place. */
-export type Card = Alert & { id: number; pane: number | null; key: string }
+/** `unopened`: its click found nothing to open (its figure is on no deck or dock yet), so it
+ *  stayed, saying so. */
+export type Card = Alert & { id: number; key: string; unopened?: true }
 
 export type Cards = { cards: Card[] }
 
@@ -16,19 +18,16 @@ export type NotifierDeps = {
   /** What polling saw move that no hook told of: the only news where there are no hooks. */
   polled(cb: (m: PolledMove) => void): () => void
   repos(): readonly RepoNode[]
-  /** `activeWorktree` of the layout. */
-  active(): string | null
-  /** The panes of the shown worktree's tabs. */
-  shownPanes(): readonly number[]
+  /** The session on screen (`shownSession`), or null. */
+  shown(): Shown | null
   focused(): boolean
-  /** Calls `cb` when the shown worktree or the window's focus may have changed. */
+  /** Calls `cb` when the session on screen or the window's focus may have changed. */
   onLook(cb: () => void): () => void
   native(title: string, body: string): Promise<void>
   sound(): void
-  switchTo(worktree: string | null, pane: number | null): void
-  /** Shows the dispatched child session `sessionId` is (working in `worktree`) in its parent's
-   *  Dispatch tab; false when it is no child, or the tab cannot take it. */
-  openChild?(sessionId: string, worktree: string | null): boolean
+  /** Opens session `sessionId` (working in `worktree`) in the Nexus: its figure's drawer tab
+   *  (`openFigure`). False when there was nothing to open. */
+  open(sessionId: string, worktree: string | null): boolean
   now(): number
 }
 
@@ -44,8 +43,8 @@ export const COALESCE_MS = 60_000
 
 export type Notifier = {
   cards: StoreApi<Cards>
-  /** The card was clicked: show its worktree (and pane), or a dispatched child's Dispatch tab,
-   *  and the card goes. */
+  /** The card was clicked: its session opens in the Nexus, and the card goes. When it cannot
+   *  open, the card stays, marked `unopened`. */
   open(id: number): void
   dismiss(id: number): void
   stop(): void
@@ -53,7 +52,7 @@ export type Notifier = {
 
 /**
  * Tells you when an agent finishes its turn or starts waiting on you, unless you are looking at
- * it (the window has focus and shows its worktree): a card in the stack and a short sound, and
+ * it (the window has focus and the Nexus drawer shows it): a card in the stack and a short sound, and
  * a native notification when the window is not focused — with focus, the card already says it.
  *
  * A turn no person started (`quietPrompt`: a child's report card, a wake, a sweep, a peer message,
@@ -90,12 +89,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   }
   const dismiss = (id: number) => drop((c) => c.id !== id)
 
-  const at = (pane: number | null) => ({
-    focused: deps.focused(),
-    shown: shownWorktree(deps.active(), deps.repos()),
-    shownPanes: deps.shownPanes(),
-    pane,
-  })
+  const at = () => ({ focused: deps.focused(), shown: deps.shown() })
 
   const onEvent = (e: AgentEvent) => {
     const repos = deps.repos()
@@ -137,13 +131,12 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   }
 
   const tell = (alert: Alert, key: string, polled: boolean) => {
-    const pane = paneOf(alert.sessionId, deps.repos())
-    const where = at(pane)
-    if (looking(alert, where)) return
+    const where = at()
+    if (onScreen(alert, where)) return
     const before = cards.getState().cards.find((c) => c.key === key)
     // A hook's card says more than a poll's about the same thing.
     if (polled && before?.kind === alert.kind) return
-    const card: Card = { ...alert, id: before?.id ?? nextId++, pane, key }
+    const card: Card = { ...alert, id: before?.id ?? nextId++, key }
     const next = [...cards.getState().cards.filter((c) => c.key !== key), card].slice(-MAX_CARDS)
     set(next)
     if (card.kind === 'done') timers.set(card.id, setTimeout(() => dismiss(card.id), DONE_TTL_MS))
@@ -161,8 +154,8 @@ export function createNotifier(deps: NotifierDeps): Notifier {
 
   // What is on screen with focus is no longer news.
   const onLook = () => {
-    const now = at(null)
-    drop((c) => !looking(c, { ...now, pane: c.pane }))
+    const now = at()
+    drop((c) => !onScreen(c, now))
   }
 
   const offs = [deps.subscribe(onEvent), deps.polled(onPolled), deps.onLook(onLook)]
@@ -173,9 +166,9 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     open(id) {
       const card = cards.getState().cards.find((c) => c.id === id)
       if (!card) return
-      dismiss(id)
-      if (deps.openChild?.(card.sessionId, card.worktree)) return
-      if (card.worktree !== null || card.pane !== null) deps.switchTo(card.worktree, card.pane)
+      if (deps.open(card.sessionId, card.worktree)) return dismiss(id)
+      // Nothing opened: the card stays, and says why, rather than leave with nothing to show.
+      set(cards.getState().cards.map((c) => (c.id === id ? { ...c, unopened: true } : c)))
     },
     stop() {
       offs.forEach((off) => off())

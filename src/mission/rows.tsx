@@ -13,13 +13,17 @@ import { ChatComposer } from '../chat-input/Composer'
 import { ApprovalCard } from '../chat-input/ApprovalCard'
 import type { ComposerProps } from '../conversation/chat-input'
 import type { Parked } from '../conversation/Foot'
+import { attachInNexus, openFigure } from '../nexus/outside'
 import './mission.css'
 
 /** What the mission pane does with a child, and what sits beside its conversation: the
  *  composer the chat's foot draws for it (`ChildComposer`) and the line under the foot's
  *  approval card (`MissionFooter`). */
 
+/** Opens the child: its robot's drawer tab in the Nexus (wave 2a, `routes`). Only while the Nexus
+ *  has no ship that knows it, its mission pane in the workbench, which wave 2b removes. */
 export function openMissionPane(child: ChildSession) {
+  if (openFigure(child.id)) return void missionStore.getState().markLooked(child.id, child.timeline_len)
   const s = appStore.getState()
   const existing = Object.values(s.panes).find((p) => p.view === 'mission' && p.props?.id === child.id)
   if (existing) {
@@ -30,8 +34,11 @@ export function openMissionPane(child: ChildSession) {
   void missionStore.getState().markLooked(child.id, child.timeline_len)
 }
 
-/** `claude attach` to the child, on its own account, in a terminal. */
+/** `claude attach` to the child, on its own account: in a drawer tab of the Nexus, its robot's
+ *  when the ship knows it. Only with no Nexus mounted, in a workbench terminal at `place`, which
+ *  wave 2b removes. */
 export function attachChild(child: Target, place: 'tab' | 'split-col' = 'tab') {
+  if (attachInNexus(child)) return
   const id = idOf(child)
   appStore.getState().openView('terminal-cmd', { cmd: onAccount(`claude attach ${id}`, accountOf(child)) }, place, `attach ${id}`)
 }

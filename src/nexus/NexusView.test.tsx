@@ -5,6 +5,7 @@ import type { NexusClient } from './client'
 import { NexusView } from './NexusView'
 import type { ShipClient } from './ship-client'
 import type { Feed, Ship, ShipSceneProps } from './ship-types'
+import { attachInNexus, openFigure } from './outside'
 import { nexusStore } from './store'
 import { liveDrawer } from './drawer/app'
 import { shipFixture } from './drawer/fixtures'
@@ -421,4 +422,46 @@ test('a window opens a figure in the drawer as a menu does, and closes so its ta
   expect(windowStore.getState().open).toBeNull()
   expect(nexusStore.getState().activeTab).toBe('r-live')
   answered = []
+})
+
+test('openFigure opens a figure from anywhere in the app as a click does, the Nexus opened; false for what the ship does not know', async () => {
+  expect(openFigure('r-live')).toBe(false)
+  await mount()
+  act(() => nexusStore.getState().setOpen(false))
+  let opened = false
+  act(() => void (opened = openFigure('r-live')))
+  expect(opened).toBe(true)
+  expect(nexusStore.getState()).toMatchObject({ open: true, activeTab: 'r-live', collapsed: false })
+  expect(document.querySelector('[data-drawer-tab="r-live"]')).not.toBeNull()
+  act(() => void (opened = openFigure('not-on-the-ship')))
+  expect(opened).toBe(false)
+  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['r-live'])
+})
+
+test('attaching a child opens it in the drawer: its robot’s tab, or one of its own while the ship does not know it', async () => {
+  await mount()
+  act(() => nexusStore.getState().setOpen(false))
+  act(() => void attachInNexus('r-live'))
+  expect(nexusStore.getState()).toMatchObject({ open: true, activeTab: 'r-live' })
+  act(() => void attachInNexus({ id: 'c0ffee99', account_env: null }))
+  expect(nexusStore.getState().tabs.at(-1)).toMatchObject({ id: 'c0ffee99', kind: 'robot', key: 'child:c0ffee99', label: 'c0ffee99' })
+  expect(nexusStore.getState().activeTab).toBe('c0ffee99')
+  for (const r of roots.splice(0)) act(() => r.unmount())
+  expect(attachInNexus('c0ffee98')).toBe(false)
+  expect(openFigure('r-live')).toBe(false)
+})
+
+test('openFigure closes an open window, as the window’s own open does, so the tab is not left under it; what it cannot open leaves the window', async () => {
+  await mount()
+  unregister = registerWindow({ id: 'zz-over', title: 'Over', render: () => <p data-zz-over="" /> })
+  await act(async () => openWindow('zz-over'))
+  act(() => void openFigure('not-on-the-ship'))
+  expect(windowStore.getState().open?.id).toBe('zz-over')
+  act(() => void openFigure('r-live'))
+  expect(windowStore.getState().open).toBeNull()
+  expect(document.querySelector('[data-zz-over]')).toBeNull()
+  expect(nexusStore.getState().activeTab).toBe('r-live')
+  await act(async () => openWindow('zz-over'))
+  act(() => void attachInNexus({ id: 'c0ffee97', account_env: null }))
+  expect(windowStore.getState().open).toBeNull()
 })

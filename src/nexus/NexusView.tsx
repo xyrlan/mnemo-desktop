@@ -5,6 +5,7 @@ import { STATUS_BAR } from '../shell/edges'
 import { shellStore } from '../shell/store'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
+import { idOf } from '../mission/account'
 import { useMission } from '../mission/app-store'
 import type { Snapshot } from '../mission/types'
 import { usePulse } from '../pulse/app-store'
@@ -20,6 +21,7 @@ import { NexusDrawer, useShownWidth, type DrawerDeps } from './drawer/Drawer'
 import { openingOf } from './drawer/model'
 import { useReducedMotion, useVisible } from './env'
 import { logEvents } from './log'
+import { setFigures } from './outside'
 import { buildShip } from './ship'
 import { asksFrom, type ShipClient } from './ship-client'
 import type { ActionResult, AgentView, Feed, Ship, ShipAction } from './ship-types'
@@ -31,7 +33,7 @@ import { NexusMenu } from './ui/Menu'
 import { menuFor, type MenuItem, type MenuTarget } from './ui/menus'
 import { WindowHost } from './ui/Window'
 import { ConfirmHost } from './ui/confirm'
-import { openWindow, windowsIn } from './ui/windows'
+import { closeWindow, openWindow, windowsIn } from './ui/windows'
 
 /** The SYSTEMS menu: every window registered in that group, in its order. */
 const systemsItems = (): MenuItem[] => windowsIn('systems').map((d) => ({ id: d.id, label: d.title, run: () => openWindow(d.id) }))
@@ -268,6 +270,30 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
     },
     [drawer],
   )
+  // Every path in the app that goes to a session opens it here (`./outside`): a notification's
+  // click, the mission pane's attach. Its figure's tab, the Nexus open and a window closed, as a
+  // window's own `ctx.open` does, so the tab is not left under it; a child the ship does not know
+  // yet is attached in a tab of its own, which becomes its robot's once the ship lists it.
+  useEffect(() => {
+    const shown = () => {
+      nexusStore.getState().setOpen(true)
+      closeWindow()
+    }
+    const open = (id: string) => {
+      if (!onOpen(id)) return false
+      shown()
+      return true
+    }
+    return setFigures({
+      open,
+      attach(child) {
+        const id = idOf(child)
+        if (open(id)) return
+        drawer.drawer.open({ id, kind: 'robot', key: null, readOnly: null, label: id, sessionId: null, cwd: null }, { child })
+        shown()
+      },
+    })
+  }, [onOpen, drawer])
   // Open, the sidebars and the workbench under it are out of reach, keys and focus included (the
   // shell's `covered`); closed, the shell gives their focus back.
   useEffect(() => {

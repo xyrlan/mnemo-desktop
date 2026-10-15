@@ -1,5 +1,4 @@
 import type { StoreApi } from 'zustand/vanilla'
-import type { Target } from '../../mission/account'
 import type { PaneId } from '../../pty/client'
 import { sessionKey, type SessionHost, type SessionKey, type SessionRef } from '../../session/host'
 import type { DrawerTab, NexusState } from '../store'
@@ -27,22 +26,20 @@ export type Drawer = {
   close(id: string): Promise<void>
   /** Expands or collapses; the tabs stay held. */
   toggle(): void
-  /** *Open as tab*: tab `id`'s session in the workbench, the Nexus closed. A pane's session is
-   *  revealed in its pane, and the tab keeps it. A child's attach is let go and the child attached
-   *  in a workbench tab instead: one attach, not two. */
-  reveal(id: string, child: Target | null): Promise<void>
   dispose(): void
 }
 
-/** What *open as tab* does in the workbench. */
+/** What the drawer tells the rest of the app. A session is shown in the drawer only: *open as tab*,
+ *  which showed it in the workbench, went in wave 2a (`routes`). */
 export type Workbench = {
-  goToPane(id: PaneId): void
-  /** `claude attach` to the child on its account, in a new tab. */
-  attach(child: Target): void
-  closeNexus(): void
   /** Pane `pane`'s session is shown by no tab any more: an offscreen pane with nothing to come
    *  back to ends (`start.ts`). */
   letGo?(pane: PaneId): void
+  /** Read by nothing: what *open as tab* used. Callers outside the `routes` piece still pass them;
+   *  wave 2b removes them. */
+  goToPane?: unknown
+  attach?: unknown
+  closeNexus?: unknown
 }
 
 export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, workbench: Workbench): Drawer {
@@ -80,21 +77,6 @@ export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, wor
     toggle() {
       const s = store.getState()
       if (s.tabs.length) s.setCollapsed(!s.collapsed)
-    },
-
-    async reveal(id, child) {
-      const tab = store.getState().tabs.find((t) => t.id === id)
-      const session = tab?.key ? host.getState().sessions[tab.key] : undefined
-      if (!tab || !session) return
-      if (session.kind === 'pane' && session.pty !== null) {
-        workbench.closeNexus()
-        workbench.goToPane(session.pty)
-        return
-      }
-      if (session.kind !== 'attach' || child === null) return
-      workbench.closeNexus()
-      await drawer.close(id)
-      workbench.attach(child)
     },
 
     dispose: unwatch,

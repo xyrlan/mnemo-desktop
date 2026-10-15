@@ -1,6 +1,7 @@
 import type { AgentEvent } from '../agents/events'
 import { notificationKind } from '../fleet/model'
 import type { RepoNode } from '../fleet/types'
+import { allChildren, type Snapshot } from '../mission/types'
 import { basename, norm, within } from '../path/path'
 
 /** What an agent did that is worth telling you: its turn is `done`, or it waits on a `permission`
@@ -38,12 +39,33 @@ export function placeOf(cwd: string, repos: readonly RepoNode[]): Place | null {
   return best
 }
 
-/** The worktree on screen: the one the layout shows, or, before one is chosen, the first repo's
- *  main checkout (what the shell shows then). */
-export function shownWorktree(active: string | null, repos: readonly RepoNode[]): string | null {
-  if (active !== null) return active
-  const first = repos[0]?.worktrees
-  return first?.find((w) => w.kind === 'main')?.path ?? first?.[0]?.path ?? null
+/** The session on screen: the Nexus drawer's tab shown, expanded, the Nexus open. `worktree`: a
+ *  dispatched child's tab's worktree, so the child resumed as a new session there is still the one
+ *  on screen. */
+export type Shown = { sessionId: string | null; worktree: string | null }
+
+/** What `shownSession` reads of the Nexus store. */
+export type DrawerOnScreen = {
+  open: boolean
+  collapsed: boolean
+  activeTab: string | null
+  tabs: readonly { id: string; kind: string; sessionId: string | null; cwd: string | null }[]
+}
+
+/** The session the drawer shows, or null when it shows none: the Nexus closed, the drawer
+ *  collapsed or empty. */
+export function shownSession(nexus: DrawerOnScreen, repos: readonly RepoNode[]): Shown | null {
+  if (!nexus.open || nexus.collapsed) return null
+  const tab = nexus.tabs.find((t) => t.id === nexus.activeTab)
+  if (!tab) return null
+  return { sessionId: tab.sessionId, worktree: tab.kind === 'robot' && tab.cwd ? (placeOf(tab.cwd, repos)?.path ?? null) : null }
+}
+
+/** The ship's figure for session `sessionId`: a dispatched child's robot (its short id), else the
+ *  captain, whose id is the session's. A child is named by its full session id, by its short id,
+ *  or by a session id its short id begins, before mnemo knows the full one. */
+export function figureOf(snap: Snapshot, sessionId: string): string {
+  return allChildren(snap).find((c) => c.session_id === sessionId || c.id === sessionId || sessionId.startsWith(c.id))?.id ?? sessionId
 }
 
 /** What `e` is worth telling, before asking whether you are looking: a `stop` is a finished turn,
@@ -108,14 +130,17 @@ export function cardKey(sessionId: string, worktree: string | null, repos: reado
   return `session:${sessionId}`
 }
 
-/** The pane running session `sessionId`, when the fleet knows one. */
-export function paneOf(sessionId: string, repos: readonly RepoNode[]): number | null {
-  for (const r of repos) for (const w of r.worktrees) for (const a of w.agents) if (a.sessionId === sessionId) return a.paneId
-  return null
+/** You are looking at the agent: the window has focus and the drawer shows its session, or the
+ *  dispatched child's worktree it runs in. */
+export function onScreen(alert: Pick<Alert, 'sessionId' | 'worktree'>, at: { focused: boolean; shown: Shown | null }): boolean {
+  if (!at.focused || !at.shown) return false
+  if (at.shown.sessionId !== null && at.shown.sessionId === alert.sessionId) return true
+  return alert.worktree !== null && at.shown.worktree !== null && norm(alert.worktree) === norm(at.shown.worktree)
 }
 
-/** You are looking at the agent: the window has focus and shows its worktree, or one of the
- *  shown worktree's tabs holds its pane (an agent in a folder no repo owns). */
+/** The workbench's *looking*: the window has focus and shows the agent's worktree, or one of the
+ *  shown worktree's tabs holds its pane. The notifier no longer asks it (`onScreen`); only
+ *  `src/path/callers.test.ts` does, and wave 2b removes both. */
 export function looking(alert: Pick<Alert, 'worktree'>, at: { focused: boolean; shown: string | null; shownPanes: readonly number[]; pane: number | null }): boolean {
   if (!at.focused) return false
   if (alert.worktree !== null && at.shown !== null && norm(alert.worktree) === norm(at.shown)) return true

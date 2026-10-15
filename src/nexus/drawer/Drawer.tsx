@@ -30,7 +30,7 @@ export type DrawerDeps = {
   drawer: Drawer
   host: SessionHost
   /** The layout store (`src/layout/store.ts`): its owners say whether a tab's view owns its
-   *  session; its panes, which pane is offscreen (no workbench view to reveal). */
+   *  session. (`panes` is read by nothing since *open as tab* went; wave 2b drops it.) */
   owners: StoreApi<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>
   /** Draws a terminal: the terminal pane view (`src/terminal/view.tsx`) in the app. */
   terminal: ComponentType<PaneViewProps>
@@ -39,7 +39,7 @@ export type DrawerDeps = {
   diff: DiffClient
   /** The deepest worktree the app knows that holds `cwd`. */
   worktreeOf(cwd: string): string
-  /** Shows repo `root` in the workbench. */
+  /** Opens repo `root` in the drawer: a shell there, in a tab of its own (a breadcrumb). */
   goToRepo(root: string): void
   /** The layout's terminal pane running session `sessionId`, if one does. */
   paneOfSession(sessionId: string): number | null
@@ -336,10 +336,6 @@ function ChangesButton({ id, worktree, label }: { id: string; worktree: string; 
 }
 
 function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
-  const session = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key] : undefined))
-  const kind = session?.kind
-  // A pane the Nexus started has no place in the workbench to be shown in.
-  const offscreen = useStore(deps.owners, (s) => (kind === 'pane' && session?.pty != null ? !!s.panes?.[session.pty]?.offscreen : false))
   if (!figure)
     return (
       <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs">
@@ -365,7 +361,7 @@ function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
                 <button
                   type="button"
                   className="text-foreground/80 hover:underline"
-                  title={c.go ? `Open ${c.text} in the drawer` : `Show ${c.text} in the workbench`}
+                  title={c.go ? `Open ${c.text} in the drawer` : `Open a terminal in ${c.text}`}
                   onClick={() => (c.go ? onOpen(c.go) : deps.goToRepo(c.repo!))}
                 >
                   {c.text}
@@ -381,17 +377,6 @@ function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
           {state.text}
         </span>
         {child && <ChangesButton id={figure.kind === 'robot' ? figure.robot.id : tab.id} worktree={child.cwd} label={labelOf(figure)} />}
-        {((kind === 'pane' && !offscreen) || kind === 'attach') && (
-          <button
-            type="button"
-            data-open-as-tab=""
-            className={SMALL}
-            title={kind === 'pane' ? 'Show its pane in the workbench' : 'Attach it in a workbench tab instead'}
-            onClick={() => void deps.drawer.reveal(tab.id, child)}
-          >
-            open as tab ⤢
-          </button>
-        )}
       </div>
       {line && <div className="truncate px-3 pb-1 text-[11px] text-muted-foreground" title={line}>{line}</div>}
     </div>

@@ -7,11 +7,7 @@ import { BY, createDrawer, type Workbench } from './sessions'
 function setup() {
   const { host, log, exits } = fakeHost()
   const done: string[] = []
-  const workbench: Workbench = {
-    goToPane: (id) => void done.push(`go ${id}`),
-    attach: (c) => void done.push(`attach ${typeof c === 'string' ? c : c.id}`),
-    closeNexus: () => void done.push('close nexus'),
-  }
+  const workbench: Workbench = { letGo: (pane) => void done.push(`let go ${pane}`) }
   const drawer = createDrawer(host, nexusStore, workbench)
   const ship = shipFixture()
   const open = (id: string) => {
@@ -158,17 +154,14 @@ test('a session the host lets go of (its pane closed, its attach ended) takes it
   expect(nexusStore.getState().tabs).toEqual([])
 })
 
-test('open as tab: a pane is revealed and kept; a child is detached here and attached in the workbench', async () => {
-  const { host, log, done, drawer, open } = setup()
+
+test('closing the last tab that shows a pane hands the pane to letGo; an attach is only ended', async () => {
+  const { done, drawer, open, log } = setup()
   open('cap-1')
   open('r-live')
   await settle()
-  await drawer.reveal('cap-1', null)
-  expect(done).toEqual(['close nexus', 'go 7'])
-  expect(host.getState().sessions['pane:7']).toBeDefined()
-  done.length = 0
-  await drawer.reveal('r-live', shipFixture().decks[0].flight[0].child)
-  expect(done).toEqual(['close nexus', 'attach r-live'])
+  await drawer.close('cap-1')
+  await drawer.close('r-live')
+  expect(done).toEqual(['let go 7'])
   expect(log).toContain('kill 60')
-  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['cap-1'])
 })

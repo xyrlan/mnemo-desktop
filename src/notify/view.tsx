@@ -1,11 +1,11 @@
 import { subscribeAgentEvents } from '../agents/events'
 import { notifyAgent } from '../agents/notify'
 import { fleetStore, subscribePolledMoves } from '../fleet/store'
-import { store as layout } from '../layout/app-store'
-import { leaves } from '../layout/tree'
 import { missionStore } from '../mission/app-store'
-import { dispatchRoutes, openChildSession } from '../sidebar/dispatch'
+import { openFigure } from '../nexus/outside'
+import { nexusStore } from '../nexus/store'
 import { mountInSlot } from '../shell/slots'
+import { figureOf, shownSession } from './decide'
 import { NotificationStack } from './NotificationStack'
 import { createNotifier } from './notifier'
 import { chime } from './sound'
@@ -18,8 +18,7 @@ export const notifier = createNotifier({
   subscribe: subscribeAgentEvents,
   polled: subscribePolledMoves,
   repos: () => fleetStore.getState().repos,
-  active: () => layout.getState().activeWorktree,
-  shownPanes: () => layout.getState().tabs.flatMap((t) => leaves(t.root)),
+  shown: () => shownSession(nexusStore.getState(), fleetStore.getState().repos),
   focused: () => focused,
   onLook(cb) {
     const onFocus = () => ((focused = true), cb())
@@ -27,7 +26,7 @@ export const notifier = createNotifier({
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
     const offs = [
-      layout.subscribe((s, p) => void ((s.activeWorktree !== p.activeWorktree || s.tabs !== p.tabs) && cb())),
+      nexusStore.subscribe((s, p) => void ((s.open !== p.open || s.collapsed !== p.collapsed || s.activeTab !== p.activeTab || s.tabs !== p.tabs) && cb())),
       fleetStore.subscribe((s, p) => void (s.repos !== p.repos && cb())),
     ]
     return () => {
@@ -38,19 +37,10 @@ export const notifier = createNotifier({
   },
   native: notifyAgent,
   sound: () => chime(),
-  switchTo(worktree, pane) {
-    void (async () => {
-      if (worktree !== null) {
-        await layout.getState().switchWorktree(worktree)
-        fleetStore.getState().markRead(worktree)
-      }
-      if (pane !== null) layout.getState().goToPane(pane)
-    })()
-  },
-  // A dispatched child's card opens its parent's Dispatch tab, where its question is; the child's
-  // own worktree has nothing on screen. What it said is seen, as `switchTo` counts it.
-  openChild(sessionId, worktree) {
-    if (!openChildSession(dispatchRoutes, missionStore.getState().snapshot, sessionId)) return false
+  // Its figure in the Nexus (Q14): a dispatched child's robot, else its captain. What it said is
+  // seen once it is on screen.
+  open(sessionId, worktree) {
+    if (!openFigure(figureOf(missionStore.getState().snapshot, sessionId))) return false
     if (worktree !== null) fleetStore.getState().markRead(worktree)
     return true
   },
