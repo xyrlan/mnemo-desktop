@@ -35,6 +35,10 @@ pub struct PulseEvent {
     pub hits: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The file an enrichment's Edit/Write/Read touched, as the log spells it: the Nexus
+    /// sends the packet to the robot whose worktree holds it. Only `enrich` carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
 }
 
 /// One of the logs mnemo writes under `<vault>/.mnemo/`.
@@ -93,6 +97,7 @@ struct Row {
     projects: Option<Vec<String>>,
     backfilled: Option<bool>,
     parent_session: Option<String>,
+    file_path: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -125,7 +130,14 @@ pub fn parse_line(log: Log, line: &str, now: u64) -> Option<PulseEvent> {
         }
         Log::Enrich => {
             let slugs = slugs(row.hit_slugs.as_deref().unwrap_or_default());
-            (!slugs.is_empty()).then(|| PulseEvent { kind: "enrich", tool: row.tool_name, hits: Some(slugs.len() as u32), slugs, ..base })
+            (!slugs.is_empty()).then(|| PulseEvent {
+                kind: "enrich",
+                tool: row.tool_name,
+                hits: Some(slugs.len() as u32),
+                slugs,
+                file_path: row.file_path.filter(|f| !f.is_empty()),
+                ..base
+            })
         }
         Log::Denial => {
             let slug = row.slug.as_deref().map(rule_slug).filter(|s| !s.is_empty())?;
@@ -305,6 +317,7 @@ mod tests {
                 tool: None,
                 hits: Some(1),
                 session_id: Some("f11816fc-b362-4779-b511-f98ed8d5c994".into()),
+                file_path: None,
             }
         );
         // Prefixed ids name the graph's slugs.
@@ -340,10 +353,34 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert_eq!((e[0].kind, e[0].tool.as_deref(), e[0].project.as_str()), ("enrich", Some("Edit"), "clubinho"));
         assert_eq!(e[0].slugs, ["plan-upgrade-reuses-renewal-infrastructure-no-new-endpoint"]);
+        assert!(e[0].file_path.is_some());
 
         let d = events(Log::Denial, "denial-log.jsonl");
         assert_eq!(d.len(), 1);
         assert_eq!((d[0].kind, d[0].tool.as_deref(), d[0].slugs.as_slice()), ("enforce", Some("Bash"), &["never-force-push-main".to_string()][..]));
+    }
+
+    #[test]
+    fn an_enrich_carries_its_file_path_and_no_other_event_does() {
+        let line = r#"{"timestamp":"2026-01-02T03:04:05Z","project":"demo","tool_name":"Edit","hit_slugs":["a-rule"],"file_path":"/home/dev/demo-wt-3/src/a.ts"}"#;
+        let e = parse_line(Log::Enrich, line, 7).unwrap();
+        assert_eq!(e.file_path.as_deref(), Some("/home/dev/demo-wt-3/src/a.ts"));
+        assert_eq!(serde_json::to_value(&e).unwrap()["file_path"], "/home/dev/demo-wt-3/src/a.ts");
+        // Windows spellings travel as written; the Nexus matches them.
+        let win = r#"{"project":"demo","hit_slugs":["a-rule"],"file_path":"C:\\dev\\demo-wt-3\\a.ts"}"#;
+        assert_eq!(parse_line(Log::Enrich, win, 7).unwrap().file_path.as_deref(), Some(r"C:\dev\demo-wt-3\a.ts"));
+        // A row without one, or with an empty one, sends none.
+        let bare = parse_line(Log::Enrich, r#"{"project":"demo","hit_slugs":["a-rule"],"file_path":""}"#, 7).unwrap();
+        assert_eq!(bare.file_path, None);
+        assert!(serde_json::to_value(&bare).unwrap().get("file_path").is_none());
+        // Other logs ignore the field even when a row has it.
+        for (log, row) in [
+            (Log::Access, r#"{"tool":"read_mnemo_rule","project":"demo","file_path":"/x"}"#),
+            (Log::Denial, r#"{"slug":"a-rule","tool":"Bash","project":"demo","file_path":"/x"}"#),
+            (Log::Reflex, r#"{"emitted":["a-rule"],"project":"demo","file_path":"/x"}"#),
+        ] {
+            assert_eq!(parse_line(log, row, 7).unwrap().file_path, None, "{log:?}");
+        }
     }
 
     #[test]
