@@ -24,3 +24,14 @@ test('shift+click toggles a robot in and out of the selection', () => {
   s.clearSelection()
   expect(nexusStore.getState().selection.size).toBe(0)
 })
+
+test('triage asked from outside opens the Nexus; the view settles it, on triage only with robots waiting', () => {
+  nexusStore.setState({ open: false, triage: false, triageAsked: false })
+  nexusStore.getState().askTriage()
+  expect(nexusStore.getState()).toMatchObject({ open: true, triage: false, triageAsked: true })
+  nexusStore.getState().settleTriageAsk(0)
+  expect(nexusStore.getState()).toMatchObject({ triage: false, triageAsked: false })
+  nexusStore.getState().askTriage()
+  nexusStore.getState().settleTriageAsk(2)
+  expect(nexusStore.getState()).toMatchObject({ triage: true, triageAsked: false })
+})

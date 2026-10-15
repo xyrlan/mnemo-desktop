@@ -202,6 +202,17 @@ test('the needs-you count opens the Nexus on triage, not the plain toggle; the o
   for (const b of ['working', 'done']) expect(host.querySelector(`[data-bucket="${b}"]`)!.tagName).toBe('SPAN')
 })
 
+test('the counts are named for assistive tech: the button by what it does, the others as images', async () => {
+  fleet()
+  const host = await mount()
+  const name = (b: string) => host.querySelector(`[data-bucket="${b}"]`)!
+  expect(name('needs-you').getAttribute('aria-label')).toBe('Open triage: 2 need you')
+  expect([name('working'), name('done')].map((e) => [e.getAttribute('role'), e.getAttribute('aria-label')])).toEqual([
+    ['img', 'Working: 1'],
+    ['img', 'Done: 1'],
+  ])
+})
+
 test('the Nexus entry leaves out a state no agent is in, and shows no counts for an idle fleet', async () => {
   fleetStore.setState({ repos: [repo('/r/a', [tree('/r/a', { agents: [agent('x', 'working'), agent('y', 'idle')] })])] })
   const host = await mount()

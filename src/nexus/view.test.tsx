@@ -27,12 +27,13 @@ test('the app opens on the Nexus, and `nexus.toggle` closes and opens it', () =>
   expect(nexusStore.getState().open).toBe(true)
 })
 
-test('`nexus.triage` opens the Nexus with triage open, from closed or open', () => {
+test('`nexus.triage` opens the Nexus and asks the view for triage, from closed or open', () => {
   expect(all().filter((a) => a.id === 'nexus.triage')).toHaveLength(1)
-  nexusStore.setState({ open: false, triage: false })
+  nexusStore.setState({ open: false, triage: false, triageAsked: false })
   run('nexus.triage')
-  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true })
-  nexusStore.setState({ triage: false })
+  // Triage itself is the view's call: it knows whether a robot waits (NexusView.test).
+  expect(nexusStore.getState()).toMatchObject({ open: true, triage: false, triageAsked: true })
+  nexusStore.setState({ triageAsked: false })
   run('nexus.triage')
-  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true })
+  expect(nexusStore.getState()).toMatchObject({ open: true, triageAsked: true })
 })

@@ -48,8 +48,9 @@ const BUCKETS: { state: Exclude<AgentState, 'idle'>; label: string; dot?: string
 const COUNT = 'inline-flex items-center gap-1 text-[10px] tabular-nums text-worktree-sidebar-foreground/55'
 
 /** Every agent's state, counted, beside the entry: the fleet's radar. Idle is left out, as in Orca
- *  by default. The needs-you count is a button of its own: it opens the Nexus on triage. The other
- *  counts let a click through to the entry under them. */
+ *  by default. The needs-you count is a button of its own: it opens the Nexus, on triage when a
+ *  child waits on you. The other counts are images with their words, and let a click through to the
+ *  entry under them. */
 function BucketCounts(): React.JSX.Element | null {
   const repos = useFleet((f) => f.repos)
   const counts = useMemo(() => countByState(repos), [repos])
@@ -58,12 +59,12 @@ function BucketCounts(): React.JSX.Element | null {
   return (
     <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1.5">
       {shown.map((b) => {
-        const glyph = b.dot ? <span className={cn('size-1.5 rounded-full', b.dot)} /> : <AgentQuestionIcon className="size-2.5" />
+        const glyph = b.dot ? <span aria-hidden className={cn('size-1.5 rounded-full', b.dot)} /> : <AgentQuestionIcon className="size-2.5" />
         return b.state === 'needs-you' ? (
           <button
             key={b.state}
             type="button"
-            aria-label={`${b.label}: ${counts[b.state]}`}
+            aria-label={`Open triage: ${counts[b.state]} need${counts[b.state] === 1 ? 's' : ''} you`}
             title="Open the Nexus on who needs you"
             data-bucket={b.state}
             onClick={() => run('nexus.triage')}
@@ -73,7 +74,7 @@ function BucketCounts(): React.JSX.Element | null {
             {counts[b.state]}
           </button>
         ) : (
-          <span key={b.state} aria-label={`${b.label}: ${counts[b.state]}`} data-bucket={b.state} className={COUNT}>
+          <span key={b.state} role="img" aria-label={`${b.label}: ${counts[b.state]}`} data-bucket={b.state} className={COUNT}>
             {glyph}
             {counts[b.state]}
           </span>

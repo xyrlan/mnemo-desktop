@@ -70,6 +70,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const log = useNexus((s) => s.log)
   const selection = useNexus((s) => s.selection)
   const triage = useNexus((s) => s.triage)
+  const triageAsked = useNexus((s) => s.triageAsked)
   const focusId = useNexus((s) => s.focusId)
   const reducedMotion = useReducedMotion()
   const visible = useVisible()
@@ -117,6 +118,11 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
     nexusStore.getState().appendLog(logEvents(prev.current, ship, now))
     prev.current = ship
   }, [ship, now])
+
+  // Triage asked for from the sidebar opens only on robots to triage: with none, the Nexus alone.
+  useEffect(() => {
+    if (triageAsked) nexusStore.getState().settleTriageAsk(ship.counts.need)
+  }, [triageAsked, ship])
 
   // Opening is the view's (the drawer's); every other action is the command piece's.
   const run = useCallback(

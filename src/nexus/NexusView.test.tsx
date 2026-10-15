@@ -4,9 +4,10 @@ import { toast } from '@/ui'
 import type { NexusClient } from './client'
 import { NexusView } from './NexusView'
 import type { ShipClient } from './ship-client'
-import type { Feed, ShipSceneProps } from './ship-types'
+import type { Feed, Ship, ShipSceneProps } from './ship-types'
 import { nexusStore } from './store'
 import { liveDrawer } from './drawer/app'
+import { shipFixture } from './drawer/fixtures'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -38,12 +39,12 @@ vi.mock('./drawer/app', async () => {
   }
 })
 // What each build and each log call was given, and the scene's props.
-const seen = vi.hoisted(() => ({ feeds: [] as unknown[], logged: 0, scene: null as unknown }))
+const seen = vi.hoisted(() => ({ feeds: [] as unknown[], logged: 0, scene: null as unknown, ship: null as null | (() => unknown) }))
 vi.mock('./ship', async (importOriginal) => {
   const { shipFixture } = await import('./drawer/fixtures')
   return {
     ...(await importOriginal<object>()),
-    buildShip: (input: { feed: unknown }) => (seen.feeds.push(input.feed), shipFixture()),
+    buildShip: (input: { feed: unknown }) => (seen.feeds.push(input.feed), seen.ship ? seen.ship() : shipFixture()),
   }
 })
 vi.mock('./log', async (importOriginal) => {
@@ -95,7 +96,8 @@ beforeEach(() => Object.defineProperty(window, 'innerWidth', { value: 1600, conf
 afterEach(async () => {
   for (const r of roots.splice(0)) act(() => r.unmount())
   for (const t of nexusStore.getState().tabs) await liveDrawer.drawer.close(t.id)
-  nexusStore.setState({ open: true, collapsed: false, drawerWidth: 600, feed: null })
+  nexusStore.setState({ open: true, collapsed: false, drawerWidth: 600, feed: null, triage: false, triageAsked: false })
+  seen.ship = null
   seen.feeds.length = 0
   seen.logged = 0
   document.body.innerHTML = ''
@@ -182,4 +184,31 @@ test('an action from the ship that is refused says why', async () => {
   const scene = seen.scene as ShipSceneProps
   await act(async () => scene.onAction({ kind: 'merge', robotIds: ['r-live'] }))
   expect(toast.error).toHaveBeenCalledWith('merge refused: checks are red')
+})
+
+test('triage asked from the sidebar opens on a blocked robot', async () => {
+  const blocked = (): Ship => {
+    const s = shipFixture()
+    const r = { ...s.decks[0].flight[0], state: 'need' as const, zone: 'bridge' as const, need: { kind: 'question' as const, text: 'which one?', options: ['a', 'b'] } }
+    return { ...s, bridge: { exceptions: [{ kind: 'need', robotId: r.id, need: r.need }], blocked: [r] }, counts: { ...s.counts, need: 1 } }
+  }
+  seen.ship = blocked
+  nexusStore.getState().setOpen(false)
+  await mount()
+  await act(async () => nexusStore.getState().askTriage())
+  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true, triageAsked: false })
+})
+
+test('triage asked when only a captain waits opens the Nexus alone: triage has no card for it', async () => {
+  // The sidebar counts a waiting interactive session as needing you; the ship lists no robot.
+  seen.ship = () => {
+    const s = shipFixture()
+    return { ...s, decks: [{ ...s.decks[0], captains: s.decks[0].captains.map((c, i) => (i === 0 ? { ...c, pose: 'alert' as const } : c)) }] }
+  }
+  nexusStore.getState().setOpen(false)
+  await mount()
+  await act(async () => nexusStore.getState().askTriage())
+  expect(view()).not.toBeNull()
+  expect(nexusStore.getState()).toMatchObject({ open: true, triage: false, triageAsked: false })
+  expect(document.body.textContent).not.toContain('all settled')
 })
