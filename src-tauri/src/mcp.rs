@@ -1,5 +1,6 @@
-//! Desktop MCP (issue #74): the app serves structured reads of its panes to the Claude Code
-//! sessions it hosts.
+//! Desktop MCP (issue #74): the app serves the Claude Code sessions it hosts structured reads of
+//! the Nexus's sessions: the drawer's tabs, and the terminals the app runs with no view on screen
+//! (spec `2026-10-15-nexus-app-design.md`, Q16).
 //!
 //! ```text
 //! claude ──stdio JSON-RPC──▶ mnemo-desktop-mcp ──unix socket, one JSON line each way──▶ app
@@ -8,7 +9,7 @@
 //! ```
 //!
 //! The binary (`src/bin/mnemo-desktop-mcp.rs`) owns the MCP protocol; this side only
-//! relays a tool name and its arguments to the webview, which knows the panes, and hands
+//! relays a tool name and its arguments to the webview, which knows the sessions, and hands
 //! back MCP `content`. The socket is bound when the webview first asks for its path, so
 //! nothing is served before something can answer.
 //!
@@ -33,7 +34,8 @@ pub const BIN_NAME: &str = "mnemo-desktop-mcp";
 /// The name sessions know the server by (`claude mcp add desktop …`).
 pub const SERVER_NAME: &str = "desktop";
 /// The tools the binary may relay; anything else is refused before it reaches the webview.
-pub const TOOLS: &[&str] = &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", APP_SNAPSHOT];
+/// `desktop_browser_read` and `desktop_pane_snapshot` went with the workbench's browser panes (Q16).
+pub const TOOLS: &[&str] = &["desktop_list_panes", "desktop_terminal_read", APP_SNAPSHOT];
 /// Tools only a debug build serves (`pnpm tauri dev`), on top of `TOOLS`.
 pub const DEV_TOOLS: &[&str] = &[APP_DRIVE];
 /// A picture of the app's main webview, answered here without asking the webview.
@@ -333,7 +335,8 @@ pub fn relink(target: &Path, link: &Path) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------------------
-// Browser panes: the page's own reads, which only the child webview can make.
+// Browser panes: the page's own reads, which only the child webview can make. Design Mode makes
+// them (`src/browser/design-live.ts`); no MCP tool does any more.
 
 fn browser_webview<R: Runtime>(app: &AppHandle<R>, id: i64) -> Result<tauri::Webview<R>, String> {
     app.get_webview(&crate::browser::label_for(id)).ok_or_else(|| format!("browser pane {id} has no page open"))
@@ -377,8 +380,8 @@ pub async fn mcp_browser_snapshot<R: Runtime>(app: AppHandle<R>, id: i64) -> Res
 }
 
 /// `desktop_app_snapshot`: the app's main webview as MCP image content. Browser panes are
-/// webviews of their own laid over it, so they show as the space they leave
-/// (`desktop_pane_snapshot` takes those). A WebGL canvas without `preserveDrawingBuffer`
+/// webviews of their own laid over it, so they show as the space they leave. A WebGL canvas
+/// without `preserveDrawingBuffer`
 /// (xterm's renderer) has nothing to paint by the time WebKit draws the snapshot, and comes
 /// out blank. Blocks: it runs on the socket's thread.
 fn app_snapshot<R: Runtime>(app: &AppHandle<R>) -> Answer {
@@ -435,7 +438,7 @@ async fn snapshot<R: Runtime>(_webview: &tauri::Webview<R>) -> Result<(&'static 
 }
 
 /// `MNEMO_DESKTOP_SMOKE=snapshot`: the built app takes a picture of its own window through the
-/// same `snapshot` Design Mode and `desktop_pane_snapshot` use, and exits 0 when it is an image,
+/// same `snapshot` Design Mode uses, and exits 0 when it is an image,
 /// 1 otherwise. CI runs it on all three systems: the only real webview a test can capture there.
 /// The process exits itself: `AppHandle::exit(1)` was seen to end it with 0 on macOS.
 pub fn smoke_snapshot<R: Runtime>(app: AppHandle<R>) {
@@ -704,10 +707,16 @@ mod tests {
 
     #[test]
     fn errors_and_unknown_tools_come_back_as_error() {
-        let r = parse(answer_line(r#"{"id":"a","method":"desktop_browser_read","params":{"fail":1}}"#, &echo));
+        let r = parse(answer_line(r#"{"id":"a","method":"desktop_terminal_read","params":{"fail":1}}"#, &echo));
         assert_eq!(r, json!({ "id": "a", "error": "nope" }));
         let r = parse(answer_line(r#"{"id":4,"method":"pty_write","params":{}}"#, &echo));
         assert_eq!(r["error"], "unknown tool pty_write");
+        // Gone with the workbench's browser panes: refused before the webview hears of them.
+        for gone in ["desktop_browser_read", "desktop_pane_snapshot"] {
+            assert!(!serves_in(gone, true), "{gone}");
+            let r = parse(answer_line(&json!({ "id": 5, "method": gone, "params": { "pane": -1 } }).to_string(), &echo));
+            assert_eq!(r["error"], format!("unknown tool {gone}"));
+        }
         let r = parse(answer_line("not json", &echo));
         assert!(r["error"].as_str().unwrap().starts_with("bad request"));
         assert_eq!(r["id"], Value::Null);

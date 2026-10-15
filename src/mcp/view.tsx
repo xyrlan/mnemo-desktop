@@ -1,24 +1,23 @@
 /** Desktop MCP (issue #74). No pane view: it lives in `view.tsx` because App imports every
  *  `src/*\/view.tsx`, and that import is where the webview starts answering the questions
  *  the `mnemo-desktop-mcp` binary relays through the app's socket. Rust emits
- *  `mcp://ask`; the answer goes back through `mcp_answer`. */
+ *  `mcp://ask`; the answer goes back through `mcp_answer`. The tools read the Nexus's sessions
+ *  (`./app`). */
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from '@/ui'
-import { store } from '../layout/app-store'
-import { readBuffer } from '../terminal/buffer'
+import { listSessions, readTerminal } from './app'
 import { drive } from './drive'
 import { sayServing, type Serving } from './serving'
-import { browserBridge, callTool, type Content, type ToolDeps } from './tools'
+import { callTool, type Content, type ToolDeps } from './tools'
 
 type Ask = { ask: number; method: string; params?: Record<string, unknown> }
 
 // Driving the app is for a session checking its own change in `pnpm tauri dev`; a release
 // build never types into its terminals on a session's say-so (the Rust side refuses it too).
 const deps: ToolDeps = {
-  state: () => store.getState(),
-  readBuffer,
-  browser: browserBridge,
+  sessions: listSessions,
+  read: readTerminal,
   ...(import.meta.env.DEV ? { drive: (params: Record<string, unknown>) => drive(params) } : {}),
 }
 

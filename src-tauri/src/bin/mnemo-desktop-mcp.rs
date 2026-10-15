@@ -59,21 +59,20 @@ fn tools_for(debug: bool, os: &str) -> Value {
     if unavailable_on(os).is_some() {
         return json!([]);
     }
-    let pane = json!({ "type": "integer", "description": "Pane id from desktop_list_panes (browser and other non-terminal panes have negative ids)." });
     let mut list = json!([
         {
             "name": "desktop_list_panes",
-            "description": "List the panes open in the mnemo desktop app: id, view (terminal, browser, editor…), title, cwd, url for browser panes, which tab (1-based) and whether it is the focused pane of the active tab. Start here to find the pane id the other desktop tools take.",
+            "description": "List the sessions of the mnemo desktop app's Nexus: the tabs of its drawer (a captain's Claude session, a robot's dispatched child, a shell or a saved command) and the terminals it runs that no tab shows. Each has the terminal id to read (pane), kind, label, cwd, the Claude session id it runs, whether it is on screen (shown), and its exit code once it ended; a tab with no terminal to read says why (note). Start here to find the pane desktop_terminal_read takes.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
             "annotations": { "readOnlyHint": true }
         },
         {
             "name": "desktop_terminal_read",
-            "description": "Read the last lines of a terminal pane in the mnemo desktop app (scrollback included, soft-wrapped rows joined). Use it to see a dev server's log, a test run or another agent's session without asking the user to paste it.",
+            "description": "Read the last lines of a session's terminal in the mnemo desktop app, shown on screen or not (scrollback included, soft-wrapped rows joined). Use it to see a dev server's log, a test run or another agent's session without asking the user to paste it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "pane": pane,
+                    "pane": { "type": "integer", "description": "The pane of a session from desktop_list_panes." },
                     "lines": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 100, "description": "How many lines from the bottom." }
                 },
                 "required": ["pane"],
@@ -82,20 +81,8 @@ fn tools_for(debug: bool, os: &str) -> Value {
             "annotations": { "readOnlyHint": true }
         },
         {
-            "name": "desktop_browser_read",
-            "description": "Read the page open in a browser pane of the mnemo desktop app as text: title, current url, and the visible content as light markdown (headings, links with their urls, lists, form fields, code blocks). Sees what the user sees, logins included.",
-            "inputSchema": { "type": "object", "properties": { "pane": pane }, "required": ["pane"], "additionalProperties": false },
-            "annotations": { "readOnlyHint": true }
-        },
-        {
-            "name": "desktop_pane_snapshot",
-            "description": "Take a screenshot of a browser pane in the mnemo desktop app (browser panes only, including ones in a background tab). Use it when layout or visuals matter; desktop_browser_read is cheaper for text.",
-            "inputSchema": { "type": "object", "properties": { "pane": pane }, "required": ["pane"], "additionalProperties": false },
-            "annotations": { "readOnlyHint": true }
-        },
-        {
             "name": "desktop_app_snapshot",
-            "description": "Take a screenshot of the mnemo desktop app's own window: its main webview, everything but the pages inside browser panes (desktop_pane_snapshot takes those). Use it to see a UI change in the running app. A terminal drawn with WebGL can come out blank; desktop_terminal_read has its text.",
+            "description": "Take a screenshot of the mnemo desktop app's own window. Use it to see a UI change in the running app. A terminal drawn with WebGL can come out blank; desktop_terminal_read has its text.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
             "annotations": { "readOnlyHint": true }
         }
@@ -122,7 +109,7 @@ fn tools_for(debug: bool, os: &str) -> Value {
 }
 
 /// What `initialize` tells the model.
-const INSTRUCTIONS: &str = "Reads the panes of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a terminal's output, a browser page's text, or a browser page's screenshot. desktop_app_snapshot shows the app's own window.";
+const INSTRUCTIONS: &str = "Reads the sessions of the mnemo desktop app this session runs in: list them with desktop_list_panes, then read a session's terminal with desktop_terminal_read, shown or not. desktop_app_snapshot shows the app's own window.";
 
 /// Asks the app one question. `Ok` carries MCP content; `Err` a message for the model.
 fn call_app(method: &str, params: Value) -> Result<Value, String> {
@@ -393,7 +380,7 @@ mod tests {
 
     fn app(method: &str, params: Value) -> Result<Value, String> {
         match params.get("pane").and_then(Value::as_i64) {
-            Some(-1) => Err("pane -1 is a browser pane".into()),
+            Some(-1) => Err("no session has pane -1".into()),
             _ => Ok(json!([{ "type": "text", "text": format!("{method} {params}") }])),
         }
     }
@@ -422,7 +409,7 @@ mod tests {
         let r = req(json!({ "id": 2, "method": "tools/list" }));
         let names: Vec<_> = r["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
         // `cargo test` is a debug build, like `tauri dev`.
-        assert_eq!(names, ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]);
+        assert_eq!(names, ["desktop_list_panes", "desktop_terminal_read", "desktop_app_snapshot", "desktop_app_drive"]);
         for t in r["result"]["tools"].as_array().unwrap() {
             assert_eq!(t["inputSchema"]["type"], "object");
         }
@@ -435,12 +422,18 @@ mod tests {
         assert_eq!(r["result"]["content"][0]["text"], r#"desktop_terminal_read {"lines":5,"pane":2}"#);
         assert!(r["result"].get("isError").is_none());
 
-        let r = req(json!({ "id": 4, "method": "tools/call", "params": { "name": "desktop_pane_snapshot", "arguments": { "pane": -1 } } }));
+        let r = req(json!({ "id": 4, "method": "tools/call", "params": { "name": "desktop_terminal_read", "arguments": { "pane": -1 } } }));
         assert_eq!(r["result"]["isError"], true);
-        assert_eq!(r["result"]["content"][0]["text"], "pane -1 is a browser pane");
+        assert_eq!(r["result"]["content"][0]["text"], "no session has pane -1");
 
         let r = req(json!({ "id": 5, "method": "tools/call", "params": { "name": "desktop_list_panes" } }));
         assert_eq!(r["result"]["content"][0]["text"], "desktop_list_panes {}");
+
+        // Gone with the workbench's browser panes.
+        for gone in ["desktop_browser_read", "desktop_pane_snapshot"] {
+            let r = req(json!({ "id": 6, "method": "tools/call", "params": { "name": gone, "arguments": { "pane": -1 } } }));
+            assert_eq!(r["error"]["message"], format!("unknown tool {gone:?}"));
+        }
     }
 
     #[test]
@@ -460,7 +453,7 @@ mod tests {
 
     #[test]
     fn a_tool_is_listed_only_where_it_can_work() {
-        let all = ["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot"];
+        let all = ["desktop_list_panes", "desktop_terminal_read", "desktop_app_snapshot"];
         assert_eq!(names(tools_for(false, "linux")), all, "snapshots through WebKitGTK's own");
         assert_eq!(names(tools_for(true, "linux")), [&all[..], &["desktop_app_drive"]].concat());
         assert_eq!(names(tools_for(false, "macos")), all);
@@ -471,7 +464,7 @@ mod tests {
         let want: &[&str] = if cfg!(windows) {
             &[]
         } else {
-            &["desktop_list_panes", "desktop_terminal_read", "desktop_browser_read", "desktop_pane_snapshot", "desktop_app_snapshot", "desktop_app_drive"]
+            &["desktop_list_panes", "desktop_terminal_read", "desktop_app_snapshot", "desktop_app_drive"]
         };
         assert_eq!(here, want);
         let r = handle(&json!({ "id": 1, "method": "tools/list" }), &app).unwrap();
