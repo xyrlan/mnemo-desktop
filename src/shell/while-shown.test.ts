@@ -168,8 +168,6 @@ function sources(dir = `${cwd}/src`): [string, string][] {
 const UNPOLLED: Record<string, string> = {
   // Clocks: they move "3 min ago" on screen, nothing more.
   'src/conversation/ConversationView.tsx': 'clock',
-  // `watchLogin`: 60 tries while someone logs in to gh in a pane, then stops.
-  'src/github/store.ts': 'bounded login watch',
 }
 
 test('every setInterval left in the app is a clock or named with why it runs while hidden', () => {

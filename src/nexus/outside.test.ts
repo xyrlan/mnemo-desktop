@@ -1,7 +1,7 @@
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
 
 import { tauriAccounts } from '../accounts/client'
-import { ghLogin, installGh, openUrl } from '../github/actions'
+import { openUrl } from '../github/actions'
 import { child } from '../mission/fixtures'
 import { openRule } from '../pulse/open'
 import { vault } from '../vault/app-store'
@@ -26,16 +26,12 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 
 test('a terminal opens in the drawer, a page in the system browser, a rule in Memory', async () => {
   openUrl('https://github.com/me/app/pull/7')
-  ghLogin()
-  installGh()
   await tauriAccounts.openTerminal('claude')
   await appPaths.stop('/Users/you/code/app', [child({ id: 'a1' })])
   await openRule('one-cargo-target')
   await flush()
   expect(seen).toEqual([
     'page https://github.com/me/app/pull/7',
-    'terminal gh auth login --web · gh auth login',
-    expect.stringMatching(/^terminal .+ · Install gh$/),
     'terminal claude · Sign in',
     expect.stringMatching(/^terminal claude stop a1 · stop · app in \/Users\/you\/code\/app$/),
     'memory pages',

@@ -1,14 +1,10 @@
 import { cockpitStore } from '../cockpit/app-store'
 import { runJob } from '../cockpit/job'
-import { saveSetting, settingsStore } from '../settings/app-store'
-import { githubStore } from './app-store'
 import { nexusRoutes } from '../nexus/outside'
-import { currentOs, installRoute } from '../setup/tools'
-import { SCOPE_FIX, type Issue } from './types'
 
 /** What a click does with GitHub: a dispatch runs headless with `runJob`, its output captured
- *  and shown in its job's log rather than typed into a fresh terminal; other commands run in a
- *  drawer tab, and pages open in the system browser (`nexus/outside`). */
+ *  and shown in its job's log rather than typed into a fresh terminal; a page opens in the system
+ *  browser (`nexus/outside`). */
 
 type DispatchOpts = { model?: string; effort?: string; may?: string }
 
@@ -67,28 +63,4 @@ export function openUrl(url: string) {
   void nexusRoutes()
     .page(url)
     .catch(() => {})
-}
-
-/** Runs `cmd` in a drawer tab. */
-const inTerminal = (cmd: string, label: string) => void nexusRoutes().terminal(undefined, cmd, label).catch(() => {})
-
-export const openIssue = (i: Pick<Issue, 'url'>) => openUrl(i.url)
-
-export function ghLogin() {
-  inTerminal('gh auth login --web', 'gh auth login')
-  githubStore.getState().watchLogin()
-}
-
-/** This OS's own route to `gh`: `brew` exists only on a Mac. */
-export const ghInstall = () => installRoute('gh', currentOs())
-
-export const installGh = () => inTerminal(ghInstall().command, 'Install gh')
-
-export const refreshScope = () => inTerminal(SCOPE_FIX, 'gh auth refresh')
-
-export function setIssueLabels(root: string, labels: string[]) {
-  const all = { ...settingsStore.getState().issueLabels }
-  if (labels.length) all[root] = labels
-  else delete all[root]
-  void saveSetting('issueLabels', all)
 }
