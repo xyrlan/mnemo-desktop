@@ -74,6 +74,13 @@ export const bigCaptains = (cmdW: number) => (cmdW >= 250 ? 2 : 1)
 const BIG_H = 172
 const SMALL_ROW = 124
 const QUIET_H = 34
+/** Between the captains' topics and action pills and the first row of quiet chips. */
+const QUIET_GAP = 36
+/** A quiet captain's chip, its gap included: as many sit on one row as COMMAND is wide. */
+export const QUIET_CHIP = 124
+
+/** Rows of quiet chips COMMAND needs at this width. */
+export const quietRows = (n: number, cmdW: number) => (n ? Math.ceil(n / Math.max(1, Math.floor((cmdW - 12) / QUIET_CHIP))) : 0)
 
 /** The robots the hangar floor holds before it folds the rest into a stack: two rows, less one
  *  slot, as the stack takes two. */
@@ -110,7 +117,7 @@ export function deckLayout(deck: Deck, width: number, open: boolean): DeckLayout
 
   const big = deck.captains.length <= bigCaptains(cmdW)
   const captains: CaptainSpot[] = deck.captains.map((captain, k) => (big ? { captain, big, x: 14 + k * 122, y: 26 } : { captain, big, x: 6 + (k % 2) * 100, y: 24 + Math.floor(k / 2) * SMALL_ROW }))
-  const cmdH = 28 + (big ? BIG_H : Math.ceil(deck.captains.length / 2) * SMALL_ROW) + (deck.quiet.length ? QUIET_H : 0)
+  const cmdH = 28 + (big ? BIG_H : Math.ceil(deck.captains.length / 2) * SMALL_ROW) + (deck.quiet.length ? QUIET_GAP + quietRows(deck.quiet.length, cmdW) * QUIET_H : 0)
   const rows = Math.max(1, ...rooms.map((r, i) => Math.ceil(slots[i] / r.perRow)))
   const height = Math.max(G.labelH + G.bubbleH + rows * G.rowH + 4, cmdH)
   return { width, height, cmdW, rooms, captains, robots, stack }

@@ -1,4 +1,4 @@
-import { bubblesOf, columns, deckLayout, G, hangarFloor } from './geometry'
+import { bubblesOf, columns, deckLayout, G, hangarFloor, quietRows } from './geometry'
 import { captain, deck, robot } from './fixtures'
 
 const many = (n: number, prefix: string, over = {}) => Array.from({ length: n }, (_, i) => robot(`${prefix}${i}`, over))
@@ -71,4 +71,15 @@ test('bubbles hang left to right over the robots that speak, tails pointing at t
     expect(x.tail).toBeLessThanOrEqual(x.w - 20)
   }
   expect(bubblesOf({ ...room, voices: 0 }, ['f0'], l.robots)).toEqual([])
+})
+
+test('quiet captains take as many chip rows as COMMAND needs, and the deck is tall enough for them', () => {
+  expect(quietRows(0, 260)).toBe(0)
+  expect(quietRows(1, 260)).toBe(1)
+  expect(quietRows(7, 260)).toBe(4) // 260 px holds two 124 px chips a row
+  expect(quietRows(7, 480)).toBe(3) // three a row
+  const quiet = Array.from({ length: 7 }, (_, i) => captain(`q${i}`))
+  const one = deckLayout(deck({ captains: [captain('a')], quiet: quiet.slice(0, 1) }), 1400, false)
+  const seven = deckLayout(deck({ captains: [captain('a')], quiet }), 1400, false)
+  expect(seven.height - one.height).toBe((quietRows(7, seven.cmdW) - 1) * 34)
 })
