@@ -133,6 +133,11 @@ test('the nexus is its pose, the archive its tier, the core is in the middle', a
   expect($('.nexus-empty')).toBeNull()
 })
 
+test('a nexus with no robots draws no ring', async () => {
+  await draw()
+  expect($$('.nexus-orbit')).toHaveLength(1)
+})
+
 test('an empty world draws the core and says so', async () => {
   await draw({ world: world([], AT) })
   expect($('.nexus-universal')).not.toBeNull()
