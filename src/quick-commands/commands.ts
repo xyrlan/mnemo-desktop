@@ -1,6 +1,7 @@
 // adapted from stablyai/orca src/renderer/src/components/terminal-quick-commands/ (the saved
 // command's shape and the save rules; Orca's agent prompts, scopes and "append Enter" are not
-// ported: a command here belongs to one repo and always runs).
+// ported: a command here belongs to one repo and always runs). PROJECTS keeps them, and a deck's
+// or a dock's menu runs them in a drawer tab.
 
 import { samePath } from '../path/path'
 
@@ -59,70 +60,3 @@ export function withRemoved(all: QuickCommands, root: string, index: number): Qu
   if (index < 0 || index >= list.length) return all
   return withList(all, root, list.filter((_, i) => i !== index))
 }
-
-/** What is typed into the terminal: the command and Enter. A carriage return, as the Enter key
- *  sends, so a Claude pane submits it rather than starting a new line. */
-export function keystrokes(cmd: QuickCommand): string {
-  return cmd.command + '\r'
-}
-
-/** Where a command runs, told from the layout: the focused pane of the tab shown, when it is a
- *  live terminal (a positive id); else null, and the command opens a terminal tab of its own. */
-export function focusedTerminal(s: {
-  tabs: ReadonlyArray<{ id: string; focused: number }>
-  activeTab: string
-  panes: Record<number, { view: string } | undefined>
-}): number | null {
-  const id = s.tabs.find((t) => t.id === s.activeTab)?.focused
-  if (id === undefined || id <= 0) return null
-  return s.panes[id]?.view === 'terminal' ? id : null
-}
-
-/** The repo holding worktree `path` — its root, the key commands are saved under — or null
- *  (no worktree shown, or one the fleet does not know). */
-export function repoOf(repos: ReadonlyArray<{ root: string; worktrees: ReadonlyArray<{ path: string }> }>, path: string | null): string | null {
-  if (!path) return null
-  return repos.find((r) => r.root === path || r.worktrees.some((w) => w.path === path))?.root ?? null
-}
-
-export type QuickCommandDeps = {
-  /** Every repo's saved commands, now. */
-  read(): QuickCommands
-  /** Save them all. */
-  write(next: QuickCommands): Promise<void>
-  /** The layout's focused terminal, or null. */
-  focused(): number | null
-  writePty(pane: number, data: string): Promise<void>
-  /** Open a terminal tab in the shown worktree running `cmd`. */
-  openCommandTab(cmd: string): Promise<void>
-}
-
-/** The quick commands' actions, over the settings and the layout. */
-export function createQuickCommands(deps: QuickCommandDeps) {
-  return {
-    /** Type `cmd` into the focused terminal, or run it in a new one when none is focused. */
-    async run(cmd: QuickCommand): Promise<void> {
-      const pane = deps.focused()
-      if (pane === null) return deps.openCommandTab(cmd.command)
-      return deps.writePty(pane, keystrokes(cmd))
-    },
-    /** Save `draft` for `root`; false (nothing saved) when it has no label or no command. */
-    async add(root: string, draft: QuickCommand): Promise<boolean> {
-      const cmd = cleaned(draft)
-      if (!cmd) return false
-      await deps.write(withAdded(deps.read(), root, cmd))
-      return true
-    },
-    async edit(root: string, index: number, draft: QuickCommand): Promise<boolean> {
-      const cmd = cleaned(draft)
-      if (!cmd) return false
-      await deps.write(withEdited(deps.read(), root, index, cmd))
-      return true
-    },
-    async remove(root: string, index: number): Promise<void> {
-      await deps.write(withRemoved(deps.read(), root, index))
-    },
-  }
-}
-
-export type QuickCommandActions = ReturnType<typeof createQuickCommands>

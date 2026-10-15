@@ -1,55 +1,6 @@
 import type { MemoryFeed } from '../memory/types'
-import type { RepoNode } from '../fleet/types'
 import type { RunResult } from '../vault/types'
-import { ago, createMemoryStore, targetOf, type LayoutView, type MemoryDeps } from './memory'
-
-const repo = (over: Partial<RepoNode> = {}): RepoNode => ({
-  root: '/r/app',
-  name: 'app',
-  worktrees: [
-    { path: '/r/app-wt-x', name: 'x', branch: 'x', kind: 'workspace', agents: [], pr: null, unread: false },
-    { path: '/r/app', name: 'app', branch: 'main', kind: 'main', agents: [], pr: null, unread: false },
-  ],
-  ...over,
-})
-
-const layout = (over: Partial<LayoutView> = {}): LayoutView => ({
-  activeWorktree: '/r/app-wt-x',
-  tabs: [{ id: 't1', root: { kind: 'leaf', pane: 7 }, focused: 7 }],
-  activeTab: 't1',
-  panes: { 7: { id: 7, view: 'terminal', cwd: '/r/app-wt-x/src' } },
-  ...over,
-})
-
-describe('targetOf', () => {
-  it('reads the chosen worktree and the session its focused pane was opened for', () => {
-    const l = layout({ panes: { 7: { id: 7, view: 'terminal', sessionId: 's-pane' } } })
-    expect(targetOf(l, [repo()])).toEqual({ cwd: '/r/app-wt-x', sessionId: 's-pane' })
-  })
-
-  it("takes the session the fleet found in the focused pane when the pane was not opened for one", () => {
-    const r = repo()
-    r.worktrees[0].agents = [
-      { sessionId: 'other', paneId: 9, state: 'working', waitingFor: null, title: '', since: 0 },
-      { sessionId: 's-fleet', paneId: 7, state: 'working', waitingFor: null, title: '', since: 0 },
-    ]
-    expect(targetOf(layout(), [r])).toEqual({ cwd: '/r/app-wt-x', sessionId: 's-fleet' })
-  })
-
-  it('has no session with no tab shown', () => {
-    expect(targetOf(layout({ activeTab: '' }), [repo()])).toEqual({ cwd: '/r/app-wt-x', sessionId: null })
-  })
-
-  it("before a worktree is chosen, reads the first repo's main checkout, as the shell shows it", () => {
-    expect(targetOf(layout({ activeWorktree: null }), [repo(), repo({ root: '/r/b' })])?.cwd).toBe('/r/app')
-    expect(targetOf(layout({ activeWorktree: undefined }), [repo({ worktrees: [] })])?.cwd).toBe('/r/app')
-  })
-
-  it("with no repo known, reads the focused pane's folder, else nothing", () => {
-    expect(targetOf(layout({ activeWorktree: null }), [])?.cwd).toBe('/r/app-wt-x/src')
-    expect(targetOf(layout({ activeWorktree: null, activeTab: '' }), [])).toBeNull()
-  })
-})
+import { ago, createMemoryStore, type MemoryDeps } from './memory'
 
 test('ago counts in the largest whole unit', () => {
   const now = 1_000_000_000

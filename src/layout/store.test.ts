@@ -1527,7 +1527,7 @@ describe('terminals that outlived the page', () => {
     provideSessions(core.client)
     try {
       const s = createStore(fakePty({ first: 100 }), { workspace: () => null })
-      // As the setup pane waits on it (`src/setup/launch.ts`): the saved layout, alone.
+      // A wrapper of `restore`, as the setup pane once waited on it: the saved layout, alone.
       const restore = s.getState().restore
       s.setState({ restore: async (saved) => restore(saved) })
       const saved = await savedPair()

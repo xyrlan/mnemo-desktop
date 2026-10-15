@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { child, parent } from '../mission/fixtures'
+import { parent } from '../mission/fixtures'
 import type { RepoGroup, Snapshot } from '../mission/types'
 import type { HomeSnapshot } from '../home/types'
 import type { RepoNode } from '../fleet/types'
 import { buildRepos, knownRepos, worktreeName, type Tracked } from '../fleet/model'
 import { alertFor, cardKey, onScreen } from '../notify/decide'
-import { resolveAgent } from '../browser/grab-agent'
 import { prefill, resolvePath } from '../editor/paths'
 import { agentForCwd } from '../vault/search'
 import { focusedFirst, paneCwd, repoOfCwd } from '../mission/scope'
@@ -66,15 +65,6 @@ describe('notify', () => {
     expect(alertFor({ sessionId: 's', cwd: 'D:\\elsewhere\\notes\\', kind: 'stop', at: 1 }, fleet())?.name).toBe('notes')
     expect(cardKey('s', OS_WT, fleet())).toBe(`tree:${GIT_WT}`)
     expect(onScreen({ sessionId: 's', worktree: GIT_WT }, { focused: true, shown: { sessionId: null, worktree: VERBATIM + '-wt-322' } })).toBe(true)
-  })
-})
-
-describe('the agent of a worktree (#324 finding 6)', () => {
-  test("a chat's picked file finds the agent of its worktree, across spellings", () => {
-    const w = { worktree: OS_WT, repos: fleet(), panes: {}, children: [child({ id: 'c', cwd: `${GIT_WT}/src` })] }
-    expect(resolveAgent({ ...w, repos: [] })).toEqual({ kind: 'mission', id: 'c', title: 'c' })
-    expect(resolveAgent({ ...w, repos: [], children: [] })).toEqual({ kind: 'none', reason: 'no agent is running in repo-wt-322' })
-    expect(resolveAgent({ ...w, children: [] })).toMatchObject({ kind: 'none', reason: expect.stringContaining('runs outside') })
   })
 })
 
