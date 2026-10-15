@@ -22,8 +22,8 @@ export interface AccountsClient {
   usage(account: Account, refresh: boolean): Promise<PlanUsage>
   /** Calls `cb` with every new state; resolves to the unsubscribe. */
   onChanged(cb: (state: AccountsState) => void): Promise<() => void>
-  /** Opens a terminal that runs `cmd`, spawned on whichever account is active now: a workbench tab,
-   *  or a drawer tab while the Nexus covers the workbench. */
+  /** Opens a terminal that runs `cmd`, spawned on whichever account is active now, in a drawer
+   *  tab. */
   openTerminal(cmd: string): Promise<void>
 }
 

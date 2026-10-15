@@ -13,18 +13,15 @@ pub mod procs;
 // -- accounts (src/accounts.rs) --
 pub mod accounts;
 
-// -- editor (src/fs.rs) --
+// -- files (src/fs.rs) --
 pub mod fs;
-
-// -- search (src/search.rs) --
-pub mod search;
 
 // -- tool-path (src/tools.rs) --
 pub mod tools;
 
 // -- browser (src/browser.rs) --
 pub mod browser;
-// What a key does in a browser pane and in the app's own webview, on Windows (src/browser_keys.rs).
+// WebView2's browser keys turned off in the app's own webview, on Windows (src/browser_keys.rs).
 pub mod browser_keys;
 
 // -- settings (src/settings.rs) --
@@ -36,14 +33,8 @@ pub mod json_file;
 pub mod mission;
 pub mod mission_commands;
 
-// -- child-memory (src-tauri/src/child_memory.rs) --
-pub mod child_memory;
-
 // -- voice (src/voice.rs) --
 pub mod voice;
-
-// -- marketplace (src/marketplace.rs) --
-pub mod marketplace;
 
 // -- vault (src/vault.rs) --
 pub mod vault;
@@ -56,9 +47,6 @@ pub mod memory_feed;
 // -- home (src/home.rs) --
 pub mod home;
 pub mod home_commands;
-
-// -- pr-review (src/review.rs) --
-pub mod review;
 
 // -- diff-comments (src/worktree_diff.rs) --
 pub mod worktree_diff;
@@ -97,15 +85,9 @@ pub mod github;
 // -- checks (src/checks.rs) --
 pub mod checks;
 
-// -- ai-commit-pr (src/commit.rs) --
-pub mod commit;
-
 // -- job (src/job.rs) --
 pub mod job;
 pub mod tools_install;
-
-// -- source-control (src/source_control.rs) --
-pub mod source_control;
 
 // -- build info (src/build_info.rs) --
 pub mod build_info;
@@ -239,32 +221,16 @@ pub fn run() {
             accounts::accounts_panes,
             accounts::accounts_move_pane,
 
-            // -- editor commands --
+            // -- files commands --
             fs::fs_read,
-            fs::fs_load,
-            fs::fs_write,
             fs::fs_list,
-
-            // -- search commands --
-            search::search_worktree,
 
             // -- tool-path commands --
             tools::tools_status,
 
             // -- browser commands --
-            browser::browser_create,
-            browser::browser_navigate,
-            browser::browser_set_bounds,
-            browser::browser_destroy,
-            browser::browser_back,
-            browser::browser_forward,
-            browser::browser_reload,
-            browser::browser_pr_url,
             browser::browser_open_external,
             browser::system_open,
-            browser::browser_data_store,
-            browser::browser_save_shot,
-            browser_keys::browser_chords,
 
             // -- mission commands --
             mission_commands::mission_snapshot,
@@ -275,8 +241,7 @@ pub fn run() {
             mission_commands::mission_translate,
             mission_commands::mission_waiting_for,
 
-            // -- child-memory commands --
-            child_memory::child_memory,
+            // -- settings commands --
             settings::settings_read,
             settings::settings_write,
 
@@ -307,9 +272,6 @@ pub fn run() {
             home_commands::home_resolve_repo,
             home_commands::home_refresh_github,
 
-            // -- pr-review commands --
-            review::review_pr,
-
             // -- diff-comments commands --
             worktree_diff::worktree_diff_files,
             worktree_diff::worktree_diff_file,
@@ -333,14 +295,9 @@ pub fn run() {
             // -- mcp commands --
             mcp::mcp_socket_path,
             mcp::mcp_answer,
-            mcp::mcp_browser_eval,
-            mcp::mcp_browser_snapshot,
 
             // -- system-path commands --
             tools_path::tools_add_to_path,
-
-            chrome::chrome_branch,
-            chrome::chrome_repo,
 
             // -- pulse commands --
             pulse::pulse_start,
@@ -355,37 +312,10 @@ pub fn run() {
             conversation::conversation_unfollow,
             conversation::conversation_earlier,
 
-            // -- github commands --
-            github::gh_auth,
-            github::gh_issues,
-            github::gh_project,
-
-            // -- checks commands --
-            checks::checks_read,
-            checks::checks_details,
-            checks::checks_merge,
-            checks::checks_ready,
-
-            // -- ai-commit-pr commands --
-            commit::commit_status,
-            commit::commit_message,
-            commit::commit_create,
-            commit::commit_push,
-            commit::commit_pr_find,
-            commit::commit_pr_draft,
-            commit::commit_pr_create,
-
             // -- job commands --
             job::job_run,
             tools_install::tools_install_mnemo,
             tools_install::tools_mnemo_latest,
-
-            // -- source-control commands --
-            source_control::source_control_status,
-            source_control::source_control_stage,
-            source_control::source_control_unstage,
-            source_control::source_control_discard,
-            source_control::source_control_watch,
 
             // -- build info commands --
             build_info::app_build_info,
@@ -403,17 +333,6 @@ pub fn run() {
             install_review::install_review_run,
             install_review::install_review_decided,
             install_review::install_review_record,
-
-            // -- marketplace commands --
-            marketplace::marketplace_list,
-            marketplace::marketplace_refresh,
-            marketplace::marketplace_add_source,
-            marketplace::marketplace_remove_source,
-            marketplace::marketplace_import,
-            marketplace::marketplace_repo,
-            marketplace::marketplace_publish,
-            marketplace::marketplace_open_pr,
-            marketplace::marketplace_import_new,
 
             // -- plan-usage commands --
             plan_usage::plan_usage,
@@ -603,7 +522,7 @@ mod handler_tests {
                             continue;
                         }
                         if let Some(rest) = t.split("fn ").nth(1) {
-                            // `browser_create<R: Runtime>(…)`: the generics are part of the
+                            // `mcp_socket_path<R: Runtime>(…)`: the generics are part of the
                             // signature, never of the name the handler lists.
                             if let Some(name) = rest.split(['(', '<']).next() {
                                 out.insert(name.trim().to_string());

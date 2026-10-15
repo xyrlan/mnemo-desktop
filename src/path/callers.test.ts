@@ -7,7 +7,6 @@ import { buildRepos, knownRepos, worktreeName, type Tracked } from '../fleet/mod
 import { alertFor, cardKey, onScreen } from '../notify/decide'
 import { prefill, resolvePath } from '../editor/paths'
 import { agentForCwd } from '../vault/search'
-import { focusedFirst, paneCwd, repoOfCwd } from '../mission/scope'
 import { relativeTo } from '../conversation/run'
 
 /** One repo as it reaches the front end on Windows: git prints `C:/…`; the OS, a folder picker and
@@ -90,15 +89,6 @@ describe('vault (#323 finding 4)', () => {
     const agents = [{ name: 'repo', kind: 'repo' as const }]
     expect(agentForCwd(OS, agents)).toBe('repo')
     expect(agentForCwd(`${OS_WT}\\src`, agents)).toBe('repo')
-  })
-})
-
-describe('mission scope', () => {
-  test("an editor pane's folder, and the repo a folder is in, across spellings", () => {
-    expect(paneCwd({ id: 1, view: 'editor', props: { path: `${OS}\\README.md` } }, snap())).toBe(GIT)
-    expect(repoOfCwd(snap(), `${VERBATIM}\\src`)?.name).toBe('repo')
-    const two: Snapshot = { ...snap(), repos: [{ ...snap().repos[0], root: 'C:/other', name: 'other' }, snap().repos[0]] }
-    expect(focusedFirst(two, OS).map((r) => r.name)).toEqual(['repo', 'other'])
   })
 })
 

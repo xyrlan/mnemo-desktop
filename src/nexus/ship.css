@@ -91,8 +91,8 @@
 .ship-chip[data-chip='need'][data-zero] { opacity: 0.35; }
 .ship-chip[data-chip='ready'] { color: var(--ship-done); }
 .ship-chip[data-chip='rate'] { color: #c4b5fd; cursor: help; }
-/* The account switcher, as wide as in a sidebar, then the way back to the workbench. With the drawer
-   open the bar is narrow: the rate chip (its title has it all) and the switcher give way first. */
+/* The account switcher, as wide as in a sidebar, then the bar's buttons. With the drawer open the
+   bar is narrow: the rate chip (its title has it all) and the switcher give way first. */
 .ship-scene .ship-chip[data-chip='rate'] { flex-shrink: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ship-accounts {
   flex: 0 1 224px;

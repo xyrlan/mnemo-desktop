@@ -8,7 +8,7 @@ import type { Drawer } from './sessions'
 
 /** The sessions the Nexus starts (spec `2026-10-15-nexus-app-design.md`, Q1, Q4): each a terminal
  *  in a pane with no view on screen (`openOffscreen` in the layout store, which stays the app's
- *  session registry), shown in a drawer tab. The workbench is never shown or switched. */
+ *  session registry), shown in a drawer tab. */
 
 /** What of the layout store the sessions use. */
 export type SessionLayout = StoreApi<{
@@ -34,9 +34,10 @@ export type Sessions = {
   openSession(spec: SessionSpec): Promise<void>
   paneOf(sessionId: string): PaneId | null
   endSession(pane: PaneId): Promise<void>
-  /** No drawer tab shows pane `pane` any more (`Release.letGo`): an offscreen pane ends unless a
-   *  Claude runs in it, whose captain opens it again. A shell or a saved command, ended or not, has
-   *  nothing on the ship to come back from. */
+  /** No drawer tab shows pane `pane` any more (`Release.letGo`): it ends unless a Claude runs in
+   *  it, whose captain opens it again. A shell or a saved command, ended or not, has nothing on the
+   *  ship to come back from. Offscreen or kept from the workbench's tabs alike: nothing else shows
+   *  either. */
   letGo(pane: PaneId): Promise<void>
 }
 
@@ -108,7 +109,7 @@ export function createSessions(d: StartDeps): Sessions {
 
     async letGo(pane) {
       const p = panes()[pane]
-      if (!p?.offscreen) return
+      if (!p || p.view !== 'terminal') return
       const ended = p.exitCode !== undefined || !!p.error
       // When that cannot be told, it is kept: a session is never ended on a guess.
       if (!ended && (await d.runsClaude(pane).catch(() => true))) return

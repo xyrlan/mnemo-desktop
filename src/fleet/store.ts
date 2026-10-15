@@ -1,7 +1,6 @@
 import { useStore } from 'zustand'
 import { homeStore } from '../home/app-store'
 import { missionStore } from '../mission/app-store'
-import { focusedCwd } from '../mission/scope'
 import { store as layout } from '../layout/app-store'
 import { createFleet } from './create'
 import { listWorktrees, subscribeAgentEvents } from './upstream'
@@ -16,22 +15,22 @@ const fleet = createFleet({
   home: () => homeStore.getState().snapshot,
   mission: () => missionStore.getState().snapshot,
   panes: () => layout.getState().panes,
-  // `activeWorktree` is the workspace-model piece's; until it lands nothing is shown as a
-  // worktree, and cards are read only through `markRead`.
-  shown: () => (layout.getState() as { activeWorktree?: string | null }).activeWorktree ?? null,
+  // No worktree is shown as a whole in the Nexus: a worktree is read through `markRead`, as a
+  // notification's figure opens (#459).
+  shown: () => null,
   listWorktrees,
   subscribeAgentEvents,
   onChange(cb) {
     const offs = [
       homeStore.subscribe((s, p) => void (s.snapshot !== p.snapshot && cb())),
       missionStore.subscribe((s, p) => void (s.snapshot !== p.snapshot && cb())),
-      layout.subscribe((s, p) => void ((s.panes !== p.panes || (s as { activeWorktree?: unknown }).activeWorktree !== (p as { activeWorktree?: unknown }).activeWorktree) && cb())),
+      layout.subscribe((s, p) => void (s.panes !== p.panes && cb())),
     ]
     return () => offs.forEach((off) => off())
   },
   async reload({ withPrs, home }) {
-    const cwd = focusedCwd(layout.getState(), missionStore.getState().snapshot)
-    await Promise.all([missionStore.getState().refresh(cwd, withPrs), home ? homeStore.getState().load() : undefined])
+    // Every repo: the Nexus shows the whole fleet, with no folder in focus.
+    await Promise.all([missionStore.getState().refresh(undefined, withPrs), home ? homeStore.getState().load() : undefined])
   },
 })
 fleet.connect()

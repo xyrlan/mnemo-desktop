@@ -1,7 +1,7 @@
 import type { Pane } from '../../layout/store'
 import { nexusStore, type DrawerTab } from '../store'
 import { fakeHost } from './fixtures'
-import { readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
+import { adoptShells, readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
 import { createDrawer } from './sessions'
 
 const tab = (over: Partial<DrawerTab>): DrawerTab => ({ id: 'x', kind: 'captain', key: null, readOnly: null, label: 'x', sessionId: null, cwd: '/work/mnemo', ...over })
@@ -74,4 +74,40 @@ test('after a restart each tab comes back on its pane, or on the pane that resum
   ])
   expect(nexusStore.getState().activeTab).toBe('session:9')
   expect(Object.keys(host.getState().sessions)).toEqual(['pane:7', 'pane:9', 'pane:12'])
+})
+
+test('a shell the restore brought back that no tab shows gets a tab of its own; Claude, offscreen, exited and shown panes do not (#459)', () => {
+  const { host } = fakeHost()
+  const drawer = createDrawer(host, nexusStore, {})
+  const panes: Record<number, Pane> = {
+    // A workbench tab's shell from before the Nexus was the app, and one with a title of its own.
+    3: term(3, { cwd: '/work/mnemo-desktop' }),
+    4: term(4, { cwd: '/work/notes', title: 'vim todo.md' }),
+    // Its captain opens it: a Claude session runs there.
+    5: term(5, { cwd: '/work/mnemo', sessionId: 'cap-5' }),
+    // Offscreen: what a drawer tab let go, or a session the Nexus started.
+    6: term(6, { cwd: '/w', offscreen: true }),
+    7: term(7, { cwd: '/w', exitCode: 0 }),
+    8: term(8, { cwd: '/w' }),
+    9: { id: 9, view: 'vault' },
+  }
+  reopenTabs({ tabs: [{ id: 'session:8', kind: 'session', label: 'shell · w', sessionId: null, cwd: '/w', pane: 8 }], active: 'session:8' }, panes, drawer, nexusStore)
+  adoptShells(panes, drawer, nexusStore)
+  expect(nexusStore.getState().tabs.map((t) => [t.id, t.kind, t.key, t.label, t.cwd])).toEqual([
+    ['session:8', 'session', 'pane:8', 'shell · w', '/w'],
+    ['session:3', 'session', 'pane:3', 'shell · mnemo-desktop', '/work/mnemo-desktop'],
+    ['session:4', 'session', 'pane:4', 'vim todo.md', '/work/notes'],
+  ])
+  // The tab kept as shown stays shown.
+  expect(nexusStore.getState().activeTab).toBe('session:8')
+  // A second pass opens nothing twice.
+  adoptShells(panes, drawer, nexusStore)
+  expect(nexusStore.getState().tabs).toHaveLength(3)
+})
+
+test('with no tab kept, the last shell adopted is shown', () => {
+  const { host } = fakeHost()
+  const drawer = createDrawer(host, nexusStore, {})
+  adoptShells({ 1: term(1, { cwd: '/a' }), 2: term(2, { cwd: '/b' }) }, drawer, nexusStore)
+  expect(nexusStore.getState()).toMatchObject({ activeTab: 'session:2', collapsed: false })
 })

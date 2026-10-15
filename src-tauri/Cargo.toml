@@ -32,7 +32,8 @@ path = "src/bin/mnemo-desktop-hook.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# `unstable` unlocks `Window::add_child`, which browser panes use for child webviews.
+# `unstable` unlocks `Manager::get_webview`, which the app's own webview is reached through (lib.rs,
+# mcp.rs).
 tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: the app edits `~/.claude/settings.json` (agent_hooks.rs) and writes back every
@@ -72,18 +73,17 @@ libc = "0.2"
 # process table and a pid's exit code are read from the system (procs.rs), and a process's name
 # for what a closing window would end (pty/closing.rs). The time zone the Memory panel's times are
 # read in (memory_feed.rs). `--version` prints into the terminal's console (console.rs), and a
-# start that fails says so in a message box (crash.rs). The keys held while a browser pane has
-# focus (browser_keys.rs).
+# start that fails says so in a message box (crash.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
 # WebView2's own interfaces, at the versions wry uses, so the controller Tauri hands over is these
-# crates' type: the keys a browser pane hands the host first, the app webview's browser keys
-# (browser_keys.rs), and pane snapshots through CapturePreview into a memory stream (mcp.rs).
+# crates' type: the app webview's browser keys (browser_keys.rs), and the app's snapshot through
+# CapturePreview into a memory stream (mcp.rs).
 webview2-com = "0.38"
 windows-core = "0.61"
 windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 
-# Pane snapshots through WebKitGTK's own, encoded by gdk-pixbuf (mcp.rs). The versions wry uses.
+# The app's snapshot through WebKitGTK's own, encoded by gdk-pixbuf (mcp.rs). The versions wry uses.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
 gdk = "0.18"
@@ -94,7 +94,7 @@ gdk = "0.18"
 [target.'cfg(not(windows))'.dependencies]
 rfd = { version = "0.16", default-features = false }
 
-# Browser panes read the window's content layout to place child webviews (see browser.rs).
+# The app's snapshot through WKWebView's own (mcp.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 # Completion handlers for WKWebView snapshots (mcp.rs).

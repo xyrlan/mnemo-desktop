@@ -1,7 +1,7 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view (for a
- *  read-only tab) and diff, ⌘W claimed while the Nexus is open; the sessions the Nexus starts
- *  (`./start`), their Claude session learnt while no pane bar asks for it, and the tabs kept across
- *  a restart (`./persist`). Nothing here shows the workbench: a repo opens as a shell in a tab. */
+ *  read-only tab) and diff, ⌘W claimed; the sessions the Nexus starts (`./start`), the Claude
+ *  session each terminal runs, learnt here, and the tabs kept across a restart, with the shells the
+ *  restore brought back that no tab showed (`./persist`). A repo opens as a shell in a tab. */
 import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
 import { paneRunsClaude } from '../../chrome/running'
@@ -17,7 +17,7 @@ import { nexusStore } from '../store'
 import type { DrawerDeps } from './Drawer'
 import { claimClose } from './keys'
 import { deepestWorktree } from './model'
-import { readTabs, reopenTabs, tabsToSave, writeTabs } from './persist'
+import { adoptShells, readTabs, reopenTabs, tabsToSave, writeTabs } from './persist'
 import { createDrawer } from './sessions'
 import { createSessions, followPanes, type Sessions } from './start'
 
@@ -60,6 +60,7 @@ const reopen = () => {
   if (!restoring || !layout.getState().restored) return
   restoring = false
   reopenTabs(readTabs(kept), layout.getState().panes, drawer, nexusStore)
+  adoptShells(layout.getState().panes, drawer, nexusStore)
 }
 const unwatchLayout = layout.subscribe((s, prev) => {
   reopen()

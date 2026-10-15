@@ -1,6 +1,6 @@
-// Dictation (Mod+E) over a terminal pane, through the native menu's action event: Orca's
-// indicator while listening, and after the second press the transcript it typed into the
-// terminal, lingering under it.
+// Dictation (Mod+E) into the drawer's terminal (a saved shell the restore brings back in a tab of
+// its own), through the native menu's action event: Orca's indicator while listening, and after
+// the second press the transcript it typed into the terminal, lingering under it.
 import { scenario } from '../scenario.mjs'
 import { appIpc, REPO } from '../fixtures/app.mjs'
 
@@ -20,6 +20,8 @@ const ipc = appIpc({
   pty_kill: null,
   pty_pid: 4242,
   pty_list: [],
+  // The drawer tab's changes chips: a clean tree.
+  worktree_diff_files: ({ worktree }) => ({ root: worktree, files: [], truncated: false }),
   voice_start: 'MacBook Pro Microphone',
   voice_stop: 'run the voice tests and tell me what fails',
   // Outgoing text is rewritten in English by default; it already is.

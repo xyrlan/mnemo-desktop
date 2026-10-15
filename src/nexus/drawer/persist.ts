@@ -1,13 +1,16 @@
 import type { StoreApi } from 'zustand/vanilla'
 import type { Pane } from '../../layout/store'
 import type { PaneId } from '../../layout/tree'
+import { basename } from '../../path/path'
 import type { DrawerTab, NexusState } from '../store'
 import type { Drawer } from './sessions'
 
 /** The drawer's tabs across a restart (contract `sessions`): each tab on a pane's session (a
  *  session the Nexus started, a captain or robot in a pane) comes back on that session while the
  *  layout store still holds it: on its pane, or on the pane that resumed its Claude session. A
- *  child's attach and a read-only tab are opened again from the ship. */
+ *  child's attach and a read-only tab are opened again from the ship. A terminal the restore
+ *  brings back that no tab shows and no figure leads to (a workbench tab's shell, before #459) is
+ *  opened in a tab of its own (`adoptShells`). */
 
 export const TABS_KEY = 'mnemo.nexus-drawer.v1'
 
@@ -68,4 +71,23 @@ export function reopenTabs(saved: SavedTabs, panes: Record<PaneId, Pane>, drawer
   }
   const active = saved.active && opened.includes(saved.active) ? saved.active : null
   if (active) nexus.getState().activateTab(active)
+}
+
+/** Every live terminal the restore brought back that no drawer tab shows and that runs no Claude
+ *  session, outside the offscreen ones: a workbench tab's shell, kept in the workspace file from
+ *  before the Nexus was the app (#459), or a shell the restore found running that no saved pane
+ *  claimed. Nothing on the ship leads to it, so each opens in a drawer tab of its own, after the
+ *  tabs kept; the tab shown stays shown. A pane running Claude is left to its captain, as an
+ *  offscreen one is. */
+export function adoptShells(panes: Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>): void {
+  const shown = new Set(nexus.getState().tabs.flatMap((t) => (t.key?.startsWith('pane:') ? [Number(t.key.slice(5))] : [])))
+  const was = nexus.getState().activeTab
+  for (const p of Object.values(panes)) {
+    if (p.view !== 'terminal' || p.id <= 0 || p.offscreen || p.sessionId || p.exitCode !== undefined || p.error || shown.has(p.id)) continue
+    const id = `session:${p.id}`
+    if (nexus.getState().tabs.some((t) => t.id === id)) continue
+    const label = p.title || (p.cwd ? `shell · ${basename(p.cwd) || p.cwd}` : 'shell')
+    drawer.open({ id, kind: 'session', key: null, readOnly: null, label, sessionId: null, cwd: p.cwd ?? null }, { pane: p.id })
+  }
+  if (was) nexus.getState().activateTab(was)
 }

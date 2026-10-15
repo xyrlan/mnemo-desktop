@@ -178,7 +178,7 @@ test('× on a shell’s tab ends its shell; on a Claude session’s, the session
   expect(w.killed).toEqual([2, 1])
 })
 
-test('× never ends what it cannot tell is done, an exited one always, and a workbench pane never', async () => {
+test('× never ends what it cannot tell is done, and an exited one always', async () => {
   const w = world({ runsClaude: async () => Promise.reject(new Error('cannot tell')) })
   await w.sessions.openSession({ kind: 'shell', root: '/b' })
   await w.drawer.close('session:1')
@@ -187,9 +187,20 @@ test('× never ends what it cannot tell is done, an exited one always, and a wor
   w.layout.getState().paneExited(1, 0)
   await w.sessions.letGo(1)
   expect(w.killed).toEqual([1])
+})
+
+test('× on a pane kept from the workbench’s tabs ends it as an offscreen one: nothing else shows it (#459)', async () => {
+  const running = new Set([2])
+  const w = world({ runsClaude: async (p) => running.has(p) })
   await w.layout.getState().newTab('/c')
+  await w.layout.getState().newTab('/c')
+  await w.sessions.letGo(1)
+  expect(w.killed).toEqual([1])
+  expect(w.layout.getState().panes[1]).toBeUndefined()
+  // A Claude runs in it: kept, for its captain.
   await w.sessions.letGo(2)
   expect(w.killed).toEqual([1])
+  expect(w.layout.getState().panes[2]).toBeDefined()
 })
 
 test('a tab follows the Claude session its pane runs; a robot’s never does', () => {

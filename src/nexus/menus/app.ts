@@ -11,7 +11,7 @@ import type { MenuContext, MenuItem, MenuTarget } from '../ui/menus'
 import { openWindow } from '../ui/windows'
 import { makeShipMenu, type MenuDeps } from './menu'
 
-/** Repo `root`'s saved commands, as PROJECTS and the workbench find them (`commandsFor`). */
+/** Repo `root`'s saved commands, as PROJECTS finds them (`commandsFor`). */
 const savedCommands = (root: string) => commandsFor(settingsStore.getState().quickCommands, root)
 
 /** The menus' paths, the app's own. */

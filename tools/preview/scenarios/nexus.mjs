@@ -1,4 +1,4 @@
-// Nexus v2 open over the whole app (the app opens on it), the account switcher in its bar: one
+// The Nexus, the app (#459), the account switcher in its bar: one
 // repo's deck with two captains and a crew in every zone, a blocked child on the bridge, green and running PRs in the hangar, a stranded child,
 // twins, and a second repo docked. Synthetic data; the feed answers as `nexus_feed` would.
 import { scenario } from '../scenario.mjs'
@@ -88,7 +88,6 @@ const FEED = {
 
 scenario('nexus', {
   ipc: appIpc({
-    settings_read: { nexusAtLaunch: true },
     mission_snapshot: MISSION,
     nexus_feed: () => FEED,
     home_snapshot: { repos: [], clone_base: `${HOME}/code`, errors: [], protected: 0 },
