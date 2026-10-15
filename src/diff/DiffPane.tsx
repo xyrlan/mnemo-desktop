@@ -1,17 +1,14 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react'
+import { Suspense, useState } from 'react'
 import type { StoreApi } from 'zustand/vanilla'
-import { useStore } from 'zustand'
 import { Columns2, GitCommitHorizontal, GitCompareArrows, MessageSquare, RotateCw, Rows2, SendHorizontal } from 'lucide-react'
 import { Button } from '@/ui'
 import { cn } from '@/ui/cn'
 import type { PaneViewProps } from '../panes/registry'
 import type { ChangedFile } from './client'
-import type { DiffEditorProps } from './DiffEditor'
-import { scopeOf, sidesKey, type DiffState } from './store'
+import { LazyDiffEditor } from './lazy-editor'
+import type { DiffState } from './store'
+import { useDiffView } from './use-diff-view'
 import './diff.css'
-
-/** Monaco loads with the first diff shown, never at boot. */
-const LazyDiffEditor: ComponentType<DiffEditorProps> = lazy(() => import('./DiffEditor'))
 
 const LETTER: Record<ChangedFile['status'], { letter: string; tone: string; label: string }> = {
   added: { letter: 'A', tone: 'text-status-success', label: 'added' },
@@ -101,42 +98,9 @@ export function DiffPane({ props, store, onCommit }: DiffPaneProps) {
 /** `DiffPane`'s body for any worktree, and for a branch's changes when given a `base`: the
  *  child's diff in the Dispatch tab. */
 export function DiffView({ store, worktree, base, onCommit }: DiffViewProps) {
-  const scope = scopeOf(worktree, base)
-  const changes = useStore(store, (s) => s.changes[scope])
-  const allComments = useStore(store, (s) => s.comments)
-  const sent = useStore(store, (s) => s.sent[worktree])
-  const [picked, setPicked] = useState<string | null>(null)
+  const { changes, files, file, pick: setPicked, comments, notesByFile, sent, totals, loading, shown } = useDiffView(store, worktree, base)
   // Inline first: a pane beside two sidebars is rarely wide enough for two columns of code.
   const [sideBySide, setSideBySide] = useState(false)
-
-  const files = changes?.list?.files
-  const file = files?.find((f) => f.path === picked) ?? files?.[0] ?? null
-  const sides = useStore(store, (s) => (file ? s.sides[sidesKey(scope, file.path)] : undefined))
-  const comments = useMemo(() => allComments.filter((c) => c.worktreeId === worktree), [allComments, worktree])
-  const notesByFile = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const c of comments) m.set(c.filePath, (m.get(c.filePath) ?? 0) + 1)
-    return m
-  }, [comments])
-
-  useEffect(() => {
-    if (!worktree) return
-    void store.getState().load(worktree, base)
-    // An agent works while the diff is open: coming back to the window reads the changes again.
-    const again = () => void store.getState().load(worktree, base)
-    window.addEventListener('focus', again)
-    return () => window.removeEventListener('focus', again)
-  }, [store, worktree, base])
-
-  // A re-read list hands a new but equal file, so the file is keyed by its paths; its sides are
-  // dropped on every re-read, and read again here.
-  const fileKey = file ? `${file.path}\0${file.oldPath ?? ''}` : null
-  const unread = sides === undefined
-  useEffect(() => {
-    if (!file || !worktree) return
-    void store.getState().loadSides(worktree, file.path, file.oldPath, false, base)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, worktree, base, fileKey, unread])
 
   if (!worktree) {
     return (
@@ -146,28 +110,27 @@ export function DiffView({ store, worktree, base, onCommit }: DiffViewProps) {
     )
   }
 
-  const totals = (files ?? []).reduce((t, f) => ({ add: t.add + (f.additions ?? 0), del: t.del + (f.deletions ?? 0) }), { add: 0, del: 0 })
   const st = store.getState()
-  const loading = changes?.loading ?? true
 
   let body: React.ReactNode
-  if (changes?.error && !changes.list) body = <Notice tone="error">Could not read the changes: {changes.error}</Notice>
-  else if (!files) body = <Notice>Reading the changes…</Notice>
-  else if (!file) body = <Notice>{base === undefined ? `No uncommitted changes in ${folderName(worktree)}.` : `${folderName(worktree)} has no changes against ${changes?.list?.base?.split(' @ ')[0] || 'its base'}.`}</Notice>
-  else if (sides?.error) body = <Notice tone="error">Could not read {file.path}: {sides.error}</Notice>
-  else if (!sides?.data) body = <Notice>Reading {baseOf(file.path)}…</Notice>
-  else if (sides.data.binary || file.binary) body = <Notice>{file.path} is a binary file: no text diff to show.</Notice>
-  else if (sides.data.tooLarge) body = <Notice>{file.path} is too large to diff here.</Notice>
-  else
+  if (shown.kind === 'error') body = <Notice tone="error">Could not read the changes: {shown.error}</Notice>
+  else if (shown.kind === 'reading') body = <Notice>Reading the changes…</Notice>
+  else if (shown.kind === 'none') body = <Notice>{base === undefined ? `No uncommitted changes in ${folderName(worktree)}.` : `${folderName(worktree)} has no changes against ${changes?.list?.base?.split(' @ ')[0] || 'its base'}.`}</Notice>
+  else if (shown.kind === 'file-error') body = <Notice tone="error">Could not read {shown.file.path}: {shown.error}</Notice>
+  else if (shown.kind === 'reading-file') body = <Notice>Reading {baseOf(shown.file.path)}…</Notice>
+  else if (shown.kind === 'binary') body = <Notice>{shown.file.path} is a binary file: no text diff to show.</Notice>
+  else if (shown.kind === 'too-large') body = <Notice>{shown.file.path} is too large to diff here.</Notice>
+  else {
+    const { file: f, sides } = shown
     body = (
       <Suspense fallback={<Notice>Loading the editor…</Notice>}>
         <LazyDiffEditor
           worktree={worktree}
-          file={file}
-          sides={sides.data}
+          file={f}
+          sides={sides}
           sideBySide={sideBySide}
           comments={comments}
-          onAdd={(n) => st.addComment({ worktreeId: worktree, filePath: file.path, ...n })}
+          onAdd={(n) => st.addComment({ worktreeId: worktree, filePath: f.path, ...n })}
           onDelete={(id) => st.deleteComment(id)}
           onUpdate={async (id, text) => {
             st.updateComment(id, text)
@@ -177,6 +140,7 @@ export function DiffView({ store, worktree, base, onCommit }: DiffViewProps) {
         />
       </Suspense>
     )
+  }
 
   return (
     <div className="pane-body diff-pane flex flex-col bg-background text-foreground" data-ui>

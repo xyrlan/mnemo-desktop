@@ -171,3 +171,12 @@ test('a pane target gets the message pasted, then Enter', async () => {
   expect(writes[0]).toContain('look here')
   expect(writes[1]).toBe('\r')
 })
+
+test('send to a named agent goes there, even where the store finds none', async () => {
+  const { store, sent, setTarget } = setup()
+  setTarget(null)
+  add(store)
+  expect(await store.getState().send(WT, undefined, { kind: 'mission', id: 'r9', label: '#9' })).toBe(true)
+  expect(sent).toEqual([`r9: ${formatDiffComments([{ id: 'n1', worktreeId: WT, filePath: 'a.ts', lineNumber: 1, body: 'fix this', createdAt: 1001 }])}`])
+  expect(store.getState().sent[WT].ok).toBe('Sent 1 note to #9.')
+})

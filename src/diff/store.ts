@@ -29,9 +29,10 @@ export type DiffState = {
   updateComment(id: string, body: string): void
   deleteComment(id: string): void
   /** Send the worktree's notes (`ids`: only those) to its agent in one message; the notes that
-   *  went are dropped, as Orca drops delivered notes. False, with the reason in `sent`, when
-   *  nothing went. */
-  send(worktree: string, ids?: readonly string[]): Promise<boolean>
+   *  went are dropped, as Orca drops delivered notes. `to` names the agent when the caller knows
+   *  it (the Changes window knows its robot); left out, the store's `target` finds one. False,
+   *  with the reason in `sent`, when nothing went. */
+  send(worktree: string, ids?: readonly string[], to?: Target): Promise<boolean>
 }
 
 /** Where a worktree's changes are kept: the uncommitted ones under the path itself, a branch's
@@ -146,7 +147,7 @@ export function createDiffStore(deps: DiffDeps): StoreApi<DiffState> {
       set((s) => ({ comments: s.comments.filter((c) => c.id !== id) }))
     },
 
-    async send(worktree, ids) {
+    async send(worktree, ids, to) {
       const notes = get().comments.filter((c) => c.worktreeId === worktree && (!ids || ids.includes(c.id)))
       const fail = (error: string) => {
         set((s) => ({ sent: { ...s.sent, [worktree]: { sending: false, ok: null, error } } }))
@@ -154,7 +155,7 @@ export function createDiffStore(deps: DiffDeps): StoreApi<DiffState> {
       }
       if (notes.length === 0) return fail('No notes to send.')
       if (get().sent[worktree]?.sending) return false
-      const target = deps.target(worktree)
+      const target = to ?? deps.target(worktree)
       if (!target) return fail('No agent runs in this worktree: start Claude in one of its terminals, then send again.')
       set((s) => ({ sent: { ...s.sent, [worktree]: { sending: true, ok: null, error: null } } }))
       try {

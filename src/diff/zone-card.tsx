@@ -64,7 +64,7 @@ export function renderDiffCommentZoneCard(
                 onSendCommentRef.current?.(comment.id)
               }}
             >
-              <SendHorizontal className="size-3" />
+              <SendHorizontal size={12} />
             </button>
           ) : null
         }
