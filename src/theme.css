@@ -89,7 +89,7 @@
 
   /* Stacking, lowest first. Popovers sit above drawers and dialogs (a select inside a sheet
      must open over it); tooltips above everything. A pane's own layers stay below all of it:
-     its dividers, the pulse overlay and the drop zone go up to 6. Use as `z-drawer`, `z-popover`, … */
+     its dividers and the drop zone go up to 6. Use as `z-drawer`, `z-popover`, … */
   --z-index-drawer: 40;
   --z-index-toast: 45;
   --z-index-modal: 50;

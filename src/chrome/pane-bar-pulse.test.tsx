@@ -95,16 +95,6 @@ test('a bar mounted again does not flash an old pulse, but keeps its count', asy
   expect(badge()!.textContent).toBe('↯ 1')
 })
 
-test('a pulse from the pane repo also plays the overlay scene', async () => {
-  await push(ev({ kind: 'learned' }))
-  expect(host.querySelector('.pv-caption')?.textContent).toBe('learned something')
-})
-
-test('a pulse from another repo plays no overlay', async () => {
-  await push(ev({ project: 'repo-a', agent: 'repo-a' }))
-  expect(host.querySelector('.pv-overlay')).toBeNull()
-})
-
 test('two panes on one repo: each flashes and counts its own session, a sessionless pulse lands in one', async () => {
   const first = store.getState().tabs[0].focused
   // Beside it, in a group of its own, and focused.
@@ -118,11 +108,9 @@ test('two panes on one repo: each flashes and counts its own session, a sessionl
   const otherRoot = createRoot(other)
   await act(async () => otherRoot.render(<PaneBar id={second} client={git} />))
   const badgeOf = (h: HTMLElement) => h.querySelector('.pane-bar-pulse')?.textContent ?? null
-  const scene = (h: HTMLElement) => h.querySelector('.pv-overlay') !== null
 
   await push(ev({ session_id: 'sa', slugs: ['for-a'] }))
   expect([badgeOf(host), badgeOf(other)]).toEqual(['↯ for-a1', null])
-  expect([scene(host), scene(other)]).toEqual([true, false])
 
   await act(async () => vi.advanceTimersByTime(FLASH_MS + 1))
   await push(ev({ session_id: 'sb', slugs: ['for-b'] }))
@@ -132,7 +120,6 @@ test('two panes on one repo: each flashes and counts its own session, a sessionl
   await act(async () => vi.advanceTimersByTime(FLASH_MS + 1))
   await push(ev({ kind: 'learned', slugs: ['learnt'] }))
   expect([badgeOf(host), badgeOf(other)]).toEqual(['↯ 1', '↯ learnt2'])
-  expect([scene(host), scene(other)]).toEqual([false, true])
 
   act(() => otherRoot.unmount())
   other.remove()
