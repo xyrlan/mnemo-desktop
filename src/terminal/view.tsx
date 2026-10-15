@@ -30,8 +30,14 @@ const platform = detectPlatform()
  *  until they take it back (`attachSink` in the layout store).
  *
  *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, and
- *  the layout's focus is not its. `props.close`: what a key closes once the program has exited; the
- *  pane's own view closes its pane. */
+ *  the layout's focus is not its. `props.name`: what the presentation calls it, as `owners[id].name`
+ *  says while it owns the terminal (a tab's indicator). `props.active`: takes the terminal each time
+ *  it turns true (a drawer tab shown again), with no remount. `props.close`: what a key closes once
+ *  the program has exited; the pane's own view closes its pane.
+ *
+ *  A presentation hides a view with `display: none` or a box of no size: that is how the view
+ *  knows it is hidden and hands the terminal to one on screen. A transform or `visibility` keeps
+ *  the size, and so keeps the terminal. */
 export default function TerminalPane({ id, props }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -41,6 +47,8 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
   const [owns, setOwns] = useState(true)
   const broken = id < 0
   const present = props.present === true
+  const name = typeof props.name === 'string' ? props.name : undefined
+  const active = props.active === true
 
   useEffect(() => {
     if (broken) return
@@ -109,7 +117,7 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
       refitAfterWrite = false
       refit()
     }
-    const release = store.getState().attachSink(id, sink, present)
+    const release = store.getState().attachSink(id, sink, present, name)
     setOwns(mine())
     // Taking the shell, losing it, or its owner sizing it again: this view fits anew.
     const unwatch = store.subscribe((s, prev) => {
@@ -199,7 +207,11 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
       term.dispose()
       termRef.current = null
     }
-  }, [id, broken, present])
+  }, [id, broken, present, name])
+
+  useEffect(() => {
+    if (active && sinkRef.current) store.getState().takeSession(id, sinkRef.current)
+  }, [id, active])
 
   useEffect(() => {
     if (focused && !present) termRef.current?.focus()
@@ -209,7 +221,7 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
   const close = typeof props.close === 'function' ? () => void (props.close as () => void)() : () => void store.getState().closePane(id)
   return (
     <div
-      className="pane-body"
+      className="pane-body terminal-body"
       onKeyDown={exited ? close : undefined}
       tabIndex={exited || broken ? 0 : -1}
     >

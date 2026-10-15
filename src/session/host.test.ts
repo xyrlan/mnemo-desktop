@@ -189,3 +189,14 @@ test('a session\'s key names it, whoever holds it', () => {
   expect(sessionKey({ child: work })).toBe('child:b0b0b0b0')
   expect(sessionKey({ child: 'c2c2c2c2' })).toBe('child:c2c2c2c2')
 })
+
+test('what an attach prints once let go of (its detach) goes nowhere', async () => {
+  const f = fakePty()
+  const { s, fed } = make(f.pty)
+  const key = s().hold({ child: 'c2c2c2c2' }, 'popout')
+  await settle()
+  f.outputs[50](new TextEncoder().encode('live'))
+  await s().release(key, 'popout')
+  f.outputs[50](new TextEncoder().encode(' detaching'))
+  expect(fed[50]).toBe('live')
+})

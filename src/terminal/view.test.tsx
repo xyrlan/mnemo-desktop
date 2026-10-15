@@ -243,3 +243,38 @@ test('a key after the program exited closes the popup showing it, never a pane',
   act(() => popup.root.unmount())
   act(() => pane.root.unmount())
 })
+
+test('a drawer tab shown again takes its session back when it turns active, with no remount', async () => {
+  const pane = mount('100x30')
+  const drawer = mount('60x40', { present: true, name: 'drawer:1', active: true })
+  await settle()
+  expect(store.getState().owners[1].name).toBe('drawer:1')
+  // Another tab shows: this one is hidden, and the pane on screen gets the shell.
+  act(() => drawer.root.render(<TerminalPane id={1} props={{ present: true, name: 'drawer:1', active: false }} />))
+  boxed(drawer, '0x0')
+  expect(resizes.at(-1)).toEqual([1, 100, 30])
+  const made = terms.length
+  // Its tab shows again.
+  boxed(drawer, '60x40')
+  expect(veiled(drawer)).toBe(true)
+  act(() => drawer.root.render(<TerminalPane id={1} props={{ present: true, name: 'drawer:1', active: true }} />))
+  expect(veiled(drawer)).toBe(false)
+  expect(veiled(pane)).toBe(true)
+  expect(resizes.at(-1)).toEqual([1, 60, 40])
+  expect(store.getState().owners[1].name).toBe('drawer:1')
+  expect(terms.length).toBe(made)
+  act(() => drawer.root.unmount())
+  act(() => pane.root.unmount())
+})
+
+// chrome.css off disk, as the Nexus scene tests read their stylesheet.
+type Fs = { readFileSync(path: string, encoding: string): string }
+
+test('a view drawn larger than its box (at a bigger owner\'s size) is cut at the box', async () => {
+  const pane = mount('100x30')
+  expect(pane.host.querySelector('.pane-body')!.classList.contains('terminal-body')).toBe(true)
+  const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
+  const css = fs.readFileSync('src/chrome/chrome.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  expect(css).toMatch(/\.terminal-body\s*\{[^}]*overflow:\s*hidden/)
+  act(() => pane.root.unmount())
+})

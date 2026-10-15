@@ -66,6 +66,7 @@ function PopoutWindow({ popup, store, host, terminal: Terminal }: { popup: Popup
       ref={panel}
       data-ui=""
       data-popout={key}
+      data-session-pty={pty ?? ''}
       className="fixed z-[46] flex min-h-[280px] min-w-[420px] rounded-lg bg-transparent text-card-foreground shadow-[0_4px_12px_rgba(0,0,0,0.16),0_24px_64px_rgba(0,0,0,0.32)] dark:shadow-[0_8px_20px_rgba(0,0,0,0.35),0_28px_72px_rgba(0,0,0,0.58)]"
       style={{ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }}
       onPointerDownCapture={() => store.getState().raise(key)}

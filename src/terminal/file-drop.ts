@@ -37,6 +37,24 @@ function dropAt(x: number, y: number): { pane: PaneId; chat: DropTarget | null }
   return terminal === null ? null : { pane: terminal, chat: null }
 }
 
+/** The session host's presentation on top at a point (a popup, a drawer tab), as it marks its root
+ *  with `data-session-pty`: the PTY it shows, null while it has none; undefined where none is. A
+ *  pane under one never gets what is dropped on it. */
+function presentationAt(x: number, y: number): PaneId | null | undefined {
+  let top: { el: HTMLElement; z: number } | null = null
+  for (const el of document.querySelectorAll<HTMLElement>('[data-session-pty]')) {
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) continue
+    if (x < r.left || x >= r.left + r.width || y < r.top || y >= r.top + r.height) continue
+    // The highest layer; of equals, the one drawn last.
+    const z = Number(getComputedStyle(el).zIndex) || 0
+    if (!top || z >= top.z) top = { el, z }
+  }
+  if (!top) return undefined
+  const id = Number(top.el.dataset.sessionPty)
+  return id > 0 ? id : null
+}
+
 type DropEvent = { type: 'enter' | 'over'; position: { x: number; y: number } } | { type: 'drop'; paths: string[]; position: { x: number; y: number } } | { type: 'leave' }
 
 /** What divides Tauri's drop position into CSS pixels. The position is relative to the
@@ -52,7 +70,18 @@ export function dropScale(platform = navigator.platform, dpr = window.devicePixe
  *  puts the files' paths into its chat, else types them into its terminal, and focuses it. */
 export function onFileDrag(e: DropEvent, scale = dropScale()): void {
   if (e.type === 'leave') return fileDropStore.setState({ over: null })
-  const at = dropAt(e.position.x / scale, e.position.y / scale)
+  const x = e.position.x / scale
+  const y = e.position.y / scale
+  const shown = presentationAt(x, y)
+  if (shown !== undefined) {
+    // Over a popup or the drawer: its session takes the paths, typed as into a pane.
+    fileDropStore.setState({ over: null })
+    if (e.type !== 'drop') return
+    const text = dropText(e.paths)
+    if (shown !== null && text && store.getState().panes[shown]?.exitCode === undefined) void tauriPty.write(shown, text)
+    return
+  }
+  const at = dropAt(x, y)
   if (e.type !== 'drop') {
     const id = at?.pane ?? null
     if (fileDropStore.getState().over !== id) fileDropStore.setState({ over: id })

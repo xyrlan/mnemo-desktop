@@ -155,18 +155,18 @@ export function createSessionHost(deps: SessionHostDeps): SessionHost {
     async function start(key: SessionKey, child: Target, token: object) {
       const mine = () => starts.get(key) === token
       let id: PaneId
+      let early: Uint8Array[] | null = []
       try {
-        let assigned: PaneId | null = null
-        const early: Uint8Array[] = []
-        id = await deps.pty.spawn({ cols: COLS, rows: ROWS, onOutput: (b) => (assigned === null ? early.push(b) : deps.feed(assigned, b)) })
-        assigned = id
-        for (const b of early) deps.feed(id, b)
+        // Only while it is held: what `claude attach` prints as it detaches goes nowhere.
+        id = await deps.pty.spawn({ cols: COLS, rows: ROWS, onOutput: (b) => (early ? early.push(b) : attaches.has(id) && deps.feed(id, b)) })
       } catch (e) {
         if (mine()) update(key, (s) => ({ ...s, error: String(e) }))
         return
       }
       attaches.set(id, { unlisten: deps.pty.onExit(id, () => ended(key, id)) })
       persist()
+      for (const b of early) deps.feed(id, b)
+      early = null
       if (!mine()) {
         // Let go of while it started.
         forget(id)

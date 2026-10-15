@@ -121,8 +121,9 @@ export type State = {
   owners: Record<PaneId, Owner>
 }
 
-/** The view sizing a terminal (`State.owners`): its sink, and the size it gave the program last. */
-export type Owner = { sink: (b: Uint8Array) => void; cols?: number; rows?: number }
+/** The view sizing a terminal (`State.owners`): its sink, the name its presentation gave it (none
+ *  for a pane's own view), and the size it gave the program last. */
+export type Owner = { sink: (b: Uint8Array) => void; name?: string; cols?: number; rows?: number }
 
 export type Actions = {
   /** Show worktree `path`'s workbench: the one shown is parked with its panes running, and `path`
@@ -226,8 +227,9 @@ export type Actions = {
    *  the core's screen first, and fed from that point on. One view owns the terminal
    *  (`State.owners`): the first, a view that `claim`s it (a popup or drawer tab opening), or one
    *  shown while the owner is not. When the owner goes or is hidden, the newest view on screen
-   *  owns it; nothing is drawn again. */
-  attachSink(id: PaneId, sink: (b: Uint8Array) => void, claim?: boolean): () => void
+   *  owns it; nothing is drawn again. `name`: what a presentation calls its view, so it can tell
+   *  whether that view owns the terminal (`owners[id].name`). */
+  attachSink(id: PaneId, sink: (b: Uint8Array) => void, claim?: boolean, name?: string): () => void
   /** Whether the view of `sink` is on screen (a box with a size). A view shown while the owner
    *  is hidden takes the terminal; the owner hidden hands it to the newest view on screen. */
   showSink(id: PaneId, sink: (b: Uint8Array) => void, shown: boolean): void
@@ -238,7 +240,8 @@ export type Actions = {
   /** Output of a terminal this store did not spawn (the session host's attaches): handed to its
    *  views like a pane's, and kept until one mounts. */
   feedTerminal(id: PaneId, b: Uint8Array): void
-  /** Terminal `id` has ended and is not a pane: everything kept for its views goes. */
+  /** Terminal `id` has ended and is not a pane: everything kept for its views goes, and what it
+   *  prints from now on is dropped. */
   forgetTerminal(id: PaneId): void
   /** The terminals whose output this store keeps anything for (views, seeds, output waiting):
    *  none once a terminal's views are gone and its output was taken. For tests. */
@@ -440,7 +443,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
     /** A view of a terminal (`attachSink`). One `seeding` waits for the core's screen, and is fed
      *  nothing before it: what the others get until then is in that screen. One that `claims` the
      *  terminal takes it once it is drawn and on screen. */
-    type View = { sink: Sink; shown: boolean; seeding: boolean; claims: boolean }
+    type View = { sink: Sink; name?: string; shown: boolean; seeding: boolean; claims: boolean }
     /** The views of each terminal, oldest first. */
     const views = new Map<PaneId, View[]>()
     /** The seeds of each terminal, one after another (each moves the core's output to a channel of
@@ -453,7 +456,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       set((s) => {
         if (s.owners[id]?.sink === v?.sink) return {}
         const owners = { ...s.owners }
-        if (v) owners[id] = { ...owners[id], sink: v.sink }
+        if (v) owners[id] = { cols: owners[id]?.cols, rows: owners[id]?.rows, sink: v.sink, ...(v.name === undefined ? {} : { name: v.name }) }
         else delete owners[id]
         return { owners }
       })
@@ -522,12 +525,28 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       }
       views.set(id, left)
       if (get().owners[id]?.sink !== v.sink) return
-      const ready = left.filter((x) => !x.seeding)
-      own(id, ready.filter((x) => x.shown).at(-1) ?? ready.at(-1))
+      // Drawn views first; else one still waiting for its screen, which sizes it once drawn: a
+      // terminal with views always has an owner, and the size it was given.
+      const pick = (vs: View[]) => vs.filter((x) => x.shown).at(-1) ?? vs.at(-1)
+      own(id, pick(left.filter((x) => !x.seeding)) ?? pick(left))
     }
 
-    /** Output of terminal `id`: to its view, else kept for when it mounts. */
+    /** Terminals that are gone (a closed pane, an ended attach). What they print after the kill
+     *  (an attach's detach, a shell's last words) is dropped, not kept for a view that never comes.
+     *  Ids are never used again. */
+    const gone = new Set<PaneId>()
+    function bury(ids: PaneId[]) {
+      for (const id of ids) {
+        gone.add(id)
+        pending.delete(id)
+        replay.delete(id)
+        seeds.delete(id)
+      }
+    }
+
+    /** Output of terminal `id`: to its views, else kept for when one mounts. */
     function route(id: PaneId, b: Uint8Array) {
+      if (gone.has(id)) return
       const sink = get().sinks[id]
       if (sink) {
         replay.delete(id)
@@ -738,9 +757,8 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           for (const p of ids) {
             delete panes[p]
             delete sinks[p]
-            pending.delete(p)
-            replay.delete(p)
           }
+          bury(ids)
           const parked = { ...s.parked }
           delete parked[path]
           const idx = s.worktrees.indexOf(path)
@@ -808,6 +826,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const tab = id === undefined ? active() : [s0.tabs, ...Object.values(s0.parked).map((l) => l.tabs)].flat().find((t) => leaves(t.root).includes(id))
         if (!tab) return
         const closing = id ?? tab.focused
+        bury([closing])
         if (closing > 0) await pty.kill(closing)
         set((s) => {
           const panes = { ...s.panes }
@@ -897,6 +916,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         if (!tab) return
         const keep = tab.focused
         const ids = leaves(tab.root).filter((p) => p !== keep)
+        bury(ids)
         for (const p of ids) if (p > 0) await pty.kill(p)
         set((s) => {
           const panes = { ...s.panes }
@@ -914,6 +934,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const tab = [s0.tabs, ...Object.values(s0.parked).map((l) => l.tabs)].flat().find((t) => t.id === id)
         if (!tab) return
         const ids = leaves(tab.root)
+        bury(ids)
         for (const p of ids) if (p > 0) await pty.kill(p)
         set((s) => {
           const panes = { ...s.panes }
@@ -1096,15 +1117,16 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           return { panes: { ...s.panes, [id]: pane } }
         })
       },
-      attachSink(id, sink, claim = false) {
+      attachSink(id, sink, claim = false, name) {
         const others = views.get(id) ?? []
-        const v: View = { sink, shown: true, seeding: false, claims: claim && others.length > 0 }
+        const v: View = { sink, name, shown: true, seeding: false, claims: claim && others.length > 0 }
         views.set(id, [...others, v])
         if (!others.length) {
           const all: Sink = (b) => {
             for (const x of views.get(id) ?? []) if (!x.seeding) x.sink(b)
           }
-          set((s) => ({ sinks: { ...s.sinks, [id]: all }, owners: { ...s.owners, [id]: { ...s.owners[id], sink } } }))
+          set((s) => ({ sinks: { ...s.sinks, [id]: all } }))
+          own(id, v)
           const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
           pending.delete(id)
           if (chunks.length) replay.set(id, chunks)
@@ -1147,9 +1169,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
       forgetTerminal(id) {
         views.delete(id)
-        seeds.delete(id)
-        pending.delete(id)
-        replay.delete(id)
+        bury([id])
         set((s) => {
           if (!(id in s.sinks) && !(id in s.owners)) return {}
           const sinks = { ...s.sinks }

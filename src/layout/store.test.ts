@@ -1455,6 +1455,51 @@ describe('terminals that outlived the page', () => {
       expect(core.attached).toEqual([1, 2, 1])
     })
 
+    test('a terminal forgotten drops what it prints after: nothing is kept for a view that never comes', async () => {
+      const { s } = await restored()
+      const v = view(s, 60)
+      s.getState().forgetTerminal(60)
+      v.release()
+      // `claude attach` detaching.
+      s.getState().feedTerminal(60, enc('detached'))
+      expect(s.getState().tracked()).not.toContain(60)
+      expect(text(view(s, 60).got)).toBe('')
+    })
+
+    test('a closed pane drops what its shell prints after the kill, and what waited for its view', async () => {
+      const { s, core } = await restored()
+      // Terminal 1's restored screen waits for a view that never comes.
+      await s.getState().closePane(1)
+      core.outputs[1](enc('last words'))
+      expect(s.getState().tracked()).not.toContain(1)
+      const t = s.getState().tabs[0]
+      await s.getState().closeTab(t.id)
+      core.outputs[2](enc('last words'))
+      expect(s.getState().tracked()).toEqual([])
+    })
+
+    test('the owner leaving while every other view waits for its screen still leaves an owner, and its size', async () => {
+      const { s } = await restored()
+      const pane = view(s, 1)
+      s.getState().sizeSession(1, pane.sink, 100, 30)
+      const popup = view(s, 1, true)
+      pane.release()
+      expect(s.getState().owners[1]).toMatchObject({ sink: popup.sink, cols: 100, rows: 30 })
+      await settle()
+      expect(s.getState().owners[1].sink).toBe(popup.sink)
+    })
+
+    test('the owner carries the name its presentation gave its view', async () => {
+      const { s } = await restored()
+      const pane = view(s, 1)
+      const drawer = s.getState().attachSink(1, () => {}, true, 'drawer:1')
+      await settle()
+      expect(s.getState().owners[1].name).toBe('drawer:1')
+      s.getState().takeSession(1, pane.sink)
+      expect(s.getState().owners[1].name).toBeUndefined()
+      drawer()
+    })
+
     test('a terminal this store did not spawn is fed and forgotten like a pane\'s', async () => {
       const { s } = await restored()
       s.getState().feedTerminal(60, enc('before'))
