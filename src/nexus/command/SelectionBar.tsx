@@ -1,4 +1,5 @@
 import type { JSX } from 'react'
+import { createPortal } from 'react-dom'
 import { useArm } from '../../cockpit/actions'
 import type { SelectionBarProps, ShipAction, ShipRobot } from '../ship-types'
 import { isGreen, isRunning, robotById } from './find'
@@ -32,7 +33,9 @@ export function SelectionBar({ ship, selection, onClear, run }: SelectionBarProp
   }
 
   const btn = 'rounded-sm border-2 px-2 py-0.5 font-bold disabled:cursor-default disabled:opacity-35'
-  return (
+  // At the end of `<body>`, like the Nexus's windows: inside its layer, the open drawer (the same
+  // layer, later) would paint over the bar's right end.
+  return createPortal(
     <div
       data-selection-bar=""
       role="toolbar"
@@ -67,6 +70,7 @@ export function SelectionBar({ ship, selection, onClear, run }: SelectionBarProp
         clear
       </button>
       <small className="text-slate-400">shift+click adds · Esc clears</small>
-    </div>
+    </div>,
+    document.body,
   )
 }

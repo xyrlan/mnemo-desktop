@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { createPortal } from 'react-dom'
 import { useArm } from '../../cockpit/actions'
 import { tauriMission } from '../../mission/client'
 import { captainWait } from '../ship-scene/words'
@@ -191,7 +192,8 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // A window or a confirmation drawn over it has the keys: no digit or y/n answers a card unseen.
+      if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector('[data-nx-window], [data-nx-confirm]')) return
       const { card, keys, answer, move } = state.current
       if (e.key === 'Escape') onClose()
       else if (typing(e.target)) return
@@ -222,7 +224,9 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   const permission = card?.kind === 'robot' ? card.need.kind === 'permission' : card?.wait.waitsOn === 'permission'
   const context = !card ? [] : card.kind === 'captain' ? card.wait.lines : lines?.length ? lines : [card.robot.line, card.robot.act].filter(truthy)
 
-  return (
+  // At the end of `<body>`, like the Nexus's windows: inside its layer, the open drawer (the same
+  // layer, later) would paint over the card's right edge.
+  return createPortal(
     <div
       data-triage=""
       role="dialog"
@@ -354,6 +358,7 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

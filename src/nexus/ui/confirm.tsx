@@ -1,4 +1,5 @@
 import { useEffect, useRef, type JSX } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from 'zustand'
 import { createStore } from 'zustand/vanilla'
 import './ui.css'
@@ -23,8 +24,17 @@ function answer(ok: boolean) {
   p?.resolve(ok)
 }
 
-/** Draws the pending confirmation (mounted once, by the Nexus). Its Esc is caught on `window`,
- *  before a window's own on `document`, so it closes the question and not the window under it. */
+/** Answers a pending confirmation with false, as Cancel does (⌘W while one is open). True when one
+ *  was pending. */
+export function dismissConfirm(): boolean {
+  if (!store.getState().pending) return false
+  answer(false)
+  return true
+}
+
+/** Draws the pending confirmation (mounted once, by the Nexus), at the end of `<body>` like a window
+ *  and over it. Its Esc is caught on `window`, before a window's own on `document`, so it closes the
+ *  question and not the window under it. */
 export function ConfirmHost(): JSX.Element | null {
   const pending = useStore(store, (s) => s.pending)
   const go = useRef<HTMLButtonElement>(null)
@@ -41,7 +51,7 @@ export function ConfirmHost(): JSX.Element | null {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [pending])
   if (!pending) return null
-  return (
+  return createPortal(
     <div className="nx nx-backdrop nx-confirm-layer" data-nx-confirm="" onMouseDown={(e) => e.target === e.currentTarget && answer(false)}>
       <div className="nx-window" role="alertdialog" aria-label={pending.title} style={{ width: 420 }}>
         <div className="nx-window-bar">
@@ -59,6 +69,7 @@ export function ConfirmHost(): JSX.Element | null {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

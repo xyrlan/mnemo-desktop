@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { parseBlocks, type Inline } from '../../../vault/md'
 import type { Tone } from '../../../vault/rules'
 import type { RepoNode } from '../../../fleet/store'
+import { typedInWindow } from '../../ui/Window'
 import { chooseRepo } from './repo'
 
 /** `/Users/you/x` → `~/x`. */
@@ -13,6 +14,10 @@ export function openExternal(url: string): void {
   if (!/^https?:\/\//.test(url)) return
   void invoke('browser_open_external', { url }).catch(() => {})
 }
+
+/** A file in the app the system opens it with (a page in the editor), a folder in the file manager
+ *  (spec Q6): the core opens only an absolute path that exists. */
+export const openInSystem = (path: string): Promise<void> => invoke<void>('system_open', { path })
 
 /** Puts `text` on the clipboard; false when the page may not. */
 export async function copyText(text: string): Promise<boolean> {
@@ -25,13 +30,14 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /** Esc for what is open inside a window, before the window's own Esc closes it: `handle` returns
- *  true when it closed something. A pending confirmation keeps its Esc. */
+ *  true when it closed something. A pending confirmation keeps its Esc, and one typed outside the
+ *  window (the drawer's terminal) is where it was typed. */
 export function useInnerEscape(handle: () => boolean): void {
   const ref = useRef(handle)
   ref.current = handle
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || document.querySelector('[data-nx-confirm]')) return
+      if (e.key !== 'Escape' || document.querySelector('[data-nx-confirm]') || !typedInWindow(e.target)) return
       if (!ref.current()) return
       e.preventDefault()
       e.stopPropagation()

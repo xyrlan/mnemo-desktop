@@ -20,7 +20,8 @@
 .nx-project-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nx-project-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; }
 .nx-project-line .nx-faint { color: var(--nx-faint); }
-.nx-project-session { white-space: nowrap; }
+.nx-project-session { padding: 0; border: 0; background: none; white-space: nowrap; }
+.nx-project-session:hover { text-decoration: underline; }
 .nx-project-session[data-live='here'] { color: var(--nx-ok); }
 .nx-project-session[data-live='bg'] { color: var(--nx-pale); }
 .nx-project-cmd { display: inline-flex; align-items: center; border: 1px solid var(--nx-edge); border-radius: 2px; }

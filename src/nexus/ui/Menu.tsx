@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react'
+import { createPortal } from 'react-dom'
 import type { MenuItem } from './menus'
 import './ui.css'
 
@@ -12,8 +13,8 @@ export type NexusMenuProps = {
   onClose(): void
 }
 
-/** A menu in the ship's look. ↑ ↓ move, Enter runs, Esc or a click outside closes; an item closes
- *  the menu before it runs. With no item it says so. */
+/** A menu in the ship's look, at the end of `<body>`: over the drawer too. ↑ ↓ move, Enter runs, Esc
+ *  or a click outside closes; an item closes the menu before it runs. With no item it says so. */
 export function NexusMenu({ x, y, head, items, onClose }: NexusMenuProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
@@ -56,7 +57,7 @@ export function NexusMenu({ x, y, head, items, onClose }: NexusMenuProps): JSX.E
     }
   })
 
-  return (
+  return createPortal(
     <div ref={box} className="nx nx-menu" role="menu" tabIndex={-1} style={pos} data-nx-menu="">
       {head && <div className="nx-menu-head">{head}</div>}
       {items.length === 0 && <div className="nx-menu-head">nothing to do here</div>}
@@ -76,6 +77,7 @@ export function NexusMenu({ x, y, head, items, onClose }: NexusMenuProps): JSX.E
           {it.hint && <span className="nx-hint">{it.hint}</span>}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   )
 }

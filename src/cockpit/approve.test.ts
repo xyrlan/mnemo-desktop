@@ -7,6 +7,7 @@ import { DETACH_KEY, keyFor, promptOnScreen, promptOptions } from './prompt'
 import type { AttachSession } from '../mission/as-me'
 import { store as appStore } from '../layout/app-store'
 import { child } from '../mission/fixtures'
+import { setNexusRoutes } from '../nexus/outside'
 
 /** The bottom of `claude attach 987fb657` parked on a Bash prompt, as xterm reads it back
  *  (captured 2026-09-15 from a real `claude --bg` child). */
@@ -145,6 +146,19 @@ test('a prompt for another call than the card shows: nothing is pressed, and the
   expect(answer.phase).toBe('error')
   expect(answer.error).toContain('not the one')
   expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', '987fb657-a6c1']])
+})
+
+test('with the Nexus open, the attach to answer by hand opens in its drawer, not in a workbench tab under it', async () => {
+  const drawer: [string | undefined, string, string][] = []
+  const unset = setNexusRoutes({ terminal: async (cwd, cmd, label) => void drawer.push([cwd, cmd, label]), page: async () => {}, pages: () => {} }, () => true)
+  try {
+    const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => fakeAttach(OTHER).session })
+    expect(answer.phase).toBe('error')
+    expect(drawer).toEqual([['/Users/me/probe', 'claude attach 987fb657', 'attach · 987fb657']])
+    expect(typed).toEqual([])
+  } finally {
+    unset()
+  }
 })
 
 test('no prompt in time: nothing is pressed, and the attach opens in a terminal', async () => {

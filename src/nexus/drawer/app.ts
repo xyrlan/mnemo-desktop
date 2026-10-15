@@ -2,7 +2,6 @@
  *  read-only tab) and diff, ⌘W claimed while the Nexus is open; the sessions the Nexus starts
  *  (`./start`), their Claude session learnt while no pane bar asks for it, and the tabs kept across
  *  a restart (`./persist`). */
-import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
 import { paneRunsClaude } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
@@ -56,7 +55,6 @@ export const liveSessions: Sessions = (sessions = createSessions({
   skipPermissions: () => (settingsStore.getState() as { skipPermissions?: boolean }).skipPermissions !== false,
   newId,
   runsClaude: paneRunsClaude,
-  say: (text) => void toast.error(text),
 }))
 
 // The tabs kept from the last run come back once the layout store has its panes back; from then on

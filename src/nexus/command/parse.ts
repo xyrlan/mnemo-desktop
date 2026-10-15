@@ -20,11 +20,14 @@ const issueOf = (label: string) => label.replace(/·[a-z]+$/, '')
 
 /** The repo on the ship called `name`: by its name, its path, or its folder's name. */
 function repoCalled(name: string, ship: Ship): { root: string; name: string } | { error: string } {
-  const want = name.toLowerCase()
   const repos = reposOf(ship)
+  return repoIn(name, repos) ?? { error: repos.length ? `no repo called ${name} on the ship — repos: ${repos.map((r) => r.name).join(', ')}` : 'no repo is on the ship right now' }
+}
+
+function repoIn(name: string, repos: readonly { root: string; name: string }[]): { root: string; name: string } | undefined {
+  const want = name.toLowerCase()
   const repo = repos.find((r) => r.name.toLowerCase() === want) ?? repos.find((r) => samePath(r.root, name) || basename(r.root).toLowerCase() === want)
-  if (!repo) return { error: repos.length ? `no repo called ${name} on the ship — repos: ${repos.map((r) => r.name).join(', ')}` : 'no repo is on the ship right now' }
-  return repo
+  return repo && { root: repo.root, name: repo.name }
 }
 
 function dispatch(rest: string, ship: Ship): Parsed {
@@ -37,14 +40,17 @@ function dispatch(rest: string, ship: Ship): Parsed {
   return { action: { kind: 'dispatch', root: repo.root, issues } }
 }
 
-/** `/new <repo>`: `claude` started in that repo, named as `/dispatch` names one, in a drawer tab.
- *  Not a ship action: the prompt opens the session itself (`openSession`). Null for any other line. */
-export function parseNew(line: string, ship: Ship): { root: string; name: string } | { error: string } | null {
+/** `/new <repo>`: `claude` started in that repo, named as `/dispatch` names one, in a drawer tab:
+ *  one on the ship, else one of `known` (every repo PROJECTS lists: `useKnownRepos`). Not a ship
+ *  action: the prompt opens the session itself (`openSession`). Null for any other line. */
+export function parseNew(line: string, ship: Ship, known: readonly { root: string; name: string }[] = []): { root: string; name: string } | { error: string } | null {
   const m = /^\/new(?:\s+([\s\S]*))?$/i.exec(line.trim())
   if (!m) return null
   const name = m[1]?.trim() ?? ''
   if (!name || /\s/.test(name)) return { error: 'usage: /new <repo> — starts claude in that repo' }
-  return repoCalled(name, ship)
+  const onShip = repoCalled(name, ship)
+  if (!('error' in onShip) || !known.length) return onShip
+  return repoIn(name, known) ?? { error: `no repo called ${name} — open PROJECTS to add it` }
 }
 
 /** `who` among the robots: `#682` is every twin of it, `#682·a` one twin; a piece's name or a

@@ -261,6 +261,7 @@ pub fn run() {
             browser::browser_reload,
             browser::browser_pr_url,
             browser::browser_open_external,
+            browser::system_open,
             browser::browser_data_store,
             browser::browser_save_shot,
             browser_keys::browser_chords,

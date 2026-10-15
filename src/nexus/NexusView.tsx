@@ -24,6 +24,7 @@ import { buildShip } from './ship'
 import { asksFrom, type ShipClient } from './ship-client'
 import type { ActionResult, AgentView, Feed, Ship, ShipAction } from './ship-types'
 import { ShipScene } from './ShipScene'
+import { useKnownRepos } from './repos'
 import { nexusStore, useNexus } from './store'
 import { startNexusUsage } from './usage'
 import { NexusMenu } from './ui/Menu'
@@ -43,6 +44,10 @@ function menuHead(t: MenuTarget, ship: Ship): string | undefined {
   const captains = [...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)]
   return t.kind === 'robot' ? robots.find((r) => r.id === t.id)?.label : captains.find((c) => c.id === t.id)?.name
 }
+
+/** What is open over the ship and keeps its keys: Triage, a window, the accounts' list (dialogs, open),
+ *  a confirmation, a menu. */
+const OVER_THE_SHIP = '[role="dialog"][data-state="open"], [role="alertdialog"], [role="menu"][data-nx-menu]'
 
 /** How often the feed is read while the Nexus is shown. */
 export const FEED_MS = 3_000
@@ -76,8 +81,8 @@ function sayFailure(r: ActionResult) {
 type BodyProps = {
   client: ShipClient
   usage: NexusClient
-  /** Opens a captain or a robot in the drawer. */
-  onOpen(id: string): void
+  /** Opens a captain or a robot in the drawer; false when the ship has no such figure. */
+  onOpen(id: string): boolean
   /** The ship and feed each time they are built, for the drawer beside it. */
   onShip(ship: Ship, feed: Feed | null): void
 }
@@ -91,6 +96,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const triage = useNexus((s) => s.triage)
   const triageAsked = useNexus((s) => s.triageAsked)
   const focusId = useNexus((s) => s.focusId)
+  const known = useKnownRepos()
   const reducedMotion = useReducedMotion()
   const visible = useVisible()
   // The last feed read, also by an earlier mount: reopened, the ship is drawn with it.
@@ -160,14 +166,14 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
 
   // The view's keys, while it is open and nothing typed into has focus: Tab triages, ⌥1–9 opens the
   // bridge's Nth exception (⌘1–9 are the worktrees'), `/` focuses the fleet prompt, Esc drops the
-  // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). The
-  // app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
+  // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). With
+  // anything open over the ship (`OVER_THE_SHIP`) they are that's. The app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
   // on its quick diff) next.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return
+      if (e.defaultPrevented || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return
+      if (document.querySelector(OVER_THE_SHIP)) return
       const st = nexusStore.getState()
       const digit = /^Digit([1-9])$/.exec(e.code)
       if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && shipRef.current.counts.need > 0) st.setTriage(true)
@@ -203,7 +209,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         onSelect={s.toggleSelect}
         onAction={(a) => void run(a).then(sayFailure, (e: unknown) => toast.error(String(e)))}
         onTriage={() => s.setTriage(true)}
-        bridge={<FleetPrompt ship={ship} run={run} />}
+        bridge={<FleetPrompt ship={ship} repos={known} run={run} />}
         reducedMotion={reducedMotion}
         visible={visible}
       />
@@ -218,7 +224,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
           onClose={() => setMenu(null)}
         />
       )}
-      <WindowHost />
+      <WindowHost open={onOpen} />
       <ConfirmHost />
     </>
   )
@@ -255,9 +261,10 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
   builtRef.current = built
   // A click on a figure, an exception's open, ⌥1–9, a breadcrumb: its tab, held as it opens.
   const onOpen = useCallback(
-    (id: string) => {
+    (id: string): boolean => {
       const o = openingOf(id, builtRef.current?.ship ?? null, reposRef.current, drawer.paneOfSession)
       if (o) drawer.drawer.open(o.tab, o.ref)
+      return o !== null
     },
     [drawer],
   )

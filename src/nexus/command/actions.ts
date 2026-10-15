@@ -14,6 +14,7 @@ import { tauriMission } from '../../mission/client'
 import type { ChildSession } from '../../mission/types'
 import { paneShell, type Shell } from '../../pty/typed'
 import { currentOs, type Os } from '../../setup/tools'
+import { nexusRoutes } from '../outside'
 import type { ActionResult, Ship, ShipAction } from '../ship-types'
 import { basename } from '../../path/path'
 import { act, type Outcome, type Paths } from './run'
@@ -93,8 +94,12 @@ export const appPaths: Paths = {
     return outcomeOf(await jobEnded(key))
   },
   async stop(root, children) {
-    await layout.getState().openCommandTab(root, stopLine(children))
-    return { ok: true, why: '(typed in a terminal tab)' }
+    // In a drawer tab while the Nexus is open (where the stop is asked from), never a workbench tab
+    // under it.
+    const nexus = nexusRoutes()
+    if (nexus) await nexus.terminal(root, stopLine(children), `stop · ${basename(root) || root}`)
+    else await layout.getState().openCommandTab(root, stopLine(children))
+    return { ok: true, why: nexus ? '(typed in a drawer tab)' : '(typed in a terminal tab)' }
   },
   reply: (id, text) => tauriMission.reply(id, text),
   paneOf(sessionId) {

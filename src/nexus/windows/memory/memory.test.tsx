@@ -316,3 +316,41 @@ test('a neighbour says how it stands to the centre', () => {
   expect(relation('a', 'b', [{ id: '1', source: 'b', target: 'a', kind: 'link', label: '' }])).toBe('links here')
   expect(relation('a', 'b', [])).toBe('nearby')
 })
+
+test('Esc typed outside the window (the drawer’s terminal) closes nothing inside it', async () => {
+  await open()
+  await tab('Pages')
+  await act(async () => vault.setState({ query: 'run-git' }))
+  const terminal = document.body.appendChild(document.createElement('textarea'))
+  await key('Escape', terminal)
+  expect(vault.getState().query).toBe('run-git')
+  expect(windowStore.getState().open?.id).toBe('memory')
+  await key('Escape')
+  expect(vault.getState().query).toBe('')
+})
+
+test('the repo picker offers a repo PROJECTS just added, before any session runs in it', async () => {
+  const { settingsStore } = await import('../../../settings/app-store')
+  const was = settingsStore.getState().projects
+  settingsStore.setState({ projects: ['/Users/you/code/notes'] })
+  try {
+    await open()
+    const options = [...document.querySelectorAll<HTMLOptionElement>('select[aria-label="Repo"] option')].map((o) => o.value)
+    expect(options).toEqual(['/Users/you/code/mnemo-desktop', '/Users/you/code/mnemo', '/Users/you/code/notes'])
+  } finally {
+    settingsStore.setState({ projects: was })
+  }
+})
+
+test('a page opens in the system’s editor, its folder in the file manager, never in an app pane', async () => {
+  await open()
+  await tab('Health')
+  const w = document.querySelector('[data-memory-window]')!
+  await click(w.querySelector('[data-rule=one-cargo-target]'))
+  const path = w.querySelector('[data-page]')!.getAttribute('data-page')!
+  const opened = () => t.calls.filter(([c]) => c === 'system_open').map(([, a]) => a!.path)
+  await click(button('Edit', w))
+  await click(button('Open folder', w))
+  expect(opened()).toEqual([path, path.slice(0, path.lastIndexOf('/'))])
+  expect(t.calls.some(([c]) => c === 'browser_create')).toBe(false)
+})

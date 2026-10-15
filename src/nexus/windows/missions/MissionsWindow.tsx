@@ -9,7 +9,7 @@ import type { Mission } from '../../../mission/types'
 import { samePath } from '../../../path/path'
 import { checksOf, dispatchable, EFFORTS, MAY, MODELS, taskRepos, type TaskRepo } from '../../../tasks/model'
 import { confirm } from '../../ui/confirm'
-import { listContracts, openInBrowser, openRobot } from './live'
+import { listContracts, openInBrowser } from './live'
 import { contractFiles, contractPathError, initialRepo, jobLine, missionOf, pick, robotOf, shortPath, type ContractFile } from './model'
 import './missions.css'
 
@@ -265,14 +265,16 @@ function BatchBar({ repo, ns, flags, onFlags, running, onGo, onClear }: { repo: 
   )
 }
 
-export type MissionsWindowProps = { root?: string; close: () => void }
+/** `open`: a robot in its drawer tab, the window closed (`WindowContext.open`); false when the ship
+ *  has no such robot. */
+export type MissionsWindowProps = { root?: string; close: () => void; open(id: string): boolean }
 
 /** The MISSIONS window (spec `2026-10-15-nexus-app-design.md`, Q5): each repo's open issues and
  *  PRs as Home's last GitHub read has them (the Tasks view's data). Issues are picked and
  *  dispatched with their model, effort and may; one already in flight says so and links to its
  *  robot. A repo's contract is dispatched from its header. A PR shows its checks and opens in the
  *  system browser. `root` opens it on that repo. */
-export function MissionsWindow({ root, close }: MissionsWindowProps): JSX.Element {
+export function MissionsWindow({ root, open }: MissionsWindowProps): JSX.Element {
   const snap = useHome((s) => s.snapshot)
   const github = useHome((s) => s.github)
   const loading = useHome((s) => s.loading)
@@ -297,7 +299,7 @@ export function MissionsWindow({ root, close }: MissionsWindowProps): JSX.Elemen
   const acts: Acts = {
     browse: (url) => void openInBrowser(url).catch((e: unknown) => setNotice(`The browser did not open: ${String(e)}`)),
     robot: (id, label) => {
-      if (!openRobot(id, close)) setNotice(`Robot ${label} is not on the ship now.`)
+      if (!open(id)) setNotice(`Robot ${label} is not on the ship now.`)
     },
   }
 

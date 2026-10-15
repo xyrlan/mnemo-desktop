@@ -4,6 +4,8 @@ import { fakeHost, reposFixture, shipFixture } from './fixtures'
 import { claimClose, isToggleKey } from './keys'
 import { openingOf } from './model'
 import { createDrawer } from './sessions'
+import { confirm } from '../ui/confirm'
+import { closeWindow, openWindow, registerWindow, windowStore } from '../ui/windows'
 
 const ran: string[] = []
 register({ id: 'pane.close', title: 'Close pane', run: () => void ran.push('pane.close') })
@@ -80,4 +82,22 @@ test('⌘\\ on a Mac, Ctrl+Shift+\\ elsewhere: plain Ctrl+\\ is the shell’s', 
   expect(isToggleKey(k({ ctrlKey: true }), 'mac')).toBe(false)
   expect(isToggleKey(k({ ctrlKey: true, shiftKey: true, key: '|' }), 'other')).toBe(true)
   expect(isToggleKey(k({ ctrlKey: true }), 'other')).toBe(false)
+})
+
+test('with a window open, ⌘W closes the window, not the drawer’s tab under it; a confirmation goes first', async () => {
+  const { unclaim, inside } = setup()
+  const unregister = registerWindow({ id: 'zz-test', title: 'Test', render: () => null })
+  openWindow('zz-test')
+  inside.focus()
+  const asked = confirm({ title: 'Close it?', confirm: 'Close' })
+  run('pane.close')
+  expect(await asked).toBe(false)
+  expect(windowStore.getState().open?.id).toBe('zz-test')
+  run('tab.close')
+  expect(windowStore.getState().open).toBeNull()
+  expect(nexusStore.getState().tabs).toHaveLength(2)
+  expect(ran).toEqual([])
+  closeWindow()
+  unregister()
+  unclaim()
 })

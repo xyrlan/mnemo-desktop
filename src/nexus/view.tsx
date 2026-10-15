@@ -3,6 +3,7 @@ import { settingsStore } from '../settings/app-store'
 import { mountInSlot } from '../shell/slots'
 import { tauriNexus } from './client'
 import { NexusView } from './NexusView'
+import './outside-app'
 import { tauriShip } from './ship-client'
 import { nexusStore } from './store'
 

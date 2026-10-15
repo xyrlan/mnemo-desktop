@@ -36,7 +36,7 @@ afterEach(() => {
 
 const draw = (s: Ship = ship(), open = true) =>
   act(async () => root.render(<Triage ship={s} open={open} onClose={() => closed++} onOpen={(id) => opened.push(id)} run={run} />))
-const card = () => host.querySelector('[data-triage-card]')?.getAttribute('data-triage-card')
+const card = () => document.querySelector('[data-triage-card]')?.getAttribute('data-triage-card')
 const key = (k: string) => act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })))
 
 test('one card per need on the bridge, with its breadcrumbs, title and question', () => {
@@ -49,16 +49,16 @@ test('one card per need on the bridge, with its breadcrumbs, title and question'
 
 test('closed, it draws nothing', async () => {
   await draw(ship(), false)
-  expect(host.querySelector('[data-triage]')).toBeNull()
+  expect(document.querySelector('[data-triage]')).toBeNull()
 })
 
 test('a card shows the question, the child’s last lines and its options', async () => {
   await draw()
-  expect(host.querySelector('[data-triage]')!.getAttribute('role')).toBe('dialog')
-  expect(host.querySelector('[data-triage-count]')!.textContent).toBe('1/2')
-  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('❓ Which way?')
-  expect(host.querySelector('[data-triage-lines]')!.textContent).toBe('101: reading the tests')
-  expect([...host.querySelectorAll('[data-triage-option]')].map((b) => b.textContent)).toEqual(['1Keep it', '2Drop it'])
+  expect(document.querySelector('[data-triage]')!.getAttribute('role')).toBe('dialog')
+  expect(document.querySelector('[data-triage-count]')!.textContent).toBe('1/2')
+  expect(document.querySelector('[data-triage-question]')!.textContent).toBe('❓ Which way?')
+  expect(document.querySelector('[data-triage-lines]')!.textContent).toBe('101: reading the tests')
+  expect([...document.querySelectorAll('[data-triage-option]')].map((b) => b.textContent)).toEqual(['1Keep it', '2Drop it'])
 })
 
 test('a digit answers with that option, and the next card comes up', async () => {
@@ -66,7 +66,7 @@ test('a digit answers with that option, and the next card comes up', async () =>
   await key('2')
   expect(ran).toEqual([{ kind: 'answer', robotId: '101', text: 'Drop it' }])
   expect(card()).toBe('102')
-  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('🔒 wants to run: Bash: rm -rf build')
+  expect(document.querySelector('[data-triage-question]')!.textContent).toBe('🔒 wants to run: Bash: rm -rf build')
   await key('n')
   expect(ran[1]).toEqual({ kind: 'answer', robotId: '102', text: 'no' })
 })
@@ -76,7 +76,7 @@ test('a refused answer keeps the card and says why', async () => {
   await draw()
   await key('1')
   expect(card()).toBe('101')
-  expect(host.querySelector('[data-triage-out]')!.textContent).toBe('#101: 101 is not asking a question now: nothing was typed')
+  expect(document.querySelector('[data-triage-out]')!.textContent).toBe('#101: 101 is not asking a question now: nothing was typed')
 })
 
 test('arrows move between cards, T opens the robot, Esc closes', async () => {
@@ -99,7 +99,7 @@ test('it closes itself once none is left', async () => {
   await draw()
   await key('1')
   await key('y')
-  expect(host.querySelector('[data-triage-settled]')).not.toBeNull()
+  expect(document.querySelector('[data-triage-settled]')).not.toBeNull()
   expect(closed).toBe(0)
   await act(async () => vi.advanceTimersByTime(SETTLED_MS + 1))
   expect(closed).toBe(1)
@@ -112,7 +112,7 @@ test('a card settled elsewhere leaves a notice, and its key does not answer the 
   after.bridge = { exceptions: after.bridge.exceptions.filter((x) => !('robotId' in x) || x.robotId !== '101'), blocked: after.bridge.blocked.filter((r) => r.id !== '101') }
   await draw(after)
   expect(card()).toBeUndefined()
-  expect(host.querySelector('[data-triage-gone]')!.textContent).toBe('#101 was settled elsewhere — ← → for the next')
+  expect(document.querySelector('[data-triage-gone]')!.textContent).toBe('#101 was settled elsewhere — ← → for the next')
   await key('y')
   await key('1')
   expect(ran).toEqual([])
@@ -125,8 +125,8 @@ test('"always" takes a second press', async () => {
   await key('ArrowRight')
   await key('a')
   expect(ran).toEqual([])
-  expect(host.querySelector('[data-triage-out]')!.textContent).toBe('press A again within 4 s to allow it always: Bash: rm -rf build')
-  expect(host.querySelector('[data-triage-option="always"]')!.textContent).toBe('AA again: always')
+  expect(document.querySelector('[data-triage-out]')!.textContent).toBe('press A again within 4 s to allow it always: Bash: rm -rf build')
+  expect(document.querySelector('[data-triage-option="always"]')!.textContent).toBe('AA again: always')
   await key('a')
   expect(ran).toEqual([{ kind: 'answer', robotId: '102', text: 'always' }])
 })
@@ -166,17 +166,17 @@ test('a captain waiting on you is a card too, in the bridge’s order', () => {
 test('a captain’s card shows what it waits on and its last lines, and only opens it', async () => {
   await draw(withCaptains())
   expect(card()).toBe(LEAD)
-  expect(host.querySelector('[data-triage-count]')!.textContent).toBe('1/4')
-  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('🔒 waits on a permission')
-  expect(host.querySelector('[data-triage-lines]')!.textContent).toBe('⌘ Bash · git push origin main')
-  expect(host.querySelectorAll('[data-triage-option]')).toHaveLength(0)
-  expect(host.querySelector('input')).toBeNull()
+  expect(document.querySelector('[data-triage-count]')!.textContent).toBe('1/4')
+  expect(document.querySelector('[data-triage-question]')!.textContent).toBe('🔒 waits on a permission')
+  expect(document.querySelector('[data-triage-lines]')!.textContent).toBe('⌘ Bash · git push origin main')
+  expect(document.querySelectorAll('[data-triage-option]')).toHaveLength(0)
+  expect(document.querySelector('input')).toBeNull()
   // Its keys answer nothing: a parent's prompt is answered in its own terminal.
   await key('y')
   await key('1')
   expect(ran).toEqual([])
   expect(card()).toBe(LEAD)
-  await act(async () => (host.querySelector('[data-triage-open]') as HTMLButtonElement).click())
+  await act(async () => (document.querySelector('[data-triage-open]') as HTMLButtonElement).click())
   expect([closed, opened]).toEqual([1, [LEAD]])
 })
 
@@ -184,8 +184,24 @@ test('T opens a captain’s card in the drawer; its question shows when the feed
   await draw(withCaptains())
   await key('ArrowLeft')
   expect(card()).toBe(MAIN)
-  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('❓ Which schema?')
-  expect(host.querySelector('[data-triage-lines]')!.textContent).toBe('no context')
+  expect(document.querySelector('[data-triage-question]')!.textContent).toBe('❓ Which schema?')
+  expect(document.querySelector('[data-triage-lines]')!.textContent).toBe('no context')
   await key('t')
   expect([closed, opened]).toEqual([1, [MAIN]])
+})
+
+test('with a window or a confirmation over it, its keys answer nothing and Esc leaves it open', async () => {
+  await draw()
+  for (const mark of ['data-nx-window', 'data-nx-confirm']) {
+    const over = document.body.appendChild(document.createElement('div'))
+    over.setAttribute(mark, '')
+    await key('1')
+    await key('y')
+    await key('Escape')
+    over.remove()
+  }
+  expect(ran).toEqual([])
+  expect(closed).toBe(0)
+  await key('1')
+  expect(ran).toHaveLength(1)
 })

@@ -50,8 +50,8 @@ export function ChangesView({ store, robotId, worktree, label }: { store: StoreA
   const [sideBySide, setSideBySide] = useState(false)
   const to: Target = { kind: 'mission', id: robotId, label: label || robotId }
 
-  // The window closes on Esc in the capture phase, before a note's textarea hears it: here, on
-  // `window`, Esc typed in a note drops the draft and the window stays.
+  // Here, on `window` in the capture phase, Esc typed in a note drops the draft before anything else
+  // hears it, and the window stays.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || !root.current?.contains(e.target as Node)) return

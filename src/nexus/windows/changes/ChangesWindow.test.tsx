@@ -78,7 +78,8 @@ afterEach(() => {
 async function settle() {
   for (let i = 0; i < 6; i++) await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
 }
-const $ = (sel: string) => host.querySelector<HTMLElement>(sel)
+// The window is drawn at the end of `<body>`, not in the root's box.
+const $ = (sel: string) => document.querySelector<HTMLElement>(sel)
 const click = (sel: string) => act(async () => $(sel)!.click())
 async function open(params: Record<string, unknown> = { robotId: 'c682', worktree: WT, label: '#682' }) {
   await act(async () => r.render(<WindowHost />))

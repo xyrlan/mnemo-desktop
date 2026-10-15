@@ -2,6 +2,8 @@
 // command's shape and the save rules; Orca's agent prompts, scopes and "append Enter" are not
 // ported: a command here belongs to one repo and always runs).
 
+import { samePath } from '../path/path'
+
 /** One saved command: what the menu shows, and what is typed into the terminal. */
 export type QuickCommand = { label: string; command: string }
 
@@ -10,10 +12,17 @@ export type QuickCommands = Record<string, QuickCommand[]>
 
 const NONE: QuickCommand[] = []
 
-/** Repo `root`'s commands, in the order saved. The same empty array for a repo with none, so a
- *  selector that returns it does not re-render forever. */
+/** The key repo `root`'s commands are saved under: `root` itself, else a key naming the same folder
+ *  as a path (Windows writes `C:\…` and `c:\…`, either slash), else `root` for a repo with none. */
+function keyOf(all: QuickCommands, root: string): string {
+  if (Object.hasOwn(all, root)) return root
+  return Object.keys(all).find((k) => samePath(k, root)) ?? root
+}
+
+/** Repo `root`'s commands, in the order saved, its key compared as a path. The same empty array for
+ *  a repo with none, so a selector that returns it does not re-render forever. */
 export function commandsFor(all: QuickCommands | undefined, root: string | null): QuickCommand[] {
-  return (root !== null && all?.[root]) || NONE
+  return (root !== null && all?.[keyOf(all, root)]) || NONE
 }
 
 /** `draft` as it is saved — label trimmed, trailing whitespace off the command — or null when
@@ -24,11 +33,13 @@ export function cleaned(draft: QuickCommand): QuickCommand | null {
   return label && command.trim() ? { label, command } : null
 }
 
-/** `all` with `root`'s list replaced; a repo left with none is dropped from the record. */
+/** `all` with `root`'s list replaced, under the key it is saved under already; a repo left with none
+ *  is dropped from the record. */
 function withList(all: QuickCommands, root: string, list: QuickCommand[]): QuickCommands {
   const next = { ...all }
-  if (list.length) next[root] = list
-  else delete next[root]
+  const key = keyOf(all, root)
+  if (list.length) next[key] = list
+  else delete next[key]
   return next
 }
 

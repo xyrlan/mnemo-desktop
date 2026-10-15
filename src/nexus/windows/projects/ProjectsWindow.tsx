@@ -5,7 +5,7 @@ import { cloneDest, isFolded, visibleRepos, type HomeRepo } from '../../../home/
 import { cleaned, commandsFor, withAdded, withRemoved, type QuickCommand } from '../../../quick-commands/commands'
 import type { SessionSpec } from '../../drawer/open'
 import { ProjectsDepsContext, type ProjectsDeps } from './deps'
-import { added, cloneBase, cloneCommand, liveSessions, WHERE } from './model'
+import { added, cloneBase, cloneCommand, liveSessions, WHERE, type LiveSession } from './model'
 import '../../ui/ui.css'
 import './projects.css'
 
@@ -20,9 +20,10 @@ function launch(deps: ProjectsDeps, close: () => void, spec: SessionSpec) {
 /** The PROJECTS window (spec `2026-10-15-nexus-app-design.md`, Q3, Q4): every repo the app knows,
  *  whether or not a session is live in it. A row has the sessions live in it, **New session**,
  *  **Terminal** and its saved commands, each opening in a drawer tab; saved commands are added and
- *  removed there. The window adds a folder, clones a repo into the clone base, or opens a folder
- *  with `claude` in it. */
-export function ProjectsWindow({ close }: { close: () => void }): JSX.Element {
+ *  removed there; a live session opens in its drawer tab (`open`: the window's `ctx.open`, false
+ *  when the ship has no such figure). The window adds a folder, clones a repo into the clone base,
+ *  or opens a folder with `claude` in it. */
+export function ProjectsWindow({ close, open = () => false }: { close: () => void; open?(id: string): boolean }): JSX.Element {
   const deps = useContext(ProjectsDepsContext)
   const snapshot = useStore(deps.home, (s) => s.snapshot)
   const loading = useStore(deps.home, (s) => s.loading)
@@ -140,6 +141,9 @@ export function ProjectsWindow({ close }: { close: () => void }): JSX.Element {
               repo={r}
               commands={commandsFor(quick, r.root)}
               open={(spec) => launch(deps, close, spec)}
+              show={(s) => {
+                if (!open(s.id)) setError(`${s.title} is not on the ship now: ${WHERE[s.live]}, nothing to open here.`)
+              }}
               addCommand={(cmd) => writeCommands(withAdded(quick, r.root, cmd))}
               removeCommand={(i) => void writeCommands(withRemoved(quick, r.root, i))}
             />
@@ -168,12 +172,14 @@ type RowProps = {
   repo: HomeRepo
   commands: QuickCommand[]
   open(spec: SessionSpec): void
+  /** Opens a live session in its drawer tab. */
+  show(session: LiveSession): void
   addCommand(cmd: QuickCommand): Promise<void>
   removeCommand(index: number): void
 }
 
 /** One repo: its name and path, the sessions live in it, what starts one, and its saved commands. */
-function ProjectRow({ repo, commands, open, addCommand, removeCommand }: RowProps): JSX.Element {
+function ProjectRow({ repo, commands, open, show, addCommand, removeCommand }: RowProps): JSX.Element {
   const live = liveSessions(repo)
   const [draft, setDraft] = useState<QuickCommand | null>(null)
   const ready = draft && cleaned(draft)
@@ -202,9 +208,16 @@ function ProjectRow({ repo, commands, open, addCommand, removeCommand }: RowProp
           <span className="nx-faint">no session live</span>
         ) : (
           live.map((s) => (
-            <span key={s.id} className="nx-project-session" data-live={s.live} title={`${s.robot ? 'Robot' : 'Captain'} · ${WHERE[s.live]} · ${s.id}`}>
+            <button
+              type="button"
+              key={s.id}
+              className="nx-project-session"
+              data-live={s.live}
+              title={`Open in the drawer · ${s.robot ? 'Robot' : 'Captain'} · ${WHERE[s.live]} · ${s.id}`}
+              onClick={() => show(s)}
+            >
               {s.robot ? '▣' : '●'} {s.title} <span className="nx-muted">· {WHERE[s.live]}</span>
-            </span>
+            </button>
           ))
         )}
       </div>

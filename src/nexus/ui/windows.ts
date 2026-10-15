@@ -2,6 +2,11 @@ import type { ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 
+/** What the Nexus lends a window, as it lends a menu its `MenuContext`: `open` opens a figure (a
+ *  captain's or a robot's id) in its drawer tab as a click on it does, and closes the window so the
+ *  tab is in view; false, the window left open, when the ship has no such figure. */
+export type WindowContext = { open(id: string): boolean }
+
 /** A Nexus window a piece registers: its title, an optional subtitle, and its content. `group`:
  *  'systems' puts it in the SYSTEMS menu. `params` are what `openWindow` was given. */
 export type WindowDef = {
@@ -11,7 +16,7 @@ export type WindowDef = {
   /** Its order in its group's menu; lower first. */
   order?: number
   width?: number
-  render(params: Record<string, unknown>, close: () => void): ReactNode
+  render(params: Record<string, unknown>, close: () => void, ctx: WindowContext): ReactNode
 }
 
 const defs = new Map<string, WindowDef>()

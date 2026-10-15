@@ -12,7 +12,8 @@ export type SessionSpec =
 /** Starts the session and opens it in a drawer tab showing its live terminal, the Nexus open
  *  (`./start`). `claude` is typed as *Launch agent* types it, under a session id of its own, so its
  *  tab is its captain's; a session one of the app's panes runs already is shown instead. A command
- *  is typed once the prompt is up. What could not start is said, and nothing is opened. */
+ *  is typed once the prompt is up. What could not start rejects, saying why, and nothing is opened:
+ *  the caller says it. */
 export async function openSession(spec: SessionSpec): Promise<void> {
   return liveSessions.openSession(spec)
 }

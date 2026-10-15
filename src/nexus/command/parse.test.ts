@@ -80,5 +80,10 @@ test('/new names a repo on the ship as /dispatch does; any other line is not it'
   expect(parseNew('/new mnemo now', s)).toEqual({ error: 'usage: /new <repo> — starts claude in that repo' })
   expect(parseNew('/newer mnemo', s)).toBeNull()
   expect(parseNew('/dispatch mnemo #1', s)).toBeNull()
+  // A repo PROJECTS lists but the ship does not (no session in it yet) starts too.
+  const known = [{ root: '/Users/you/code/notes', name: 'notes' }]
+  expect(parseNew('/new notes', s, known)).toEqual({ root: '/Users/you/code/notes', name: 'notes' })
+  expect(parseNew('/new mnemo', s, known)).toEqual({ root: MNEMO, name: 'mnemo' })
+  expect(parseNew('/new elsewhere', s, known)).toEqual({ error: 'no repo called elsewhere — open PROJECTS to add it' })
   expect(HINT.startsWith('/new <repo> · ')).toBe(true)
 })
