@@ -10,7 +10,7 @@ import { columns, G } from './ship-scene/geometry'
 import { useArrivals } from './ship-scene/motion'
 import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
-import { chips, emptyText, rateChip } from './ship-scene/words'
+import { emptyText, rateChip } from './ship-scene/words'
 import type { Deck as DeckT, Ship, ShipRobot, ShipSceneProps } from './ship-types'
 import type { MenuTarget } from './ui/menus'
 import { openWindow } from './ui/windows'
@@ -79,7 +79,7 @@ function useDecks(decks: DeckT[], reducedMotion: boolean): { decks: Drawn[]; set
 
 const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
 
-/** The ship drawn (v2 spec "What it is"): the top bar's counts, the account the app runs on and the
+/** The ship drawn (v2 spec "What it is"): the top bar's rate chip, the account the app runs on and the
  *  way back to the workbench (the Nexus covers the sidebar that has both), the bridge with what
  *  waits for you and the fleet prompt, a deck per repo with live children, the docks, and the
  *  ship's log. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
@@ -143,7 +143,6 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
     onAction,
     onTriage,
   }
-  const c = chips(ship.counts)
   const rate = rateChip(ship.rate)
   const cols = columns(width)
 
@@ -163,23 +162,6 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
       >
         <header className="ship-top">
           <span className="ship-brand">NEXUS</span>
-          <span className="ship-chip" data-chip="working">
-            {c.working}
-          </span>
-          <button
-            type="button"
-            className="ship-chip"
-            data-chip="need"
-            data-zero={ship.counts.need ? undefined : ''}
-            disabled={!ship.counts.need}
-            title="triage what needs you (Tab)"
-            onClick={onTriage}
-          >
-            {c.need}
-          </button>
-          <span className="ship-chip" data-chip="ready">
-            {c.ready}
-          </span>
           <span className="ship-chip" data-chip="rate" title={rate.title}>
             {rate.text}
           </span>

@@ -111,17 +111,18 @@ const fire = (el: Element, type: 'animationend' | 'transitionend', name: string)
     el.dispatchEvent(e)
   })
 
-test('the top bar counts as chips; the need chip triages, and rests when nothing needs you', async () => {
+test('the top bar has the rate chip and no count chips', async () => {
   await draw()
-  expect($('[data-chip="working"]')!.textContent).toBe('⚙ 1 working')
-  expect($('[data-chip="ready"]')!.textContent).toBe('✓ 1 ready')
   expect($('[data-chip="rate"]')!.textContent).toBe('⚡ 4 calls/min · 2k out tok/min')
   expect($('[data-chip="rate"]')!.title).toContain('90% read from cache')
-  await click($('[data-chip="need"]'))
+  expect($$('.ship-top [data-chip]').map((c) => c.dataset.chip)).toEqual(['rate'])
+  expect($('.ship-top')!.textContent).not.toMatch(/working|need you|needs you|ready/)
+})
+
+test('the bridge’s attend button opens Triage', async () => {
+  await draw()
+  await click($('.ship-attend'))
   expect(calls.triage).toBe(1)
-  await draw({ ship: { ...fleet(), counts: { working: 0, need: 0, ready: 0 } } })
-  expect($('[data-chip="need"]')!.hasAttribute('data-zero')).toBe(true)
-  expect(($('[data-chip="need"]') as HTMLButtonElement).disabled).toBe(true)
 })
 
 test('the bridge holds the fleet prompt, a row per exception labelled ⌥N on macOS, and is red while a question waits', async () => {
