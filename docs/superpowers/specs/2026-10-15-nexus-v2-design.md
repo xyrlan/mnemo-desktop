@@ -94,7 +94,7 @@ How they fit, decided with the maintainer:
   scrolls to it. Magenta is not a state colour.
 - **⌘\\ or Esc** collapses the drawer to a handle on the right edge. The tabs stay open; only × closes
   one.
-- **Triage:** `Tab`, the `! N need you` chip or *attend* opens a focused card per pending decision,
+- **Triage:** `Tab`, *attend* or the bridge's `+N blocked · triage` opens a focused card per pending decision,
   with the question, the child's last lines and its options:
   - `1`/`2` choose an option, `Y`/`N` approve or deny;
   - `←`/`→` move between cards, `T` opens the terminal, `Esc` leaves.

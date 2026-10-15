@@ -1,4 +1,4 @@
-import type { ActionKind, Captain, Ci, Exception, FleetRate, LogKind, RobotPose, Ship, ShipAction, ShipCounts, ShipRobot } from '../ship-types'
+import type { ActionKind, Captain, Ci, Exception, FleetRate, LogKind, RobotPose, Ship, ShipAction, ShipRobot } from '../ship-types'
 
 /** Everything the ship says, in English (spec "What it is"). Pure. */
 
@@ -24,10 +24,6 @@ export function hhmm(at: number): string {
 }
 
 const k = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${Math.round(n)}`)
-
-export function chips(c: ShipCounts): { working: string; need: string; ready: string } {
-  return { working: `⚙ ${c.working} working`, need: `! ${c.need} need${c.need === 1 ? 's' : ''} you`, ready: `✓ ${c.ready} ready` }
-}
 
 /** The rate chip: calls and output tokens a minute, with input and cache share on hover. No US$
  *  figure (spec "Telemetry chip"). */
