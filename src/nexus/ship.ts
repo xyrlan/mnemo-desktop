@@ -58,10 +58,10 @@ const SHIP_RE = /\b(git (commit|push|tag|rebase|merge)|gh (pr|run|release)|pr ch
 const EDIT_SH = /(sed -i|perl -pi|cat >|tee |apply_patch|> [\w./-]+\.(py|ts|tsx|rs|md|json))/
 const FAILED = /FAIL|ERROR|CANCEL|TIMED|ACTION_REQUIRED/i
 
-/** `6s`, `9 min`, `1.5 h`. */
+/** `6s`, `9 min`, `1.5 h`, `2 h`: the scene's `ago` too. */
 export function ago(ms: number): string {
   const s = Math.max(0, ms) / 1000
-  return s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`
+  return s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1).replace(/\.0$/, '')} h`
 }
 
 /** The first sentence of an assistant's text (at least 20 characters), without markdown marks, at
@@ -371,7 +371,8 @@ export function buildShip(input: ShipInput): Ship {
       .map((p): Exception => ({ kind: 'red', robotId: p.robot.id, pr: p.robot.pr! })),
     ...landOrder.flatMap((r) => r.missions.filter((m) => m.landable).map((m): Exception => ({ kind: 'land', root: r.root, mission: m }))),
     ...waiting
-      .filter((p) => (p.robot.ci === 'green' || p.robot.ci === null) && !p.robot.pr!.draft)
+      // Only green: the merge gate refuses a PR without checks, so it waits in the hangar unlisted.
+      .filter((p) => p.robot.ci === 'green' && !p.robot.pr!.draft)
       .sort(longestFirst)
       .map((p): Exception => ({ kind: 'ready', robotId: p.robot.id, pr: p.robot.pr!, waitingMs: p.robot.idleMs })),
     ...inDeckOrder

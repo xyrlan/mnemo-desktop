@@ -54,6 +54,7 @@ const one = (c: ChildSession, over: Partial<ShipInput> = {}) =>
 describe('helpers', () => {
   it('prints durations as the prototype does', () => {
     expect([ago(5 * SEC), ago(6 * MIN), ago(90 * MIN)]).toEqual(['5s', '6 min', '1.5 h'])
+    expect(ago(2 * HOUR)).toBe('2 h')
   })
 
   it('takes the first sentence of a long text, without markdown marks', () => {
@@ -388,6 +389,8 @@ describe('buildShip: decks and docks', () => {
     const c = kid('a1', { cwd: `${MNEMO}-wt-1` })
     const s = ship(snap(repo({ parents: [boss()] }), repo({ root: MNEMO, name: 'mnemo', children: [c] })))
     expect(s.decks.map((d) => [d.name, d.flight.map((r) => r.id)])).toEqual([['mnemo-desktop', ['a1']]])
+    // It still carries its own repo, for the merge root and the breadcrumbs.
+    expect(robot(s, 'a1').child.cwd).toBe(`${MNEMO}-wt-1`)
   })
 })
 
@@ -399,7 +402,8 @@ describe('buildShip: the bridge', () => {
       kid('s1', { updated_at: iso(20 * MIN) }),
       kid('s2', { updated_at: iso(40 * MIN) }),
       done('r1', 1, HOUR, 'pass'),
-      done('r2', 2, 2 * HOUR, 'none'),
+      done('r2', 2, 2 * HOUR, 'pass'),
+      done('c1', 6, 3 * HOUR, 'none'),
       done('d1', 3, HOUR, 'pass', { draft: true }),
       done('x1', 4, HOUR, 'fail'),
       done('p1', 5, HOUR, 'pending'),
@@ -419,6 +423,8 @@ describe('buildShip: the bridge', () => {
     const ready = s.bridge.exceptions.find((e) => e.kind === 'ready')
     expect(ready && 'waitingMs' in ready ? ready.waitingMs : null).toBe(2 * HOUR)
     expect(s.bridge.blocked.map((r) => r.id)).toEqual(['n1'])
+    // A PR without checks waits in the hangar with no row: the merge gate would refuse it.
+    expect(robot(s, 'c1').zone).toBe('hangar')
   })
 
   it('reads calm when nothing waits, and carries the fleet’s rate', () => {
