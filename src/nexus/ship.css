@@ -1,0 +1,662 @@
+/* Nexus v2: the ship (`ShipScene.tsx`, `ship-scene/`). Every sprite is drawn at 1×, pixelated.
+
+   Motion rules: every loop, walk, flight and one-shot is declared under
+   `.ship-scene:not([data-reduced])`, so reduced motion keeps only state colours, badges and
+   counters, plus ◈ held still where it flashed (the scene test reads this file to hold that).
+   `[data-paused]` (the window is hidden) pauses everything.
+
+   Colour means state only (spec "Decisions"): the app's four `--state-*` tokens. Magenta is the
+   drawer's highlight, never a state. The rest is the ship's own dark hull. */
+
+.ship-scene {
+  --ship-working: var(--state-working);
+  --ship-need: var(--state-needs-you);
+  --ship-done: var(--state-done);
+  --ship-idle: var(--state-idle);
+  --ship-focus: #e879f9;
+  --ship-space: #070b17;
+  --ship-hull: #0e1529;
+  --ship-edge: #2b3a6b;
+  --ship-edge-dim: #1f2a4d;
+  --ship-ink: #dfe6ff;
+  --ship-dim: #7f8bb3;
+  --ship-faint: #4a5680;
+  --ship-lilac: #a5b4fc;
+  --ship-pale: #c7d2fe;
+  --ship-paper: #f4efe2;
+  --ship-paper-ink: #16130d;
+  --ship-rose: #e11d48;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ship-space);
+  color: var(--ship-ink);
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* Zero specificity, so every class below positions its own buttons. */
+:where(.ship-scene) button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.ship-scene button:focus-visible {
+  outline: 2px solid var(--ship-lilac);
+  outline-offset: 2px;
+}
+.ship-scene button:disabled { cursor: default; }
+
+.ship-px {
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+  user-select: none;
+}
+.ship-em { color: var(--ship-lilac); }
+
+/* ---------- the top bar ---------- */
+.ship-top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border-bottom: 2px solid var(--ship-edge);
+  background: #0c1326;
+}
+.ship-brand {
+  margin-right: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--ship-lilac);
+  text-shadow: 2px 2px 0 #1e1b4b;
+}
+.ship-scene .ship-chip {
+  padding: 2px 7px;
+  border: 2px solid;
+  border-radius: 2px;
+  background: #0008;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ship-chip[data-chip='working'] { color: var(--ship-working); }
+.ship-chip[data-chip='need'] { color: var(--ship-need); }
+.ship-chip[data-chip='need'][data-zero] { opacity: 0.35; }
+.ship-chip[data-chip='ready'] { color: var(--ship-done); }
+.ship-chip[data-chip='rate'] { color: #c4b5fd; cursor: help; }
+
+/* ---------- space and the stage ---------- */
+.ship-space {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background:
+    radial-gradient(1px 1px at 20% 30%, #fff8 50%, transparent 51%) 0 0 / 180px 140px,
+    radial-gradient(1px 1px at 70% 80%, #fff6 50%, transparent 51%) 0 0 / 230px 190px,
+    radial-gradient(1.5px 1.5px at 40% 60%, #a5b4fc88 50%, transparent 51%) 0 0 / 310px 260px,
+    var(--ship-space);
+}
+.ship-stage {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 auto;
+  padding: 16px 16px 72px;
+}
+.ship-empty {
+  margin: 24px 0 0;
+  text-align: center;
+  color: var(--ship-dim);
+}
+
+/* ---------- the bridge ---------- */
+.ship-bridge {
+  padding: 10px 16px 12px;
+  border: 3px solid #4338ca;
+  border-radius: 18px 18px 4px 4px;
+  background: linear-gradient(#1e1b4b, #0f1029);
+  box-shadow: 0 0 0 3px #0b0d22, inset 0 0 30px #4338ca44;
+}
+.ship-bridge[data-tone='red'] { border-color: var(--ship-rose); box-shadow: 0 0 0 3px #0b0d22, inset 0 0 40px #e11d4855; }
+.ship-bridge[data-tone='lilac'] { border-color: var(--ship-lilac); box-shadow: 0 0 0 3px #0b0d22, inset 0 0 34px #a5b4fc33; }
+.ship-bridge-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.ship-blabel { font-weight: 700; letter-spacing: 2px; color: var(--ship-pale); }
+.ship-bridge[data-tone='red'] .ship-blabel { color: #fecdd3; }
+.ship-bstatus { margin-left: auto; font-size: 11px; color: var(--ship-dim); }
+.ship-scene .ship-attend {
+  padding: 2px 10px;
+  border: 2px solid #fecdd3;
+  border-radius: 2px;
+  background: var(--ship-rose);
+  color: #fff;
+  font-weight: 700;
+}
+.ship-lights { display: flex; gap: 6px; }
+.ship-lights i { width: 10px; height: 10px; border-radius: 2px; background: #4338ca; }
+.ship-lights i:nth-child(2) { background: #0ea5e9; }
+.ship-lights i:nth-child(3) { background: #22c55e; }
+.ship-bridge[data-tone='red'] .ship-lights i { background: var(--ship-rose); }
+.ship-bridge-body { display: flex; align-items: flex-end; gap: 24px; }
+.ship-bridge-main { flex: 1 1 auto; min-width: 0; }
+.ship-exceptions { margin-top: 8px; }
+.ship-xhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--ship-pale);
+}
+.ship-xhead small { font-size: 10px; letter-spacing: 0; color: var(--ship-dim); }
+.ship-xhead .ship-go { margin-left: auto; }
+.ship-xrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-left: 3px solid var(--ship-idle);
+  background: #0b0d22cc;
+  cursor: pointer;
+}
+.ship-xrow:hover { background: #18213f; }
+.ship-xrow[data-kind='need'],
+.ship-xrow[data-kind='red'] { border-left-color: var(--ship-need); }
+.ship-xrow[data-kind='ready'],
+.ship-xrow[data-kind='land'] { border-left-color: var(--ship-done); }
+.ship-xn {
+  padding: 0 3px;
+  border: 1px solid #4b5563;
+  border-radius: 2px;
+  background: #000;
+  color: #e0e7ff;
+  font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ship-xi { width: 16px; text-align: center; }
+.ship-xtag { white-space: nowrap; }
+.ship-xt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ship-dim); }
+.ship-xmore { padding: 2px 8px; font-size: 11px; color: var(--ship-dim); }
+.ship-bridge :where(button:not(.ship-attend):not(.ship-figure)),
+.ship-need :where(button) {
+  padding: 0 8px;
+  border: 2px solid #26335c;
+  border-radius: 2px;
+  background: #18213f;
+  color: var(--ship-ink);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ship-bridge button.ship-go { border-color: var(--ship-done); background: #14532d; color: #dcfce7; }
+/* Armed: the next press acts. */
+.ship-bridge button[data-armed] { border-color: var(--ship-rose); background: #4c0519; color: #fff; }
+.ship-blocked { display: flex; flex: none; align-items: flex-end; gap: 16px; max-width: 50%; }
+.ship-scene .ship-more-blocked { align-self: center; padding: 2px 8px; border: 2px solid #be123c; border-radius: 2px; background: #2a0a17; color: #fecdd3; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ship-blocked-one { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.ship-need {
+  position: relative;
+  box-sizing: border-box;
+  width: 236px;
+  padding: 4px 6px;
+  border: 2px solid #be123c;
+  border-radius: 2px;
+  background: #fff1f2;
+  box-shadow: 2px 2px 0 #4c0519;
+  color: var(--ship-paper-ink);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.ship-need::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  margin-left: -6px;
+  border: 6px solid transparent;
+  border-top-color: #be123c;
+  border-bottom: 0;
+}
+.ship-q { font-weight: 700; color: #881337; overflow-wrap: anywhere; }
+.ship-opts { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0; }
+.ship-scene .ship-need button { border-color: #be123c; background: #ffe4e6; color: #881337; }
+.ship-scene .ship-need button.ship-go { background: #be123c; color: #fff; }
+.ship-need form { display: flex; gap: 4px; }
+.ship-need input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 2px solid #be123c;
+  background: #fff;
+  color: #111;
+  font: inherit;
+}
+.ship-scene .ship-need .ship-link { margin-top: 4px; padding: 0; border: 0; background: none; color: #9f1239; font-weight: 400; text-decoration: underline; }
+
+/* ---------- column heads and decks ---------- */
+.ship-colhead { display: flex; margin-bottom: -8px; font-size: 10px; letter-spacing: 1px; color: var(--ship-dim); }
+.ship-colhead > div { box-sizing: border-box; padding-left: 8px; white-space: nowrap; overflow: hidden; }
+.ship-colhead small { margin-left: 6px; letter-spacing: 0; color: var(--ship-faint); }
+
+/* A deck's box: the outline sits outside, so deck coordinates start at its inner edge. */
+.ship-deck {
+  position: relative;
+  border-radius: 4px;
+  background: var(--ship-hull);
+  outline: 3px solid var(--ship-edge);
+  box-shadow: 0 0 0 6px #060912, 6px 6px 0 6px #03050b;
+}
+.ship-cmd {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
+  border-right: 3px solid var(--ship-edge);
+  background: linear-gradient(90deg, #151c38, #111831);
+}
+.ship-dlabel { position: absolute; top: 4px; left: 8px; margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--ship-pale); }
+.ship-quiet { position: absolute; right: 6px; bottom: 10px; left: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.ship-room {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border-right: 2px solid var(--ship-edge-dim);
+  filter: brightness(0.42) saturate(0.45);
+  transition: filter 0.9s;
+}
+.ship-room[data-zone='stranded'] { border-right: 0; }
+.ship-room[data-lit] { filter: none; box-shadow: inset 0 50px 50px -34px #c7d2fe33; }
+.ship-room::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 6px; background: #26335c; }
+.ship-room[data-zone='flight'] {
+  background:
+    linear-gradient(#18213f 1px, transparent 1px) 0 0 / 100% 24px,
+    linear-gradient(90deg, #18213f 1px, transparent 1px) 0 0 / 24px 100%,
+    linear-gradient(#0f1a33, #0e1529);
+}
+.ship-room[data-zone='hangar'] { background: linear-gradient(#141a26, #11161f); }
+.ship-room[data-zone='hangar']::after { height: 7px; background: repeating-linear-gradient(45deg, #ca8a04 0 8px, #1c1917 8px 16px); }
+.ship-room[data-zone='stranded'] { background: repeating-linear-gradient(135deg, #1a1d2e 0 10px, #141726 10px 20px); }
+/* The ready glow is a layer of its own: only its opacity moves, so the room is not repainted. */
+.ship-room[data-zone='hangar'][data-ready]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px #4ade8099, inset 0 -60px 70px -24px #4ade8055;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.ship-room[data-ready] .ship-rcount { color: var(--ship-done); }
+.ship-rcount { position: absolute; top: 3px; right: 6px; font-size: 10px; color: var(--ship-faint); }
+
+/* ---------- captains ---------- */
+.ship-captain {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 96px;
+}
+.ship-console { position: relative; display: grid; place-items: center; width: 96px; height: 96px; }
+.ship-floor { position: absolute; top: 74px; left: 50%; width: 92px; height: 22px; margin-left: -46px; border-radius: 50%; }
+.ship-captain[data-pose='busy'] .ship-floor { background: radial-gradient(color-mix(in oklab, var(--ship-working) 60%, transparent), transparent 70%); }
+.ship-captain[data-pose='alert'] .ship-floor { background: radial-gradient(color-mix(in oklab, var(--ship-need) 80%, transparent), transparent 70%); }
+.ship-captain[data-pose='offline'] .ship-console img { opacity: 0.55; filter: grayscale(0.6); }
+.ship-captain[data-pose='empty'] .ship-console img { opacity: 0.5; }
+.ship-captain[data-hl] .ship-console img { filter: drop-shadow(0 0 6px var(--ship-lilac)) drop-shadow(0 0 2px #fff); }
+.ship-cname { max-width: 120px; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
+.ship-topic {
+  display: -webkit-box;
+  width: 112px;
+  overflow: hidden;
+  font-size: 10px;
+  text-align: center;
+  color: var(--ship-dim);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ship-pact {
+  box-sizing: border-box;
+  width: 112px;
+  margin-top: 3px;
+  padding: 1px 4px;
+  overflow: hidden;
+  border: 1px solid #22d3ee;
+  border-radius: 2px;
+  background: #0e749055;
+  box-shadow: 0 0 10px #22d3ee55;
+  color: #cffafe;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ship-mail {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  z-index: 2;
+  padding: 0 4px;
+  border: 2px solid #93c5fd;
+  border-radius: 2px;
+  background: #1e3a8a;
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ship-scene .ship-chip-captain {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 0;
+  border: 2px solid #26335c;
+  border-radius: 2px;
+  background: #131b33;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ship-scene .ship-chip-captain:hover { border-color: var(--ship-lilac); }
+/* A 1× window onto the console: the captain's head and screen. */
+.ship-window { position: relative; width: 40px; height: 40px; overflow: hidden; }
+.ship-window img { position: absolute; top: -14px; left: -28px; }
+
+/* ---------- robots ---------- */
+.ship-robot {
+  position: relative;
+  z-index: 4;
+  width: 64px;
+  height: 88px;
+}
+.ship-robot[data-placed] { position: absolute; top: 0; left: 0; }
+.ship-figure { position: absolute; inset: 0; }
+.ship-body { position: absolute; top: 0; left: 0; width: 64px; height: 64px; transform-origin: 50% 100%; }
+.ship-body img { position: absolute; inset: 0; width: 64px; height: 64px; }
+.ship-robot[data-left] .ship-body { scale: -1 1; }
+.ship-halo { position: absolute; top: 50px; left: -4px; width: 72px; height: 18px; border-radius: 50%; }
+.ship-robot[data-state='working'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-working) 60%, transparent), transparent 70%); }
+.ship-robot[data-state='need'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-need) 80%, transparent), transparent 70%); }
+.ship-robot[data-state='done'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-done) 45%, transparent), transparent 70%); }
+.ship-robot[data-state='stopped'] .ship-body { filter: grayscale(1) brightness(0.7); }
+.ship-ab {
+  position: absolute;
+  top: -4px;
+  left: 48px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border: 2px solid var(--ship-idle);
+  border-radius: 3px;
+  background: #0b1020;
+  box-shadow: 1px 1px 0 #000;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ship-robot[data-state='working'] .ship-ab { border-color: var(--ship-working); }
+.ship-robot[data-state='need'] .ship-ab { border-color: var(--ship-need); background: #4c0519; }
+.ship-robot[data-state='done'] .ship-ab { border-color: var(--ship-done); color: var(--ship-done); }
+.ship-robot[data-ci='red'] .ship-ab { border-color: var(--ship-need); background: #2a0a17; color: var(--ship-need); }
+.ship-robot[data-ci='run'] .ship-ab,
+.ship-robot[data-ci='wait'] .ship-ab { border-color: var(--ship-working); color: var(--ship-working); }
+.ship-tag {
+  position: absolute;
+  top: 66px;
+  left: -5px;
+  width: 74px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 1px 1px 0 #000;
+  white-space: nowrap;
+}
+.ship-via { font-weight: 400; color: var(--ship-dim); }
+.ship-shuttle { position: absolute; top: -30px; left: 4px; z-index: -1; width: 64px; height: 64px; }
+.ship-teleport { position: absolute; top: -30px; left: 0; z-index: 5; width: 64px; height: 96px; opacity: 0; }
+.ship-rule { position: absolute; top: -8px; left: -8px; z-index: 6; font-size: 16px; color: #c4b5fd; text-shadow: 0 0 8px #a78bfa; opacity: 0; }
+.ship-robot[data-dim] { opacity: 0.2; }
+.ship-robot[data-selected]::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -6px;
+  width: 76px;
+  height: 92px;
+  border: 2px dashed #e0e7ff;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.ship-robot[data-focus] { z-index: 8; }
+.ship-robot[data-focus] .ship-body,
+.ship-captain[data-focus] .ship-console img { filter: drop-shadow(0 0 3px #f0abfc) drop-shadow(0 0 10px #c026d3); }
+.ship-robot[data-focus] .ship-tag { color: #f5d0fe; }
+.ship-robot[data-focus]::before,
+.ship-captain[data-focus]::before {
+  content: '▼';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  z-index: 7;
+  margin-left: -7px;
+  color: #f0abfc;
+  font-size: 14px;
+  text-shadow: 0 0 8px var(--ship-focus);
+}
+.ship-captain[data-focus]::before { top: -24px; }
+.ship-chip-captain[data-focus] { border-color: var(--ship-focus); }
+
+/* Particles: what a working robot is doing, round its body. */
+.ship-fx { position: absolute; top: 0; left: 0; z-index: 2; width: 64px; height: 64px; pointer-events: none; }
+.ship-fx::before,
+.ship-fx::after { content: ''; position: absolute; opacity: 0; }
+.ship-fx[data-fx='sparks']::before { top: 30px; left: 50px; width: 2px; height: 2px; background: #fff; box-shadow: 3px -3px #f9a8d4, -2px -4px #fff, 5px 1px #f472b6, 1px -6px #fbcfe8, -4px 0 #f0abfc; }
+.ship-fx[data-fx='sparks']::after { top: 33px; left: 47px; width: 2px; height: 2px; background: #f9a8d4; box-shadow: -3px 2px #fff, 4px 3px #f472b6; }
+.ship-fx[data-fx='bubbles']::before,
+.ship-fx[data-fx='bubbles']::after { top: 26px; left: 46px; width: 5px; height: 5px; border: 1px solid #a5f3fc; border-radius: 50%; background: #22d3ee33; }
+.ship-fx[data-fx='bubbles']::after { left: 14px; width: 4px; height: 4px; }
+.ship-fx[data-fx='pages']::before,
+.ship-fx[data-fx='pages']::after { content: '▤'; top: 6px; left: 44px; color: #e0e7ff; font-size: 10px; }
+.ship-fx[data-fx='pages']::after { top: 12px; left: 8px; font-size: 9px; color: var(--ship-pale); }
+.ship-fx[data-fx='zz']::before { content: 'z'; top: 2px; left: 44px; color: var(--ship-pale); font-size: 10px; }
+.ship-fx[data-fx='zz']::after { content: 'Z'; top: -4px; left: 50px; color: var(--ship-lilac); font-size: 13px; }
+.ship-fx[data-fx='radar']::before { top: 16px; left: 22px; width: 20px; height: 20px; border: 2px solid #67e8f9; border-radius: 50%; }
+
+/* The hangar's stack: the rest of the ready PRs, folded. */
+.ship-stack { position: absolute; top: 0; left: 0; z-index: 4; width: 140px; height: 88px; }
+.ship-stack img { position: absolute; width: 64px; height: 64px; }
+.ship-stack img:nth-of-type(1) { top: 14px; left: 0; }
+.ship-stack img:nth-of-type(2) { top: 6px; left: 22px; }
+.ship-stack img:nth-of-type(3) { top: 0; left: 44px; }
+.ship-stack small { position: absolute; top: 22px; left: 112px; font-size: 15px; font-weight: 700; color: #e0e7ff; text-shadow: 2px 2px 0 #000; }
+.ship-stack b { position: absolute; top: 74px; left: 0; width: 160px; font-size: 10.5px; color: var(--ship-done); text-shadow: 1px 1px 0 #000; }
+.ship-stack:hover b { text-decoration: underline; }
+
+/* Leaving: where it last stood, boarding its shuttle or walking off. */
+.ship-leaver { position: absolute; top: 0; left: 0; z-index: 4; width: 64px; height: 88px; pointer-events: none; }
+.ship-walk-off { position: absolute; inset: 0; opacity: 0; }
+.ship-launch { position: absolute; top: -30px; left: 4px; width: 64px; height: 96px; opacity: 0; }
+
+/* ---------- speech ---------- */
+.ship-bubble {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 2px solid #111;
+  border-radius: 2px;
+  background: var(--ship-paper);
+  box-shadow: 2px 2px 0 #000;
+  color: var(--ship-paper-ink);
+  font-size: 11px;
+  line-height: 1.3;
+  pointer-events: none;
+}
+.ship-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: var(--tail, 30px);
+  border: 6px solid transparent;
+  border-top-color: #111;
+  border-bottom: 0;
+}
+.ship-bubble b { color: #3730a3; }
+.ship-bubble .ship-em { color: #4f46e5; }
+.ship-bubble[data-state='done'] { background: #e9f8ec; }
+.ship-bubble[data-state='idle'],
+.ship-bubble[data-state='stopped'] { background: #e5e7eb; }
+.ship-say { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.ship-act { margin-top: 2px; overflow: hidden; font-size: 10px; color: #5b5444; text-overflow: ellipsis; white-space: nowrap; }
+.ship-hover { z-index: 20; width: 280px; --tail: 120px; }
+.ship-hover .ship-say { -webkit-line-clamp: 8; }
+.ship-more { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #b8ae95; font-size: 10px; color: #3c372a; overflow-wrap: anywhere; }
+.ship-tether { position: absolute; top: 0; left: 0; z-index: 3; overflow: visible; pointer-events: none; }
+.ship-tether line { stroke: var(--ship-lilac); stroke-width: 2; stroke-dasharray: 4 4; }
+.ship-tether [data-tether='relation'] line { stroke: #94a3b8; stroke-dasharray: 2 6; }
+.ship-tether text { fill: #cbd5e1; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+
+/* ---------- docks ---------- */
+.ship-docks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 2px dashed #26335c;
+  border-radius: 4px;
+  background: #0b1122cc;
+  opacity: 0.5;
+  filter: saturate(0.6);
+  transition: opacity 0.3s, filter 0.3s;
+}
+.ship-docks:hover,
+.ship-docks:focus-within { opacity: 1; filter: none; }
+.ship-docks > b { margin-right: 6px; font-size: 12px; letter-spacing: 1px; color: var(--ship-dim); }
+.ship-pod { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 2px solid #26335c; border-radius: 10px 10px 2px 2px; background: #10172b; }
+.ship-pod > span { margin-right: 2px; font-size: 11px; font-weight: 700; color: var(--ship-pale); }
+
+/* ---------- the ship's log ---------- */
+.ship-log {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  z-index: 25;
+  width: min(520px, calc(100% - 32px));
+  border: 2px solid var(--ship-edge);
+  border-radius: 4px;
+  background: #0c1326f2;
+  box-shadow: 4px 4px 0 #000;
+}
+.ship-scene .ship-log-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 8px; }
+.ship-log-head b { font-size: 12px; letter-spacing: 1px; color: var(--ship-pale); }
+.ship-log[data-open] .ship-log-head { border-bottom: 1px solid #26335c; }
+.ship-tick { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 11px; color: var(--ship-dim); text-overflow: ellipsis; white-space: nowrap; }
+.ship-tick i,
+.ship-log-list i { font-style: normal; }
+.ship-log-list { max-height: 196px; margin: 0; padding: 2px 0; overflow: auto; list-style: none; }
+.ship-scene .ship-log-list button { display: flex; gap: 7px; width: 100%; padding: 1px 8px; overflow: hidden; font-size: 11px; white-space: nowrap; }
+.ship-scene .ship-log-list button:hover:not(:disabled) { background: #18213f; }
+.ship-log-list time { color: var(--ship-faint); }
+.ship-log-list i { width: 14px; text-align: center; color: var(--ship-dim); }
+.ship-log-list span { overflow: hidden; color: #cbd5e1; text-overflow: ellipsis; }
+.ship-log b { color: #e0e7ff; }
+[data-tone='ok'] > i { color: var(--ship-done); }
+[data-tone='bad'] > i { color: var(--ship-need); }
+[data-tone='warn'] > i { color: #c4b5fd; }
+[data-tone='you'] > i { color: #f0abfc; }
+
+/* ---------- motion: never with reduced motion ---------- */
+.ship-scene:not([data-reduced]) .ship-robot[data-placed]:not([data-still]) { transition: transform 1.4s ease-in-out; }
+.ship-scene:not([data-reduced]) .ship-robot[data-walking] .ship-body { animation: ship-walk 0.35s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-state='working']:not([data-walking]) .ship-body { animation: ship-bob 0.9s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-state='idle']:not([data-walking]) .ship-body { animation: ship-breathe 3.2s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-state='working'] .ship-halo { animation: ship-pulse 1.6s infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-state='need'] .ship-halo,
+.ship-scene:not([data-reduced]) .ship-robot[data-state='need'] .ship-ab,
+.ship-scene:not([data-reduced]) .ship-attend { animation: ship-pulse 0.8s infinite; }
+.ship-scene:not([data-reduced]) .ship-captain[data-pose='busy'] .ship-console img { animation: ship-type 0.5s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-captain[data-pose='busy'] .ship-floor { animation: ship-pulse 2.4s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-captain[data-pose='alert'] .ship-floor { animation: ship-pulse 1s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-focus]::before,
+.ship-scene:not([data-reduced]) .ship-captain[data-focus]::before { animation: ship-hop 0.8s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-selected]::after { animation: ship-blink 1.2s infinite; }
+.ship-scene:not([data-reduced]) .ship-lights i { animation: ship-blink 1.8s infinite; }
+.ship-scene:not([data-reduced]) .ship-lights i:nth-child(2) { animation-delay: 0.3s; }
+.ship-scene:not([data-reduced]) .ship-lights i:nth-child(3) { animation-delay: 0.9s; }
+.ship-scene:not([data-reduced]) .ship-bridge[data-tone='red'] .ship-lights i { animation-duration: 0.6s; }
+.ship-scene:not([data-reduced]) .ship-room[data-zone='hangar'][data-ready]::before { animation: ship-hangar-ready 2.6s ease-in-out infinite; will-change: opacity; }
+.ship-scene:not([data-reduced]) .ship-tether line { animation: ship-dash 0.6s linear infinite; }
+.ship-scene:not([data-reduced]) .ship-tether [data-tether='relation'] line { animation: none; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='sparks']::before { animation: ship-spark 0.45s steps(3) infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='sparks']::after { animation: ship-spark 0.45s 0.22s steps(3) infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='bubbles']::before { animation: ship-rise 1.6s ease-in infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='bubbles']::after { animation: ship-rise 1.6s 0.8s ease-in infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='pages']::before,
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='zz']::before { animation: ship-float 2.4s ease-out infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='pages']::after,
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='zz']::after { animation: ship-float 2.4s 1.2s ease-out infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='radar']::before { animation: ship-ping 1.5s ease-out infinite; }
+
+/* One-shots: a beam in, a flash, a launch, a walk off, a fresh log line. */
+.ship-scene:not([data-reduced]) .ship-robot[data-arriving] .ship-figure { animation: ship-beam 1.2s ease-out both; }
+.ship-scene:not([data-reduced]) .ship-teleport { animation: ship-tele 1.4s ease-out forwards; }
+.ship-scene:not([data-reduced]) .ship-rule { animation: ship-rule 1.6s ease-out forwards; }
+.ship-scene:not([data-reduced]) .ship-launch { animation: ship-launch 2s cubic-bezier(0.5, 0, 0.9, 0.4) forwards; }
+.ship-scene:not([data-reduced]) .ship-walk-off { animation: ship-walk-off 1.5s ease-in forwards; }
+.ship-scene:not([data-reduced]) .ship-walk-off .ship-body { animation: ship-walk 0.35s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-tick { animation: ship-new 1.6s ease-out; }
+
+/* Reduced motion: ◈ shows where it flashed, still, for as long as a flash would have taken. */
+.ship-scene[data-reduced] .ship-fx { display: none; }
+.ship-scene[data-reduced] .ship-rule { animation: ship-hold 1.6s steps(1) forwards; }
+
+.ship-scene[data-paused] *,
+.ship-scene[data-paused] *::before,
+.ship-scene[data-paused] *::after {
+  animation-play-state: paused !important;
+}
+
+@keyframes ship-walk { 50% { translate: 0 -3px; rotate: -3deg; } }
+@keyframes ship-bob { 50% { translate: 0 -2px; } }
+@keyframes ship-breathe { 50% { translate: 0 1px; } }
+@keyframes ship-type { 50% { translate: 0 1px; } }
+@keyframes ship-pulse { 50% { opacity: 0.55; } }
+@keyframes ship-blink { 50% { opacity: 0.3; } }
+@keyframes ship-hop { 50% { translate: 0 -5px; } }
+@keyframes ship-dash { to { stroke-dashoffset: -8; } }
+@keyframes ship-hangar-ready { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+@keyframes ship-spark { 0% { scale: 0.4; opacity: 1; } 100% { scale: 2.4; translate: 2px -3px; opacity: 0; } }
+@keyframes ship-rise { 0% { translate: 0 0; opacity: 0; } 15% { opacity: 1; } 100% { translate: 0 -44px; opacity: 0; } }
+@keyframes ship-float { 0% { translate: 0 0; opacity: 0; } 20% { opacity: 0.9; } 100% { translate: 6px -34px; opacity: 0; } }
+@keyframes ship-ping { 0% { scale: 0.3; opacity: 1; } 100% { scale: 2.6; opacity: 0; } }
+@keyframes ship-beam { 0% { translate: 0 -40px; scale: 1 1.6; opacity: 0; filter: brightness(3); } 60% { opacity: 1; filter: brightness(1.6); } 100% { translate: 0 0; scale: 1 1; opacity: 1; filter: none; } }
+@keyframes ship-tele { 0% { scale: 1 0.2; opacity: 0; } 25% { scale: 1 1.15; opacity: 1; } 100% { scale: 1 1; opacity: 0; } }
+@keyframes ship-rule { 0% { scale: 0.6; opacity: 0; } 20% { scale: 1.3; opacity: 1; } 70% { opacity: 1; } 100% { translate: 0 -10px; opacity: 0; } }
+@keyframes ship-launch { 0% { translate: 0 0; opacity: 1; } 90% { opacity: 1; } 100% { translate: 90px -380px; opacity: 0; } }
+@keyframes ship-walk-off { 0% { translate: 0 0; opacity: 1; } 80% { opacity: 1; } 100% { translate: var(--off) 0; opacity: 0; } }
+@keyframes ship-new { 0% { background: #4338ca88; } 100% { background: transparent; } }
+@keyframes ship-hold { 0% { opacity: 1; } 100% { opacity: 0; } }
