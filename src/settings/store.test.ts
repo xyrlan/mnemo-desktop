@@ -12,7 +12,7 @@ test('set persists the whole settings object', async () => {
   const written: unknown[] = []
   const s = createSettingsStore({ read: async () => ({}), write: async (v) => { written.push(v) } })
   await s.getState().set('replyLanguage', 'pt')
-  expect(written).toEqual([{ outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
+  expect(written).toEqual([{ outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'pt', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null, nexusAtLaunch: true }])
 })
 
 test('a sidebarScope left in an old settings file is dropped, not written back', async () => {
@@ -21,10 +21,10 @@ test('a sidebarScope left in an old settings file is dropped, not written back',
   await s.getState().load()
   expect('sidebarScope' in s.getState()).toBe(false)
   await s.getState().set('outgoing', 'en')
-  expect(written).toEqual([{ outgoing: 'en', outgoingChosen: true, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }])
+  expect(written).toEqual([{ outgoing: 'en', outgoingChosen: true, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null, nexusAtLaunch: true }])
 })
 
-const WHOLE = { outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null }
+const WHOLE = { outgoing: 'as-typed', outgoingChosen: false, replyLanguage: 'unchanged', homePinned: [], homeHidden: [], cloneBase: null, issueLabels: {}, skipPermissions: true, repoSetup: {}, projects: [], quickCommands: {}, windowsShell: null, nexusAtLaunch: true }
 const WHY = '/home/u/.mnemo-desktop/settings.json: trailing comma at line 3 column 1'
 
 // #391, expected 1.
@@ -253,4 +253,16 @@ test('windowsShell keeps a chosen id across a write and reads junk as no choice'
     await j.getState().load()
     expect(j.getState().windowsShell).toBeNull()
   }
+})
+
+test('nexusAtLaunch: on by default, off when the file says false, junk read as the default', async () => {
+  const on = createSettingsStore({ read: async () => ({}), write: async () => {} })
+  await on.getState().load()
+  expect(on.getState().nexusAtLaunch).toBe(true)
+  const off = createSettingsStore({ read: async () => ({ nexusAtLaunch: false }), write: async () => {} })
+  await off.getState().load()
+  expect(off.getState().nexusAtLaunch).toBe(false)
+  const junk = createSettingsStore({ read: async () => ({ nexusAtLaunch: 'no' as unknown as boolean }), write: async () => {} })
+  await junk.getState().load()
+  expect(junk.getState().nexusAtLaunch).toBe(true)
 })

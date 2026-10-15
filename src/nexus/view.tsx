@@ -1,4 +1,5 @@
 import { register } from '../actions/registry'
+import { settingsStore } from '../settings/app-store'
 import { mountInSlot, useLeftEdge } from '../dashboard/shell'
 import { tauriNexus } from './client'
 import { NexusView } from './NexusView'
@@ -14,5 +15,12 @@ function Nexus() {
 }
 
 register({ id: 'nexus.toggle', title: 'Nexus', run: () => nexusStore.getState().toggle() })
+
+// The store opens on the Nexus; settings that say otherwise close it once they are read.
+const atLaunch = settingsStore.subscribe((s) => {
+  if (!s.loaded) return
+  atLaunch()
+  if (!s.nexusAtLaunch) nexusStore.getState().setOpen(false)
+})
 
 mountInSlot('overlay', Nexus)
