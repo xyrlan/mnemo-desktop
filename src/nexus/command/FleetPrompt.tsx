@@ -9,7 +9,7 @@ type Pending = { action: ShipAction; until: number }
 /** The bridge's prompt (`/` focuses it): orders for the whole fleet (spec "Fleet prompt"). Its
  *  input sits in `[data-fleet-prompt]`; under it, the hint and the last result. A batch verb waits
  *  for `/yes` for 20 s, then lapses. */
-export function FleetPrompt({ ship, run }: FleetPromptProps): JSX.Element | null {
+export function FleetPrompt({ ship, repos, run }: FleetPromptProps): JSX.Element | null {
   const [line, setLine] = useState('')
   const [out, setOut] = useState<Out | null>(null)
   const [busy, setBusy] = useState(false)
@@ -57,7 +57,7 @@ export function FleetPrompt({ ship, run }: FleetPromptProps): JSX.Element | null
     const typed = line.trim()
     if (!typed || busy) return
     setLine('')
-    const fresh = parseNew(typed, ship)
+    const fresh = parseNew(typed, ship, repos)
     if (fresh) {
       if ('error' in fresh) return say(fresh.error, true)
       // An order, like any other: a batch still waiting for its `/yes` lapses.

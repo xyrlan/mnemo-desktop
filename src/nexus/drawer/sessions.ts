@@ -62,11 +62,12 @@ export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, wor
   const drawer: Drawer = {
     open(tab, ref) {
       const had = store.getState().tabs.find((t) => t.id === tab.id)
-      const moved = had?.key?.startsWith('pane:') && ref !== null && 'pane' in ref && sessionKey(ref) !== had.key
+      const old = had?.key ?? null
+      const moved = !!old?.startsWith('pane:') && ref !== null && 'pane' in ref && sessionKey(ref) !== old
       if (had && !moved && (had.key !== null || ref === null)) return store.getState().activateTab(tab.id)
       const key = ref ? host.getState().hold(ref, BY) : null
       store.getState().putTab({ ...tab, key, readOnly: key === null ? tab.readOnly : null })
-      if (moved) void letGo(had.key)
+      if (moved) void letGo(old)
     },
 
     async close(id) {

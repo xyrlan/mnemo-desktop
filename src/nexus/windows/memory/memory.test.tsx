@@ -328,3 +328,16 @@ test('Esc typed outside the window (the drawer’s terminal) closes nothing insi
   await key('Escape')
   expect(vault.getState().query).toBe('')
 })
+
+test('the repo picker offers a repo PROJECTS just added, before any session runs in it', async () => {
+  const { settingsStore } = await import('../../../settings/app-store')
+  const was = settingsStore.getState().projects
+  settingsStore.setState({ projects: ['/Users/you/code/notes'] })
+  try {
+    await open()
+    const options = [...document.querySelectorAll<HTMLOptionElement>('select[aria-label="Repo"] option')].map((o) => o.value)
+    expect(options).toEqual(['/Users/you/code/mnemo-desktop', '/Users/you/code/mnemo', '/Users/you/code/notes'])
+  } finally {
+    settingsStore.setState({ projects: was })
+  }
+})

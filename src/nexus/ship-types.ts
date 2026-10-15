@@ -241,6 +241,8 @@ export type ShipSceneProps = {
 
 export type FleetPromptProps = {
   ship: Ship
+  /** Every repo `/new` takes besides the ship's (`useKnownRepos`). */
+  repos?: readonly { root: string; name: string }[]
   /** Runs an action and returns what to print under the prompt. */
   run(action: ShipAction): Promise<ActionResult>
 }

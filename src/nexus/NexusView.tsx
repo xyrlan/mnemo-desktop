@@ -24,6 +24,7 @@ import { buildShip } from './ship'
 import { asksFrom, type ShipClient } from './ship-client'
 import type { ActionResult, AgentView, Feed, Ship, ShipAction } from './ship-types'
 import { ShipScene } from './ShipScene'
+import { useKnownRepos } from './repos'
 import { nexusStore, useNexus } from './store'
 import { startNexusUsage } from './usage'
 import { NexusMenu } from './ui/Menu'
@@ -95,6 +96,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const triage = useNexus((s) => s.triage)
   const triageAsked = useNexus((s) => s.triageAsked)
   const focusId = useNexus((s) => s.focusId)
+  const known = useKnownRepos()
   const reducedMotion = useReducedMotion()
   const visible = useVisible()
   // The last feed read, also by an earlier mount: reopened, the ship is drawn with it.
@@ -207,7 +209,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         onSelect={s.toggleSelect}
         onAction={(a) => void run(a).then(sayFailure, (e: unknown) => toast.error(String(e)))}
         onTriage={() => s.setTriage(true)}
-        bridge={<FleetPrompt ship={ship} run={run} />}
+        bridge={<FleetPrompt ship={ship} repos={known} run={run} />}
         reducedMotion={reducedMotion}
         visible={visible}
       />

@@ -133,3 +133,11 @@ describe('createQuickCommands', () => {
     expect(all()).toEqual({ [R]: [dev] })
   })
 })
+
+test('a repo’s key is compared as a path: one spelling finds and changes the list another saved', () => {
+  const all = { 'C:\\Users\\you\\repo': [dev] }
+  expect(commandsFor(all, 'c:/Users/you/repo/')).toEqual([dev])
+  expect(withAdded(all, 'c:\\Users\\you\\repo', test_)).toEqual({ 'C:\\Users\\you\\repo': [dev, test_] })
+  expect(withRemoved(all, 'c:\\Users\\you\\repo', 0)).toEqual({})
+  expect(commandsFor(all, 'C:\\Users\\you\\other')).toBe(commandsFor(undefined, 'x'))
+})

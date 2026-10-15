@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from '@/ui'
-import { samePath } from '../../path/path'
+import { commandsFor } from '../../quick-commands/commands'
 import { settingsStore } from '../../settings/app-store'
 import { runAction } from '../command/actions'
 import { endSession, openSession, paneOf } from '../drawer/open'
@@ -11,11 +11,8 @@ import type { MenuContext, MenuItem, MenuTarget } from '../ui/menus'
 import { openWindow } from '../ui/windows'
 import { makeShipMenu, type MenuDeps } from './menu'
 
-/** Repo `root`'s saved commands, its key compared as a path (Windows writes `C:\…` either way). */
-function savedCommands(root: string) {
-  const all = settingsStore.getState().quickCommands
-  return all[root] ?? Object.entries(all).find(([k]) => samePath(k, root))?.[1] ?? []
-}
+/** Repo `root`'s saved commands, as PROJECTS and the workbench find them (`commandsFor`). */
+const savedCommands = (root: string) => commandsFor(settingsStore.getState().quickCommands, root)
 
 /** The menus' paths, the app's own. */
 export const appMenuDeps: MenuDeps = {
