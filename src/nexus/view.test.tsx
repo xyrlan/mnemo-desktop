@@ -17,12 +17,12 @@ test('the Nexus mounts itself once, in the shell’s overlay slot', () => {
   expect(mounted.map(([slot]) => slot)).toEqual(['overlay'])
 })
 
-test('`nexus.toggle` opens and closes the drawer', () => {
+test('the app opens on the Nexus, and `nexus.toggle` closes and opens it', () => {
   expect(all().filter((a) => a.id === 'nexus.toggle')).toHaveLength(1)
   expect(all().find((a) => a.id === 'nexus.toggle')!.title).toBe('Nexus')
-  expect(nexusStore.getState().open).toBe(false)
-  run('nexus.toggle')
   expect(nexusStore.getState().open).toBe(true)
   run('nexus.toggle')
   expect(nexusStore.getState().open).toBe(false)
+  run('nexus.toggle')
+  expect(nexusStore.getState().open).toBe(true)
 })

@@ -46,6 +46,8 @@ const BINDINGS: Record<string, Binding> = {
   'focus.up': focus('arrowup'),
   'focus.down': focus('arrowdown'),
   'floating-terminal.toggle': { mac: { meta: true, alt: true, key: 'a', code: 'KeyA' }, other: { ctrl: true, shift: true, key: 'a' } },
+  // ⌘1–9 go to a worktree; ⌘0 to the whole fleet (Nexus v2). Shift types ")" on the 0 key.
+  'nexus.toggle': { mac: { meta: true, key: '0' }, other: { ctrl: true, shift: true, key: '0', code: 'Digit0' } },
 }
 for (let n = 1; n <= 9; n++) {
   const key = String(n)

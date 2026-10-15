@@ -238,7 +238,7 @@ test('every native menu accelerator in lib.rs maps to the same action as its key
   expect(ids.sort()).toEqual(
     [
       'tab.new', 'tab.new-browser', 'tab.prev', 'tab.next', 'tab.close', 'pane.split.row', 'pane.split.col', 'pane.close', 'palette.open',
-      'sidebar.toggle-left', 'sidebar.toggle-right', 'worktree.jump', 'workspace.new', 'pane.toggle-face', 'dictation.toggle', 'floating-terminal.toggle', 'diff.open', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
+      'sidebar.toggle-left', 'sidebar.toggle-right', 'worktree.jump', 'workspace.new', 'pane.toggle-face', 'dictation.toggle', 'floating-terminal.toggle', 'diff.open', 'nexus.toggle', 'focus.left', 'focus.right', 'focus.up', 'focus.down',
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((n) => [`tab.go.${n}`, `worktree.go.${n}`]),
     ].sort(),
   )
