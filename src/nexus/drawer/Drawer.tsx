@@ -5,7 +5,7 @@ import { EyeOff, MessageSquare, SquareTerminal, X } from 'lucide-react'
 import { shortcutLabel } from '../../actions/chords'
 import type { ChatAgent } from '../../conversation/agent'
 import type { ConversationViewProps } from '../../conversation/ConversationView'
-import { STATUS_BAR, TOP_CHROME } from '../../shell/edges'
+import { STATUS_BAR } from '../../shell/edges'
 import type { ChangedFile, DiffClient } from '../../diff/client'
 import type { AgentState, RepoNode } from '../../fleet/types'
 import type { PaneViewProps } from '../../panes/registry'
@@ -130,10 +130,12 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
         data-session-pty={activeSession?.pty ?? ''}
         aria-label="Sessions"
         className="fixed right-0 z-drawer flex-col border-l border-border bg-card text-card-foreground shadow-[-6px_0_16px_rgba(0,0,0,0.18)]"
-        style={{ display: open ? 'flex' : 'none', top: TOP_CHROME, bottom: STATUS_BAR, width }}
+        style={{ display: open ? 'flex' : 'none', top: 0, bottom: STATUS_BAR, width }}
       >
         <ResizeEdge width={width} />
-        <div role="tablist" className="flex shrink-0 overflow-x-auto border-b border-border bg-background" data-drawer-tabs="">
+        {/* As tall as the ship's bar beside it (`.ship-top`, 44 px): the Nexus takes the whole window
+            from the top (#440), and the two bars read as one. */}
+        <div role="tablist" className="flex h-11 shrink-0 overflow-x-auto border-b border-border bg-background" data-drawer-tabs="">
           {tabs.map((t) => (
             <TabButton key={t.id} tab={t} active={t.id === activeTab} figure={findFigure(ship, t.id)} deps={deps} />
           ))}
@@ -299,11 +301,16 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
   const status = useMemo(() => s, [s?.busy, s?.waiting, s?.parked]) // eslint-disable-line react-hooks/exhaustive-deps
   const openTerminal = useCallback(() => nexusStore.getState().setFace(tab.id, 'terminal'), [tab.id])
 
-  // Shown, it takes the keyboard: the composer, or the terminal.
+  // Shown, it takes the keyboard: the composer, or the terminal. A conversation with no composer
+  // (its foot shows a card, or sends you to the terminal) gives it to the panel, never leaving it
+  // in the terminal under the conversation, where a key would answer what waits there unseen.
   useEffect(() => {
     if (!active || !shown || pty === null) return
     const where = face === 'conversation' ? '[data-drawer-conversation]' : '[data-drawer-terminal]'
-    const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>(`${where} textarea`)?.focus())
+    const frame = requestAnimationFrame(() => {
+      const target = panel.current?.querySelector<HTMLElement>(`${where} textarea`) ?? (face === 'conversation' ? panel.current : null)
+      target?.focus()
+    })
     return () => cancelAnimationFrame(frame)
   }, [active, shown, pty, face])
 

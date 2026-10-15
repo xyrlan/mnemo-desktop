@@ -31,7 +31,7 @@ vi.mock('react-virtuoso', async () => {
   return { Virtuoso }
 })
 
-import { BACKSPACE, CLEAR_LINE, ENTER, makeChatPty, promptBytes } from '../../chat-input/pty'
+import { BACKSPACE, CLEAR_LINE, ENTER, promptBytes } from '../../chat-input/pty'
 import { ChatInputContext, type ChatInputParts } from '../../conversation/chat-input'
 import type { ConversationClient } from '../../conversation/client'
 import { ConversationView } from '../../conversation/ConversationView'
@@ -86,11 +86,8 @@ const PARTS: ChatInputParts = {
 const typed: string[] = []
 let screen = INPUT
 const write = async (pty: number, d: string) => void typed.push(`${pty} ${JSON.stringify(d)}`)
-const paneChat = makeChatPty({ writePty: write, paneRunsClaude: async () => true, sleep: async () => {} })
-const sinks = {
-  pane: { sendPrompt: paneChat.sendPrompt, sendBash: paneChat.sendBash, answerApproval: paneChat.answerApproval, answerQuestion: paneChat.answerQuestion },
-  attach: { writePty: write, screen: () => screen, sleep: async () => {} },
-}
+const keys = { writePty: write, screen: () => screen, sleep: async () => {} }
+const sinks = { pane: { ...keys, runsClaude: async () => true }, attach: keys }
 
 const diff: DiffClient = { files: async (w) => ({ root: w, truncated: false, files: [] }), sides: async () => ({ original: '', modified: '', binary: false, tooLarge: false }) }
 const Terminal = ({ id }: PaneViewProps) => (
@@ -178,6 +175,19 @@ test('a dialog the conversation has no card for puts an Open terminal line where
   act(() => [...foot.querySelectorAll('button')].find((b) => b.textContent === 'Open terminal')!.click())
   expect(panel('cap-1').dataset.drawerFace).toBe('terminal')
   expect(conversation('cap-1').style.visibility).toBe('hidden')
+})
+
+test('flipped back to a conversation with no composer, the keyboard leaves the terminal under it for the panel', async () => {
+  transcripts['cap-1'] = [user('u1', 'go')]
+  await mount(waiting(null, { status: 'waiting', waiting_for: 'dialog open' }), ['cap-1'])
+  const frame = () => act(() => new Promise((r) => requestAnimationFrame(r)))
+  act(() => nexusStore.getState().setFace('cap-1', 'terminal'))
+  await frame()
+  expect(document.activeElement?.closest('[data-stub-terminal="7"]')).not.toBeNull()
+  act(() => nexusStore.getState().setFace('cap-1', 'conversation'))
+  await frame()
+  // What is typed now must not land on the dialog waiting in the terminal.
+  expect(document.activeElement).toBe(panel('cap-1'))
 })
 
 test('a permission whose call the transcript has not written yet is pointed at the terminal too, never answered blind', async () => {

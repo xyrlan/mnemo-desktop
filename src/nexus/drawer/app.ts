@@ -1,7 +1,7 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view and
  *  diff, its conversations typing into the app's terminals, ⌘W claimed while the Nexus is open and
  *  ⌘⇧C while the drawer has the keyboard. */
-import { tauriPaneSinks } from '../../conversation/agent'
+import { paneRunsClaude } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
 import { tauriDiff } from '../../diff/client'
 import { fleetStore } from '../../fleet/store'
@@ -26,10 +26,8 @@ const drawer = createDrawer(sessionHost, nexusStore, {
 const unclaim = claimClose(drawer, nexusStore)
 const unclaimFace = claimFace(nexusStore)
 
-const sinks: AgentSinks = {
-  pane: tauriPaneSinks,
-  attach: { writePty: (pty, data) => tauriPty.write(pty, data), screen: readBuffer, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) },
-}
+const keys = { writePty: (pty: number, data: string) => tauriPty.write(pty, data), screen: readBuffer, sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) }
+const sinks: AgentSinks = { pane: { ...keys, runsClaude: paneRunsClaude }, attach: keys }
 
 export const liveDrawer: DrawerDeps = {
   drawer,

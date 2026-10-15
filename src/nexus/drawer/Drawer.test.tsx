@@ -2,7 +2,7 @@ import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { createStore } from 'zustand/vanilla'
 import { register, run } from '../../actions/registry'
-import { BACKSPACE, CLEAR_LINE, ENTER, makeChatPty, promptBytes } from '../../chat-input/pty'
+import { BACKSPACE, CLEAR_LINE, ENTER, promptBytes } from '../../chat-input/pty'
 import type { ConversationViewProps } from '../../conversation/ConversationView'
 import type { DiffClient } from '../../diff/client'
 import type { PaneViewProps } from '../../panes/registry'
@@ -51,12 +51,10 @@ function StubConversation(props: ConvProps) {
 
 /** The keys typed into each PTY, as the conversations' agents type them. */
 const typed: string[] = []
+const screen = INPUT
 const write = async (pty: number, d: string) => void typed.push(`${pty} ${JSON.stringify(d)}`)
-const paneChat = makeChatPty({ writePty: write, paneRunsClaude: async () => true, sleep: async () => {} })
-const sinks = {
-  pane: { sendPrompt: paneChat.sendPrompt, sendBash: paneChat.sendBash, answerApproval: paneChat.answerApproval, answerQuestion: paneChat.answerQuestion },
-  attach: { writePty: write, screen: () => INPUT, sleep: async () => {} },
-}
+const keys = { writePty: write, screen: () => screen, sleep: async () => {} }
+const sinks = { pane: { ...keys, runsClaude: async () => true }, attach: keys }
 
 const diffAsked: string[] = []
 const diff: DiffClient = {
@@ -323,7 +321,7 @@ test('the switch flips a tab between its conversation and its terminal, remounti
   expect(convs['cap-1'].mounts).toBe(1)
 })
 
-test('⌘⇧C flips the tab shown while the drawer has the keyboard, and is left to the workbench otherwise', async () => {
+test('⌘⇧C with the Nexus open flips the tab shown, wherever the focus is, and never the pane under the Nexus', async () => {
   const ran: string[] = []
   register({ id: 'pane.toggle-face', title: 'Toggle conversation', run: () => void ran.push('pane.toggle-face') })
   const unclaim = claimFace(nexusStore)
@@ -332,7 +330,7 @@ test('⌘⇧C flips the tab shown while the drawer has the keyboard, and is left
   open('cap-2')
   await act(settle)
   act(() => nexusStore.getState().activateTab('cap-1'))
-  // In the terminal, in the conversation, or anywhere a click in the tab put the keyboard.
+  // In the terminal, in the conversation, anywhere a click in the tab put the keyboard, or on the ship.
   act(() => panel('cap-1').querySelector<HTMLElement>('[data-composer]')!.focus())
   act(() => run('pane.toggle-face'))
   expect(face('cap-1')).toBe('terminal')
@@ -342,22 +340,33 @@ test('⌘⇧C flips the tab shown while the drawer has the keyboard, and is left
   act(() => panel('cap-1').focus())
   act(() => run('pane.toggle-face'))
   expect(face('cap-1')).toBe('terminal')
+  const ship = document.body.appendChild(document.createElement('textarea'))
+  act(() => ship.focus())
+  act(() => run('pane.toggle-face'))
+  expect(face('cap-1')).toBe('conversation')
   expect(views[7].mounts).toBe(1)
   expect(convs['cap-1'].mounts).toBe(1)
-  // A read-only tab has no terminal: nothing flips, and nothing under the Nexus either.
+  // A read-only tab has no terminal: nothing flips.
   act(() => nexusStore.getState().activateTab('cap-2'))
-  act(() => panel('cap-2').focus())
   act(() => run('pane.toggle-face'))
   expect(panel('cap-2').dataset.drawerFace).toBeUndefined()
   expect(panel('cap-2').querySelector('[data-drawer-face-switch]')).toBeNull()
-  expect(ran).toEqual([])
-  // Outside the drawer the chord is the workbench's.
+  // Collapsed, nothing flips either.
   act(() => nexusStore.getState().activateTab('cap-1'))
-  const outside = document.body.appendChild(document.createElement('textarea'))
-  act(() => outside.focus())
+  act(() => nexusStore.getState().setCollapsed(true))
   act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('terminal')
-  expect(ran).toEqual(['pane.toggle-face'])
+  expect(face('cap-1')).toBe('conversation')
+  expect(ran).toEqual([])
+  // A popup over the Nexus shows a pane of its own; with the Nexus closed, the chord is the workbench's.
+  const popup = document.body.appendChild(document.createElement('div'))
+  popup.dataset.popout = ''
+  const inPopup = popup.appendChild(document.createElement('textarea'))
+  act(() => inPopup.focus())
+  act(() => run('pane.toggle-face'))
+  act(() => ship.focus())
+  act(() => nexusStore.getState().setOpen(false))
+  act(() => run('pane.toggle-face'))
+  expect(ran).toEqual(['pane.toggle-face', 'pane.toggle-face'])
   unclaim()
 })
 

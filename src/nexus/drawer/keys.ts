@@ -33,19 +33,17 @@ export function claimClose(drawer: Drawer, store: StoreApi<NexusState>): () => v
   })
 }
 
-/** The drawer's root (`Drawer.tsx`). */
-const DRAWER_SELECTOR = '[data-nexus-drawer]'
-
-/** ⌘⇧C (`pane.toggle-face`) while the drawer has the keyboard flips its tab shown between its
- *  conversation and its terminal, as it flips a pane's face in the workbench, whose focused pane
- *  under the Nexus it would flip otherwise. A read-only tab has no terminal: the chord does nothing
- *  there. With the focus anywhere else (the ship, a popup), the chord is not the drawer's. */
+/** ⌘⇧C (`pane.toggle-face`) while the Nexus is open flips the drawer's tab shown between its
+ *  conversation and its terminal, or does nothing: never the workbench's focused pane hidden under
+ *  the Nexus, whose face the drawer's view of the same pane would show too. Wherever the focus is,
+ *  as for ⌘W (`claimClose`), but in a popup over the Nexus, which shows a pane of its own. A
+ *  read-only tab has no terminal: nothing flips there. */
 export function claimFace(store: StoreApi<NexusState>): () => void {
   return claimAction((id) => {
     if (id !== 'pane.toggle-face') return false
     const s = store.getState()
-    if (!s.open || s.collapsed || !s.activeTab || !document.activeElement?.closest(DRAWER_SELECTOR)) return false
-    if (s.tabs.find((t) => t.id === s.activeTab)?.key) s.toggleFace(s.activeTab)
+    if (!s.open || document.activeElement?.closest(POPUP_SELECTOR)) return false
+    if (!s.collapsed && s.activeTab && s.tabs.find((t) => t.id === s.activeTab)?.key) s.toggleFace(s.activeTab)
     return true
   })
 }

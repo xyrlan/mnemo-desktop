@@ -1,6 +1,6 @@
 import { makeChatPty } from '../../chat-input/pty'
 import { promptOnScreen } from '../../cockpit/prompt'
-import { paneAgent, type ChatAgent, type PaneSinks } from '../../conversation/agent'
+import type { ChatAgent } from '../../conversation/agent'
 import type { SessionStatus } from '../../conversation/types'
 import { waitingKind } from '../../conversation/Face'
 import { childStatus } from '../../mission/agent'
@@ -11,43 +11,50 @@ import type { HostedSession } from '../../session/host'
 import type { Figure } from './model'
 
 /** How a drawer tab's conversation answers its session: typed into the session's own terminal,
- *  the one drawn under the conversation.
+ *  the one drawn under the conversation, a pane's PTY or a child's attach PTY, with the keys the
+ *  pane's own conversation face types (`makeChatPty`).
  *
- *  - A pane's session: the pane's PTY, as the pane's own conversation face types into it
- *    (`paneAgent`), each write gated on Claude still running under the pane's shell.
- *  - A child's attach: the attach PTY, with the same keys (`makeChatPty`). That gate cannot serve
- *    here: it looks for a `claude agents` session under the shell, and what runs under an attach's
- *    shell is the `claude attach` client, the session itself running elsewhere. So each write reads
- *    the attach's screen instead, as the mission's hidden attaches do (`src/mission/as-me.ts`),
- *    whose measurements set what is refused: a prompt is typed only into Claude Code's input box
- *    (on a permission prompt, typed letters are dropped and Enter picks "Yes"; on the shell, Enter
- *    would run the prompt), an approval only onto a permission prompt, an option only onto a
- *    question. A child has no shell mode: what it runs is its own business (`src/mission/agent.ts`). */
+ *  Each write reads that terminal's screen right before it types, as the mission's hidden attaches
+ *  do (`src/mission/as-me.ts`), whose measurements set what is refused: a prompt is typed only into
+ *  Claude Code's input box (on a permission prompt, typed letters are dropped and Enter picks
+ *  "Yes"; on the shell, Enter would run the prompt), an approval only onto a permission prompt, an
+ *  option only onto a question. The status the foot draws from is a poll of `claude agents`, seconds
+ *  old: a prompt that appeared since, or after a `/clear`, still shows the composer, and only the
+ *  screen can tell.
+ *
+ *  A pane's write is also gated on Claude still running under the pane's shell, as the pane's face
+ *  gates it (`chrome_claude_running`). That gate cannot serve an attach: it looks for a
+ *  `claude agents` session under the shell, and what runs under an attach's shell is the
+ *  `claude attach` client, the session itself running elsewhere. A child has no shell mode: what it
+ *  runs is its own business (`src/mission/agent.ts`). */
 
-export type AttachSinks = {
+export type ScreenSinks = {
   writePty(pty: PaneId, data: string): Promise<void>
-  /** What the attach's terminal view shows now (`readBuffer`), undefined when none is drawn. */
+  /** What the terminal's view shows now (`readBuffer`), undefined when none is drawn. */
   screen(pty: PaneId): string[] | undefined
   sleep(ms: number): Promise<void>
+  /** Whether Claude runs under the terminal's shell, asked now: a pane's gate (`paneRunsClaude`). */
+  runsClaude?(pty: PaneId): Promise<boolean>
 }
 
-export type AgentSinks = { pane: PaneSinks; attach: AttachSinks }
+export type AgentSinks = { pane: ScreenSinks; attach: ScreenSinks }
 
 /** Claude Code's own screen, of any kind: its input box, a permission prompt, a question. */
 const claudeShows = (lines: string[]) => inputBox(lines) !== null || promptOnScreen(lines) !== null || questionOnScreen(lines) !== null
 
-/** The agent of the attach drawn on `pty`. Each write reads the screen right before it types,
- *  and rejects, typing nothing, when the screen is not what it answers. Writes run one at a time,
- *  so the screen each one checks is the one its keys land on. */
-export function attachAgent(pty: PaneId, s: AttachSinks): ChatAgent {
+/** The agent of the terminal on `pty`, with Claude Code's shell mode (`!`) when `bash`. Each write
+ *  reads the screen right before it types, and rejects, typing nothing, when the screen is not what
+ *  it answers. Writes run one at a time, so the screen each one checks is the one its keys land on. */
+export function screenAgent(pty: PaneId, s: ScreenSinks, { bash = false } = {}): ChatAgent {
   /** The screen the write running now answers: why not, or null. */
   let check: (lines: string[]) => string | null = () => null
   const chat = makeChatPty({
     writePty: s.writePty,
     sleep: s.sleep,
-    paneRunsClaude: async () => {
+    paneRunsClaude: async (p) => {
+      if (s.runsClaude && !(await s.runsClaude(p))) return false
       const lines = s.screen(pty) ?? []
-      const why = claudeShows(lines) ? check(lines) : 'Claude Code is not on screen in that attach: nothing was sent'
+      const why = claudeShows(lines) ? check(lines) : 'Claude Code is not on screen in that terminal: nothing was sent'
       if (why) throw new Error(why)
       return true
     },
@@ -76,6 +83,7 @@ export function attachAgent(pty: PaneId, s: AttachSinks): ChatAgent {
   }
   return {
     send: (text) => one(box, () => chat.sendPrompt(pty, text)),
+    bash: bash ? (command) => one(box, () => chat.sendBash(pty, command)) : undefined,
     allow: () => one(prompt, () => chat.answerApproval(pty, true)),
     deny: () => one(prompt, () => chat.answerApproval(pty, false)),
     answer: (index) => one(question, () => chat.answerQuestion(pty, index)),
@@ -85,7 +93,7 @@ export function attachAgent(pty: PaneId, s: AttachSinks): ChatAgent {
 /** The agent of a tab's session, or none while it has no terminal to type into. */
 export function sessionAgent(session: Pick<HostedSession, 'kind' | 'pty' | 'error'> | undefined, s: AgentSinks): ChatAgent | undefined {
   if (!session || session.pty === null || session.error) return undefined
-  return session.kind === 'pane' ? paneAgent(session.pty, s.pane) : attachAgent(session.pty, s.attach)
+  return session.kind === 'pane' ? screenAgent(session.pty, s.pane, { bash: true }) : screenAgent(session.pty, s.attach)
 }
 
 /** What the snapshot the ship was built from says the figure's session is doing, as the
