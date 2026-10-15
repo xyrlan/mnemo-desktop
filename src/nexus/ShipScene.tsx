@@ -35,6 +35,20 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return w
 }
 
+/** A `.dark` box at the end of `<body>` for the account switcher's popup: in the hull's scheme
+ *  whatever the app's (its utilities' `dark:` reads an ancestor), and above the drawer. */
+function useDarkLayer(): HTMLElement | null {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const d = document.body.appendChild(document.createElement('div'))
+    d.className = 'dark'
+    d.dataset.shipLayer = ''
+    setEl(d)
+    return () => d.remove()
+  }, [])
+  return el
+}
+
 type Drawn = { deck: DeckT; ghost: boolean }
 
 /** The decks to draw: the ship's, plus each deck that just left it (its last child merged or
@@ -88,6 +102,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
   const { decks, settled } = useDecks(ship.decks, reducedMotion)
 
   const [hover, setHover] = useState<Hover | null>(null)
+  const dark = useDarkLayer()
   // Speech turns: only while turns are taken and someone can see them.
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -157,7 +172,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
           </span>
           {/* The sidebar's own switcher, in the app's dark tokens whatever the theme: the hull is. */}
           <div className="ship-accounts dark font-sans">
-            <AccountSwitcher className="w-full" />
+            <AccountSwitcher className="w-full" portal={dark} />
           </div>
           <button type="button" className="ship-exit" title={`Back to the workbench (${shortcutLabel('nexus.toggle') ?? ''})`} onClick={() => run('nexus.toggle')}>
             WORKBENCH <kbd>{shortcutLabel('nexus.toggle')}</kbd>

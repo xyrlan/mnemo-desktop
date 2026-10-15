@@ -56,8 +56,8 @@ function Unreadable({ why, className }: { why: string; className: string }) {
  *  its tightest limit. A click opens the accounts (`AccountsPanel`), and reads every account's usage
  *  again. Draws nothing until the accounts are known, unless they could not be read (`Unreadable`).
  *  A failure the panel shows marks the row, so it is seen with the panel closed. `className`: where
- *  it sits, in place of the sidebar's margins. */
-export function AccountSwitcher({ className = 'mx-2 mt-2' }: { className?: string } = {}) {
+ *  it sits, in place of the sidebar's margins. `portal`: where the accounts open, `<body>` if none. */
+export function AccountSwitcher({ className = 'mx-2 mt-2', portal }: { className?: string; portal?: HTMLElement | null } = {}) {
   const store = useAccountsStore()
   const state = useAccounts((s) => s.state)
   const listError = useAccounts((s) => s.listError)
@@ -118,6 +118,7 @@ export function AccountSwitcher({ className = 'mx-2 mt-2' }: { className?: strin
         align="start"
         sideOffset={4}
         className="max-h-[70vh] w-80 overflow-y-auto p-0"
+        portalContainer={portal}
         aria-label="Claude accounts"
         onEscapeKeyDown={(e) => {
           // Escape in a name being typed cancels the typing, not the whole list.

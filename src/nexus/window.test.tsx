@@ -21,13 +21,25 @@ import { nexusStore } from './store'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => null, Channel: class {} }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-const workbench = vi.hoisted(() => ({ mounts: 0 }))
+// The workbench's panes: which are mounted, which is the active one, and the one that focuses its
+// terminal as it mounts (the terminal view does, for the focused pane a restore brings back).
+const workbench = vi.hoisted(() => ({ mounts: 0, panes: ['a'], focused: 'a', selfFocus: null as string | null, redraw: () => {} }))
 vi.mock('../shell/Workbench', async () => {
-  const { createElement, useEffect } = await import('react')
+  const { createElement, useEffect, useReducer, useRef } = await import('react')
+  function Pane({ id }: { id: string }) {
+    const input = useRef<HTMLTextAreaElement>(null)
+    useEffect(() => {
+      if (workbench.selfFocus === id) input.current?.focus()
+    }, [id])
+    const cls = `pane${workbench.focused === id ? ' focused' : ''}`
+    return createElement('div', { className: cls, 'data-pane': id }, createElement('div', { className: 'pane-content' }, createElement('textarea', { ref: input, 'aria-label': id })))
+  }
   return {
     default: function Workbench() {
+      const [, redraw] = useReducer((n: number) => n + 1, 0)
+      workbench.redraw = redraw
       useEffect(() => void workbench.mounts++, [])
-      return createElement('div', { 'data-pane': '' }, createElement('textarea', { 'aria-label': 'terminal' }))
+      return createElement('div', null, ...workbench.panes.map((id) => createElement(Pane, { key: id, id })))
     },
   }
 })
@@ -93,7 +105,7 @@ beforeEach(() => {
   mountInSlot('left-sidebar', Sidebar)
   mountInSlot('status-bar', StatusBar)
   mountInSlot('overlay', Nexus)
-  workbench.mounts = 0
+  Object.assign(workbench, { mounts: 0, panes: ['a'], focused: 'a', selfFocus: null })
   went.length = 0
   unkeys = installKeys('mac', { listen: async () => () => {}, sendChords: async () => {} })
 })
@@ -180,3 +192,63 @@ test('opened over a focused workbench terminal, the keys are the Nexus’s', asy
   expect(document.activeElement).toBe(document.body)
 })
 
+const main = () => document.querySelector<HTMLElement>('[data-shell-main]')!
+const pane = (id: string) => document.querySelector<HTMLTextAreaElement>(`[data-pane="${id}"] textarea`)!
+/** The workbench draws again: a pane mounts, or the active one changes. */
+const redraw = (change: Partial<typeof workbench>) => act(() => void (Object.assign(workbench, change), workbench.redraw()))
+
+test('open, the sidebars and the workbench are inert, the status bar is not; closed, nothing is', async () => {
+  await render()
+  expect(main().hasAttribute('inert')).toBe(true)
+  expect(main().contains(document.querySelector('[data-left]'))).toBe(true)
+  expect(main().contains(document.querySelector('[data-pane]'))).toBe(true)
+  expect(main().contains(document.querySelector('[data-status]'))).toBe(false)
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(main().hasAttribute('inert')).toBe(false)
+})
+
+test('at launch, a pane the restore brings back after the Nexus opened cannot take the keys', async () => {
+  // The app opens on the Nexus; the saved workspace lands later and focuses its pane.
+  await render()
+  workbench.selfFocus = 'b'
+  await redraw({ panes: ['a', 'b'], focused: 'b' })
+  expect(pane('b')).not.toBeNull()
+  expect(document.activeElement).toBe(document.body)
+  // So Tab is the Nexus's, and ⌘0 then gives the focus to the restored pane.
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(document.activeElement).toBe(pane('b'))
+})
+
+test('⌘0 back gives the focus back to the pane that had it', async () => {
+  nexusStore.setState({ open: false })
+  workbench.panes = ['a', 'b']
+  await render()
+  pane('a').focus()
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(document.activeElement).toBe(document.body)
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(document.activeElement).toBe(pane('a'))
+})
+
+test('⌘0 back focuses the active pane when the one that had the focus is no longer active', async () => {
+  nexusStore.setState({ open: false })
+  workbench.panes = ['a', 'b']
+  await render()
+  pane('a').focus()
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  // Gone to from the Nexus (the drawer's open as tab): pane b is active, and focused itself unseen.
+  await redraw({ focused: 'b' })
+  pane('b').focus()
+  expect(document.activeElement).toBe(document.body)
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(document.activeElement).toBe(pane('b'))
+})
+
+test('the account popup opens in a dark layer of the ship’s, gone with the Nexus', async () => {
+  await render()
+  const layer = document.querySelector('body > [data-ship-layer]')!
+  expect(layer.classList).toContain('dark')
+  expect(view()!.contains(layer)).toBe(false)
+  press({ key: '0', code: 'Digit0', metaKey: true })
+  expect(document.querySelector('[data-ship-layer]')).toBeNull()
+})

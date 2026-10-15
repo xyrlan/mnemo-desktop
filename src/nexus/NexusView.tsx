@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/ui'
 import { claimAction } from '../actions/registry'
 import { STATUS_BAR } from '../shell/edges'
+import { shellStore } from '../shell/store'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
 import { useMission } from '../mission/app-store'
@@ -204,7 +205,7 @@ export type NexusViewProps = {
 const WORKTREE_GO = /^worktree\.go\.[1-9]$/
 
 /** The Nexus: the whole window but the status bar, over the workbench and its sidebar, which stay
- *  mounted under it with their panes running (v2 spec, "Where it sits in the app"). The window's
+ *  mounted under it with their panes running, out of reach (v2 spec, "Where it sits in the app"). The window's
  *  native title bar is above it, traffic lights and dragging included. Nothing is read, polled or
  *  animated while it is closed. The drawer sits beside the ship, which shrinks while it is open; the
  *  drawer stays mounted, hidden, while the Nexus is closed, so its tabs keep their terminals. */
@@ -228,13 +229,11 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
     },
     [drawer],
   )
-  const view = useRef<HTMLDivElement>(null)
-  // Opened, the keys are the Nexus's: a workbench terminal kept the focus would take what is typed,
-  // unseen, and the view's keys with it. A popup over the Nexus keeps its own.
+  // Open, the sidebars and the workbench under it are out of reach, keys and focus included (the
+  // shell's `covered`); closed, the shell gives their focus back.
   useEffect(() => {
-    if (!open) return
-    const a = document.activeElement
-    if (a instanceof HTMLElement && a !== document.body && !view.current?.contains(a) && !a.closest('[data-nexus-drawer], [data-popout], [role="dialog"]')) a.blur()
+    shellStore.getState().setCovered(open)
+    return () => shellStore.getState().setCovered(false)
   }, [open])
   useEffect(
     () =>
@@ -248,7 +247,7 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
   return (
     <>
       {open && (
-        <div ref={view} data-nexus-view="" className="fixed inset-x-0 top-0 z-drawer flex flex-col overflow-hidden bg-[#0c1326]" style={{ bottom: STATUS_BAR }}>
+        <div data-nexus-view="" className="fixed inset-x-0 top-0 z-drawer flex flex-col overflow-hidden bg-[#0c1326]" style={{ bottom: STATUS_BAR }}>
           <div data-nexus-ship="" className="flex min-h-0 flex-1 flex-col" style={{ marginRight: beside }}>
             <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
           </div>

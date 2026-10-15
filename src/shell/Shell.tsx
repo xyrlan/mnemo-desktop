@@ -2,7 +2,7 @@
 // TitlebarLeftControls.tsx, TitlebarMainStrip.tsx, AppRootSurfaces.tsx [176-194] and
 // components/sidebar/index.tsx, components/right-sidebar/index.tsx (the columns and their resize
 // handles) (MIT, 122b8c25)
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { PanelLeft, PanelRight } from 'lucide-react'
 import { Toaster, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -204,6 +204,44 @@ function StatusBarRow() {
   )
 }
 
+/** What takes the focus back in the active pane when nothing in the row kept it. */
+const PANE_FOCUS = '.pane.focused .pane-content :is(textarea, input, [contenteditable="true"], [tabindex]:not([tabindex="-1"]))'
+
+/** While `covered` (the Nexus is over it), the row is inert, and a focus that lands in it anyway (a
+ *  pane restored at launch focuses itself; a webview without `inert`) is dropped: what is typed
+ *  never reaches a terminal no one sees, and Tab never reaches a button no one sees. Uncovered,
+ *  the focus goes back to where it last was in the row, or else to the active pane. */
+function useCoveredRow(row: RefObject<HTMLDivElement | null>, covered: boolean) {
+  const last = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const el = row.current
+    if (!el) return
+    const onFocus = (e: FocusEvent) => {
+      if (!(e.target instanceof HTMLElement)) return
+      if (covered) e.target.blur()
+      else last.current = e.target
+    }
+    el.addEventListener('focusin', onFocus)
+    if (covered && document.activeElement instanceof HTMLElement && el.contains(document.activeElement)) document.activeElement.blur()
+    return () => el.removeEventListener('focusin', onFocus)
+  }, [row, covered])
+  const wasCovered = useRef(covered)
+  useEffect(() => {
+    const uncovered = wasCovered.current && !covered
+    wasCovered.current = covered
+    const el = row.current
+    if (!uncovered || !el) return
+    const now = document.activeElement
+    if (now && now !== document.body) return
+    // A pane's focus is given back only while that pane is still the active one: a pane gone to
+    // from the Nexus (the drawer's *open as tab*) focused itself while the row was still inert.
+    const was = last.current
+    const kept = was?.isConnected && el.contains(was) && (!was.closest('.pane') || was.closest('.pane.focused'))
+    const back = kept ? was : el.querySelector<HTMLElement>(PANE_FOCUS)
+    back?.focus()
+  }, [row, covered])
+}
+
 type Props = {
   /** The saved workspace is restored. */
   ready: boolean
@@ -222,11 +260,14 @@ export default function Shell({ ready, notice, onDismissNotice }: Props) {
   const hasLeft = useSlot('left-sidebar').length > 0
   const hasRight = useSlot('right-sidebar').length > 0
   const leftShown = hasLeft && leftOpen
+  const covered = useShell((s) => s.covered)
+  const row = useRef<HTMLDivElement>(null)
+  useCoveredRow(row, covered)
 
   return (
     <TooltipProvider delayDuration={400}>
       <div data-shell="" className="flex h-full w-full flex-col overflow-hidden bg-background font-sans text-foreground" style={CHROME_VARS}>
-        <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+        <div ref={row} data-shell-main="" inert={covered} className="flex min-h-0 flex-1 flex-row overflow-hidden">
           {hasLeft && <LeftColumn />}
           <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', leftShown && 'border-l border-border')}>
             {/* No titlebar row: the rows of the top groups are the window's top band. */}
