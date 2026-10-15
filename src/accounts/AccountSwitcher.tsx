@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ChevronsUpDown, RefreshCw, UserRound } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@/ui'
+import { cn } from '@/ui/cn'
 import { useAccounts, useAccountsStore } from './store'
 import { limitName, percentNow, resetsWhen, tightest } from './format'
 import { LimitBar } from './Usage'
@@ -18,13 +19,13 @@ function useNow(): number {
 
 /** In place of the switcher while the accounts list cannot be read: why, what it means for a new
  *  terminal, and a retry. */
-function Unreadable({ why }: { why: string }) {
+function Unreadable({ why, className }: { why: string; className: string }) {
   const store = useAccountsStore()
   const [trying, setTrying] = useState(false)
   return (
     <div
       role="alert"
-      className="mx-2 mt-2 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-xs"
+      className={cn('flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-xs', className)}
       title={`The Claude accounts list could not be read: ${why}\nUntil it can, new terminals run on the default account.`}
       data-account-switcher-error=""
     >
@@ -51,11 +52,12 @@ function Unreadable({ why }: { why: string }) {
   )
 }
 
-/** The left sidebar's account row: the active account's label and its tightest limit. A click opens
- *  the accounts (`AccountsPanel`), and reads every account's usage again. Draws nothing until the
- *  accounts are known, unless they could not be read (`Unreadable`). A failure the panel shows
- *  marks the row, so it is seen with the panel closed. */
-export function AccountSwitcher() {
+/** The account row, at the left sidebar's top and in the Nexus's bar: the active account's label and
+ *  its tightest limit. A click opens the accounts (`AccountsPanel`), and reads every account's usage
+ *  again. Draws nothing until the accounts are known, unless they could not be read (`Unreadable`).
+ *  A failure the panel shows marks the row, so it is seen with the panel closed. `className`: where
+ *  it sits, in place of the sidebar's margins. `portal`: where the accounts open, `<body>` if none. */
+export function AccountSwitcher({ className = 'mx-2 mt-2', portal }: { className?: string; portal?: HTMLElement | null } = {}) {
   const store = useAccountsStore()
   const state = useAccounts((s) => s.state)
   const listError = useAccounts((s) => s.listError)
@@ -63,7 +65,7 @@ export function AccountSwitcher() {
   const usage = useAccounts((s) => (s.state ? s.usage[s.state.active] : undefined))
   const [open, setOpen] = useState(false)
   const now = useNow()
-  if (!state) return listError ? <Unreadable why={listError} /> : null
+  if (!state) return listError ? <Unreadable why={listError} className={className} /> : null
   const account = state.accounts.find((a) => a.id === state.active)
   const label = account?.label ?? state.active
   const limit = usage?.usage ? tightest(usage.usage.limits, now) : undefined
@@ -89,7 +91,10 @@ export function AccountSwitcher() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="mx-2 mt-2 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent"
+          className={cn(
+            'flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent',
+            className,
+          )}
           aria-label={`Claude accounts: ${label}`}
           title={title}
           data-account-switcher=""
@@ -113,6 +118,7 @@ export function AccountSwitcher() {
         align="start"
         sideOffset={4}
         className="max-h-[70vh] w-80 overflow-y-auto p-0"
+        portalContainer={portal}
         aria-label="Claude accounts"
         onEscapeKeyDown={(e) => {
           // Escape in a name being typed cancels the typing, not the whole list.

@@ -1,5 +1,5 @@
-// Nexus v2 open over the app (the app opens on it): one repo's deck with two captains and a crew in
-// every zone, a blocked child on the bridge, green and running PRs in the hangar, a stranded child,
+// Nexus v2 open over the whole app (the app opens on it), the account switcher in its bar: one
+// repo's deck with two captains and a crew in every zone, a blocked child on the bridge, green and running PRs in the hangar, a stranded child,
 // twins, and a second repo docked. Synthetic data; the feed answers as `nexus_feed` would.
 import { scenario } from '../scenario.mjs'
 import { appIpc, HOME, REPO } from '../fixtures/app.mjs'
@@ -95,6 +95,13 @@ scenario('nexus', {
     mission_looked: {},
     mission_timeline: { lines: [], total: 0 },
     worktree_list: () => [],
+    // The account switcher in the ship's bar, with its usage bar.
+    plan_usage: () => ({
+      limits: [{ kind: 'session', group: 'session', model: null, percent: 34, severity: 'normal', resetsAt: iso(now + 3 * 3600_000), active: true }],
+      plan: 'max',
+      fetchedAt: now - 20_000,
+      stale: null,
+    }),
   }),
   events: [],
 })

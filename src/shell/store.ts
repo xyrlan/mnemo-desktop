@@ -2,7 +2,8 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 
 /** The shell's own state: whether each sidebar is open, and how wide it is. The widths are the
- *  sidebars' own, whether open or not; a closed sidebar takes no room. Kept across launches. */
+ *  sidebars' own, whether open or not; a closed sidebar takes no room. Kept across launches, but for
+ *  `covered`. */
 export type ShellState = {
   leftOpen: boolean
   rightOpen: boolean
@@ -15,6 +16,10 @@ export type ShellState = {
   /** Set the right sidebar's width, clamped to RIGHT_MIN…RIGHT_MAX; on screen it also leaves
    *  the workbench room (`rightWidthFor`). */
   setRightWidth(px: number): void
+  /** An overlay covers the sidebars and the workbench (the Nexus): out of reach until it is gone,
+   *  by keyboard and pointer alike, and their focus given back then. Not kept. */
+  covered: boolean
+  setCovered(covered: boolean): void
 }
 
 // Orca's bounds (sidebar/index.tsx, right-sidebar/right-sidebar-width.ts).
@@ -83,6 +88,8 @@ export function createShellStore(storage: Storage | null = null): StoreApi<Shell
     toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
     setLeftWidth: (px) => set({ leftWidth: clamp(px, LEFT_MIN, LEFT_MAX) }),
     setRightWidth: (px) => set({ rightWidth: clamp(px, RIGHT_MIN, RIGHT_MAX) }),
+    covered: false,
+    setCovered: (covered) => set({ covered }),
   }))
   if (storage) {
     store.subscribe((s, p) => {

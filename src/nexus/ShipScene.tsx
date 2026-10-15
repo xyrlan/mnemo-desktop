@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
+import { AccountSwitcher } from '../accounts/AccountSwitcher'
+import { shortcutLabel } from '../actions/chords'
+import { run } from '../actions/registry'
 import { pollWhileShown } from '../shell/while-shown'
 import { Bridge } from './ship-scene/Bridge'
 import { SceneContext, type SceneCtx } from './ship-scene/context'
@@ -32,6 +35,20 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return w
 }
 
+/** A `.dark` box at the end of `<body>` for the account switcher's popup: in the hull's scheme
+ *  whatever the app's (its utilities' `dark:` reads an ancestor), and above the drawer. */
+function useDarkLayer(): HTMLElement | null {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const d = document.body.appendChild(document.createElement('div'))
+    d.className = 'dark'
+    d.dataset.shipLayer = ''
+    setEl(d)
+    return () => d.remove()
+  }, [])
+  return el
+}
+
 type Drawn = { deck: DeckT; ghost: boolean }
 
 /** The decks to draw: the ship's, plus each deck that just left it (its last child merged or
@@ -60,10 +77,11 @@ function useDecks(decks: DeckT[], reducedMotion: boolean): { decks: Drawn[]; set
 
 const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
 
-/** The ship drawn (v2 spec "What it is"): the top bar's counts, the bridge with what waits for you
- *  and the fleet prompt, a deck per repo with live children, the docks, and the ship's log. Every
- *  motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops, and while the
- *  window is hidden all of it pauses. */
+/** The ship drawn (v2 spec "What it is"): the top bar's counts, the account the app runs on and the
+ *  way back to the workbench (the Nexus covers the sidebar that has both), the bridge with what
+ *  waits for you and the fleet prompt, a deck per repo with live children, the docks, and the
+ *  ship's log. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
+ *  and while the window is hidden all of it pauses. */
 export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, bridge, reducedMotion, visible }: ShipSceneProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const box = useWidth(scroller)
@@ -84,6 +102,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
   const { decks, settled } = useDecks(ship.decks, reducedMotion)
 
   const [hover, setHover] = useState<Hover | null>(null)
+  const dark = useDarkLayer()
   // Speech turns: only while turns are taken and someone can see them.
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -151,6 +170,13 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
           <span className="ship-chip" data-chip="rate" title={rate.title}>
             {rate.text}
           </span>
+          {/* The sidebar's own switcher, in the app's dark tokens whatever the theme: the hull is. */}
+          <div className="ship-accounts dark font-sans">
+            <AccountSwitcher className="w-full" portal={dark} />
+          </div>
+          <button type="button" className="ship-exit" title={`Back to the workbench (${shortcutLabel('nexus.toggle') ?? ''})`} onClick={() => run('nexus.toggle')}>
+            WORKBENCH <kbd>{shortcutLabel('nexus.toggle')}</kbd>
+          </button>
         </header>
         <div ref={scroller} className="ship-space">
           {drawn && (
