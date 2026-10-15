@@ -27,11 +27,10 @@ export type StartDeps = {
   newId(): string
   /** Whether a Claude runs under pane `pane`'s shell now. */
   runsClaude(pane: PaneId): Promise<boolean>
-  /** Says what could not be done. */
-  say(text: string): void
 }
 
 export type Sessions = {
+  /** Rejects with what could not be done: every caller says it, where it was asked from. */
   openSession(spec: SessionSpec): Promise<void>
   paneOf(sessionId: string): PaneId | null
   endSession(pane: PaneId): Promise<void>
@@ -57,6 +56,7 @@ export function labelFor(spec: SessionSpec): string {
 
 const tabKey = (pane: PaneId) => `pane:${pane}`
 const why = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const failed = (what: string, e: unknown) => new Error(`${what}: ${why(e)}`)
 
 export function createSessions(d: StartDeps): Sessions {
   const panes = () => d.layout.getState().panes
@@ -88,7 +88,7 @@ export function createSessions(d: StartDeps): Sessions {
         try {
           pane = await d.layout.getState().openOffscreen(spec.root, cmd, id)
         } catch (e) {
-          return d.say(`Could not start claude in ${spec.root}: ${why(e)}`)
+          throw failed(`Could not start claude in ${spec.root}`, e)
         }
         return show(tab, pane)
       }
@@ -96,7 +96,7 @@ export function createSessions(d: StartDeps): Sessions {
       try {
         pane = await d.layout.getState().openOffscreen(spec.root, spec.kind === 'command' ? spec.command : undefined)
       } catch (e) {
-        return d.say(`Could not open a terminal in ${spec.root}: ${why(e)}`)
+        throw failed(`Could not open a terminal in ${spec.root}`, e)
       }
       show({ id: `session:${pane}`, kind: 'session', key: null, readOnly: null, label, sessionId: null, cwd: spec.root }, pane)
     },

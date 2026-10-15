@@ -30,7 +30,6 @@ function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: 
   layout.subscribe((s, prev) => {
     for (const id of Object.keys(prev.panes)) if (!s.panes[Number(id)]) host.getState().paneGone(Number(id))
   })
-  const said: string[] = []
   let ids = 0
   sessions = createSessions({
     layout,
@@ -39,9 +38,8 @@ function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: 
     skipPermissions: () => over.skip ?? true,
     newId: () => `0000000${++ids}-0000-4000-8000-000000000000`,
     runsClaude: over.runsClaude ?? (async () => false),
-    say: (t) => void said.push(t),
   })
-  return { layout, host, drawer, sessions, writes, spawned, killed, said }
+  return { layout, host, drawer, sessions, writes, spawned, killed }
 }
 
 const tabs = () => nexusStore.getState().tabs.map((t) => ({ id: t.id, kind: t.kind, key: t.key, label: t.label }))
@@ -87,6 +85,26 @@ test('a resume of a session a pane of the app runs already shows that pane: noth
   expect(tabs().at(-1)).toEqual({ id: 'live-2', kind: 'captain', key: 'pane:2', label: 'claude · mnemo' })
 })
 
+test('a resume after Claude exited in its tab shows the new pane in that tab, in its place, and the shell left ends', async () => {
+  const w = world()
+  await w.sessions.openSession({ kind: 'claude', root: '/b' })
+  await w.sessions.openSession({ kind: 'shell', root: '/b' })
+  // Claude quits in pane 1: the session poll clears its session; the tab still shows the shell left.
+  w.layout.getState().setSessionId(1, undefined)
+  expect(w.sessions.paneOf(ID1)).toBeNull()
+  await w.sessions.openSession({ kind: 'claude', root: '/b', resume: ID1 })
+  await settle()
+  expect(tabs()).toEqual([
+    { id: ID1, kind: 'captain', key: 'pane:3', label: 'claude · b' },
+    { id: 'session:2', kind: 'session', key: 'pane:2', label: 'shell · b' },
+  ])
+  expect(nexusStore.getState().activeTab).toBe(ID1)
+  expect(w.host.getState().sessions['pane:1']).toBeUndefined()
+  expect(w.killed).toEqual([1])
+  // Its captain opens the revived session.
+  expect(w.sessions.paneOf(ID1)).toBe(3)
+})
+
 test('a shell, and a saved command typed once the prompt is up, each in a tab named for what it runs', async () => {
   vi.useFakeTimers()
   try {
@@ -105,11 +123,10 @@ test('a shell, and a saved command typed once the prompt is up, each in a tab na
   }
 })
 
-test('a session that cannot start is said, and nothing is opened', async () => {
+test('a session that cannot start rejects with why, for its caller to say, and nothing is opened', async () => {
   const w = world({ failSpawn: true })
-  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })
-  await w.sessions.openSession({ kind: 'shell', root: '/work/mnemo' })
-  expect(w.said).toEqual(['Could not start claude in /work/mnemo: no shell', 'Could not open a terminal in /work/mnemo: no shell'])
+  await expect(w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })).rejects.toThrow('Could not start claude in /work/mnemo: no shell')
+  await expect(w.sessions.openSession({ kind: 'shell', root: '/work/mnemo' })).rejects.toThrow('Could not open a terminal in /work/mnemo: no shell')
   expect(tabs()).toEqual([])
   expect(nexusStore.getState().open).toBe(false)
 })

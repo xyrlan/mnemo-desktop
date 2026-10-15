@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla'
 import type { Target } from '../../mission/account'
 import type { PaneId } from '../../pty/client'
-import type { SessionHost, SessionRef } from '../../session/host'
+import { sessionKey, type SessionHost, type SessionKey, type SessionRef } from '../../session/host'
 import type { DrawerTab, NexusState } from '../store'
 
 /** The drawer as a presentation of the session host (`src/session/host.ts`): a tab holds its
@@ -18,7 +18,9 @@ export const viewName = (tabId: string) => `${BY}:${tabId}`
 
 export type Drawer = {
   /** Opens `tab`, holding `ref` for it; a figure that has a tab already is shown. A tab that showed
-   *  a conversation read-only takes the live session once there is one. */
+   *  a conversation read-only takes the live session once there is one, and a tab showing a pane
+   *  takes the other pane it is given (a captain resumed in a new pane after its Claude exited in
+   *  the tab's), in its place, letting the old one go. */
   open(tab: DrawerTab, ref: SessionRef | null): void
   /** Closes tab `id` and lets its session go; a pane's session no tab shows any more is handed to
    *  `Workbench.letGo`. */
@@ -48,23 +50,30 @@ export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, wor
   const unwatch = host.subscribe((h) => {
     for (const t of store.getState().tabs) if (t.key !== null && !h.sessions[t.key]) store.getState().removeTab(t.id)
   })
+  /** No tab shows session `key` any more: it is let go. Another tab may show the same session (a
+   *  captain's pane opened from two figures): it keeps it. */
+  async function letGo(key: SessionKey | null) {
+    if (key === null || store.getState().tabs.some((t) => t.key === key)) return
+    const session = host.getState().sessions[key]
+    await host.getState().release(key, BY)
+    if (session?.kind === 'pane' && session.pty !== null) workbench.letGo?.(session.pty)
+  }
+
   const drawer: Drawer = {
     open(tab, ref) {
       const had = store.getState().tabs.find((t) => t.id === tab.id)
-      if (had && (had.key !== null || ref === null)) return store.getState().activateTab(tab.id)
+      const moved = had?.key?.startsWith('pane:') && ref !== null && 'pane' in ref && sessionKey(ref) !== had.key
+      if (had && !moved && (had.key !== null || ref === null)) return store.getState().activateTab(tab.id)
       const key = ref ? host.getState().hold(ref, BY) : null
       store.getState().putTab({ ...tab, key, readOnly: key === null ? tab.readOnly : null })
+      if (moved) void letGo(had.key)
     },
 
     async close(id) {
       const tab = store.getState().tabs.find((t) => t.id === id)
       if (!tab) return
       store.getState().removeTab(id)
-      // Another tab may show the same session (a captain's pane opened from two figures): it keeps it.
-      if (tab.key === null || store.getState().tabs.some((t) => t.key === tab.key)) return
-      const session = host.getState().sessions[tab.key]
-      await host.getState().release(tab.key, BY)
-      if (session?.kind === 'pane' && session.pty !== null) workbench.letGo?.(session.pty)
+      await letGo(tab.key)
     },
 
     toggle() {
