@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import type { Ship, ShipAction, ShipRobot } from '../ship-types'
+import type { Captain, Ship, ShipAction, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
 import { RobotFigure, Tag } from './figures'
 import { bridgeStatus, exceptionRow, toneOf, type Row, type RowButton } from './words'
@@ -56,6 +56,7 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
   const ready = ship.bridge.exceptions.flatMap((x) => (x.kind === 'ready' ? [x.robotId] : []))
   const blocked = ship.bridge.blocked
   const mac = altDigits()
+  const captains = new Map([...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)].map((c) => [c.id, c]))
 
   return (
     <section className="ship-bridge" data-tone={toneOf(ship)} aria-label="bridge">
@@ -85,7 +86,13 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
                 )}
               </div>
               {rows.slice(0, ROWS).map((row, k) => (
-                <ExceptionRow key={row.key} row={row} n={mac ? k + 1 : null} robot={row.robotId ? s.robots.get(row.robotId) : undefined} />
+                <ExceptionRow
+                  key={row.key}
+                  row={row}
+                  n={mac ? k + 1 : null}
+                  robot={row.robotId ? s.robots.get(row.robotId) : undefined}
+                  captain={row.captainId ? captains.get(row.captainId) : undefined}
+                />
               ))}
               {rows.length > ROWS && <div className="ship-xmore">+{rows.length - ROWS} exceptions</div>}
             </div>
@@ -108,14 +115,17 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
   )
 }
 
-function ExceptionRow({ row, n, robot }: { row: Row; n: number | null; robot: ShipRobot | undefined }) {
+function ExceptionRow({ row, n, robot, captain }: { row: Row; n: number | null; robot: ShipRobot | undefined; captain: Captain | undefined }) {
   const s = useScene()
   const press = (b: RowButton) => (e: MouseEvent) => {
     e.stopPropagation()
     if ('open' in b) s.onOpen(b.open)
     else s.onTriage()
   }
-  const open = () => row.robotId && s.onOpen(row.robotId)
+  const open = () => {
+    const id = row.robotId ?? row.captainId
+    if (id) s.onOpen(id)
+  }
   return (
     <div className="ship-xrow" data-kind={row.kind} data-row={row.key} onClick={open}>
       {n !== null && (
@@ -129,6 +139,12 @@ function ExceptionRow({ row, n, robot }: { row: Row; n: number | null; robot: Sh
       {robot && (
         <b className="ship-xtag">
           <Tag robot={robot} emblem={s.emblems.get(robot.captainId) ?? ''} />
+        </b>
+      )}
+      {captain && (
+        <b className="ship-xtag">
+          <span className="ship-em">{captain.emblem} </span>
+          {captain.name}
         </b>
       )}
       <span className="ship-xt">{row.text}</span>

@@ -119,7 +119,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
     prev.current = ship
   }, [ship, now])
 
-  // Triage asked for from the sidebar opens only on robots to triage: with none, the Nexus alone.
+  // Triage asked for from the sidebar opens only on cards to triage: with none, the Nexus alone.
   useEffect(() => {
     if (triageAsked) nexusStore.getState().settleTriageAsk(ship.counts.need)
   }, [triageAsked, ship])
@@ -154,8 +154,9 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
       if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && shipRef.current.counts.need > 0) st.setTriage(true)
       else if (digit && e.altKey && !e.metaKey && !e.ctrlKey && navigator.platform.toLowerCase().includes('mac')) {
         const x = shipRef.current.bridge.exceptions[Number(digit[1]) - 1]
-        if (!x || !('robotId' in x)) return
-        onOpen(x.robotId)
+        const id = !x ? null : x.kind === 'captain' ? x.captainId : 'robotId' in x ? x.robotId : null
+        if (!id) return
+        onOpen(id)
       } else if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
         const input = document.querySelector<HTMLInputElement>('[data-fleet-prompt] input')
         if (!input) return

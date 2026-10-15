@@ -411,7 +411,7 @@ describe('buildShip: the bridge', () => {
     ]
     const mission: Mission = { feature: 'nexus-v2', contract_path: `${ROOT}/docs/c.md`, landable: true, pieces: [] }
     const s = ship(snap(repo({ parents: [boss()], children: kids, missions: [mission] })), { agents: { [sid('s1')]: working(), [sid('s2')]: working() } })
-    expect(s.bridge.exceptions.map((e) => [e.kind, 'robotId' in e ? e.robotId : e.root])).toEqual([
+    expect(s.bridge.exceptions.map((e) => [e.kind, 'robotId' in e ? e.robotId : 'root' in e ? e.root : e.captainId])).toEqual([
       ['need', 'n1'],
       ['red', 'x1'],
       ['land', ROOT],
@@ -456,5 +456,77 @@ describe('buildShip: purity', () => {
   it('leaves the stranded threshold at 15 min', () => {
     expect(robot(one(kid('a1', { updated_at: iso(STRANDED_MS - SEC) }), { agents: {} }), 'a1').zone).toBe('flight')
     expect(robot(one(kid('a1', { updated_at: iso(STRANDED_MS + SEC) }), { agents: {} }), 'a1').zone).toBe('stranded')
+  })
+})
+
+describe('a captain waiting on you', () => {
+  const waits = (waitingFor: AgentView['waitingFor'], title = 'fleet lead'): AgentView => ({ state: 'needs-you', waitingFor, title })
+
+  it('on a permission is one exception, and counts as needing you', () => {
+    const s = ship(snap(repo({ parents: [boss()] })), { agents: { [P1]: waits('permission') } })
+    expect(s.bridge.exceptions).toEqual([{ kind: 'captain', captainId: P1, waitsOn: 'permission', question: null, since: null, lines: [] }])
+    expect(s.bridge.blocked).toEqual([])
+    expect(s.counts.need).toBe(1)
+    expect(s.docks[0].captains[0].pose).toBe('alert')
+  })
+
+  it('on a question carries the feed’s question, and its last tool and sentence as its lines', () => {
+    const feed = feedOf({
+      [P1]: sf({
+        said: { text: 'Two ways to do this, and they differ on the schema.', at: NOW - 3 * MIN },
+        activity: { tool: 'AskUserQuestion', target: 'Which schema?', at: NOW - 2 * MIN, running: true },
+        ask: { question: 'Which schema?', options: ['v1', 'v2'] },
+      }),
+    })
+    const s = ship(snap(repo({ parents: [boss()] })), { agents: { [P1]: waits('question') }, feed })
+    expect(s.bridge.exceptions).toEqual([
+      {
+        kind: 'captain',
+        captainId: P1,
+        waitsOn: 'question',
+        question: 'Which schema?',
+        since: NOW - 2 * MIN,
+        lines: ['Two ways to do this, and they differ on the schema.', '? AskUserQuestion · Which schema?'],
+      },
+    ])
+  })
+
+  it('reads its claude agents row without a fleet view, as the sidebar does', () => {
+    const asks = (waiting_for: string | null) => ship(snap(repo({ parents: [boss({ status: 'waiting', waiting_for })] }))).bridge.exceptions
+    expect(asks('permission prompt')).toMatchObject([{ kind: 'captain', waitsOn: 'permission' }])
+    expect(asks('input needed')).toMatchObject([{ kind: 'captain', waitsOn: 'question' }])
+    expect(asks('dialog open')).toEqual([])
+    expect(ship(snap(repo({ parents: [boss({ status: 'busy' })] }))).bridge.exceptions).toEqual([])
+  })
+
+  it('is not an exception while working, idle, or when only its crew waits', () => {
+    const blocked = kid('n1', { tempo: 'blocked', needs: 'which?' })
+    const s = ship(snap(repo({ parents: [boss()], children: [blocked] })), { agents: { [P1]: working('fleet lead') } })
+    expect(s.bridge.exceptions.map((x) => x.kind)).toEqual(['need'])
+    expect(s.counts.need).toBe(1)
+    expect(s.decks[0].captains[0].pose).toBe('alert')
+  })
+
+  it('waits with the children’s needs, longest first; an undated wait has just begun', () => {
+    const blocked = kid('n1', { tempo: 'blocked', needs: 'which?', updated_at: iso(4 * MIN) })
+    const parents = [boss(), boss({ session_id: P2 }), boss({ session_id: P3 })]
+    const feed = feedOf({
+      [P1]: sf({ activity: { tool: 'Bash', target: 'git push', at: NOW - 9 * MIN, running: true } }),
+      [P2]: sf({ activity: { tool: 'Bash', target: 'rm -rf build', at: NOW - MIN, running: true } }),
+    })
+    const s = ship(snap(repo({ parents, children: [blocked] })), { agents: { [P1]: waits('permission'), [P2]: waits('permission'), [P3]: waits('question') }, feed })
+    expect(s.bridge.exceptions.map((x) => [x.kind, x.kind === 'captain' ? x.captainId : 'robotId' in x ? x.robotId : null])).toEqual([
+      ['captain', P1],
+      ['need', 'n1'],
+      ['captain', P2],
+      ['captain', P3],
+    ])
+    expect(s.counts.need).toBe(4)
+  })
+
+  it('comes before the other exceptions', () => {
+    const red = kid('x1', { live: false, state: 'stopped', updated_at: iso(HOUR), pr: pr(4, { ci: 'fail' }) })
+    const s = ship(snap(repo({ parents: [boss()], children: [red] })), { agents: { [P1]: waits('permission') } })
+    expect(s.bridge.exceptions.map((x) => x.kind)).toEqual(['captain', 'red'])
   })
 })

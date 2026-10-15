@@ -571,3 +571,20 @@ test('the stylesheet: nothing walks, flies or loops with reduced motion, all of 
   const root = all.find(([sel]) => sel === '.ship-scene')![1]
   for (const s of ['working', 'needs-you', 'done', 'idle']) expect(root).toContain(`var(--state-${s})`)
 })
+
+test('a captain waiting on you has a row, ⌥N and an open button, tagged with its emblem and name', async () => {
+  platform('MacIntel')
+  const f = fleet()
+  const waiting = { kind: 'captain' as const, captainId: 'cap-d', waitsOn: 'permission' as const, question: null, since: null, lines: [] }
+  await draw({ ship: { ...f, bridge: { ...f.bridge, exceptions: [waiting, ...f.bridge.exceptions] }, counts: { ...f.counts, need: 2 } } })
+  const rows = $$('.ship-xrow')
+  expect(rows.map((r) => r.dataset.kind)).toEqual(['captain', 'need', 'ready', 'stranded'])
+  expect(rows[0].querySelector('.ship-xn')!.textContent).toBe('⌥1')
+  expect(rows[0].querySelector('.ship-xtag')!.textContent).toBe('● mnemo-18')
+  expect(rows[0].querySelector('.ship-xt')!.textContent).toBe('waits on a permission')
+  await click(rows[0].querySelector('[data-x="open"]'))
+  await click(rows[0].querySelector('.ship-xt'))
+  expect(calls.open).toEqual(['cap-d', 'cap-d'])
+  expect(calls.action).toEqual([])
+  expect($('.ship-bridge')!.dataset.tone).toBe('red')
+})

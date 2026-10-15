@@ -123,3 +123,19 @@ test('log rows are coloured by state only, lilac for a warning and magenta for y
 test('token counts read at a glance', () => {
   expect([812, 42_300, 1_000_000, 1_340_000].map(tokensWord)).toEqual(['812', '42k', '1M', '1.3M'])
 })
+
+test('a captain waiting on you: a red bridge, a row that says what it waits on and opens it', () => {
+  const perm = { kind: 'captain' as const, captainId: 'cap-1', waitsOn: 'permission' as const, question: null, since: null, lines: [] }
+  expect(toneOf(ship({ bridge: { exceptions: [perm], blocked: [] } }))).toBe('red')
+  expect(exceptionRow(perm)).toEqual({
+    key: 'captain:cap-1',
+    kind: 'captain',
+    robotId: null,
+    captainId: 'cap-1',
+    icon: '🔒',
+    text: 'waits on a permission',
+    buttons: [{ label: 'open', go: true, open: 'cap-1' }],
+  })
+  expect(exceptionRow({ ...perm, waitsOn: 'question', question: 'Which schema?' })).toMatchObject({ icon: '❓', text: 'Which schema?' })
+  expect(exceptionRow({ ...perm, waitsOn: 'question' })).toMatchObject({ icon: '❓', text: 'waits on a question' })
+})

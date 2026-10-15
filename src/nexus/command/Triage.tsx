@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { useArm } from '../../cockpit/actions'
 import { tauriMission } from '../../mission/client'
-import { SPRITES } from '../sprites'
-import type { Need, Ship, ShipAction, ShipRobot, TriageProps } from '../ship-types'
+import { captainWait } from '../ship-scene/words'
+import { SHIP_SPRITES, SPRITES } from '../sprites'
+import type { CaptainNeed, Need, Ship, ShipAction, ShipRobot, TriageProps } from '../ship-types'
 import { captainById, captainLabel, repoNameOf, robotById } from './find'
 
 /** How long "all settled" shows before the card closes itself. */
@@ -12,20 +13,40 @@ export const ALWAYS_MS = 4_000
 /** How many of the child's timeline lines the card shows. */
 const LAST_LINES = 4
 
-export type Card = { robot: ShipRobot; need: Need; crumbs: string[]; title: string }
+/** A card, pinned by `id` (the robot's or the captain's). A robot's is answered here; a captain's
+ *  only opens: a parent's prompt is answered in its own terminal (the hidden-attach answers,
+ *  `cockpit/approve.ts` and `mission/ask.ts`, reach a dispatched child by its job id only). */
+export type Card = { id: string; label: string; crumbs: string[]; title: string } & (
+  | { kind: 'robot'; robot: ShipRobot; need: Need }
+  | { kind: 'captain'; wait: CaptainNeed }
+)
+type RobotCard = Extract<Card, { kind: 'robot' }>
+
+const truthy = (c: string | null): c is string => !!c
+
+/** The name of the deck or dock a captain sits on. */
+const placeOf = (ship: Ship, id: string): string | null =>
+  ship.decks.find((d) => [...d.captains, ...d.quiet].some((c) => c.id === id))?.name ?? ship.docks.find((d) => d.captains.some((c) => c.id === id))?.name ?? null
 
 /** One card per bridge exception that needs a decision, in the bridge's order. */
 export function cardsOf(ship: Ship): Card[] {
   const out: Card[] = []
   for (const x of ship.bridge.exceptions) {
+    if (x.kind === 'captain') {
+      const captain = captainById(ship, x.captainId)
+      const label = captain ? captainLabel(captain) : `session ${x.captainId.slice(0, 8)}`
+      const title = captain?.topic?.split('\n')[0] || captain?.name || label
+      out.push({ kind: 'captain', id: x.captainId, label, crumbs: [placeOf(ship, x.captainId), label].filter(truthy), title, wait: x })
+      continue
+    }
     if (x.kind !== 'need') continue
     const robot = robotById(ship, x.robotId)
     if (!robot) continue
     const captain = captainById(ship, robot.captainId)
-    const crumbs = [repoNameOf(ship, robot), captain ? captainLabel(captain) : null, robot.via ? `↳${robot.via}` : null, robot.label].filter((c): c is string => !!c)
+    const crumbs = [repoNameOf(ship, robot), captain ? captainLabel(captain) : null, robot.via ? `↳${robot.via}` : null, robot.label].filter(truthy)
     const c = robot.child
     const title = robot.contract ? `${robot.contract.feature} · ${robot.contract.piece}` : (c.intent?.split('\n')[0] || c.name || c.branch || robot.id)
-    out.push({ robot, need: x.need, crumbs, title })
+    out.push({ kind: 'robot', id: robot.id, label: robot.label, robot, need: x.need, crumbs, title })
   }
   return out
 }
@@ -65,9 +86,11 @@ function useLastLines(robot: ShipRobot | undefined): string[] | null {
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 
 /** One card per pending decision, answered from the keyboard (spec "Triage"): `1`–`9` and `Y`/`N`
- *  answer, `←`/`→` move, `T` opens the robot, `Esc` closes. It closes itself when none is left.
+ *  answer, `←`/`→` move, `T` opens the robot or the captain, `Esc` closes. A captain's card is not
+ *  answered here: `T` or its *open* button opens it in the drawer. It closes itself when none is
+ *  left.
  *
- *  The card shown is pinned by its robot's id, never by its place in the list: a decision settled
+ *  The card shown is pinned by its figure's id, never by its place in the list: a decision settled
  *  elsewhere takes its card away, and the key meant for it must not answer the card that slid into
  *  its place. Such a card leaves a notice until `←`/`→`. Before an answer goes, the robot's need
  *  is read again from the ship. "Always" takes a second press. */
@@ -75,19 +98,19 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   const all = useMemo(() => cardsOf(ship), [ship])
   // Answered here: hidden until the ship stops listing them, so the next card comes up at once.
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set())
-  const cards = all.filter((c) => !answered.has(c.robot.id))
+  const cards = all.filter((c) => !answered.has(c.id))
   const [pinned, setPinned] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [out, setOut] = useState<{ text: string; err: boolean } | null>(null)
   const [words, setWords] = useState('')
   const { armed, fire: arm } = useArm(ALWAYS_MS)
-  const card = pinned === null ? cards[0] : cards.find((c) => c.robot.id === pinned)
+  const card = pinned === null ? cards[0] : cards.find((c) => c.id === pinned)
   const i = card ? cards.indexOf(card) : -1
   // Where the shown card stood, and what it was called, for when it is gone.
   const last = useRef<{ index: number; label: string }>({ index: 0, label: '' })
-  if (card) last.current = { index: i, label: card.robot.label }
+  if (card) last.current = { index: i, label: card.label }
   const gone = !card && cards.length > 0 ? last.current.label : null
-  const lines = useLastLines(card?.robot)
+  const lines = useLastLines(card?.kind === 'robot' ? card.robot : undefined)
   const shipNow = useRef(ship)
   shipNow.current = ship
 
@@ -102,13 +125,13 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
 
   // The card on screen is the one the keys answer: pin it as soon as it shows.
   useEffect(() => {
-    if (open && pinned === null && cards[0]) setPinned(cards[0].robot.id)
+    if (open && pinned === null && cards[0]) setPinned(cards[0].id)
   }, [open, pinned, cards])
 
   // Forget answers the ship no longer lists, so a child that asks again shows again.
   useEffect(() => {
     setAnswered((a) => {
-      const still = new Set([...a].filter((id) => all.some((c) => c.robot.id === id)))
+      const still = new Set([...a].filter((id) => all.some((c) => c.id === id)))
       return still.size === a.size ? a : still
     })
   }, [all])
@@ -126,14 +149,14 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   const move = (by: 1 | -1) => {
     if (!cards.length) return
     const from = card ? i + by : by === 1 ? last.current.index : last.current.index - 1
-    setPinned(cards[((from % cards.length) + cards.length) % cards.length].robot.id)
+    setPinned(cards[((from % cards.length) + cards.length) % cards.length].id)
   }
 
-  const answer = async (c: Card, text: string) => {
+  const answer = async (c: RobotCard, text: string) => {
     if (busy) return
     const id = c.robot.id
-    const now = cardsOf(shipNow.current).find((x) => x.robot.id === id)
-    if (!now || now.need.kind !== c.need.kind || now.need.text !== c.need.text) {
+    const now = cardsOf(shipNow.current).find((x) => x.id === id)
+    if (!now || now.kind !== 'robot' || now.need.kind !== c.need.kind || now.need.text !== c.need.text) {
       setOut({ text: `${c.robot.label}'s ${c.need.kind} changed or was settled elsewhere: nothing was sent`, err: true })
       return
     }
@@ -151,8 +174,8 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
         setWords('')
         setAnswered((a) => new Set(a).add(id))
         // The card that comes up next is the one after it, pinned.
-        const rest = cards.filter((x) => x.robot.id !== id)
-        setPinned(rest.length ? rest[Math.max(0, cards.findIndex((x) => x.robot.id === id)) % rest.length].robot.id : null)
+        const rest = cards.filter((x) => x.id !== id)
+        setPinned(rest.length ? rest[Math.max(0, cards.findIndex((x) => x.id === id)) % rest.length].id : null)
       }
     } catch (e) {
       setOut({ text: e instanceof Error ? e.message : String(e), err: true })
@@ -161,7 +184,7 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
     }
   }
 
-  const keys = card ? keysOf(card.need) : []
+  const keys = card?.kind === 'robot' ? keysOf(card.need) : []
   const state = useRef({ card, keys, answer, move })
   state.current = { card, keys, answer, move }
 
@@ -178,8 +201,9 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
       else if (!card) return
       else if (e.key.toLowerCase() === 't') {
         onClose()
-        onOpen(card.robot.id)
-      } else {
+        onOpen(card.id)
+      } else if (card.kind === 'captain') return
+      else {
         const k = e.key.toLowerCase()
         const o = keys.find((x) => x.key === k) ?? (card.need.kind === 'permission' && /^[1-9]$/.test(k) ? keys[Number(k) - 1] : undefined)
         if (!o) return
@@ -194,8 +218,9 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   }, [open, onClose, onOpen])
 
   if (!open) return null
-  const sprite = card ? SPRITES.robots[card.robot.klass].waiting : null
-  const permission = card?.need.kind === 'permission'
+  const sprite = !card ? null : card.kind === 'robot' ? SPRITES.robots[card.robot.klass].waiting : SHIP_SPRITES.captain.alert
+  const permission = card?.kind === 'robot' ? card.need.kind === 'permission' : card?.wait.waitsOn === 'permission'
+  const context = !card ? [] : card.kind === 'captain' ? card.wait.lines : lines?.length ? lines : [card.robot.line, card.robot.act].filter(truthy)
 
   return (
     <div
@@ -230,7 +255,7 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
             ✓ all settled — the fleet flies on
           </div>
         ) : (
-          <div data-triage-card={card.robot.id}>
+          <div data-triage-card={card.id} data-triage-kind={card.kind}>
             <div className="mt-3 mb-2 flex items-center gap-3">
               {sprite && <img src={sprite.src} alt="" width={64} height={64} style={{ imageRendering: 'pixelated' }} />}
               <div className="min-w-0">
@@ -246,18 +271,41 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
               </div>
             </div>
             <div data-triage-question="" className="my-2 border-l-4 border-rose-600 bg-[#2a0a17] px-2.5 py-2 text-[14px] break-words whitespace-pre-wrap text-white">
-              {permission ? '🔒 wants to run: ' : '❓ '}
-              {card.need.text}
+              {card.kind === 'captain' ? (
+                <>
+                  {permission ? '🔒 ' : '❓ '}
+                  {captainWait(card.wait)}
+                </>
+              ) : (
+                <>
+                  {permission ? '🔒 wants to run: ' : '❓ '}
+                  {card.need.text}
+                </>
+              )}
             </div>
             <div data-triage-lines="" className="mb-2.5 border border-dashed border-[#3f1d2b] px-2 py-1.5 text-[11px] text-slate-400">
-              {(lines?.length ? lines : [card.robot.line, card.robot.act].filter((l): l is string => !!l)).map((l, k) => (
+              {context.map((l, k) => (
                 <div key={k} className="truncate">
                   {l}
                 </div>
               ))}
-              {!lines?.length && !card.robot.line && !card.robot.act && <div>no context</div>}
+              {!context.length && <div>no context</div>}
             </div>
             <div className="mb-2 flex flex-wrap gap-2">
+              {card.kind === 'captain' && (
+                <button
+                  type="button"
+                  data-triage-open=""
+                  className="rounded-sm border-2 border-rose-600 bg-rose-600 px-2.5 py-1 font-bold text-white"
+                  onClick={() => {
+                    onClose()
+                    onOpen(card.id)
+                  }}
+                >
+                  <kbd className="mr-1.5 rounded-sm border border-gray-500 bg-black px-1 text-[10px] text-gray-200">T</kbd>
+                  open
+                </button>
+              )}
               {keys.map((o, k) => (
                 <button
                   key={o.text}
@@ -265,14 +313,14 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
                   disabled={busy}
                   data-triage-option={o.text}
                   className={`rounded-sm border-2 border-rose-600 px-2.5 py-1 font-bold disabled:opacity-50 ${k === 0 ? 'bg-rose-600 text-white' : 'bg-[#2a0a17] text-rose-200'}`}
-                  onClick={() => void answer(card, o.text)}
+                  onClick={() => card.kind === 'robot' && void answer(card, o.text)}
                 >
                   <kbd className="mr-1.5 rounded-sm border border-gray-500 bg-black px-1 text-[10px] text-gray-200">{o.key.toUpperCase()}</kbd>
-                  {armed === `always:${card.robot.id}` && o.text === 'always' ? `${o.key.toUpperCase()} again: always` : o.label}
+                  {armed === `always:${card.id}` && o.text === 'always' ? `${o.key.toUpperCase()} again: always` : o.label}
                 </button>
               ))}
             </div>
-            {!permission && (
+            {card.kind === 'robot' && !permission && (
               <form
                 className="flex gap-1.5"
                 onSubmit={(e) => {
@@ -296,7 +344,12 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
               </div>
             )}
             <div className="mt-2.5 text-[11px] text-[#9f8a93]">
-              {permission ? 'Y N approve / deny' : `1–${Math.min(9, card.need.options.length)} choose`} · ← → previous / next · T opens the terminal · Esc back to the ship
+              {card.kind === 'captain'
+                ? 'answer it in its own terminal'
+                : permission
+                  ? 'Y N approve / deny'
+                  : `1–${Math.min(9, card.need.options.length)} choose`}{' '}
+              · ← → previous / next · T opens the terminal · Esc back to the ship
             </div>
           </div>
         )}
