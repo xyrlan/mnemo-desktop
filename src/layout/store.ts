@@ -298,7 +298,9 @@ export type Actions = {
    *
    *  An offscreen pane whose shell kept running comes back offscreen under its id, drawn from the
    *  core's screen once a view shows it. One whose shell is gone comes back only when it ran a
-   *  Claude session no running `claude` holds: on a new shell, resuming it, as a tab's would. */
+   *  Claude session no running `claude` holds: on a new shell, resuming it, as a tab's would. When
+   *  that cannot be told, it comes back on a new shell with its id and nothing typed, as a tab's
+   *  does: its session is never lost on an answer nobody could give (#460). */
   restore(saved: unknown): Promise<void>
 }
 
@@ -482,6 +484,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           replay.delete(id)
           return
         }
+        // No core to draw it from: the newest kept. A replay that starts mid-sequence draws a few
+        // stray characters and loses what came before (an alt-screen switch). No pane of the app
+        // takes this path, since the app always has the core: only a terminal that is no pane
+        // (the session host's attach, fed until its drawer tab's view mounts) and a test do.
         while (list.length > 1 && bytes > PENDING_MAX) bytes -= list.shift()!.length
       }
       pendingBytes.set(id, bytes)
@@ -784,7 +790,8 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 
     /** The offscreen panes of saved file `saved`: each back on its shell when it kept running
      *  (`reattach` says), else on a new one resuming its Claude session when no running `claude`
-     *  holds it; forgotten otherwise. */
+     *  holds it, or on a new one with its id and nothing typed when that cannot be told; forgotten
+     *  otherwise. */
     async function restoreOffscreen(saved: unknown, reattach: (old: PaneId) => PtyInfo | null) {
       const list = parseOffscreen(saved)
       const respawn: SavedOffscreen[] = []
@@ -802,10 +809,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       }
       if (!respawn.length) return
       const running = await liveSessions(respawn.map((p) => p.sessionId!)).then((ids) => new Set(ids), () => null)
-      if (!running) return
       for (const p of respawn) {
-        if (running.has(p.sessionId!)) continue
-        const id = await get().openOffscreen(p.cwd, `claude --resume ${p.sessionId}`, p.sessionId).catch(() => null)
+        if (running?.has(p.sessionId!)) continue
+        const id = await get()
+          .openOffscreen(p.cwd, running ? `claude --resume ${p.sessionId}` : undefined, p.sessionId)
+          .catch(() => null)
         if (id !== null) set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], renewed: true } } }))
       }
     }

@@ -1,7 +1,7 @@
 import type { Pane } from '../../layout/store'
 import { nexusStore, type DrawerTab } from '../store'
 import { fakeHost } from './fixtures'
-import { adoptIdle, adoptLost, adoptShells, readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
+import { adoptIdle, adoptShells, lostPanes, readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
 import { createDrawer } from './sessions'
 
 const tab = (over: Partial<DrawerTab>): DrawerTab => ({ id: 'x', kind: 'captain', key: null, readOnly: null, label: 'x', sessionId: null, cwd: '/work/mnemo', ...over })
@@ -112,7 +112,7 @@ test('with no tab kept, the last shell adopted is shown', () => {
   expect(nexusStore.getState()).toMatchObject({ activeTab: 'session:2', collapsed: false })
 })
 
-test('a pane that holds a Claude session id but runs no Claude gets a tab, quietly; one that runs Claude, or cannot be told, is left to its captain (#459)', async () => {
+test('a pane that holds a Claude session id but runs no Claude gets a tab, quietly, and is marked idle for it; one that cannot be told gets a tab too; one that runs Claude is left to its captain (#460)', async () => {
   const { host } = fakeHost()
   const drawer = createDrawer(host, nexusStore, {})
   const panes: Record<number, Pane> = {
@@ -126,27 +126,26 @@ test('a pane that holds a Claude session id but runs no Claude gets a tab, quiet
   const asked: number[] = []
   const runs = async (p: number) => {
     asked.push(p)
-    if (p === 3) throw new Error('cannot tell')
+    if (p === 3) throw new Error('claude agents could not say')
     return p === 1
   }
-  await adoptIdle(() => panes, drawer, nexusStore, runs)
+  const idle: [number, string][] = []
+  await adoptIdle(() => panes, drawer, nexusStore, runs, (pane, id) => void idle.push([pane, id]))
   expect(asked).toEqual([1, 2, 3])
+  expect(idle).toEqual([[2, 'stale']])
   expect(nexusStore.getState().tabs.map((t) => [t.id, t.key])).toEqual([
     ['shown', 'pane:4'],
     ['session:2', 'pane:2'],
+    ['session:3', 'pane:3'],
   ])
   // Quietly: the drawer stays collapsed on the tab it showed.
   expect(nexusStore.getState()).toMatchObject({ activeTab: 'shown', collapsed: true })
+  // The ids stay with the panes, for the next launch to resume.
+  expect([panes[2].sessionId, panes[3].sessionId]).toEqual(['stale', 'unknown'])
 })
 
-test('a pane no tab shows whose Claude session went gets a tab, quietly: collapsed when the drawer had none', () => {
-  const { host } = fakeHost()
-  const drawer = createDrawer(host, nexusStore, {})
-  const before: Record<number, Pane> = { 1: term(1, { cwd: '/w', sessionId: 's-1', offscreen: true }), 2: term(2, { cwd: '/w', sessionId: 's-2', offscreen: true }) }
-  const after: Record<number, Pane> = { 1: term(1, { cwd: '/w', offscreen: true }), 2: before[2] }
-  adoptLost(before, before, drawer, nexusStore)
-  expect(nexusStore.getState().tabs).toEqual([])
-  adoptLost(before, after, drawer, nexusStore)
-  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['session:1'])
-  expect(nexusStore.getState().collapsed).toBe(true)
+test('the panes whose Claude session went are those that held an id and hold none now', () => {
+  const before: Record<number, Pane> = { 1: term(1, { sessionId: 's-1' }), 2: term(2, { sessionId: 's-2' }), 3: term(3) }
+  expect(lostPanes(before, before)).toEqual([])
+  expect(lostPanes(before, { 1: term(1), 2: term(2, { sessionId: 'other' }), 3: term(3) })).toEqual([1])
 })

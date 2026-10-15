@@ -132,7 +132,7 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
     const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
     // Off a Mac the clipboard is on Ctrl+C / Ctrl+V and Ctrl+Shift+C / Ctrl+Shift+V.
-    // App chords (⌘K, ⌘W…) are handled by the window listener in the capture phase before
+    // App chords (⌘W, ⌘E…) are handled by the window listener in the capture phase before
     // xterm sees them.
     term.attachCustomKeyEventHandler((e) => {
       const v = terminalKey(e, platform, term.getSelection())

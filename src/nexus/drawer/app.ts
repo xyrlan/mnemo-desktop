@@ -18,9 +18,9 @@ import { nexusStore } from '../store'
 import type { DrawerDeps } from './Drawer'
 import { claimClose } from './keys'
 import { deepestWorktree } from './model'
-import { adoptIdle, adoptLost, adoptShells, readTabs, reopenTabs, RESUME_WINDOW_MS, tabsToSave, writeTabs } from './persist'
+import { launchDrawer, type Launch } from './launch'
 import { createDrawer } from './sessions'
-import { createSessions, followPanes, type Sessions } from './start'
+import { createSessions, type Sessions } from './start'
 
 function storage(): Storage | null {
   try {
@@ -44,6 +44,7 @@ function newId(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
 }
 
+let launch: Launch | null = null
 export const liveSessions: Sessions = (sessions = createSessions({
   layout,
   drawer,
@@ -51,33 +52,13 @@ export const liveSessions: Sessions = (sessions = createSessions({
   skipPermissions: () => (settingsStore.getState() as { skipPermissions?: boolean }).skipPermissions !== false,
   newId,
   runsClaude: paneRunsClaude,
+  restoredAt: () => launch?.restoredAt() ?? null,
+  now: Date.now,
 }))
 
-// The tabs kept from the last run come back once the layout store has its panes back; from then on
-// what the drawer shows is kept. Tabs follow the Claude session their pane runs.
-const kept = storage()
-let restoring = true
-let idleCheck: ReturnType<typeof setTimeout> | undefined
-const reopen = () => {
-  if (!restoring || !layout.getState().restored) return
-  restoring = false
-  // A workspace saved by the workbench (#459): its tabs' terminals are offscreen panes from now on.
-  layout.getState().pocketTabs()
-  reopenTabs(readTabs(kept), layout.getState().panes, drawer, nexusStore)
-  adoptShells(layout.getState().panes, drawer, nexusStore)
-  idleCheck = setTimeout(() => void adoptIdle(() => layout.getState().panes, drawer, nexusStore, paneRunsClaude), RESUME_WINDOW_MS)
-}
-const unwatchLayout = layout.subscribe((s, prev) => {
-  reopen()
-  if (s.panes === prev.panes) return
-  followPanes(nexusStore, s.panes)
-  if (!restoring) adoptLost(prev.panes, s.panes, drawer, nexusStore)
-})
-reopen()
-const unwatchTabs = nexusStore.subscribe((s, prev) => {
-  if (restoring || (s.tabs === prev.tabs && s.activeTab === prev.activeTab)) return
-  writeTabs(kept, tabsToSave(s))
-})
+// The drawer's part of the launch: the workbench's tabs pocketed, the tabs kept from the last run
+// back, every terminal reachable; from then on tabs follow their pane's Claude session.
+launch = launchDrawer({ layout, drawer, nexus: nexusStore, sessions: liveSessions, runsClaude: paneRunsClaude, storage: storage(), now: Date.now })
 
 // Which Claude session each terminal runs, shown in a tab or not: tabs follow it (`followPanes`),
 // and the restore resumes it.
@@ -100,10 +81,8 @@ export const liveDrawer: DrawerDeps = {
 }
 
 import.meta.hot?.dispose(() => {
-  clearTimeout(idleCheck)
+  launch?.stop()
   unclaim()
   drawer.dispose()
-  unwatchLayout()
-  unwatchTabs()
   stopLearning()
 })

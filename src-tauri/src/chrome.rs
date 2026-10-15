@@ -114,10 +114,16 @@ fn children_of() -> Result<impl FnMut(&[u32]) -> Vec<u32>, String> {
     Ok(move |pids: &[u32]| table.children(pids))
 }
 
-/// The Claude Code session running under a pane's shell, None when there is none (or `claude`
-/// is not installed). An error when the process tree could not be walked.
+/// What `claude agents` failing on every account means for a pane: the app cannot tell what runs in
+/// it, which is never "no Claude runs there" (#460). A pane keeps the session it had, and nothing
+/// is ended, adopted as a bare shell or resumed a second time on this answer.
+pub const AGENTS_CANNOT_SAY: &str = "claude agents could not say which Claude sessions run";
+
+/// The Claude Code session running under a pane's shell, None when there is none. An error when the
+/// process tree could not be walked, or when `claude agents` could not answer on any account
+/// (`AGENTS_CANNOT_SAY`; `claude` not installed reads the same).
 pub fn session_of(pane_pid: u32) -> Result<Option<String>, String> {
-    let Some(agents) = live_agents() else { return Ok(None) };
+    let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
     if agents.is_empty() {
         return Ok(None);
     }
@@ -157,7 +163,8 @@ const VOUCH: Duration = Duration::from_secs(30);
 /// it is refused at once. Only when no cached pid vouches (none cached, or a Claude started since)
 /// is `claude agents` asked again, and its answer kept for the next check. The tree under the pane
 /// is then read by `walk`, after that answer and not before it: its error is "cannot tell", and is
-/// never turned into "Claude is not running".
+/// never turned into "Claude is not running". Nor is a `claude agents` that no account answered
+/// (`AGENTS_CANNOT_SAY`).
 pub fn claude_running<W: FnMut(&[u32]) -> Vec<u32>>(
     pane_pid: u32,
     cached: Option<(Instant, Option<HashMap<u32, (String, u64)>>)>,
@@ -172,8 +179,9 @@ pub fn claude_running<W: FnMut(&[u32]) -> Vec<u32>>(
         }
     }
     match fresh() {
-        Some(agents) if !agents.is_empty() => Ok(session_below(pane_pid, &agents, walk()?).is_some()),
-        _ => Ok(false),
+        Some(agents) if agents.is_empty() => Ok(false),
+        Some(agents) => Ok(session_below(pane_pid, &agents, walk()?).is_some()),
+        None => Err(AGENTS_CANNOT_SAY.to_string()),
     }
 }
 
@@ -382,11 +390,12 @@ mod tests {
         assert_eq!(claude_running(5004, Some((t0, Some(before))), t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
         assert_eq!(asked.get(), 1);
 
-        // Too old to vouch, or nothing cached, or `claude` missing.
+        // Too old to vouch, or nothing cached, or `claude agents` answering on no account (`claude`
+        // missing reads the same): that is "cannot tell", never "not running" (#460).
         asked.set(0);
         assert_eq!(claude_running(5001, cached.clone(), t0 + VOUCH, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
         assert_eq!(claude_running(5001, None, t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
-        assert_eq!(claude_running(5001, Some((t0, None)), t0, parents(&[]), fresh(None), || Ok(pgrep(&calls))), Ok(false));
+        assert_eq!(claude_running(5001, Some((t0, None)), t0, parents(&[]), fresh(None), || Ok(pgrep(&calls))), Err(AGENTS_CANNOT_SAY.to_string()));
         assert_eq!(asked.get(), 3);
 
         // An idle pane is refused either way.

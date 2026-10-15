@@ -5,7 +5,8 @@ import { ptyPid } from '../pty/client'
 /** Whether a Claude Code process runs under terminal pane `pane`'s shell this moment: the gate
  *  before keys are typed into it (`chrome_claude_running`). False once the shell has exited.
  *
- *  It rejects when the app cannot tell (the process table could not be read): that is neither
+ *  It rejects when the app cannot tell (the process table could not be read, or `claude agents`
+ *  answered on no account): that is neither
  *  "running" nor "no longer running", and the person is told it as what it is. */
 export async function paneRunsClaude(pane: PaneId): Promise<boolean> {
   const pid = await ptyPid(pane).catch(() => null)

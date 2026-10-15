@@ -3,10 +3,10 @@ import type { PtyClient } from '../../pty/client'
 import { nexusStore } from '../store'
 import { fakeHost, settle } from './fixtures'
 import { createDrawer } from './sessions'
-import { claudeCommand, createSessions, followPanes, labelFor, type Sessions } from './start'
+import { claudeCommand, createSessions, followPanes, labelFor, RESUME_WINDOW_MS, type Sessions } from './start'
 
 /** The layout store on a PTY that records what is done to it: panes are 1, 2, … */
-function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: number) => Promise<boolean> } = {}) {
+function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: number) => Promise<boolean>; restoredAt?: () => number | null; now?: () => number } = {}) {
   const writes: [number, string][] = []
   const spawned: (string | undefined)[] = []
   const killed: number[] = []
@@ -38,6 +38,8 @@ function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: 
     skipPermissions: () => over.skip ?? true,
     newId: () => `0000000${++ids}-0000-4000-8000-000000000000`,
     runsClaude: over.runsClaude ?? (async () => false),
+    restoredAt: over.restoredAt ?? (() => null),
+    now: over.now ?? Date.now,
   })
   return { layout, host, drawer, sessions, writes, spawned, killed }
 }
@@ -105,6 +107,60 @@ test('a resume the app cannot tell about shows the pane holding the id: never a 
   await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'maybe-1' })
   expect(w.spawned).toEqual(['/work/mnemo'])
   expect(tabs()).toEqual([{ id: 'maybe-1', kind: 'captain', key: 'pane:1', label: 'claude · mnemo' }])
+})
+
+test('a Claude that may still be coming up is never started a second time: the restore, or a start here, less than RESUME_WINDOW_MS ago (#460)', async () => {
+  let now = 1_000_000
+  const restoredAt = now
+  const w = world({ runsClaude: async () => false, restoredAt: () => restoredAt, now: () => now })
+  // The restore typed `claude --resume coming-1` into pane 1; `claude agents` has not listed it yet.
+  await w.layout.getState().newTab('/work/mnemo')
+  w.layout.getState().setSessionId(1, 'coming-1')
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'coming-1' })
+  expect(w.spawned).toEqual(['/work/mnemo'])
+  expect(tabs().at(-1)).toMatchObject({ id: 'coming-1', key: 'pane:1' })
+  // A session started here, resumed again at once: still the one pane.
+  now += RESUME_WINDOW_MS
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })
+  const started = w.sessions.paneOf(ID1)!
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: ID1 })
+  expect(w.spawned).toHaveLength(2)
+  expect(nexusStore.getState().activeTab).toBe(ID1)
+  expect(w.sessions.paneOf(ID1)).toBe(started)
+  // Past the window, a pane found running none gives the session up to a new one.
+  now += RESUME_WINDOW_MS
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'coming-1' })
+  expect(w.spawned).toHaveLength(3)
+  expect(w.layout.getState().panes[1].sessionId).toBeUndefined()
+})
+
+test('a pane marked idle for its id is no captain’s pane, and its tab does not follow the id; another id is followed (#460)', () => {
+  const w = world()
+  w.layout.setState({ panes: { 7: { id: 7, view: 'terminal', sessionId: 'stale-7', offscreen: true } } })
+  w.sessions.markIdle(7, 'stale-7')
+  expect(w.sessions.paneOf('stale-7')).toBeNull()
+  nexusStore.setState({ tabs: [{ id: 'session:7', kind: 'session', key: 'pane:7', readOnly: null, label: 'shell · w', sessionId: null, cwd: '/w' }], activeTab: 'session:7' })
+  followPanes(nexusStore, w.layout.getState().panes, w.sessions.isIdle)
+  expect(tabs()[0]).toMatchObject({ id: 'session:7', kind: 'session' })
+  // Claude typed there under another id: that one is the pane's.
+  followPanes(nexusStore, { 7: { sessionId: 'new-7' } }, w.sessions.isIdle)
+  expect(tabs()[0]).toMatchObject({ id: 'new-7', kind: 'captain' })
+})
+
+test('a pane a tab let go while its Claude ran ends once that Claude does; one never let go, or shown again, does not (#460)', async () => {
+  const running = new Set([1, 2])
+  const w = world({ runsClaude: async (p) => running.has(p) })
+  await w.sessions.openSession({ kind: 'claude', root: '/b' })
+  await w.drawer.close(ID1)
+  await settle()
+  expect(w.layout.getState().panes[1]).toBeDefined()
+  running.delete(1)
+  expect(await w.sessions.lost(1)).toBe(true)
+  expect(w.killed).toEqual([1])
+  // Never let go: left for a tab of its own.
+  await w.layout.getState().openOffscreen('/b')
+  expect(await w.sessions.lost(2)).toBe(false)
+  expect(w.killed).toEqual([1])
 })
 
 test('a resume after Claude exited in its tab shows the new pane in that tab, in its place, and the shell left ends', async () => {
