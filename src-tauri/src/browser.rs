@@ -293,9 +293,46 @@ pub fn browser_data_store() -> String {
 pub async fn browser_open_external(url: String) -> Result<(), String> {
     let target = external(&url)?;
     let launches = external_launches(&target, std::env::consts::OS, |k| std::env::var(k).ok());
-    tauri::async_runtime::spawn_blocking(move || run_launches(&launches))
+    tauri::async_runtime::spawn_blocking(move || run_launches(&launches, "a browser"))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Opens `path` in the system's own app (spec `2026-10-15-nexus-app-design.md`, Q6): a file in the
+/// app its type opens with (a vault page in the system editor), a folder in the file manager. Only
+/// an absolute path that exists; it is passed as a plain argument, never through a shell.
+#[tauri::command]
+pub async fn system_open(path: String) -> Result<(), String> {
+    let target = local(&path)?;
+    let launches = path_launches(&target.to_string_lossy(), std::env::consts::OS);
+    tauri::async_runtime::spawn_blocking(move || run_launches(&launches, "an app for it"))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// What may leave the app for the system's apps: an absolute path that exists.
+pub fn local(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(path.trim());
+    if !p.is_absolute() {
+        return Err(format!("refusing to open {path:?} outside the app: not an absolute path"));
+    }
+    if !p.exists() {
+        return Err(format!("{path} does not exist"));
+    }
+    Ok(p)
+}
+
+/// How to hand a path to the system: `open` on macOS (Finder for a folder), the Explorer on
+/// Windows (a file opens in its app; it reads only backslashes), `xdg-open` elsewhere.
+pub fn path_launches(path: &str, os: &str) -> Vec<Launch> {
+    let launch = |program: &str, arg: String, wait| Launch { program: program.to_string(), args: vec![arg], wait };
+    match os {
+        // Absolute path: apps started from Finder or the Dock get a bare PATH.
+        "macos" => vec![launch("/usr/bin/open", path.to_string(), true)],
+        // explorer.exe exits 1 even when it opened the path: it is never waited on.
+        "windows" => vec![launch("explorer.exe", path.replace('/', "\\"), false)],
+        _ => vec![launch("xdg-open", path.to_string(), false)],
+    }
 }
 
 /// What may leave the app for the system browser: http(s) pages, not `about:blank`.
@@ -344,7 +381,8 @@ pub fn external_launches(url: &Url, os: &str, env: impl Fn(&str) -> Option<Strin
     }
 }
 
-fn run_launches(launches: &[Launch]) -> Result<(), String> {
+/// Tries each launch in turn; `what` names what none of them could open, for the error.
+fn run_launches(launches: &[Launch], what: &str) -> Result<(), String> {
     use std::process::Stdio;
     let mut failures = Vec::new();
     for l in launches {
@@ -367,7 +405,7 @@ fn run_launches(launches: &[Launch]) -> Result<(), String> {
             }
         }
     }
-    Err(format!("could not open a browser: {}", failures.join("; ")))
+    Err(format!("could not open {what}: {}", failures.join("; ")))
 }
 
 /// Design Mode's screenshots of picked elements, kept where the agent they are sent to can
@@ -595,14 +633,32 @@ mod tests {
     }
 
     #[test]
+    fn a_path_opens_in_the_systems_own_app_on_each_os() {
+        let one = |os: &str, path: &str| path_launches(path, os).into_iter().map(|l| (l.program, l.args, l.wait)).collect::<Vec<_>>();
+        assert_eq!(one("macos", "/Users/you/vault/rule.md"), [("/usr/bin/open".to_string(), vec!["/Users/you/vault/rule.md".to_string()], true)]);
+        assert_eq!(one("windows", "C:/Users/you/vault"), [("explorer.exe".to_string(), vec!["C:\\Users\\you\\vault".to_string()], false)]);
+        assert_eq!(one("linux", "/home/you/vault"), [("xdg-open".to_string(), vec!["/home/you/vault".to_string()], false)]);
+    }
+
+    #[test]
+    fn only_an_absolute_path_that_exists_leaves_the_app() {
+        let dir = std::env::temp_dir();
+        assert_eq!(local(&dir.to_string_lossy()).unwrap(), dir);
+        assert!(local("vault/rule.md").unwrap_err().contains("not an absolute path"));
+        assert!(local("-a").is_err());
+        let gone = dir.join(format!("mnemo-system-open-gone-{}", std::process::id()));
+        assert!(local(&gone.to_string_lossy()).unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
     fn a_failed_launch_falls_through_and_reports_every_attempt() {
         let missing = |p: &str| Launch { program: p.into(), args: vec![], wait: false };
-        let err = run_launches(&[missing("/nonexistent/chrome"), missing("/nonexistent/open")]).unwrap_err();
+        let err = run_launches(&[missing("/nonexistent/chrome"), missing("/nonexistent/open")], "a browser").unwrap_err();
         assert!(err.contains("/nonexistent/chrome") && err.contains("/nonexistent/open"), "{err}");
         #[cfg(unix)]
         {
             let exits = |p: &str| Launch { program: p.into(), args: vec![], wait: true };
-            assert!(run_launches(&[exits("/usr/bin/false"), exits("/usr/bin/true")]).is_ok());
+            assert!(run_launches(&[exits("/usr/bin/false"), exits("/usr/bin/true")], "a browser").is_ok());
         }
     }
 

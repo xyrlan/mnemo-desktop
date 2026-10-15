@@ -15,6 +15,10 @@ export function openExternal(url: string): void {
   void invoke('browser_open_external', { url }).catch(() => {})
 }
 
+/** A file in the app the system opens it with (a page in the editor), a folder in the file manager
+ *  (spec Q6): the core opens only an absolute path that exists. */
+export const openInSystem = (path: string): Promise<void> => invoke<void>('system_open', { path })
+
 /** Puts `text` on the clipboard; false when the page may not. */
 export async function copyText(text: string): Promise<boolean> {
   try {

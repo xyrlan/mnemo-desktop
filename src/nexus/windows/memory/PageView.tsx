@@ -5,9 +5,9 @@ import { confidenceTone } from '../../../vault/rules'
 import { resolveWikilink } from '../../../vault/search'
 import { countLabel } from '../../../vault/ego'
 import type { GraphEdge, GraphNode, Page } from '../../../vault/types'
-import { basename } from '../../../path/path'
+import { basename, dirname } from '../../../path/path'
 import { confirm } from '../../ui/confirm'
-import { copyText, Dot, ErrorText, Folded, Loading, Markdown, openExternal, Quiet, short, Tabs } from './kit'
+import { copyText, Dot, ErrorText, Folded, Loading, Markdown, openExternal, openInSystem, Quiet, short, Tabs } from './kit'
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
@@ -23,6 +23,11 @@ export async function runAction(a: VaultAction, cwd: string, slug: string): Prom
 function Actions({ page, cwd }: { page: Page; cwd: string }) {
   const log = useVault((s) => s.log)
   const [copied, setCopied] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+  const inSystem = (path: string) => {
+    setFailed(null)
+    openInSystem(path).catch((e: unknown) => setFailed(`Could not open ${short(path)}: ${e instanceof Error ? e.message : String(e)}`))
+  }
   return (
     <div className="nx-mem-actions">
       {ACTIONS.map((a) => {
@@ -41,9 +46,16 @@ function Actions({ page, cwd }: { page: Page; cwd: string }) {
           </button>
         )
       })}
-      <button type="button" className="nx-btn" title={`Copy ${short(page.path)}, to open it in your editor`} onClick={() => void copyText(page.path).then(setCopied)}>
+      <button type="button" className="nx-btn" title={`Open ${short(page.path)} in the system's editor`} disabled={!!page.error} onClick={() => inSystem(page.path)}>
+        Edit
+      </button>
+      <button type="button" className="nx-btn" title={`Open ${short(dirname(page.path))} in the file manager`} onClick={() => inSystem(dirname(page.path))}>
+        Open folder
+      </button>
+      <button type="button" className="nx-btn" title={`Copy ${short(page.path)}`} onClick={() => void copyText(page.path).then(setCopied)}>
         {copied ? 'Copied' : 'Copy path'}
       </button>
+      {failed && <ErrorText text={failed} onDismiss={() => setFailed(null)} />}
     </div>
   )
 }

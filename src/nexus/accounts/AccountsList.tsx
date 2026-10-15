@@ -229,7 +229,6 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
   const note = useAccounts((s) => s.note)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [adding, setAdding] = useState<'no' | 'asking' | 'busy'>('no')
-  const [added, setAdded] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   if (!state) return null
   return (
@@ -254,7 +253,6 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
         { text: error, role: 'alert', clear: () => store.getState().clearError() },
         { text: failed, role: 'alert', clear: () => setFailed(null) },
         { text: note, role: 'status', clear: () => store.getState().clearNote() },
-        { text: added, role: 'status', clear: () => setAdded(null) },
       ].map(
         (m, i) =>
           m.text && (
@@ -267,7 +265,7 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
           ),
       )}
       {adding === 'no' ? (
-        <button type="button" className="nx-btn nx-acct-add" onClick={() => (setAdded(null), setAdding('asking'))}>
+        <button type="button" className="nx-btn nx-acct-add" onClick={() => setAdding('asking')}>
           + Add account
         </button>
       ) : adding === 'busy' ? (
@@ -283,7 +281,8 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
               setAdding('busy')
               const account = await store.getState().add(label)
               setAdding(account ? 'no' : 'asking')
-              if (account) setAdded(`${account.label} is added. Its login terminal opened in the workbench; Sign in opens one here.`)
+              // Its login terminal opened in a drawer tab, as Sign in's does: the list gives way to it.
+              if (account) onTerminal()
             }}
           />
           <p className="nx-acct-line nx-muted">A terminal opens on it for you to log in. The account you are on stays active.</p>

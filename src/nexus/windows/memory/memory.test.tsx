@@ -341,3 +341,16 @@ test('the repo picker offers a repo PROJECTS just added, before any session runs
     settingsStore.setState({ projects: was })
   }
 })
+
+test('a page opens in the system’s editor, its folder in the file manager, never in an app pane', async () => {
+  await open()
+  await tab('Health')
+  const w = document.querySelector('[data-memory-window]')!
+  await click(w.querySelector('[data-rule=one-cargo-target]'))
+  const path = w.querySelector('[data-page]')!.getAttribute('data-page')!
+  const opened = () => t.calls.filter(([c]) => c === 'system_open').map(([, a]) => a!.path)
+  await click(button('Edit', w))
+  await click(button('Open folder', w))
+  expect(opened()).toEqual([path, path.slice(0, path.lastIndexOf('/'))])
+  expect(t.calls.some(([c]) => c === 'browser_create')).toBe(false)
+})

@@ -3,12 +3,15 @@ import { cockpitStore } from '../cockpit/app-store'
 import { runJob } from '../cockpit/job'
 import { saveSetting, settingsStore } from '../settings/app-store'
 import { githubStore } from './app-store'
+import { nexusRoutes } from '../nexus/outside'
 import { currentOs, installRoute } from '../setup/tools'
 import { SCOPE_FIX, type Issue } from './types'
 
 /** What a click does with GitHub: a dispatch runs headless with `runJob`, its output captured
  *  and shown in its job's drawer rather than typed into a fresh terminal tab; other commands
- *  still run in a terminal tab, and pages open in a browser pane. */
+ *  still run in a terminal tab, and pages open in a browser pane. While the Nexus covers the
+ *  workbench, a command runs in its drawer and a page opens in the system browser instead
+ *  (`nexus/outside`). */
 
 type DispatchOpts = { model?: string; effort?: string; may?: string }
 
@@ -63,20 +66,25 @@ export function resumeChildren(root: string) {
 }
 
 export function openUrl(url: string, title: string) {
-  layout.getState().openView('browser', { url }, 'auto', title)
+  const nexus = nexusRoutes()
+  if (nexus) void nexus.page(url).catch(() => {})
+  else layout.getState().openView('browser', { url }, 'auto', title)
 }
+
+/** Runs `cmd` in a terminal tab, or in the Nexus's drawer while it is open. */
+const inTerminal = (cmd: string, label: string) => void (nexusRoutes()?.terminal(undefined, cmd, label) ?? layout.getState().openCommandTab(undefined, cmd)).catch(() => {})
 
 export const openIssue = (i: Pick<Issue, 'number' | 'url'>) => openUrl(i.url, `#${i.number}`)
 
 export function ghLogin() {
-  void layout.getState().openCommandTab(undefined, 'gh auth login --web')
+  inTerminal('gh auth login --web', 'gh auth login')
   githubStore.getState().watchLogin()
 }
 
 /** This OS's own route to `gh`: `brew` exists only on a Mac. */
 export const ghInstall = () => installRoute('gh', currentOs())
 
-export const installGh = () => void layout.getState().openCommandTab(undefined, ghInstall().command)
+export const installGh = () => inTerminal(ghInstall().command, 'Install gh')
 
 export const refreshScope = () => void layout.getState().openCommandTab(undefined, SCOPE_FIX)
 

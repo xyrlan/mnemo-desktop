@@ -119,7 +119,7 @@ test('a rename: Enter saves; Esc cancels the typing and leaves the window open',
   expect(card('work').querySelector('input')).toBeNull()
 })
 
-test('an add opens its login terminal on the new account, the active one staying, and says where', async () => {
+test('an add opens its login terminal on the new account, the active one staying, and the window gives way to it', async () => {
   const f = two()
   await render(f)
   await act(async () => [...win()!.querySelectorAll('button')].find((b) => b.textContent === '+ Add account')!.click())
@@ -130,8 +130,7 @@ test('an add opens its login terminal on the new account, the active one staying
   expect(f.fake.called('add')).toEqual([['add', 'Client']])
   expect(f.fake.called('terminal')).toEqual([['terminal', 'claude', 'client']])
   expect(f.fake.state.active).toBe('default')
-  expect(win()!.querySelector('[role="status"]')!.textContent).toContain('Client is added')
-  expect(card('client').querySelector('[data-problem]')!.textContent).toContain('Not logged in yet.')
+  expect(windowStore.getState().open).toBeNull()
 })
 
 test('Sign in opens claude on that account in the drawer, from the home folder, and the window gives way', async () => {
