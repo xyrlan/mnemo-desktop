@@ -260,6 +260,7 @@
 }
 .ship-cmd {
   position: absolute;
+  overflow: hidden;
   top: 0;
   bottom: 0;
   left: 0;
@@ -359,9 +360,13 @@
   font-size: 11px;
   font-weight: 700;
 }
+/* A tab title is often a whole first prompt: a chip keeps to its column and ends in an ellipsis. */
 .ship-scene .ship-chip-captain {
   display: flex;
+  flex: 0 1 120px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   gap: 4px;
   padding: 0 8px 0 0;
   border: 2px solid #26335c;
@@ -371,6 +376,7 @@
   white-space: nowrap;
 }
 .ship-scene .ship-chip-captain:hover { border-color: var(--ship-lilac); }
+.ship-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A 1× window onto the console: the captain's head and screen. */
 .ship-window { position: relative; width: 40px; height: 40px; overflow: hidden; }
 .ship-window img { position: absolute; top: -14px; left: -28px; }

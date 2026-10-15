@@ -195,7 +195,8 @@ export function CaptainChip({ captain: c, focused, onOpen }: { captain: Captain;
       <span className="ship-window" aria-hidden>
         <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
       </span>
-      <span className="ship-em">{c.emblem}</span> {c.name}
+      <span className="ship-em">{c.emblem}</span>
+      <span className="ship-chip-name">{c.name}</span>
     </button>
   )
 }
