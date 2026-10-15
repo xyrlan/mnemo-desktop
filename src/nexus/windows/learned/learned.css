@@ -1,0 +1,20 @@
+/* The learned window, in the ship's look; its shared parts are the Memory window's (`../memory/memory.css`). */
+
+.nx-ln { display: flex; flex-direction: column; gap: 10px; max-height: min(calc(100vh - 140px), 680px); overflow: auto; }
+.nx-ln-lead { margin: 0; line-height: 1.6; }
+.nx-ln-box { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 2px solid var(--nx-edge); background: #0b0d22cc; }
+.nx-ln-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.nx-ln-bar { display: flex; flex-direction: column; gap: 3px; max-width: 420px; }
+.nx-ln-track { height: 8px; border: 1px solid var(--nx-edge); background: #000; }
+.nx-ln-fill { height: 100%; background: var(--nx-edge-hi); transition: width 0.3s; }
+@media (prefers-reduced-motion: reduce) { .nx-ln-fill { transition: none; } }
+.nx-ln-group-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 3px 0; background: var(--nx-hull); }
+.nx-ln-rows { margin: 0; padding: 0; list-style: none; }
+.nx-ln-row { padding: 2px 0; }
+.nx-ln-row[data-unchecked] { opacity: 0.55; }
+.nx-ln-row[data-unchecked] .nx-ln-name { text-decoration: line-through; }
+.nx-ln-row-head { display: flex; align-items: center; gap: 6px; }
+.nx-ln-row-head input { accent-color: var(--nx-edge-hi); }
+.nx-ln-pick { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; text-align: left; }
+.nx-ln-name { flex: none; color: #fff; }
+.nx-ln-excerpt { max-height: 160px; margin: 3px 0 0 22px; padding: 4px 8px; overflow: auto; border-left: 3px solid var(--nx-edge); background: #000; color: var(--nx-dim); font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
