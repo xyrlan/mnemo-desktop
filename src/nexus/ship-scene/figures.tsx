@@ -187,8 +187,20 @@ export function CaptainFigure({
   )
 }
 
-/** A captain as a small chip: a quiet parent on a deck, or one in a dock. Its console seen through
- *  a window, still at 1×. */
+/** A captain in a dock: its whole console at 64 px, its name under it. */
+export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
+  return (
+    <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={c.topic ?? c.name} onClick={() => c.parent && onOpen(c.id)}>
+      <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
+      <span>
+        <span className="ship-em">{c.emblem}</span> {c.name}
+      </span>
+    </button>
+  )
+}
+
+/** A captain as a small chip: a quiet parent on a deck. Its console seen through a window, still
+ *  at 1×. */
 export function CaptainChip({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
   return (
     <button type="button" className="ship-chip-captain" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={c.topic ?? c.name} onClick={() => c.parent && onOpen(c.id)}>

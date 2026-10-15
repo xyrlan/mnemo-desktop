@@ -70,7 +70,7 @@ vi.mock('../fleet/store', async () => {
   return { useFleet: <T,>(sel: (f: { repos: unknown }) => T) => sel({ repos: reposFixture }) }
 })
 
-const usage: NexusClient = { archives: async () => ({ projects: {}, universal: 0 }), logUsage: async () => {} }
+const usage: NexusClient = { logUsage: async () => {} }
 const fake = () => {
   const c = {
     asked: 0,

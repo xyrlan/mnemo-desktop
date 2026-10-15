@@ -84,3 +84,31 @@ export function useLeavers(drawn: Map<string, Drawn>, alive: ReadonlySet<string>
   // One that came back is drawn as itself, not as its exit.
   return { leavers: reducedMotion ? [] : leavers.filter((l) => !alive.has(l.robot.id)), gone }
 }
+
+/** The robots that arrived since the scene first drew: a robot that appears beams in on its
+ *  teleport pad. The ones already there when the view opens are not arrivals: opening it must not
+ *  stage a burst of dispatches that happened long ago. With reduced motion nothing beams in. */
+export function useArrivals(ids: string[], reducedMotion: boolean): { arriving: ReadonlySet<string>; arrived(id: string): void } {
+  const seen = useRef<Set<string> | null>(null)
+  const [arriving, setArriving] = useState<ReadonlySet<string>>(() => new Set())
+  const key = ids.join('\n')
+  useLayoutEffect(() => {
+    const first = seen.current === null
+    const s = (seen.current ??= new Set())
+    const fresh = ids.filter((id) => !s.has(id))
+    for (const id of fresh) s.add(id)
+    if (!first && !reducedMotion && fresh.length) setArriving((prev) => new Set([...prev, ...fresh]))
+    // `key` stands for `ids`: the same robots in a new array are not an arrival.
+  }, [key])
+  const arrived = useCallback(
+    (id: string) =>
+      setArriving((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      }),
+    [],
+  )
+  return { arriving, arrived }
+}

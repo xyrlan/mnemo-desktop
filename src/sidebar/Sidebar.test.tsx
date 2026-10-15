@@ -175,13 +175,14 @@ test('several agents fold into a pill, attention first, that opens into their ro
   expect(pill.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('nav: Search, Tasks and the Agent Dashboard run their pieces’ actions; the dashboard counts states', async () => {
+test('nav: Search, Tasks and the Nexus run their pieces’ actions; the Nexus entry counts states', async () => {
   fleet()
   const host = await mount()
+  expect(button(host, 'Agent Dashboard')).toBeUndefined()
   click(button(host, 'Search'))
   click(button(host, 'Tasks'))
-  click(button(host, 'Agent Dashboard'))
-  expect(run.mock.calls.map((c) => c[0])).toEqual(['worktree.jump', 'tasks.open', 'dashboard.toggle'])
+  click(button(host, 'Nexus'))
+  expect(run.mock.calls.map((c) => c[0])).toEqual(['worktree.jump', 'tasks.open', 'nexus.toggle'])
   const counts = [...host.querySelectorAll('[data-bucket]')].map((b) => [b.getAttribute('data-bucket'), b.textContent])
   expect(counts).toEqual([
     ['needs-you', '2'],
@@ -190,7 +191,18 @@ test('nav: Search, Tasks and the Agent Dashboard run their pieces’ actions; th
   ])
 })
 
-test('the dashboard entry leaves out a state no agent is in, and shows no counts for an idle fleet', async () => {
+test('the needs-you count opens the Nexus on triage, not the plain toggle; the other counts are no buttons', async () => {
+  fleet()
+  const host = await mount()
+  const needs = host.querySelector('[data-bucket="needs-you"]')!
+  expect(needs.tagName).toBe('BUTTON')
+  expect(needs.closest('button')!.parentElement!.closest('button')).toBeNull()
+  click(needs)
+  expect(run.mock.calls.map((c) => c[0])).toEqual(['nexus.triage'])
+  for (const b of ['working', 'done']) expect(host.querySelector(`[data-bucket="${b}"]`)!.tagName).toBe('SPAN')
+})
+
+test('the Nexus entry leaves out a state no agent is in, and shows no counts for an idle fleet', async () => {
   fleetStore.setState({ repos: [repo('/r/a', [tree('/r/a', { agents: [agent('x', 'working'), agent('y', 'idle')] })])] })
   const host = await mount()
   expect([...host.querySelectorAll('[data-bucket]')].map((b) => b.getAttribute('data-bucket'))).toEqual(['working'])

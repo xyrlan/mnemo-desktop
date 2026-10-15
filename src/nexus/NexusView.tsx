@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/ui'
-import { STATUS_BAR, TOP_CHROME } from '../dashboard/AgentDashboardDrawer'
+import { STATUS_BAR, TOP_CHROME } from '../shell/edges'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
 import { useMission } from '../mission/app-store'

@@ -147,7 +147,7 @@ function MissionPane({ id: paneId, props }: PaneViewProps) {
 
 type Word = ReturnType<typeof childWord>
 
-/** The fleet's glyph for each word: the same dot a card shows on the dashboard. */
+/** The fleet's glyph for each word: the same dot the Dispatch tab shows. */
 const DOT: Record<Word, DotState> = { active: 'working', BLOCKED: 'needs-you', stalled: 'idle', done: 'done', stopped: 'idle' }
 const WORD_LABEL: Record<Word, string> = { active: 'working', BLOCKED: 'needs you', stalled: 'stalled', done: 'done', stopped: 'stopped' }
 /** Colour only for state: asking is the question orange, stalled a warning, done green. */

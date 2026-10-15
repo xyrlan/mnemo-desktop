@@ -148,8 +148,10 @@
 .ship-lights i:nth-child(2) { background: #0ea5e9; }
 .ship-lights i:nth-child(3) { background: #22c55e; }
 .ship-bridge[data-tone='red'] .ship-lights i { background: var(--ship-rose); }
+/* The prompt sits right under the label, the exceptions under it; blocked robots stand at the
+   bottom right however tall their questions make the bridge. */
 .ship-bridge-body { display: flex; align-items: flex-end; gap: 24px; }
-.ship-bridge-main { flex: 1 1 auto; min-width: 0; }
+.ship-bridge-main { flex: 1 1 auto; align-self: flex-start; min-width: 0; }
 .ship-exceptions { margin-top: 8px; }
 .ship-xhead {
   display: flex;
@@ -379,7 +381,7 @@
 .ship-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A 1× window onto the console: the captain's head and screen. */
 .ship-window { position: relative; width: 40px; height: 40px; overflow: hidden; }
-.ship-window img { position: absolute; top: -14px; left: -28px; }
+.ship-window img { position: absolute; top: -14px; left: -28px; max-width: none; }
 
 /* ---------- robots ---------- */
 .ship-robot {
@@ -563,6 +565,23 @@
 .ship-docks > b { margin-right: 6px; font-size: 12px; letter-spacing: 1px; color: var(--ship-dim); }
 .ship-pod { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 2px solid #26335c; border-radius: 10px 10px 2px 2px; background: #10172b; }
 .ship-pod > span { margin-right: 2px; font-size: 11px; font-weight: 700; color: var(--ship-pale); }
+/* A docked captain, whole, at a size that reads: its 96 px console drawn at 64. */
+.ship-scene .ship-docked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 128px;
+  padding: 0 4px 2px;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ship-scene .ship-docked:hover { border-color: var(--ship-lilac); }
+.ship-docked[data-focus] { border-color: var(--ship-focus); }
+.ship-docked img { width: 64px; height: 64px; max-width: none; }
+.ship-docked[data-pose='offline'] img { opacity: 0.55; filter: grayscale(0.6); }
+.ship-docked > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- the ship's log ---------- */
 .ship-log {

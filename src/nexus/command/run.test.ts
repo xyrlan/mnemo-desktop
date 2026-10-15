@@ -176,3 +176,12 @@ test('land runs where its pieces work, and refuses a piece whose PR is in anothe
   expect(await act(p, { kind: 'land', root: ROOT, feature: 'nexus-v2' }, s)).toMatchObject({ ok: false, say: 'mission nexus-v2 did not land: PR #301 is in you/mnemo, not in mnemo-desktop' })
   expect(calls).toHaveLength(1)
 })
+
+test('a green draft goes to the merge as a draft, unrefused: the merge path marks it ready first', async () => {
+  const s = ship()
+  s.decks[0].hangar[0] = { ...s.decks[0].hangar[0], pr: pr(205, { draft: true }) }
+  const given: boolean[] = []
+  const { p } = paths({ merge: async (_root, pr) => (given.push(!!pr.draft), { ok: true, why: '' }) })
+  expect(await act(p, { kind: 'merge', robotIds: ['105'] }, s)).toMatchObject({ ok: true, say: '✈ merged PR #205 (#105)' })
+  expect(given).toEqual([true])
+})

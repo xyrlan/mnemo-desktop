@@ -1,6 +1,4 @@
-import { tokensWord } from '../HoverCard'
-import type { RobotPose } from '../types'
-import type { ActionKind, Captain, Ci, Exception, FleetRate, LogKind, Ship, ShipAction, ShipCounts, ShipRobot } from '../ship-types'
+import type { ActionKind, Captain, Ci, Exception, FleetRate, LogKind, RobotPose, Ship, ShipAction, ShipCounts, ShipRobot } from '../ship-types'
 
 /** Everything the ship says, in English (spec "What it is"). Pure. */
 
@@ -10,6 +8,13 @@ export function ago(ms: number): string {
   if (s < 60) return `${Math.round(s)}s`
   if (s < 3600) return `${Math.round(s / 60)} min`
   return `${(s / 3600).toFixed(1).replace(/\.0$/, '')} h`
+}
+
+/** `812`, `42k`, `1.3M`: a context size at a glance. */
+export function tokensWord(n: number): string {
+  if (n < 1000) return `${n}`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
 }
 
 /** `14:05`, local time. */
@@ -161,7 +166,7 @@ export function exceptionRow(x: Exception): Row {
         kind: x.kind,
         robotId: x.robotId,
         icon: '✈',
-        text: `PR #${x.pr.number} · CI green · waiting ${ago(x.waitingMs)}`,
+        text: `PR #${x.pr.number}${x.pr.draft ? ' · draft' : ''} · CI green · waiting ${ago(x.waitingMs)}`,
         buttons: [
           { label: 'merge', go: true, action: { kind: 'merge', robotIds: [x.robotId] } },
           { label: 'open', open: x.robotId },

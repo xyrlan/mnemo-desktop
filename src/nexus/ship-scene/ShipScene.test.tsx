@@ -261,7 +261,10 @@ test('the docks hold repos with only quiet captains; a captain clicked opens', a
   await draw()
   const pod = $('[data-dock="/home/dev/mnemo"]')!
   expect(pod.textContent).toContain('mnemo-18')
-  await click(pod.querySelector('[data-ship-id="cap-d"]'))
+  // Drawn whole, at a size that reads: the captain's console, not a sliver of it.
+  const docked = pod.querySelector<HTMLElement>('.ship-docked[data-ship-id="cap-d"]')!
+  expect(docked.querySelector('img')!.getAttribute('src')).toBe(SHIP_SPRITES.captain.idle.src)
+  await click(docked)
   await click($('.ship-captain[data-ship-id="cap-1"]'))
   await click($('.ship-captain[data-pose="empty"]'))
   expect(calls.open).toEqual(['cap-d', 'cap-1'])

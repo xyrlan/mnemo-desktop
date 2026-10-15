@@ -1,5 +1,5 @@
 import { mission, pr, robot, ship } from './fixtures'
-import { ago, bridgeStatus, chips, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, toneOf } from './words'
+import { ago, bridgeStatus, chips, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
 
 test('ago reads like the prototype', () => {
   expect(ago(40_000)).toBe('40s')
@@ -98,6 +98,10 @@ test('each exception says what waits and offers what settles it', () => {
   expect(exceptionRow({ kind: 'red', robotId: '2', pr: pr(9, { ci: 'fail', failing: ['test (windows)'] }) }).text).toBe('PR #9 · CI red: test (windows)')
   const ready = exceptionRow({ kind: 'ready', robotId: '3', pr: pr(372), waitingMs: 48 * 60_000 })
   expect(ready.text).toBe('PR #372 · CI green · waiting 48 min')
+  // A draft says so: the merge marks it ready first.
+  const draft = exceptionRow({ kind: 'ready', robotId: '3', pr: pr(372, { draft: true }), waitingMs: 48 * 60_000 })
+  expect(draft.text).toBe('PR #372 · draft · CI green · waiting 48 min')
+  expect(draft.buttons[0]).toEqual({ label: 'merge', go: true, action: { kind: 'merge', robotIds: ['3'] } })
   expect(ready.buttons[0]).toEqual({ label: 'merge', go: true, action: { kind: 'merge', robotIds: ['3'] } })
   const land = exceptionRow({ kind: 'land', root: '/r', mission: mission('nexus-v2', 4, 4) })
   expect(land).toMatchObject({ robotId: null, text: 'mission nexus-v2 · 4/4 green → land' })
@@ -114,4 +118,8 @@ test('log rows are coloured by state only, lilac for a warning and magenta for y
   expect(logTone('stranded')).toBe('warn')
   expect(logTone('you')).toBe('you')
   expect(logTone('dispatched')).toBeNull()
+})
+
+test('token counts read at a glance', () => {
+  expect([812, 42_300, 1_000_000, 1_340_000].map(tokensWord)).toEqual(['812', '42k', '1M', '1.3M'])
 })

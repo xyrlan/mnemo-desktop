@@ -8,7 +8,7 @@ import { cn } from '@/ui/cn'
 import { DOT_LABEL, STATUS_LABEL, type AgentDotState, type WorktreeStatus } from './model'
 
 // Orca's glyphs keep their shapes; their colours are the foundation's four state tokens, so a
-// state reads the same in the sidebar, the dashboard and the tabs.
+// state reads the same in the sidebar, the Dispatch tab and the tabs.
 
 const SPINNER_ANIMATION_NAME = 'agent-spinner-rotate'
 

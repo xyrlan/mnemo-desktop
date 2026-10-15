@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
 import { pollWhileShown } from '../shell/while-shown'
-import { useArrivals } from './scene/motion'
 import { Bridge } from './ship-scene/Bridge'
 import { SceneContext, type SceneCtx } from './ship-scene/context'
 import { Deck } from './ship-scene/Deck'
-import { CaptainChip, px, type Hover } from './ship-scene/figures'
+import { DockedCaptain, px, type Hover } from './ship-scene/figures'
 import { columns, G } from './ship-scene/geometry'
+import { useArrivals } from './ship-scene/motion'
 import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
 import { chips, rateChip } from './ship-scene/words'
@@ -178,7 +178,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                     <div key={d.root} className="ship-pod" data-dock={d.root}>
                       <span>{d.name}</span>
                       {d.captains.map((cap) => (
-                        <CaptainChip key={cap.id} captain={cap} focused={focusId === cap.id} onOpen={onOpen} />
+                        <DockedCaptain key={cap.id} captain={cap} focused={focusId === cap.id} onOpen={onOpen} />
                       ))}
                     </div>
                   ))}

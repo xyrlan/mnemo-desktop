@@ -1,10 +1,40 @@
 import type { RepoNode } from '../../fleet/types'
 import type { PaneId, PtyClient } from '../../pty/client'
 import { createSessionHost } from '../../session/host'
-import { child, parent } from '../interact-fixtures'
+import type { ChildSession, ParentSession } from '../../mission/types'
 import type { Captain, Ship, ShipRobot } from '../ship-types'
 
 /** Synthetic ships for the drawer's tests: no real session, path or log. */
+
+export const child = (over: Partial<ChildSession> = {}): ChildSession => ({
+  id: 'a1b2c3d4',
+  session_id: '11111111-0000-4000-8000-000000000001',
+  name: 'nexus hover card',
+  state: 'working',
+  tempo: 'active',
+  needs: null,
+  detail: '',
+  suggested_reply: null,
+  cwd: '/work/mnemo-desktop-wt-c-interact',
+  tokens: 42_300,
+  live: true,
+  updated_at: null,
+  intent: null,
+  branch: 'feat/nexus/interact',
+  timeline_len: 3,
+  account: 'default',
+  ...over,
+})
+
+export const parent = (over: Partial<ParentSession> = {}): ParentSession => ({
+  session_id: '22222222-0000-4000-8000-000000000002',
+  pid: 4242,
+  name: 'nexus round',
+  status: 'busy',
+  cwd: '/work/mnemo-desktop',
+  account: 'default',
+  ...over,
+})
 
 export const robotOf = (over: Partial<ShipRobot> = {}): ShipRobot => {
   const c = over.child ?? child()

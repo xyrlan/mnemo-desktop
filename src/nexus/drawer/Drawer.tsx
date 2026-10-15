@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
 import { EyeOff, X } from 'lucide-react'
-import { STATUS_BAR, TOP_CHROME } from '../../dashboard/AgentDashboardDrawer'
+import { STATUS_BAR, TOP_CHROME } from '../../shell/edges'
 import type { ChangedFile, DiffClient } from '../../diff/client'
 import type { AgentState, RepoNode } from '../../fleet/types'
 import type { PaneViewProps } from '../../panes/registry'

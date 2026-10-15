@@ -169,7 +169,6 @@ const UNPOLLED: Record<string, string> = {
   // Clocks: they move "3 min ago" on screen, nothing more.
   'src/accounts/AccountSwitcher.tsx': 'clock',
   'src/conversation/ConversationView.tsx': 'clock',
-  'src/dashboard/AgentKanbanBoard.tsx': 'clock',
   'src/dispatch/pane.tsx': 'clock',
   'src/sidebar/WorktreeCardAgents.tsx': 'clock',
   'src/vault/HealthTable.tsx': 'clock',

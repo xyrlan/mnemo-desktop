@@ -1,5 +1,5 @@
 /** The fleet: every repo the app knows, its worktrees, and the agents in each. The one data
- *  source for the left sidebar's worktree cards and the dashboard kanban (wave B); the shapes
+ *  source for the left sidebar's worktree cards and the Nexus's agent states; the shapes
  *  are the wave-A contract's (`docs/superpowers/contracts/2026-09-24-orca-redesign-a.md`). */
 
 export type AgentState = 'working' | 'needs-you' | 'done' | 'idle'

@@ -1,7 +1,7 @@
 import { childNext } from '../fleet/model'
 import { basename, dirname, norm } from '../path/path'
 import { needKind, permissionAsk, type ChildSession, type Mission, type ParentSession, type Pr, type RepoGroup } from '../mission/types'
-import { injectedRules } from './packets'
+import { accessoryOf, classOf, injectedRules, isRateLimited, labelOf } from './robot'
 import {
   orphanCaptainId,
   type ActionKind,
@@ -23,7 +23,6 @@ import {
   type ShipRobot,
   type Zone,
 } from './ship-types'
-import { accessoryOf, classOf, isRateLimited, labelOf } from './world'
 
 /* ------------------------------------------------------------------ calibration --
    The prototype's numbers (`docs/superpowers/prototypes/nexus-v2/index.html`), measured on the
@@ -111,7 +110,7 @@ function prEnd(pr: Pr, fate: PrFate | null, now: number): { kind: 'merged' | 'cl
 
 const joinPath = (dir: string, name: string) => (dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`)
 
-/** The repo a group's root folds into (v1's rule, `world.ts`): itself, or for a `<repo>-wt-<name>`
+/** The repo a group's root folds into: itself, or for a `<repo>-wt-<name>`
  *  folder its sibling `<repo>`, preferring one the snapshot knows. */
 function foldedRoot(root: string, known: Map<string, RepoGroup>): string {
   const name = basename(root)
@@ -372,7 +371,8 @@ export function buildShip(input: ShipInput): Ship {
     ...landOrder.flatMap((r) => r.missions.filter((m) => m.landable).map((m): Exception => ({ kind: 'land', root: r.root, mission: m }))),
     ...waiting
       // Only green: the merge gate refuses a PR without checks, so it waits in the hangar unlisted.
-      .filter((p) => p.robot.ci === 'green' && !p.robot.pr!.draft)
+      // A green draft is listed too: the merge marks it ready first (`mergeChecked`).
+      .filter((p) => p.robot.ci === 'green')
       .sort(longestFirst)
       .map((p): Exception => ({ kind: 'ready', robotId: p.robot.id, pr: p.robot.pr!, waitingMs: p.robot.idleMs })),
     ...inDeckOrder
