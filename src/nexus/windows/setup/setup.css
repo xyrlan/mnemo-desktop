@@ -1,0 +1,34 @@
+/* SYSTEMS › Setup in the ship's look, on `src/nexus/ui/`'s `.nx` tokens. */
+
+.nx-su { display: flex; flex-direction: column; gap: 10px; }
+.nx-su p { margin: 0; }
+.nx-su-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.nx-su-summary { color: var(--nx-dim); }
+.nx-su-summary[data-missing] { color: var(--nx-danger); }
+.nx-su-tools { margin: 0; padding: 0; list-style: none; }
+.nx-su-tool { align-items: flex-start; padding: 6px 8px; }
+.nx-su-tool[data-state='found'] { border-left-color: var(--nx-ok); }
+.nx-su-tool[data-state='needed'] { border-left-color: var(--nx-danger); }
+.nx-su-mark { flex: none; width: 12px; font-weight: 700; color: var(--nx-faint); }
+.nx-su-tool[data-state='found'] .nx-su-mark { color: var(--nx-ok); }
+.nx-su-tool[data-state='needed'] .nx-su-mark { color: var(--nx-danger); }
+.nx-su-body { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.nx-su-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nx-su-head b { color: #fff; }
+.nx-su-state { color: var(--nx-dim); }
+.nx-su-tool[data-state='found'] .nx-su-state { color: var(--nx-ok); }
+.nx-su-badge { padding: 0 4px; border: 1px solid var(--nx-edge); border-radius: 2px; font-size: 10px; color: var(--nx-pale); }
+.nx-su-version { flex: 1; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.nx-su-path { overflow: hidden; color: var(--nx-faint); text-overflow: ellipsis; white-space: nowrap; }
+.nx-su-action { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; }
+.nx-su-action code { color: var(--nx-pale); overflow-wrap: anywhere; }
+.nx-su-latest { margin-top: 2px; }
+.nx-su-out { margin-top: 6px; padding: 4px 6px; border: 1px solid var(--nx-edge); background: #000; }
+.nx-su-out-head { font-weight: 700; color: var(--nx-dim); }
+.nx-su-out[data-tone='ok'] .nx-su-out-head { color: var(--nx-ok); }
+.nx-su-out[data-tone='danger'] .nx-su-out-head { color: var(--nx-danger); }
+.nx-su pre { max-height: 200px; margin: 4px 0 0; overflow: auto; font: inherit; font-size: 11px; color: var(--nx-dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nx-su .nx-su-err { color: var(--nx-danger); }
+.nx-su-status { padding: 4px 6px; border: 1px solid #7f1d1d; }
+.nx-su-ok { color: var(--nx-ok); }
+.nx-su-pathsec { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 2px solid var(--nx-edge); }

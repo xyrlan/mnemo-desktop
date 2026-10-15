@@ -1,0 +1,80 @@
+/* The Claude accounts in the ship's look (`AccountsList`, `ShipAccounts`), on `src/nexus/ui/`'s
+   `.nx` tokens. Colour means state only: the active account's mark, a limit's severity, a problem. */
+
+.nx-accts { display: flex; flex-direction: column; gap: 8px; }
+.nx-acct-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.nx-acct { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 2px solid var(--nx-edge); border-radius: 2px; background: #0b0d22cc; }
+.nx-acct[data-active] { border-color: var(--nx-edge-hi); background: #141c3d; }
+/* Narrow (the bar's accounts), the buttons wrap under the name rather than cut it. */
+.nx-acct-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; min-width: 0; }
+.nx .nx-acct-pick { display: flex; flex: 1 1 170px; align-items: flex-start; gap: 8px; min-width: 0; padding: 0; border: 0; background: none; text-align: left; }
+.nx-acct[data-active] .nx-acct-pick { cursor: default; }
+.nx-acct-mark { color: var(--nx-faint); }
+.nx-acct[data-active] .nx-acct-mark { color: var(--nx-edge-hi); }
+.nx-acct-who { display: flex; flex-direction: column; min-width: 0; }
+.nx-acct-name { display: flex; align-items: center; gap: 6px; overflow: hidden; font-weight: 700; color: #fff; white-space: nowrap; }
+.nx-acct-plan { padding: 0 4px; border: 1px solid var(--nx-edge); border-radius: 2px; font-size: 10px; font-weight: 400; letter-spacing: 1px; color: var(--nx-dim); text-transform: uppercase; }
+.nx-acct-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-acct-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.nx-acct-line { margin: 0; overflow-wrap: anywhere; }
+.nx-acct-problem { color: #fbbf24; }
+.nx .nx-acct-share { align-self: flex-start; }
+.nx .nx-acct-add { align-self: flex-start; }
+.nx-acct-form { display: flex; align-items: center; gap: 6px; }
+.nx-acct-form .nx-input { flex: 1; min-width: 0; }
+
+.nx-acct-limits { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.nx-acct-limit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.nx-acct-limit-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-acct-limit-pct { font-variant-numeric: tabular-nums; }
+.nx-acct-limit .nx-acct-bar { grid-column: 1 / -1; }
+
+/* A limit's bar: blocks on the hull, filled in its severity's colour. */
+.nx-acct-bar { display: block; height: 6px; overflow: hidden; border: 1px solid var(--nx-edge); background: #000; }
+.nx-acct-bar > span { display: block; height: 100%; background: var(--nx-dim); }
+.nx-acct-bar[data-tone='ok'] > span { background: var(--nx-ok); }
+.nx-acct-bar[data-tone='warn'] > span { background: #fbbf24; }
+.nx-acct-bar[data-tone='bad'] > span { background: var(--nx-danger); }
+
+.nx-acct-say { display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-left: 3px solid var(--nx-edge-hi); background: #0b0d22; }
+.nx-acct-say[data-tone='danger'] { border-color: var(--nx-danger); color: #fecaca; }
+.nx-acct-say > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.nx .nx-acct-x { padding: 0 4px; border: 0; background: none; color: var(--nx-dim); }
+
+/* ---------- the bar's switcher, and the accounts it opens ---------- */
+.nx .nx-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border: 2px solid var(--nx-edge);
+  border-radius: 2px;
+  background: #0008;
+  font-weight: 700;
+  text-align: left;
+}
+.nx .nx-switch:hover, .nx .nx-switch[aria-expanded='true'] { border-color: var(--nx-edge-hi); }
+.nx .nx-switch:focus-visible { outline: 2px solid var(--nx-edge-hi); outline-offset: 2px; }
+.nx-switch-name { min-width: 0; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
+.nx-switch-warn { flex: none; color: #fbbf24; }
+.nx-switch-use { display: flex; flex: none; align-items: center; gap: 5px; margin-left: auto; color: var(--nx-dim); font-variant-numeric: tabular-nums; }
+.nx-switch-use .nx-acct-bar { width: 36px; }
+.nx-switch-use[data-stale] { opacity: 0.6; }
+.nx-switch-error { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 2px solid #7f1d1d; border-radius: 2px; background: #0008; }
+.nx-switch-error > span { min-width: 0; overflow: hidden; color: #fbbf24; text-overflow: ellipsis; white-space: nowrap; }
+
+.nx-pop {
+  position: fixed;
+  z-index: 59;
+  width: 340px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 8px;
+  border: 2px solid var(--nx-edge-hi);
+  border-radius: 3px;
+  background: var(--nx-hull);
+  box-shadow: 0 0 0 2px #000, 5px 5px 0 #000;
+}
