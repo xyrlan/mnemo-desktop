@@ -17,6 +17,9 @@
 .pane:has(.xterm) { background: var(--bg); }
 .pane-content { position: relative; flex: 1 1 0; min-height: 0; padding: 4px; }
 .pane-body { position: relative; height: 100%; outline: none; }
+/* A view that does not own its terminal is drawn at the owner's size, which may be larger than its
+   box (a pane whose session a bigger popup shows): it is cut at its box, never over its neighbours. */
+.terminal-body { overflow: hidden; }
 .pane .xterm { height: 100%; }
 
 /* With more than one pane in a tab, the ones without focus dim a little, so the focused one reads

@@ -119,8 +119,20 @@ impl Screen {
         }
     }
 
+    /// A shorter screen keeps the cursor's row and the rows above it, as xterm does: the top rows
+    /// scroll into the scrollback first. vt100 alone cuts the bottom rows off, which are the newest
+    /// output, and a view drawn from this screen after a smaller one closed would come back
+    /// without them (#423). A narrower one still cuts each screen row at the new width.
     pub fn resize(&mut self, rows: u16, cols: u16) {
-        self.vt.screen_mut().set_size(rows.max(1), cols.max(1));
+        let rows = rows.max(1);
+        let screen = self.vt.screen();
+        let cursor = screen.cursor_position().0;
+        // The alternate screen has no scrollback, and its program draws it again at the new size.
+        if !screen.alternate_screen() && cursor >= rows {
+            let up = cursor + 1 - rows;
+            self.vt.process(format!("\x1b[{up}S\x1b[{up}A").as_bytes());
+        }
+        self.vt.screen_mut().set_size(rows, cols.max(1));
     }
 
     /// The folder the shell last reported, if it reports one.
@@ -350,6 +362,38 @@ mod tests {
         let mut s = Screen::new(5, 20);
         s.resize(30, 100);
         assert!(s.snapshot().starts_with(b"\x1b[8;30;100t"));
+    }
+
+    #[test]
+    fn a_shorter_screen_keeps_the_newest_lines() {
+        let mut s = Screen::new(10, 20);
+        for n in 1..=9 {
+            s.feed(format!("line {n}\r\n").as_bytes());
+        }
+        s.feed(b"$ newest");
+        // Shown smaller (a popup, a drawer), then at the pane's size again.
+        s.resize(4, 20);
+        assert_eq!(s.vt.screen().contents(), "line 7\nline 8\nline 9\n$ newest");
+        assert_eq!(s.vt.screen().cursor_position(), (3, 8));
+        s.resize(10, 20);
+        let mut p = replay(&s.snapshot(), 10, 20);
+        let lines = all_lines(&mut p);
+        let text: Vec<&str> = lines.iter().map(|l| l.trim_end()).filter(|l| !l.is_empty()).collect();
+        let mut want: Vec<String> = (1..=9).map(|n| format!("line {n}")).collect();
+        want.push("$ newest".into());
+        assert_eq!(text, want);
+        // The shell goes on where it was.
+        s.feed(b"!");
+        assert!(s.vt.screen().contents().ends_with("$ newest!"), "{:?}", s.vt.screen().contents());
+    }
+
+    #[test]
+    fn a_shorter_screen_with_room_above_the_cursor_moves_nothing() {
+        let mut s = Screen::new(10, 20);
+        s.feed(b"$ ls\r\na b\r\n$ ");
+        s.resize(4, 20);
+        assert_eq!(s.vt.screen().contents(), "$ ls\na b\n$ ");
+        assert_eq!(s.vt.screen().cursor_position(), (2, 2));
     }
 
     #[test]

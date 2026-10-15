@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -24,12 +24,31 @@ import ConversationFace from '../conversation/Face'
 
 const platform = detectPlatform()
 
-export default function TerminalPane({ id }: PaneViewProps) {
+/** One view of terminal `id`. Several may show the same terminal at once (#423): the pane's own,
+ *  and the session host's presentations (a popup, the drawer). Each draws every byte; the one that
+ *  owns the terminal sizes it and types into it, and the others are veiled, drawn at its size,
+ *  until they take it back (`attachSink` in the layout store).
+ *
+ *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, and
+ *  the layout's focus is not its. `props.name`: what the presentation calls it, as `owners[id].name`
+ *  says while it owns the terminal (a tab's indicator). `props.active`: takes the terminal each time
+ *  it turns true (a drawer tab shown again), with no remount. `props.close`: what a key closes once
+ *  the program has exited; the pane's own view closes its pane.
+ *
+ *  A presentation hides a view with `display: none` or a box of no size: that is how the view
+ *  knows it is hidden and hands the terminal to one on screen. A transform or `visibility` keeps
+ *  the size, and so keeps the terminal. */
+export default function TerminalPane({ id, props }: PaneViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
+  const sinkRef = useRef<((b: Uint8Array) => void) | null>(null)
   const focused = useApp((s) => s.tabs.find((t) => t.id === s.activeTab)?.focused === id)
   const pane = useApp((s) => s.panes[id])
+  const [owns, setOwns] = useState(true)
   const broken = id < 0
+  const present = props.present === true
+  const name = typeof props.name === 'string' ? props.name : undefined
+  const active = props.active === true
 
   useEffect(() => {
     if (broken) return
@@ -61,13 +80,25 @@ export default function TerminalPane({ id }: PaneViewProps) {
     }
     fit.fit()
 
+    const sink = (b: Uint8Array) => term.write(b, settle)
+    sinkRef.current = sink
+    const mine = () => store.getState().owners[id]?.sink === sink
     /** Fits the terminal to its box and tells the shell; not while the box has no size (a hidden
-     *  tab), so a shell that kept running is never squeezed to xterm's 80×24 meanwhile. */
+     *  tab), so a shell that kept running is never squeezed to xterm's 80×24 meanwhile. A view that
+     *  does not own the shell takes the size its owner gave it instead: the output is drawn for
+     *  that size, and xterm reflows it, losing nothing, when this one takes the shell back. */
     const refit = () => {
       const d = fit.proposeDimensions()
-      if (!d || !(d.cols > 0 && d.rows > 0)) return
+      const shown = !!d && d.cols > 0 && d.rows > 0
+      store.getState().showSink(id, sink, shown)
+      const owner = store.getState().owners[id]
+      if (owner && owner.sink !== sink) {
+        if (owner.cols && owner.rows && (owner.cols !== term.cols || owner.rows !== term.rows)) term.resize(owner.cols, owner.rows)
+        return
+      }
+      if (!shown) return
       fit.fit()
-      void tauriPty.resize(id, term.cols, term.rows)
+      store.getState().sizeSession(id, sink, term.cols, term.rows)
     }
     // A shell attached again (a reload, a relaunch) comes back drawn at the size it had:
     // `CSI 8 ; rows ; cols t`, then its scrollback and screen. The terminal takes that size to draw
@@ -86,7 +117,16 @@ export default function TerminalPane({ id }: PaneViewProps) {
       refitAfterWrite = false
       refit()
     }
-    store.getState().attachSink(id, (b) => term.write(b, settle))
+    const release = store.getState().attachSink(id, sink, present, name)
+    setOwns(mine())
+    // Taking the shell, losing it, or its owner sizing it again: this view fits anew.
+    const unwatch = store.subscribe((s, prev) => {
+      if (s.owners[id] === prev.owners[id]) return
+      // Its own new size.
+      if (s.owners[id]?.sink === sink && prev.owners[id]?.sink === sink) return
+      setOwns(mine())
+      refit()
+    })
     // The desktop MCP reads what this pane shows (`desktop_terminal_read`).
     const unregisterBuffer = registerBuffer(id, () => bufferLines(term.buffer.active))
     // ⌘←/→/⌫/↩ as readline bytes, ⌘C/⌘V through the clipboard (an image pastes as Ctrl+V).
@@ -99,20 +139,23 @@ export default function TerminalPane({ id }: PaneViewProps) {
       // xterm does not cancel a key it is told to leave, and off a Mac the webview's own
       // Ctrl+V would then paste a second time through the textarea's paste event.
       if (platform !== 'mac') e.preventDefault()
-      if ('write' in v) void tauriPty.write(id, v.write)
-      else if ('copy' in v) {
+      if ('write' in v) {
+        if (mine()) void tauriPty.write(id, v.write)
+      } else if ('copy' in v) {
         void navigator.clipboard.writeText(v.copy)
         // Ctrl+C is the interrupt again once the copy is taken, as in Windows Terminal.
         if (platform !== 'mac') term.clearSelection()
       } else if ('paste' in v) {
         void pasteBytes(navigator.clipboard).then((b) => {
-          if (b) void tauriPty.write(id, b)
+          if (b && mine()) void tauriPty.write(id, b)
         })
       }
       return false
     })
+    // Only the owner types into the shell: every view's xterm answers the program's queries (the
+    // cursor position, focus), and the shell must get one answer.
     const data = term.onData((d) => {
-      void tauriPty.write(id, d)
+      if (mine()) void tauriPty.write(id, d)
     })
     // A key, not `onData`: the terminal's own answers to the shell are data too.
     const noticed = term.onKey(() => store.getState().shellNoticed(id))
@@ -159,20 +202,26 @@ export default function TerminalPane({ id }: PaneViewProps) {
       osc7.dispose()
       osc9.dispose()
       resized.dispose()
+      unwatch()
+      release()
       term.dispose()
       termRef.current = null
     }
-  }, [id, broken])
+  }, [id, broken, present, name])
 
   useEffect(() => {
-    if (focused) termRef.current?.focus()
-  }, [focused])
+    if (active && sinkRef.current) store.getState().takeSession(id, sinkRef.current)
+  }, [id, active])
+
+  useEffect(() => {
+    if (focused && !present) termRef.current?.focus()
+  }, [focused, present])
 
   const exited = pane?.exitCode !== undefined
-  const close = () => void store.getState().closePane()
+  const close = typeof props.close === 'function' ? () => void (props.close as () => void)() : () => void store.getState().closePane(id)
   return (
     <div
-      className="pane-body"
+      className="pane-body terminal-body"
       onKeyDown={exited ? close : undefined}
       tabIndex={exited || broken ? 0 : -1}
     >
@@ -186,6 +235,12 @@ export default function TerminalPane({ id }: PaneViewProps) {
       )}
       {exited && (
         <div className="pane-message">[process exited with code {pane?.exitCode ?? '?'}] press any key to close</div>
+      )}
+      {!owns && !broken && !exited && (
+        <div className="pane-message" data-veil="">
+          Shown in another view.
+          <button onClick={() => sinkRef.current && store.getState().takeSession(id, sinkRef.current)}>Show here</button>
+        </div>
       )}
       {pane?.error && (
         <div className="pane-message">

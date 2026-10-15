@@ -165,3 +165,25 @@ test('every terminal shares one webview listener, removed with the last', async 
   b()
   await vi.waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1))
 })
+
+test('a drop on a popup (or a drawer tab) goes to the session it shows, never to the pane under it', () => {
+  const focus = vi.spyOn(store.getState(), 'focusPane').mockImplementation(() => {})
+  const popup = document.body.appendChild(document.createElement('div'))
+  popup.dataset.sessionPty = '60'
+  popup.getBoundingClientRect = () => ({ left: 0, top: 0, width: 150, height: 50, right: 150, bottom: 50, x: 0, y: 0, toJSON: () => ({}) })
+  onFileDrag({ type: 'over', position: { x: 20, y: 5 } }, 1)
+  expect(fileDropStore.getState().over).toBeNull()
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 20, y: 5 } }, 1)
+  expect(invoke).toHaveBeenCalledTimes(1)
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 60, data: '/tmp/a.png ' })
+  expect(focus).not.toHaveBeenCalled()
+  // A popup still attaching takes the drop, and writes it nowhere.
+  invoke.mockClear()
+  popup.dataset.sessionPty = ''
+  onFileDrag({ type: 'drop', paths: ['/tmp/a.png'], position: { x: 20, y: 5 } }, 1)
+  expect(invoke).not.toHaveBeenCalled()
+  // Beside the popup, the pane takes it as before.
+  onFileDrag({ type: 'drop', paths: ['/tmp/c.png'], position: { x: 250, y: 5 } }, 1)
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 8, data: '/tmp/c.png ' })
+  focus.mockRestore()
+})
