@@ -75,7 +75,7 @@ test('the permission setting is Launch agent’s; a resume types claude --resume
 })
 
 test('a resume of a session a pane of the app runs already shows that pane: nothing is started', async () => {
-  const w = world()
+  const w = world({ runsClaude: async (p) => p === 2 })
   await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo-desktop', resume: 'ended-1' })
   expect(tabs()).toEqual([{ id: 'ended-1', kind: 'captain', key: 'pane:1', label: 'claude · mnemo-desktop' }])
   await w.layout.getState().newTab('/work/mnemo')
@@ -83,6 +83,28 @@ test('a resume of a session a pane of the app runs already shows that pane: noth
   await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'live-2' })
   expect(w.spawned).toEqual(['/work/mnemo-desktop', '/work/mnemo'])
   expect(tabs().at(-1)).toEqual({ id: 'live-2', kind: 'captain', key: 'pane:2', label: 'claude · mnemo' })
+})
+
+test('a resume of a session whose pane runs no Claude any more starts it in a new pane, which takes the id (#459)', async () => {
+  // A workbench pane kept its id, but its Claude ended while the app was closed: a stale id.
+  const w = world({ runsClaude: async () => false })
+  await w.layout.getState().newTab('/work/mnemo')
+  w.layout.getState().setSessionId(1, 'stale-1')
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'stale-1' })
+  expect(w.spawned).toEqual(['/work/mnemo', '/work/mnemo'])
+  expect(w.layout.getState().panes[1].sessionId).toBeUndefined()
+  expect(w.layout.getState().panes[2]).toMatchObject({ offscreen: true, sessionId: 'stale-1' })
+  expect(w.sessions.paneOf('stale-1')).toBe(2)
+  expect(tabs()).toEqual([{ id: 'stale-1', kind: 'captain', key: 'pane:2', label: 'claude · mnemo' }])
+})
+
+test('a resume the app cannot tell about shows the pane holding the id: never a second Claude', async () => {
+  const w = world({ runsClaude: async () => Promise.reject(new Error('cannot tell')) })
+  await w.layout.getState().newTab('/work/mnemo')
+  w.layout.getState().setSessionId(1, 'maybe-1')
+  await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'maybe-1' })
+  expect(w.spawned).toEqual(['/work/mnemo'])
+  expect(tabs()).toEqual([{ id: 'maybe-1', kind: 'captain', key: 'pane:1', label: 'claude · mnemo' }])
 })
 
 test('a resume after Claude exited in its tab shows the new pane in that tab, in its place, and the shell left ends', async () => {

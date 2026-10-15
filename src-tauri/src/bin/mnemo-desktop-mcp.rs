@@ -97,7 +97,7 @@ fn tools_for(debug: bool, os: &str) -> Value {
                     "action": { "type": "string", "enum": ["click", "type", "key", "eval"] },
                     "selector": { "type": "string", "description": "CSS selector. click: what to click (required). type, key: what to focus first; without it, the focused element." },
                     "text": { "type": "string", "description": "type: the text to insert at the caret." },
-                    "keys": { "type": "string", "description": "key: chords joined by + and pressed in turn when separated by spaces, e.g. \"Meta+k\", \"Mod+Shift+d\", \"ArrowDown ArrowDown Enter\". Mod is Cmd on macOS and Ctrl elsewhere; Space is the space bar." },
+                    "keys": { "type": "string", "description": "key: chords joined by + and pressed in turn when separated by spaces, e.g. \"Meta+e\", \"Mod+Shift+w\", \"ArrowDown ArrowDown Enter\". Mod is Cmd on macOS and Ctrl elsewhere; Space is the space bar." },
                     "js": { "type": "string", "description": "eval: an expression or a function body (with return), awaited; its value comes back as JSON." }
                 },
                 "required": ["action"],
@@ -210,7 +210,7 @@ tools: {tools}
 
 examples:
   {BIN} call desktop_app_snapshot --out /tmp/app.png
-  {BIN} call desktop_app_drive '{{"action":"key","keys":"Meta+k"}}'
+  {BIN} call desktop_app_drive '{{"action":"key","keys":"Meta+e"}}'
   {BIN} call desktop_app_drive '{{"action":"eval","js":"document.title"}}'
 "#,
         socket = socket_path_from(None, std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })).display(),

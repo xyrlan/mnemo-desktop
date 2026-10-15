@@ -8,9 +8,10 @@ import type { Drawer } from './sessions'
 /** The drawer's tabs across a restart (contract `sessions`): each tab on a pane's session (a
  *  session the Nexus started, a captain or robot in a pane) comes back on that session while the
  *  layout store still holds it: on its pane, or on the pane that resumed its Claude session. A
- *  child's attach and a read-only tab are opened again from the ship. A terminal the restore
- *  brings back that no tab shows and no figure leads to (a workbench tab's shell, before #459) is
- *  opened in a tab of its own (`adoptShells`). */
+ *  child's attach and a read-only tab are opened again from the ship. Every other terminal the app
+ *  keeps is reachable too: one no tab shows and no live Claude's captain leads to (a workbench
+ *  tab's shell, a pane whose Claude ended: #459) opens in a tab of its own (`adoptShells`,
+ *  `adoptIdle`, `adoptLost`). */
 
 export const TABS_KEY = 'mnemo.nexus-drawer.v1'
 
@@ -73,21 +74,67 @@ export function reopenTabs(saved: SavedTabs, panes: Record<PaneId, Pane>, drawer
   if (active) nexus.getState().activateTab(active)
 }
 
-/** Every live terminal the restore brought back that no drawer tab shows and that runs no Claude
- *  session, outside the offscreen ones: a workbench tab's shell, kept in the workspace file from
- *  before the Nexus was the app (#459), or a shell the restore found running that no saved pane
- *  claimed. Nothing on the ship leads to it, so each opens in a drawer tab of its own, after the
- *  tabs kept; the tab shown stays shown. A pane running Claude is left to its captain, as an
- *  offscreen one is. */
-export function adoptShells(panes: Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>): void {
+/** The panes no drawer tab shows: live terminals of the session registry, offscreen or not. */
+function unshown(panes: Record<PaneId, Pane>, nexus: StoreApi<NexusState>): Pane[] {
   const shown = new Set(nexus.getState().tabs.flatMap((t) => (t.key?.startsWith('pane:') ? [Number(t.key.slice(5))] : [])))
-  const was = nexus.getState().activeTab
-  for (const p of Object.values(panes)) {
-    if (p.view !== 'terminal' || p.id <= 0 || p.offscreen || p.sessionId || p.exitCode !== undefined || p.error || shown.has(p.id)) continue
+  return Object.values(panes).filter((p) => p.view === 'terminal' && p.id > 0 && p.exitCode === undefined && !p.error && !shown.has(p.id))
+}
+
+/** Opens each of `adopt` in a drawer tab of its own, a session's: named by the terminal's title,
+ *  else as a shell in its folder. The tab shown stays shown; `quiet`, the drawer also stays as it
+ *  was, and opens collapsed when it had no tab (its handle says what came). */
+function open(adopt: Pane[], drawer: Drawer, nexus: StoreApi<NexusState>, quiet: boolean): void {
+  if (!adopt.length) return
+  const was = nexus.getState()
+  for (const p of adopt) {
     const id = `session:${p.id}`
     if (nexus.getState().tabs.some((t) => t.id === id)) continue
     const label = p.title || (p.cwd ? `shell · ${basename(p.cwd) || p.cwd}` : 'shell')
     drawer.open({ id, kind: 'session', key: null, readOnly: null, label, sessionId: null, cwd: p.cwd ?? null }, { pane: p.id })
   }
-  if (was) nexus.getState().activateTab(was)
+  if (was.activeTab) nexus.getState().activateTab(was.activeTab)
+  if (quiet) nexus.getState().setCollapsed(was.collapsed || !was.activeTab)
+}
+
+/** Every live terminal the restore brought back that no drawer tab shows and that holds no Claude
+ *  session: a workbench tab's shell, kept in the workspace file from before the Nexus was the app
+ *  (#459), or a shell the restore found running that no saved pane claimed. Nothing on the ship
+ *  leads to it, so each opens in a drawer tab of its own, after the tabs kept. A pane with a
+ *  Claude session is left to its captain until `adoptIdle` asks whether a Claude runs there.
+ *  `only`: just these panes, quietly (`adoptLost`). */
+export function adoptShells(panes: Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>, only?: ReadonlySet<PaneId>): void {
+  open(
+    unshown(panes, nexus).filter((p) => !p.sessionId && (!only || only.has(p.id))),
+    drawer,
+    nexus,
+    only !== undefined,
+  )
+}
+
+/** How long after the restore a pane that kept a Claude session id is given to show that Claude
+ *  runs in it: `claude --resume` is typed once the new shell's prompt is up. */
+export const RESUME_WINDOW_MS = 15_000
+
+/** The terminals no drawer tab shows that still hold a Claude session id, each asked whether a
+ *  Claude runs in it (`runsClaude`). One that runs none opens in a drawer tab of its own, quietly,
+ *  as a shell does: its Claude ended while the app was closed, its resume never started (the
+ *  restore could not tell which sessions were live), or the session runs elsewhere (#459). One
+ *  the app cannot tell about counts as running, and is left to its captain. */
+export async function adoptIdle(panes: () => Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>, runsClaude: (pane: PaneId) => Promise<boolean>): Promise<void> {
+  const asked = unshown(panes(), nexus).filter((p) => p.sessionId)
+  const idle = await Promise.all(asked.map((p) => runsClaude(p.id).then((runs) => !runs, () => false)))
+  const now = new Set(unshown(panes(), nexus).map((p) => p.id))
+  open(
+    asked.filter((p, i) => idle[i] && now.has(p.id)).map((p) => panes()[p.id]),
+    drawer,
+    nexus,
+    true,
+  )
+}
+
+/** The terminals no drawer tab shows whose Claude session went (it ended, or `/exit`): nothing on
+ *  the ship leads to them any more, so each opens in a drawer tab of its own, quietly. */
+export function adoptLost(prev: Record<PaneId, Pick<Pane, 'sessionId'>>, panes: Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>): void {
+  const lost = new Set(Object.values(panes).flatMap((p) => (prev[p.id]?.sessionId && !p.sessionId ? [p.id] : [])))
+  if (lost.size) adoptShells(panes, drawer, nexus, lost)
 }

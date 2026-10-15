@@ -1,7 +1,8 @@
 /** The drawer as the app runs it: the app's session host, terminal view, conversation view (for a
  *  read-only tab) and diff, ⌘W claimed; the sessions the Nexus starts (`./start`), the Claude
- *  session each terminal runs, learnt here, and the tabs kept across a restart, with the shells the
- *  restore brought back that no tab showed (`./persist`). A repo opens as a shell in a tab. */
+ *  session each terminal runs, learnt here, and the tabs kept across a restart. Every terminal the
+ *  app keeps is reachable: in a drawer tab, or through its live Claude's captain (`./persist`). A
+ *  repo opens as a shell in a tab. */
 import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
 import { paneRunsClaude } from '../../chrome/running'
@@ -17,7 +18,7 @@ import { nexusStore } from '../store'
 import type { DrawerDeps } from './Drawer'
 import { claimClose } from './keys'
 import { deepestWorktree } from './model'
-import { adoptShells, readTabs, reopenTabs, tabsToSave, writeTabs } from './persist'
+import { adoptIdle, adoptLost, adoptShells, readTabs, reopenTabs, RESUME_WINDOW_MS, tabsToSave, writeTabs } from './persist'
 import { createDrawer } from './sessions'
 import { createSessions, followPanes, type Sessions } from './start'
 
@@ -56,15 +57,21 @@ export const liveSessions: Sessions = (sessions = createSessions({
 // what the drawer shows is kept. Tabs follow the Claude session their pane runs.
 const kept = storage()
 let restoring = true
+let idleCheck: ReturnType<typeof setTimeout> | undefined
 const reopen = () => {
   if (!restoring || !layout.getState().restored) return
   restoring = false
+  // A workspace saved by the workbench (#459): its tabs' terminals are offscreen panes from now on.
+  layout.getState().pocketTabs()
   reopenTabs(readTabs(kept), layout.getState().panes, drawer, nexusStore)
   adoptShells(layout.getState().panes, drawer, nexusStore)
+  idleCheck = setTimeout(() => void adoptIdle(() => layout.getState().panes, drawer, nexusStore, paneRunsClaude), RESUME_WINDOW_MS)
 }
 const unwatchLayout = layout.subscribe((s, prev) => {
   reopen()
-  if (s.panes !== prev.panes) followPanes(nexusStore, s.panes)
+  if (s.panes === prev.panes) return
+  followPanes(nexusStore, s.panes)
+  if (!restoring) adoptLost(prev.panes, s.panes, drawer, nexusStore)
 })
 reopen()
 const unwatchTabs = nexusStore.subscribe((s, prev) => {
@@ -93,6 +100,7 @@ export const liveDrawer: DrawerDeps = {
 }
 
 import.meta.hot?.dispose(() => {
+  clearTimeout(idleCheck)
   unclaim()
   drawer.dispose()
   unwatchLayout()

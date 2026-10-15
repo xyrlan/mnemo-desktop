@@ -52,9 +52,10 @@ export type Pane = {
   /** Which face a terminal pane shows: the xterm (default) or its Claude session as cards (round 20).
    *  The PTY runs underneath either way. */
   face?: Face
-  /** A terminal in no tab: a session the Nexus started (`openOffscreen`), shown only through the
-   *  session host (the drawer). No worktree holds it and nothing in the workbench shows it; it is
-   *  saved and comes back like any other pane. */
+  /** A terminal in no tab: a session the Nexus started (`openOffscreen`), or a workbench tab's
+   *  terminal from a workspace saved before the Nexus was the app (`pocketTabs`), shown only through
+   *  the session host (the drawer). No worktree holds it; it is saved and comes back like any other
+   *  pane. */
   offscreen?: true
 }
 
@@ -169,6 +170,12 @@ export type Actions = {
    *  pane, when the shell could not be spawned. While no view shows it, what it prints is not kept:
    *  the next view is drawn from the core's screen. */
   openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
+  /** The workbench's tabs, as a workspace saved before the Nexus was the app holds them (#459), made
+   *  into what the Nexus shows: every terminal pane in a tab, of every worktree, becomes an
+   *  offscreen pane under its id, its program running on; while no view shows it, what it prints
+   *  is not kept, and the next view is drawn from the core's screen. Every other view, which nothing
+   *  draws any more, goes. The layouts and the worktrees empty. Returns the panes it moved. */
+  pocketTabs(): PaneId[]
   /** ⌘D (`row`) and ⌘⇧D (`col`). In a terminal tab: split its focused pane. In any other tab: a new
    *  terminal tab in the group to the right (below), made when there is none. cwd: where the new
    *  shell starts; defaults to the focused pane's OSC 7 cwd. */
@@ -301,6 +308,10 @@ export const DEFAULT_COLS = 80
 export const DEFAULT_ROWS = 24
 /** Delay before a command is typed into a fresh shell, so it lands after the prompt. */
 export const PROMPT_DELAY_MS = 700
+/** What a terminal no view shows keeps for the next view, in bytes, at most (#459). Past it, a
+ *  pane's next view is drawn from the core's screen instead; with no core to ask (a test, a
+ *  terminal that is no pane), the newest output is kept. */
+export const PENDING_MAX = 512 * 1024
 
 /** The shown layout's fields of the state. */
 const fields = (l: WorktreeLayout): WorktreeLayout => ({ tabs: l.tabs, activeTab: l.activeTab, groups: l.groups, groupRoot: l.groupRoot, activeGroup: l.activeGroup })
@@ -454,6 +465,31 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
     /** Output that arrived before a TerminalPane attached its sink (the shell prompt
      *  usually lands before `pty.spawn` even resolves). Flushed by attachSink. */
     const pending = new Map<PaneId, Uint8Array[]>()
+    /** The bytes in `pending`, by terminal. */
+    const pendingBytes = new Map<PaneId, number>()
+    /** Keeps `chunks` for terminal `id`'s next view, within `PENDING_MAX`. */
+    function hold(id: PaneId, chunks: Uint8Array[]) {
+      if (!chunks.length) return
+      const list = pending.get(id) ?? []
+      list.push(...chunks)
+      pending.set(id, list)
+      let bytes = (pendingBytes.get(id) ?? 0) + chunks.reduce((n, b) => n + b.length, 0)
+      if (bytes > PENDING_MAX) {
+        if (get().panes[id] && (opts.sessions ?? providedSessions())) {
+          // The core holds its screen: the next view is drawn from that, and nothing is kept.
+          blank.add(id)
+          unhold(id)
+          replay.delete(id)
+          return
+        }
+        while (list.length > 1 && bytes > PENDING_MAX) bytes -= list.shift()!.length
+      }
+      pendingBytes.set(id, bytes)
+    }
+    function unhold(id: PaneId) {
+      pending.delete(id)
+      pendingBytes.delete(id)
+    }
     /** What attachSink flushed, handed again to the next sink until live output reaches one: a view
      *  mounted twice in a row (StrictMode) would otherwise draw a restored screen into the first,
      *  discarded terminal and leave the second blank. */
@@ -536,7 +572,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         views.delete(id)
         if (get().panes[id]?.offscreen) {
           blank.add(id)
-          pending.delete(id)
+          unhold(id)
           replay.delete(id)
         }
         set((s) => {
@@ -564,7 +600,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       for (const id of ids) {
         gone.add(id)
         blank.delete(id)
-        pending.delete(id)
+        unhold(id)
         replay.delete(id)
         seeds.delete(id)
       }
@@ -582,7 +618,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       if (sink) {
         replay.delete(id)
         sink(b)
-      } else if (!blank.has(id)) pending.get(id)?.push(b) ?? pending.set(id, [b])
+      } else if (!blank.has(id)) hold(id, [b])
     }
 
     /** Types `cmd` and Enter into the fresh shell of terminal `id`, once its prompt is up. A write
@@ -625,7 +661,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           },
         })
         assigned = id
-        if (early.length) pending.set(id, [...(pending.get(id) ?? []), ...early])
+        hold(id, early)
         set((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal', cwd } } }))
         void pty.onExit(id, (code) => get().paneExited(id, code))
         return id
@@ -646,7 +682,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       const early: Uint8Array[] = []
       try {
         const screen = await sessions.attach(id, (b) => (attached ? route(id, b) : early.push(b)))
-        pending.set(id, [...(screen.length ? [screen] : []), ...early])
+        // Kept, even empty, for its first view: what it shows now, then what it printed.
+        unhold(id)
+        pending.set(id, [])
+        hold(id, [...(screen.length ? [screen] : []), ...early])
         attached = true
         return true
       } catch {
@@ -872,11 +911,37 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const early: Uint8Array[] = []
         const id = await pty.spawn({ cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, onOutput: (b) => (assigned === null ? early.push(b) : route(assigned, b)) })
         assigned = id
-        if (early.length) pending.set(id, [...(pending.get(id) ?? []), ...early])
+        hold(id, early)
         set((s) => ({ panes: { ...s.panes, [id]: offscreenPane(id, cwd, sessionId) } }))
         void pty.onExit(id, (code) => get().paneExited(id, code))
         if (cmd) typeCommand(id, cmd)
         return id
+      },
+
+      pocketTabs() {
+        const s0 = get()
+        const ids = [shown(s0), ...Object.values(s0.parked)].flatMap((l) => l.tabs.flatMap((t) => leaves(t.root)))
+        const moved = ids.filter((id) => id > 0 && s0.panes[id]?.view === 'terminal')
+        const dropped = ids.filter((id) => !moved.includes(id))
+        if (!ids.length && !s0.worktrees.length && s0.activeWorktree === null) return []
+        // No view shows them: what they printed meanwhile is the core's screen, where the next view
+        // is drawn from.
+        if (opts.sessions ?? providedSessions()) {
+          for (const id of moved) {
+            if (views.get(id)?.length) continue
+            blank.add(id)
+            unhold(id)
+            replay.delete(id)
+          }
+        }
+        bury(dropped)
+        set((s) => {
+          const panes = { ...s.panes }
+          for (const id of moved) if (panes[id]) panes[id] = { ...panes[id], offscreen: true }
+          for (const id of dropped) delete panes[id]
+          return { panes, ...EMPTY_LAYOUT, parked: {}, worktrees: [], activeWorktree: null }
+        })
+        return moved
       },
 
       async split(dir, cwd) {
@@ -1219,7 +1284,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           }
           own(id, v)
           const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
-          pending.delete(id)
+          unhold(id)
           if (chunks.length) replay.set(id, chunks)
           for (const b of chunks) sink(b)
         } else {

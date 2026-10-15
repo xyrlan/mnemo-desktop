@@ -15,6 +15,7 @@ export type SessionLayout = StoreApi<{
   panes: Record<PaneId, Pane>
   openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
   closePane(id?: PaneId): Promise<void>
+  setSessionId(id: PaneId, sessionId: string | undefined): void
 }>
 
 export type StartDeps = {
@@ -78,8 +79,13 @@ export function createSessions(d: StartDeps): Sessions {
     async openSession(spec) {
       const label = labelFor(spec)
       if (spec.kind === 'claude') {
-        // A session one of the app's panes runs already is shown, never started a second time.
-        const running = spec.resume ? paneOf(spec.resume) : null
+        // A session one of the app's panes runs already is shown, never started a second time. A
+        // pane that holds its id but runs no Claude (it ended while the app was closed, or its
+        // resume never started: #459) is no such pane: the session resumes in a new one, which
+        // holds the id from then on. One the app cannot tell about counts as running.
+        const held = spec.resume ? paneOf(spec.resume) : null
+        const running = held !== null && (await d.runsClaude(held).catch(() => true)) ? held : null
+        if (held !== null && running === null) d.layout.getState().setSessionId(held, undefined)
         const id = spec.resume ?? d.newId()
         const tab: DrawerTab = { id, kind: 'captain', key: null, readOnly: null, label, sessionId: id, cwd: spec.root }
         if (running !== null) return show(tab, running)
