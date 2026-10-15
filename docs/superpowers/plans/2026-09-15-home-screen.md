@@ -1330,7 +1330,7 @@ export default function Home() {
 
 ### Task 10: Real-app check and PR
 
-- [ ] **Step 1:** `pnpm tauri dev` (background). Confirm: app opens on Home with real repos (mnemo, mnemo-desktop… and no `/Users/xyrlan`, no `tmp-probe`); worktree sessions listed under the main repo with their cwd shown; clicking a dead session opens a tab that types `claude --resume <id>`; ⌘⇧W on the last tab returns to Home; "Abrir pasta" on a non-git folder shows the notice; Clone `xyrlan/mnemo-desktop` into a temp base would type the `gh` line (cancel or let it run into a temp dir).
+- [ ] **Step 1:** `pnpm tauri dev` (background). Confirm: app opens on Home with real repos (mnemo, mnemo-desktop… and no `/Users/you`, no `tmp-probe`); worktree sessions listed under the main repo with their cwd shown; clicking a dead session opens a tab that types `claude --resume <id>`; ⌘⇧W on the last tab returns to Home; "Abrir pasta" on a non-git folder shows the notice; Clone `xyrlan/mnemo-desktop` into a temp base would type the `gh` line (cancel or let it run into a temp dir).
 - [ ] **Step 2:** Fix anything found, commit.
 - [ ] **Step 3:** `git push -u origin feat/home-screen`, `gh pr create` with `Closes` none (no issue), body from the spec's Decisions table. Gate merge on `gh pr checks --fail-fast` exit code, then `gh pr merge --squash --delete-branch`.
 

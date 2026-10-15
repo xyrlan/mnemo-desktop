@@ -47,23 +47,23 @@ function harness(o: { decided?: Record<string, Answer>; dry?: string; ready?: Pr
 
 test('a repo with no decision and sessions to read gets the consent, once per run', async () => {
   const { h, deps, move } = harness()
-  h.cwd = '/r/clubinho'
+  h.cwd = '/r/repo-a'
   watchForReview(deps)
   await flush()
-  expect(h.shown).toEqual([[{ project: 'clubinho', root: '/r/clubinho' }, { project: 'clubinho', sessions: 44, callsEstimate: 19, priceUsd: 1.2 }]])
-  expect(h.calls).toEqual(['project /r/clubinho', 'decided clubinho', 'dry-run clubinho'])
+  expect(h.shown).toEqual([[{ project: 'repo-a', root: '/r/repo-a' }, { project: 'repo-a', sessions: 44, callsEstimate: 19, priceUsd: 1.2 }]])
+  expect(h.calls).toEqual(['project /r/repo-a', 'decided repo-a', 'dry-run repo-a'])
   // A worktree or a subfolder of the same project asks nothing more.
-  await move('/r/clubinho-wt-3')
-  await move('/r/clubinho/src')
-  await move('/r/clubinho')
+  await move('/r/repo-a-wt-3')
+  await move('/r/repo-a/src')
+  await move('/r/repo-a')
   expect(h.shown).toHaveLength(1)
-  expect(h.calls.filter((c) => c.startsWith('decided'))).toEqual(['decided clubinho'])
+  expect(h.calls.filter((c) => c.startsWith('decided'))).toEqual(['decided repo-a'])
 })
 
 test('nothing is asked before setup is done', async () => {
   let done = () => {}
   const { h, deps } = harness({ ready: new Promise<void>((r) => (done = r)) })
-  h.cwd = '/r/clubinho'
+  h.cwd = '/r/repo-a'
   watchForReview(deps)
   await flush()
   expect(h.calls).toEqual([])
@@ -73,15 +73,15 @@ test('nothing is asked before setup is done', async () => {
 })
 
 test('a recorded decision, or no session to read, asks nothing', async () => {
-  const decided = harness({ decided: { clubinho: 'later' } })
-  decided.h.cwd = '/r/clubinho'
+  const decided = harness({ decided: { 'repo-a': 'later' } })
+  decided.h.cwd = '/r/repo-a'
   watchForReview(decided.deps)
   await flush()
   expect(decided.h.shown).toEqual([])
-  expect(decided.h.calls).toEqual(['project /r/clubinho', 'decided clubinho'])
+  expect(decided.h.calls).toEqual(['project /r/repo-a', 'decided repo-a'])
 
   const none = harness({ dry: dryRunNone })
-  none.h.cwd = '/r/clubinho'
+  none.h.cwd = '/r/repo-a'
   watchForReview(none.deps)
   await flush()
   expect(none.h.shown).toEqual([])
@@ -93,8 +93,8 @@ test('opening another repo later checks that one; outside a repo nothing runs', 
   await flush()
   await move('/tmp/scratch')
   expect(h.calls).toEqual(['project /tmp/scratch'])
-  await move('/r/clearframe')
-  expect(h.shown.map(([t]) => t.project)).toEqual(['clearframe'])
+  await move('/r/repo-c')
+  expect(h.shown.map(([t]) => t.project)).toEqual(['repo-c'])
 })
 
 test('a stopped watch asks nothing more', async () => {
@@ -102,6 +102,6 @@ test('a stopped watch asks nothing more', async () => {
   const stop = watchForReview(deps)
   await flush()
   stop()
-  await move('/r/clubinho')
+  await move('/r/repo-a')
   expect(h.calls).toEqual([])
 })

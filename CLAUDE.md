@@ -18,3 +18,24 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH=/Library/Developer/Comman
 - **Per-piece target, for parallel builds only:** `CARGO_TARGET_DIR=$HOME/.cache/mnemo-desktop-<piece>`. It keeps a child off the shared target's lock. It is temporary: a contract that names one says so.
 - **Landing removes it:** run `pnpm targets prune <piece>…` for each landed piece.
 - **Bounding:** Cargo never deletes stale artifacts, so `pnpm test` first runs `pnpm targets check`. It warns when the canonical target passes 20 GB (`pnpm targets trim`) or a per-piece target has sat untouched for 24 h (`pnpm targets prune`). `pnpm targets` lists the sizes.
+
+## Public text never names a private repository
+
+This repo is public. Commits, PR bodies, issues, comments, docs, code and
+fixtures are public. None of them names a private repository or someone else's
+private project — use its alias or "a private repo". The names and their
+aliases live on the maintainer's machine at `~/mnemo/.mnemo/private-names.tsv`
+(`name<TAB>alias`) and never in the repo; grep a diff against it before
+publishing:
+
+```sh
+git grep -i -F -f <(cut -f1 ~/mnemo/.mnemo/private-names.tsv)
+```
+
+Home paths are the same kind of leak: write `/Users/you/…` or `~/…`, not a
+real username. A fixture copied from a real row needs both scrubs. This must
+print nothing too:
+
+```sh
+git grep -F "/Users/$(whoami)"
+```

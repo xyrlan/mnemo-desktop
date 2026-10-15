@@ -101,7 +101,7 @@ test('a pulse from the pane repo also plays the overlay scene', async () => {
 })
 
 test('a pulse from another repo plays no overlay', async () => {
-  await push(ev({ project: 'clubinho', agent: 'clubinho' }))
+  await push(ev({ project: 'repo-a', agent: 'repo-a' }))
   expect(host.querySelector('.pv-overlay')).toBeNull()
 })
 

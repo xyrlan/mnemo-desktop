@@ -25,7 +25,7 @@ describe('routePulse', () => {
     expect(routePulse(ev({ kind: 'learned' }), [a, b])).toBe(1)
     expect(routePulse(ev({ kind: 'learned' }), [a, { ...b, focused: true }])).toBe(2)
     expect(routePulse(ev({ kind: 'tool' }), [{ ...a, place: 'mnemo' }, b])).toBe(2)
-    expect(routePulse(ev({ project: 'clubinho', agent: 'clubinho' }), [a, b])).toBeUndefined()
+    expect(routePulse(ev({ project: 'repo-a', agent: 'repo-a' }), [a, b])).toBeUndefined()
   })
 
   test('an unclaimed session falls back to a repo pane that could be running it, never to one running another', () => {

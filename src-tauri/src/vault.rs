@@ -1720,7 +1720,7 @@ mod tests {
         for n in ["bg-77p0-T-pytest-of-x", "mnemo-wt-158", "mnemo-desktop-wt-c-vault", "tmp.H06a3erqDC", "live-full", "lean", "claude-jobs-1f87-tmp-probe", "501--Users-x-scratchpad", "test_session_start0"] {
             assert!(is_noise(n), "{n} should be noise");
         }
-        for n in ["mnemo", "mnemo-desktop", "clearframe-fase2", "saints-network", "public", "app"] {
+        for n in ["mnemo", "mnemo-desktop", "repo-c-fase2", "repo-f", "public", "app"] {
             assert!(!is_noise(n), "{n} is a repo");
         }
     }
@@ -1740,7 +1740,7 @@ mod tests {
         assert_eq!(ok("reverify", &[]), Ok(()));
         assert_eq!(ok("reverify", &["--json"]), Ok(()));
         assert_eq!(ok("rewrites", &[]), Ok(()));
-        assert_eq!(ok("rewrites", &["--show", "project/clubinho__sprints-github"]), Ok(()));
+        assert_eq!(ok("rewrites", &["--show", "project/repo-a__sprints-github"]), Ok(()));
         assert_eq!(ok("rewrites", &["--apply-safe"]), Ok(()));
         assert_eq!(ok("learn", &[]), Ok(()));
         assert_eq!(ok("status", &["--scope", "project"]), Ok(()));
@@ -1954,7 +1954,7 @@ mod tests {
     #[test]
     fn rule_ids_name_their_slug() {
         assert_eq!(rule_slug("mnemo-desktop__shared-target-dir"), "shared-target-dir");
-        assert_eq!(rule_slug("project/clubinho__sprints"), "sprints");
+        assert_eq!(rule_slug("project/repo-a__sprints"), "sprints");
         assert_eq!(rule_slug("plain"), "plain");
     }
 

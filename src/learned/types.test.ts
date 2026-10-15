@@ -7,7 +7,7 @@ import drop from './fixtures/drop.json?raw'
 import { day, firstExpiry, groupPages, jsonOf, parseDecided, parseDryRun, parseListing, parseProgress } from './types'
 
 test('the dry run reads its session count and call estimate', () => {
-  expect(parseDryRun(dryRun)).toEqual({ project: 'clubinho', sessions: 44, callsEstimate: 19, priceUsd: 1.2 })
+  expect(parseDryRun(dryRun)).toEqual({ project: 'repo-a', sessions: 44, callsEstimate: 19, priceUsd: 1.2 })
   expect(parseDryRun(dryRunNone)?.sessions).toBe(0)
   expect(parseDryRun('mnemo: no such option --dry-run')).toBeNull()
   expect(parseDryRun('{"project": "x"}')).toBeNull()
@@ -15,16 +15,16 @@ test('the dry run reads its session count and call estimate', () => {
 
 test('the listing reads every page with its excerpt and expiry', () => {
   const l = parseListing(listing)!
-  expect(l.project).toBe('clubinho')
+  expect(l.project).toBe('repo-a')
   expect(l.pages.map((p) => p.key)).toEqual([
-    'project/clubinho__cron-annual-bloqueado-183',
-    'project/clubinho__staging-db-is-shared',
-    'feedback/clubinho__answer-in-portuguese',
-    'reference/clubinho__asaas-sandbox',
-    'user/clubinho__runs-on-a-mac',
+    'project/repo-a__cron-annual-bloqueado-183',
+    'project/repo-a__staging-db-is-shared',
+    'feedback/repo-a__answer-in-portuguese',
+    'reference/repo-a__asaas-sandbox',
+    'user/repo-a__runs-on-a-mac',
   ])
   expect(l.pages[0]).toEqual({
-    key: 'project/clubinho__cron-annual-bloqueado-183',
+    key: 'project/repo-a__cron-annual-bloqueado-183',
     type: 'project',
     name: 'Annual cron blocked until #183',
     description: 'The annual billing cron stays disabled until #183 lands.',
@@ -51,10 +51,10 @@ test('pages group in the spec order, other types after under their own name', ()
 
 test('a decision reads what it did and what failed, for either flag', () => {
   expect(parseDecided(promoteFailed, 'promoted')).toEqual({
-    done: ['project/clubinho__cron-annual-bloqueado-183', 'feedback/clubinho__answer-in-portuguese', 'reference/clubinho__asaas-sandbox'],
-    failed: [{ key: 'user/clubinho__runs-on-a-mac', error: 'not staged' }],
+    done: ['project/repo-a__cron-annual-bloqueado-183', 'feedback/repo-a__answer-in-portuguese', 'reference/repo-a__asaas-sandbox'],
+    failed: [{ key: 'user/repo-a__runs-on-a-mac', error: 'not staged' }],
   })
-  expect(parseDecided(drop, 'dropped')).toEqual({ done: ['project/clubinho__staging-db-is-shared'], failed: [] })
+  expect(parseDecided(drop, 'dropped')).toEqual({ done: ['project/repo-a__staging-db-is-shared'], failed: [] })
   // The other flag's answer is not this one's.
   expect(parseDecided(drop, 'promoted')).toBeNull()
   expect(parseDecided('Traceback (most recent call last):', 'dropped')).toBeNull()

@@ -116,7 +116,7 @@ A dispatch whose parent session is not yet in the map is **dropped**, not guesse
 
 ### 4.5 `enforce` is not verifiable today
 
-`denial-log.jsonl` **does not exist** in the live vault (`/Users/xyrlan/mnemo/.mnemo/`), so the existing enforcement toast has most likely never fired against real data. `Tail::at_end` already handles an absent file (it reads from the first line once it appears), so nothing breaks — but `enforce` is the one kind that cannot be validated with a real fixture until a denial happens. Its test uses the synthetic fixture already in `src-tauri/fixtures/pulse/denial-log.jsonl`.
+`denial-log.jsonl` **does not exist** in the live vault (`/Users/you/mnemo/.mnemo/`), so the existing enforcement toast has most likely never fired against real data. `Tail::at_end` already handles an absent file (it reads from the first line once it appears), so nothing breaks — but `enforce` is the one kind that cannot be validated with a real fixture until a denial happens. Its test uses the synthetic fixture already in `src-tauri/fixtures/pulse/denial-log.jsonl`.
 
 ## 5. The overlay
 

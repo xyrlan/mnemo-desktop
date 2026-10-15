@@ -11,7 +11,7 @@ agent". The dashboard card and the notification of a child that needs you do the
 (`src/sidebar/actions.ts`, `src/dashboard/store.ts`, `src/notify/view.tsx`: "a dispatched child
 shows its worktree only").
 
-On 2026-09-25 two children in clearframe were waiting on the maintainer. Nothing they clicked led
+On 2026-09-25 two children in repo-c were waiting on the maintainer. Nothing they clicked led
 to the question.
 
 The screen that answers a child already exists: the mission pane (`src/mission/view.tsx`), with
@@ -110,7 +110,7 @@ maintainer's work competes with it, which the redesign forbids.
 - **A wave** is the `feature` of the branch `feat/<feature>/<piece>`, with its contract when one
   is found in `docs/contracts/`, `docs/superpowers/contracts/` or `contracts/`.
 - **The parent workspace** is the worktree holding the cwd of the child's `parent_session`. When
-  that session is gone, it is the repo's main checkout. A clearframe child goes to a clearframe
+  that session is gone, it is the repo's main checkout. A repo-c child goes to a repo-c
   workspace.
 - **A wave leaves the tab** when all its pieces are merged or closed and mnemo prunes them. Until
   then, a finished wave stays folded.

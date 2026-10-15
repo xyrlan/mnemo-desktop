@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn names_sanitize_as_mnemo_does() {
-        assert_eq!(sanitize("clubinho"), "clubinho");
+        assert_eq!(sanitize("repo-a"), "repo-a");
         assert_eq!(sanitize("my repo (old)"), "my-repo-old");
         assert_eq!(sanitize("--x--"), "x");
         assert_eq!(sanitize("çà"), "root");
@@ -303,9 +303,9 @@ mod tests {
 
     #[test]
     fn projects_and_keys_are_checked_before_anything_runs() {
-        assert!(check(Step::List, "clubinho", &[]).is_ok());
+        assert!(check(Step::List, "repo-a", &[]).is_ok());
         assert!(check(Step::DryRun, "mnemo-desktop", &[]).is_ok());
-        assert!(check(Step::Promote, "clubinho", &strs(&["project/clubinho__cron-183", "feedback/b"])).is_ok());
+        assert!(check(Step::Promote, "repo-a", &strs(&["project/repo-a__cron-183", "feedback/b"])).is_ok());
         for bad in ["", "-rf", "..", "a b", "a/b", "$(x)"] {
             assert!(check(Step::List, bad, &[]).is_err(), "{bad:?} passed");
         }
@@ -367,16 +367,16 @@ mod tests {
     fn answers_are_recorded_per_project_and_read_back() {
         let dir = temp_dir("install-review-record");
         let rec = dir.join("sub").join("install-review.json");
-        assert_eq!(decided_at(&rec, None, "clubinho"), None);
-        record_at(&rec, "clubinho", "later", 5).unwrap();
-        record_at(&rec, "clearframe", "not-now", 6).unwrap();
-        record_at(&rec, "clubinho", "kept", 7).unwrap();
-        assert_eq!(decided_at(&rec, None, "clubinho").as_deref(), Some("kept"));
-        assert_eq!(decided_at(&rec, None, "clearframe").as_deref(), Some("not-now"));
+        assert_eq!(decided_at(&rec, None, "repo-a"), None);
+        record_at(&rec, "repo-a", "later", 5).unwrap();
+        record_at(&rec, "repo-c", "not-now", 6).unwrap();
+        record_at(&rec, "repo-a", "kept", 7).unwrap();
+        assert_eq!(decided_at(&rec, None, "repo-a").as_deref(), Some("kept"));
+        assert_eq!(decided_at(&rec, None, "repo-c").as_deref(), Some("not-now"));
         assert_eq!(decided_at(&rec, None, "mnemo"), None);
-        assert!(record_at(&rec, "clubinho", "maybe", 8).is_err());
+        assert!(record_at(&rec, "repo-a", "maybe", 8).is_err());
         assert!(record_at(&rec, "../x", "kept", 8).is_err());
-        assert_eq!(decided_at(&rec, None, "clubinho").as_deref(), Some("kept"));
+        assert_eq!(decided_at(&rec, None, "repo-a").as_deref(), Some("kept"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -387,18 +387,18 @@ mod tests {
         let vault = dir.join("vault");
         std::fs::create_dir_all(vault.join(".mnemo")).unwrap();
         let rows = [
-            r#"{"event":"promoted","key":"project/a","project":"clubinho"}"#,
+            r#"{"event":"promoted","key":"project/a","project":"repo-a"}"#,
             r#"{"event":"offered","key":"project/b","project":"mnemo","via":"review"}"#,
             r#"{"event":"dropped","key":"project/c","project":"other","via":"review"}"#,
             "not json",
         ];
         std::fs::write(vault.join(".mnemo/inbox-offers.jsonl"), rows.join("\n")).unwrap();
-        assert_eq!(decided_at(&rec, Some(&vault), "clubinho"), None, "a promote outside a review");
+        assert_eq!(decided_at(&rec, Some(&vault), "repo-a"), None, "a promote outside a review");
         assert_eq!(decided_at(&rec, Some(&vault), "mnemo"), None, "an offer is no decision");
         assert_eq!(decided_at(&rec, Some(&vault), "other").as_deref(), Some("review"));
         // The rotated ledger is read too.
-        std::fs::write(vault.join(".mnemo/inbox-offers.jsonl.1"), r#"{"event":"promoted","key":"k","project":"clubinho","via":"review"}"#).unwrap();
-        assert_eq!(decided_at(&rec, Some(&vault), "clubinho").as_deref(), Some("review"));
+        std::fs::write(vault.join(".mnemo/inbox-offers.jsonl.1"), r#"{"event":"promoted","key":"k","project":"repo-a","via":"review"}"#).unwrap();
+        assert_eq!(decided_at(&rec, Some(&vault), "repo-a").as_deref(), Some("review"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
