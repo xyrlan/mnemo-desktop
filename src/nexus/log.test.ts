@@ -152,3 +152,36 @@ describe('logEvents: changes', () => {
     expect(x.map((e) => e.id)).toEqual(['dispatched:a1', 'pr-opened:a1:7'])
   })
 })
+
+describe('logEvents: a captain waiting on you', () => {
+  const lead = (view: AgentView | null, feed: Feed | null = null, now = NOW) =>
+    buildShip({ snapshot: snap(repo([])), feed, agents: view ? { [P1]: view } : {}, events: [], firstSeen: { [P1]: NOW - HOUR }, now })
+  const waits = (waitingFor: AgentView['waitingFor']): AgentView => ({ state: 'needs-you', waitingFor, title: 'fleet lead' })
+  const pushing = (at: number) => feedOf({ [P1]: sf({ activity: { tool: 'Bash', target: 'git push', at, running: true } }) })
+
+  it('logs a blocked milestone for that captain when it starts waiting, once', () => {
+    const idle = lead({ state: 'idle', waitingFor: null, title: 'fleet lead' })
+    const blocked = lead(waits('permission'))
+    const evs = logEvents(idle, blocked, NOW)
+    expect(evs.map((e) => [e.kind, e.robotId, e.captainId, e.text])).toEqual([['blocked', null, P1, 'fleet lead waits on a permission']])
+    expect(logEvents(blocked, lead(waits('permission'), null, NOW + MIN), NOW + MIN)).toEqual([])
+  })
+
+  it('logs on the first build too, as a blocked robot is', () => {
+    expect(kinds(logEvents(null, lead(waits('permission')), NOW))).toEqual([['blocked', null]])
+  })
+
+  it('says the question when the feed has one', () => {
+    const feed = feedOf({ [P1]: sf({ ask: { question: 'Which schema?', options: ['v1', 'v2'] } }) })
+    expect(logEvents(null, lead(waits('question'), feed), NOW).map((e) => e.text)).toEqual(['fleet lead asks: Which schema?'])
+    expect(logEvents(null, lead(waits('question')), NOW).map((e) => e.text)).toEqual(['fleet lead waits on a question'])
+  })
+
+  it('a later wait on the same kind of prompt is a new milestone', () => {
+    const first = logEvents(null, lead(waits('permission'), pushing(NOW - MIN)), NOW)
+    const later = logEvents(lead(working, pushing(NOW + 5 * MIN)), lead(waits('permission'), pushing(NOW + 9 * MIN), NOW + 10 * MIN), NOW + 10 * MIN)
+    expect(first).toHaveLength(1)
+    expect(later).toHaveLength(1)
+    expect(later[0].id).not.toBe(first[0].id)
+  })
+})

@@ -20,11 +20,12 @@ export type NexusState = {
   triage: boolean
   setTriage(open: boolean): void
   /** Triage asked for from outside the view (the sidebar's needs-you count): the Nexus opens, and
-   *  the view opens triage only when its ship has a robot to triage (`settleTriageAsk`). The count
-   *  also counts interactive sessions, which triage has no card for. */
+   *  the view opens triage only when its ship has a card to triage (`settleTriageAsk`): a robot or
+   *  a captain waiting on you, the sessions the count counts. */
   triageAsked: boolean
   askTriage(): void
-  /** The view's answer to `askTriage`, from the ship it built: `needs` robots wait on a decision. */
+  /** The view's answer to `askTriage`, from the ship it built (`counts.need`): `needs` robots and
+   *  captains wait on a decision, each a triage card. */
   settleTriageAsk(needs: number): void
   /** The ship's log, oldest first, at most `LOG_MAX`; an event already logged (same `id`) is skipped. */
   log: LogEvent[]

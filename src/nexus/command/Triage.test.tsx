@@ -41,7 +41,7 @@ const key = (k: string) => act(async () => void window.dispatchEvent(new Keyboar
 
 test('one card per need on the bridge, with its breadcrumbs, title and question', () => {
   const cards = cardsOf(ship())
-  expect(cards.map((c) => [c.robot.id, c.crumbs.join(' ▸ '), c.title])).toEqual([
+  expect(cards.map((c) => [c.id, c.crumbs.join(' ▸ '), c.title])).toEqual([
     ['101', 'mnemo-desktop ▸ ◆ fleet lead ▸ #101', 'Work on issue in this repo (101)'],
     ['102', 'mnemo-desktop ▸ ◆ fleet lead ▸ #102', 'Work on issue in this repo (102)'],
   ])
@@ -129,4 +129,63 @@ test('"always" takes a second press', async () => {
   expect(host.querySelector('[data-triage-option="always"]')!.textContent).toBe('AA again: always')
   await key('a')
   expect(ran).toEqual([{ kind: 'answer', robotId: '102', text: 'always' }])
+})
+
+const LEAD = 'cap-1-0000-4000-8000-000000000000'
+const MAIN = 'cap-3-0000-4000-8000-000000000000'
+/** The fixture ship with its lead captain waiting on a permission ahead of the children, and the
+ *  docked one on a question behind them. */
+function withCaptains(): Ship {
+  const s = ship()
+  const lead = { ...s.decks[0].captains[0], pose: 'alert' as const, topic: 'Land the nexus v2 pieces' }
+  return {
+    ...s,
+    decks: [{ ...s.decks[0], captains: [lead] }],
+    bridge: {
+      ...s.bridge,
+      exceptions: [
+        { kind: 'captain', captainId: LEAD, waitsOn: 'permission', question: null, since: 0, lines: ['⌘ Bash · git push origin main'] },
+        ...s.bridge.exceptions.slice(0, 2),
+        { kind: 'captain', captainId: MAIN, waitsOn: 'question', question: 'Which schema?', since: null, lines: [] },
+        ...s.bridge.exceptions.slice(2),
+      ],
+    },
+    counts: { ...s.counts, need: 4 },
+  }
+}
+
+test('a captain waiting on you is a card too, in the bridge’s order', () => {
+  expect(cardsOf(withCaptains()).map((c) => [c.kind, c.id, c.crumbs.join(' ▸ '), c.title])).toEqual([
+    ['captain', LEAD, 'mnemo-desktop ▸ ◆ fleet lead', 'Land the nexus v2 pieces'],
+    ['robot', '101', 'mnemo-desktop ▸ ◆ fleet lead ▸ #101', 'Work on issue in this repo (101)'],
+    ['robot', '102', 'mnemo-desktop ▸ ◆ fleet lead ▸ #102', 'Work on issue in this repo (102)'],
+    ['captain', MAIN, 'mnemo ▸ ▲ mnemo main', 'mnemo main'],
+  ])
+})
+
+test('a captain’s card shows what it waits on and its last lines, and only opens it', async () => {
+  await draw(withCaptains())
+  expect(card()).toBe(LEAD)
+  expect(host.querySelector('[data-triage-count]')!.textContent).toBe('1/4')
+  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('🔒 waits on a permission')
+  expect(host.querySelector('[data-triage-lines]')!.textContent).toBe('⌘ Bash · git push origin main')
+  expect(host.querySelectorAll('[data-triage-option]')).toHaveLength(0)
+  expect(host.querySelector('input')).toBeNull()
+  // Its keys answer nothing: a parent's prompt is answered in its own terminal.
+  await key('y')
+  await key('1')
+  expect(ran).toEqual([])
+  expect(card()).toBe(LEAD)
+  await act(async () => (host.querySelector('[data-triage-open]') as HTMLButtonElement).click())
+  expect([closed, opened]).toEqual([1, [LEAD]])
+})
+
+test('T opens a captain’s card in the drawer; its question shows when the feed has one', async () => {
+  await draw(withCaptains())
+  await key('ArrowLeft')
+  expect(card()).toBe(MAIN)
+  expect(host.querySelector('[data-triage-question]')!.textContent).toBe('❓ Which schema?')
+  expect(host.querySelector('[data-triage-lines]')!.textContent).toBe('no context')
+  await key('t')
+  expect([closed, opened]).toEqual([1, [MAIN]])
 })

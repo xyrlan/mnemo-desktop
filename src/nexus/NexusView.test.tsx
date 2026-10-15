@@ -199,16 +199,33 @@ test('triage asked from the sidebar opens on a blocked robot', async () => {
   expect(nexusStore.getState()).toMatchObject({ open: true, triage: true, triageAsked: false })
 })
 
-test('triage asked when only a captain waits opens the Nexus alone: triage has no card for it', async () => {
-  // The sidebar counts a waiting interactive session as needing you; the ship lists no robot.
-  seen.ship = () => {
-    const s = shipFixture()
-    return { ...s, decks: [{ ...s.decks[0], captains: s.decks[0].captains.map((c, i) => (i === 0 ? { ...c, pose: 'alert' as const } : c)) }] }
-  }
+/** A real ship (`buildShip`) whose one captain waits on a permission, and no child. */
+const LEAD = '11111111-aaaa-4bbb-8ccc-000000000001'
+async function captainWaits(): Promise<() => Ship> {
+  const { buildShip } = await vi.importActual<typeof import('./ship')>('./ship')
+  const parents = [{ session_id: LEAD, pid: 1, name: 'fleet lead', status: 'waiting', waiting_for: 'permission prompt', cwd: '/Users/you/github/mnemo-desktop' }]
+  const snapshot = { repos: [{ root: '/Users/you/github/mnemo-desktop', name: 'mnemo-desktop', parents, missions: [], children: [] }], errors: [], at: new Date(0).toISOString() }
+  return () => buildShip({ snapshot, feed: null, agents: { [LEAD]: { state: 'needs-you', waitingFor: 'permission', title: 'fleet lead' } }, events: [], firstSeen: {}, now: 1_000 })
+}
+
+test('triage asked from the sidebar when only a captain waits opens on its card', async () => {
+  const ship = await captainWaits()
+  expect(ship().counts.need).toBe(1)
+  seen.ship = ship
   nexusStore.getState().setOpen(false)
   await mount()
   await act(async () => nexusStore.getState().askTriage())
-  expect(view()).not.toBeNull()
-  expect(nexusStore.getState()).toMatchObject({ open: true, triage: false, triageAsked: false })
-  expect(document.body.textContent).not.toContain('all settled')
+  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true, triageAsked: false })
+  const card = document.querySelector('[data-triage-card]')!
+  expect([card.getAttribute('data-triage-card'), card.getAttribute('data-triage-kind')]).toEqual([LEAD, 'captain'])
+  expect(document.querySelector('[data-triage-question]')!.textContent).toBe('🔒 waits on a permission')
+})
+
+test('⌥N opens a waiting captain’s row in the drawer', async () => {
+  Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
+  seen.ship = await captainWaits()
+  await mount()
+  press({ key: '1', code: 'Digit1', altKey: true })
+  await act(async () => {})
+  expect(nexusStore.getState()).toMatchObject({ activeTab: LEAD })
 })

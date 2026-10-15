@@ -1,4 +1,4 @@
-import { childNext } from '../fleet/model'
+import { childNext, parentNext } from '../fleet/model'
 import { basename, dirname, norm } from '../path/path'
 import { needKind, permissionAsk, type ChildSession, type Mission, type ParentSession, type Pr, type RepoGroup } from '../mission/types'
 import { accessoryOf, classOf, injectedRules, isRateLimited, labelOf } from './robot'
@@ -8,6 +8,7 @@ import {
   type Activity,
   type AgentView,
   type Captain,
+  type CaptainNeed,
   type CaptainPose,
   type CheckRun,
   type Ci,
@@ -302,16 +303,20 @@ export function buildShip(input: ShipInput): Ship {
   const homeOf = (id: string): Repo | undefined => parentRepo.get(id) ?? deckRepoOfCaptain.get(id)
   const ids = [...allCaptainIds].sort((a, b) => sightOf(a) - sightOf(b) || cmp(a, b))
   const counter = new Map<string, number>()
+  const captainNeeds: CaptainNeed[] = []
   for (const id of ids) {
     const repo = homeOf(id)
     if (!repo) continue
+    const parent = parents.get(id)
+    const own = parent ? captainNeedOf(parent, agents[id], sessions[id] ?? null) : null
+    if (own) captainNeeds.push(own)
     let emblem = ORPHAN_EMBLEM
     if (!id.startsWith('orphan:')) {
       const n = counter.get(repo.key) ?? 0
       counter.set(repo.key, n + 1)
       emblem = EMBLEMS[n % EMBLEMS.length]
     }
-    captainsByRepo.set(repo.key, [...(captainsByRepo.get(repo.key) ?? []), captainOf(id, parents.get(id) ?? null, emblem)])
+    captainsByRepo.set(repo.key, [...(captainsByRepo.get(repo.key) ?? []), captainOf(id, parent ?? null, emblem)])
   }
 
   // ---------------------------------------------------------------- decks and docks
@@ -362,8 +367,13 @@ export function buildShip(input: ShipInput): Ship {
   const waiting = inDeckOrder.filter((p) => p.robot.zone === 'hangar' && p.robot.pr)
   const deckRank = new Map(decks.map((d, i) => [d.root, i]))
   const landOrder = [...repos.values()].sort((a, b) => (deckRank.get(a.root) ?? Infinity) - (deckRank.get(b.root) ?? Infinity) || cmp(a.name, b.name))
+  // A captain's own decision waits with the children's, longest first: one undated has just begun.
+  const needs: { x: Exception; waitMs: number; id: string }[] = [
+    ...blocked.map((p) => ({ x: { kind: 'need', robotId: p.robot.id, need: p.robot.need! } as const, waitMs: p.robot.idleMs, id: p.robot.id })),
+    ...captainNeeds.map((x) => ({ x, waitMs: x.since === null ? 0 : Math.max(0, now - x.since), id: x.captainId })),
+  ].sort((a, b) => b.waitMs - a.waitMs || cmp(a.id, b.id))
   const exceptions: Exception[] = [
-    ...blocked.map((p): Exception => ({ kind: 'need', robotId: p.robot.id, need: p.robot.need! })),
+    ...needs.map((n) => n.x),
     ...waiting
       .filter((p) => p.robot.ci === 'red')
       .sort(longestFirst)
@@ -388,7 +398,7 @@ export function buildShip(input: ShipInput): Ship {
     docks,
     counts: {
       working: robots.filter((r) => r.state === 'working').length,
-      need: robots.filter((r) => r.state === 'need').length,
+      need: robots.filter((r) => r.state === 'need').length + captainNeeds.length,
       ready: robots.filter((r) => r.zone === 'hangar').length,
     },
     rate: feed?.rate ?? null,
@@ -404,6 +414,30 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 function parentNeeds(p: ParentSession, view: AgentView | undefined): boolean {
   if (view) return view.state === 'needs-you'
   return p.status === 'waiting' && p.waiting_for !== 'dialog open'
+}
+
+/** A parent's own pending decision as a bridge exception; null when it waits on nothing. What it
+ *  waits on is the fleet's word; a wait the fleet cannot name is a question when the feed holds an
+ *  unanswered `ask`, else a permission (`waitingKindOf`'s reading of an unknown wait). */
+function captainNeedOf(p: ParentSession, view: AgentView | undefined, f: SessionFeed | null): CaptainNeed | null {
+  if (!parentNeeds(p, view)) return null
+  const fleet = view ? view.waitingFor : parentNext(p, undefined).waitingFor
+  const waitsOn = fleet ?? (f?.ask ? 'question' : 'permission')
+  const said = f?.said ?? null
+  const act = f?.activity ?? null
+  const lines = [act && { at: act.at, text: toolLine(act) }, said && { at: said.at, text: firstSentence(said.text) }]
+    .filter((l): l is { at: number; text: string } => !!l && !!l.text)
+    .sort((a, b) => a.at - b.at)
+    .map((l) => l.text)
+  const since = latest(act?.at, said?.at)
+  return {
+    kind: 'captain',
+    captainId: p.session_id,
+    waitsOn,
+    question: waitsOn === 'question' ? (f?.ask?.question ?? null) : null,
+    since: Number.isFinite(since) ? since : null,
+    lines,
+  }
 }
 
 /** A busy captain's last tool, or its last sentence when that came after. */

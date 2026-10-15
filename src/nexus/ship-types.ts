@@ -151,10 +151,19 @@ export type Exception =
   | { kind: 'ready'; robotId: string; pr: Pr; waitingMs: number }
   | { kind: 'land'; root: string; mission: Mission }
   | { kind: 'stranded'; robotId: string; idleMs: number }
+  | CaptainNeed
 
+/** A captain (a parent session) waiting on you, as the fleet sees it (`waitingFor`): what the
+ *  sidebar's needs-you count counts. `question`: the feed's `ask`, when it has one. `since`: its
+ *  last action, when it began waiting, if the feed dates it. `lines`: its last tool call and
+ *  sentence, newest last. */
+export type CaptainNeed = { kind: 'captain'; captainId: string; waitsOn: 'permission' | 'question'; question: string | null; since: number | null; lines: string[] }
+
+/** `need`: robots and captains waiting on you. */
 export type ShipCounts = { working: number; need: number; ready: number }
 
-/** `bridge.exceptions`: need, red, land, ready (longest wait first), stranded (longest first).
+/** `bridge.exceptions`: need and captain (longest wait first, together), red, land, ready (longest
+ *  wait first), stranded (longest first).
  *  `bridge.blocked`: every robot whose zone is `bridge`. Decks in a fixed order: most children over
  *  the session first, then by name. */
 export type Ship = {
