@@ -1,62 +1,31 @@
 /** Session popups (#421). No pane view: App imports every `src/*\/view.tsx`, and this import is
  *  where they mount in the shell's overlay slot and offer their ⌘K entries, one per terminal pane
- *  and one per live background child in no pane. */
+ *  and one per live background child in no pane. The sessions are the session host's
+ *  (`src/session/app-host.ts`). */
 import type React from 'react'
-import { registerProvider } from '../actions/registry'
+import { claimAction, registerProvider } from '../actions/registry'
 import { store as layout } from '../layout/app-store'
-import { tauriPty } from '../pty/client'
-import { paneShell } from '../pty/typed'
 import { mountInSlot } from '../shell/slots'
-import { providedSessions, provideSessions } from '../terminal/sessions'
-// Imported first: the terminal view offers the core's terminals as it loads, and the attach PTYs
-// are then hidden from what it offers.
+import { sessionHost } from '../session/app-host'
 import TerminalPane from '../terminal/view'
-import { hideFrom } from '../floating/store'
 import { missionStore } from '../mission/app-store'
 import { allChildren, childWord } from '../mission/types'
 import { basename } from '../path/path'
 import { Popouts } from './Popouts'
-import { createPopoutStore, endLeftovers } from './store'
+import { createPopoutStore } from './store'
 
-function storage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage
-  } catch {
-    return null
-  }
-}
-
-const deps = {
-  pty: tauriPty,
-  shell: () => paneShell(),
-  sinkOf: (id: number) => layout.getState().sinks[id],
-  watchSinks: (cb: () => void) =>
-    layout.subscribe((s, prev) => {
-      if (s.sinks !== prev.sinks) cb()
-    }),
-  forgetSink: (id: number) =>
-    layout.setState((s) => {
-      if (!(id in s.sinks)) return {}
-      const sinks = { ...s.sinks }
-      delete sinks[id]
-      return { sinks }
-    }),
-  storage: storage(),
+export const popouts = createPopoutStore({
+  host: sessionHost,
   viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
-}
+})
 
-export const popouts = createPopoutStore(deps)
-
-// The attaches a reloaded page left are ended; until then, and for the ones open now, the
-// workspace restore must not adopt them as tabs.
-const leftovers = endLeftovers(deps)
-const sessions = providedSessions()
-if (sessions) provideSessions(hideFrom(sessions, () => [...leftovers, ...popouts.getState().held()]))
-
-// A pane closed under its popup takes the popup with it.
-const unwatch = layout.subscribe((s, prev) => {
-  if (s.panes === prev.panes) return
-  for (const p of popouts.getState().popups) if (p.kind === 'pane' && !s.panes[p.pty!]) popouts.getState().paneGone(p.pty!)
+// ⌘W in a popup closes the popup, not the focused pane under it.
+const unclaim = claimAction((id) => {
+  if (id !== 'pane.close') return false
+  const key = document.activeElement?.closest<HTMLElement>('[data-popout]')?.dataset.popout
+  if (!key || !popouts.getState().popups.some((p) => p.key === key)) return false
+  void popouts.getState().close(key)
+  return true
 })
 
 registerProvider(() => {
@@ -77,11 +46,11 @@ registerProvider(() => {
 })
 
 function LivePopouts(): React.JSX.Element {
-  return <Popouts store={popouts} terminal={TerminalPane} />
+  return <Popouts store={popouts} host={sessionHost} terminal={TerminalPane} />
 }
 
 const unmount = mountInSlot('overlay', LivePopouts)
 import.meta.hot?.dispose(() => {
   unmount()
-  unwatch()
+  unclaim()
 })

@@ -1243,99 +1243,238 @@ describe('terminals that outlived the page', () => {
     const first: Uint8Array[] = []
     const second: Uint8Array[] = []
     const third: Uint8Array[] = []
-    s.getState().attachSink(1, (b) => first.push(b))
     // StrictMode: mounted, unmounted, mounted again at once.
-    s.getState().attachSink(1, (b) => second.push(b))
+    s.getState().attachSink(1, (b) => first.push(b))()
+    const release = s.getState().attachSink(1, (b) => second.push(b))
     expect(text(first)).toBe('screen')
     expect(text(second)).toBe('screen')
     core.outputs[1](new TextEncoder().encode('!'))
     expect(text(second)).toBe('screen!')
+    release()
     s.getState().attachSink(1, (b) => third.push(b))
     expect(third).toEqual([])
   })
 
-  describe('a view over a pane (a popup, #421)', () => {
+  describe('several views of one terminal (a popup, a drawer tab, #423)', () => {
     const enc = (t: string) => new TextEncoder().encode(t)
     const settle = () => new Promise((r) => setTimeout(r, 0))
+    /** What a view shows: a reset (RIS) wipes what was drawn before it. */
+    const shows = (chunks: Uint8Array[]) => text(chunks).split('\x1bc').at(-1)!
 
-    test('takes the output, drawn from the core\'s screen; when it goes, the pane is drawn anew and fed again', async () => {
-      const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: '\x1b[8;30;100tscreen' })
-      const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
+    async function restored(screens: Record<number, string> = { 1: 'screen' }) {
+      const pty = fakePty({ first: 100 })
+      const resized: [number, number, number][] = []
+      pty.resize = async (id, cols, rows) => void resized.push([id, cols, rows])
+      const core = fakeSessions([live(1, '/a'), live(2, '/b')], screens)
+      const s = createStore(pty, { workspace: () => null, sessions: core.client })
       await s.getState().restore(await savedPair())
-      const pane: Uint8Array[] = []
-      const popup: Uint8Array[] = []
-      const paneSink = (b: Uint8Array) => pane.push(b)
-      s.getState().attachSink(1, paneSink)
+      return { s, core, pty, resized }
+    }
+    function view(s: ReturnType<typeof createStore>, id: number, claim = false) {
+      const got: Uint8Array[] = []
+      const sink = (b: Uint8Array) => void got.push(b)
+      const release = s.getState().attachSink(id, sink, claim)
+      return { got, sink, release }
+    }
+
+    test('every view is fed every byte; one joining is drawn from the core\'s screen first, never reset', async () => {
+      const { s, core } = await restored({ 1: '\x1b[8;30;100tscreen' })
+      const pane = view(s, 1)
       core.outputs[1](enc(' $'))
-      expect(text(pane)).toBe('\x1b[8;30;100tscreen $')
-
-      const release = s.getState().attachSink(1, (b) => popup.push(b), true)
+      core.screens[1] = '\x1b[8;30;100tscreen $'
+      const popup = view(s, 1, true)
+      // Before its screen comes, the joining view is fed nothing: what comes meanwhile is in it.
+      core.outputs[1](enc(' a'))
+      expect(text(popup.got)).toBe('')
       await settle()
-      // The popup gets the screen as the core holds it, reset first; the pane gets nothing more.
-      expect(text(popup)).toBe('\x1bc\x1b[8;30;100tscreen')
-      core.outputs[1](enc(' typed in the popup'))
-      expect(text(popup)).toBe('\x1bc\x1b[8;30;100tscreen typed in the popup')
-      expect(text(pane)).toBe('\x1b[8;30;100tscreen $')
-
-      // The core's screen now has the popup's size and what it printed meanwhile.
-      core.screens[1] = '\x1b[8;40;140tscreen $ typed in the popup'
-      pane.length = 0
-      release()
-      expect(s.getState().sinks[1]).toBe(paneSink)
-      await settle()
-      // Not blank, and the size it is drawn at comes first: the pane takes it, then refits to its
-      // own box and resizes the shell back (the terminal view's `CSI 8 t` handler).
-      expect(text(pane)).toBe('\x1bc\x1b[8;40;140tscreen $ typed in the popup')
+      expect(text(popup.got)).toBe('\x1b[8;30;100tscreen $')
+      core.outputs[1](enc(' typed'))
+      expect(text(pane.got)).toBe('\x1b[8;30;100tscreen $ a typed')
+      expect(text(popup.got)).toBe('\x1b[8;30;100tscreen $ typed')
+      popup.release()
       core.outputs[1](enc('!'))
-      expect(text(pane)).toBe('\x1bc\x1b[8;40;140tscreen $ typed in the popup!')
-      expect(text(popup)).toBe('\x1bc\x1b[8;30;100tscreen typed in the popup')
-      expect(core.attached).toEqual([1, 2, 1, 1])
+      expect(text(pane.got)).toBe('\x1b[8;30;100tscreen $ a typed!')
+      // Nothing was drawn again when the popup went.
+      expect(core.attached).toEqual([1, 2, 1])
     })
 
-    test('a pane view mounted again while a popup is over it waits under it', async () => {
-      const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: 'screen' })
-      const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
-      await s.getState().restore(await savedPair())
-      const releasePane = s.getState().attachSink(1, () => {})
-      const popupSink = () => {}
-      const releasePopup = s.getState().attachSink(1, popupSink, true)
-      releasePane()
-      const again: Uint8Array[] = []
-      s.getState().attachSink(1, (b) => again.push(b))
-      expect(s.getState().sinks[1]).toBe(popupSink)
-      expect(again).toEqual([])
-      releasePopup()
+    test('a hand-back loses nothing, though the core\'s screen cut its newest rows when it shrank', async () => {
+      // The core's screen as vt100 kept it before #423: a shorter screen cut its bottom rows off.
+      const model = { rows: 10, row: 0, screen: [''] as string[], back: [] as string[] }
+      const write = (t: string) =>
+        t.split('\r\n').forEach((seg, i) => {
+          if (i > 0) {
+            if (model.row === model.rows - 1) model.back.push(model.screen.shift()!)
+            else model.row++
+            model.screen[model.row] ??= ''
+          }
+          model.screen[model.row] = (model.screen[model.row] ?? '') + seg
+        })
+      const shrinkTo = (rows: number) => {
+        model.screen = model.screen.slice(0, rows)
+        model.row = Math.min(model.row, rows - 1)
+        model.rows = rows
+      }
+      const snapshot = () => [...model.back, ...model.screen].join('\r\n')
+      const { s, core, pty } = await restored({})
+      const out = (t: string) => {
+        write(t)
+        core.outputs[1](enc(t))
+      }
+      pty.resize = async (_id, _cols, rows) => (rows < model.rows ? shrinkTo(rows) : void (model.rows = rows))
+      const pane = view(s, 1)
+      s.getState().sizeSession(1, pane.sink, 80, 10)
+      for (let n = 1; n <= 9; n++) out(`line ${n}\r\n`)
+      out('$ ')
+
+      core.screens[1] = snapshot()
+      const popup = view(s, 1, true)
       await settle()
-      expect(text(again)).toBe('\x1bcscreen')
+      expect(s.getState().owners[1].sink).toBe(popup.sink)
+      s.getState().sizeSession(1, popup.sink, 80, 4)
+      expect(model.screen).toEqual(['line 1', 'line 2', 'line 3', 'line 4'])
+      out('newest')
+      core.screens[1] = snapshot()
+
+      popup.release()
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+      s.getState().sizeSession(1, pane.sink, 80, 10)
+      await settle()
+      const lines = shows(pane.got).split('\r\n')
+      expect(lines.slice(-3)).toEqual(['line 8', 'line 9', '$ newest'])
+    })
+
+    test('the owner sizes the terminal; a view that does not own it is refused', async () => {
+      const { s, resized } = await restored()
+      const pane = view(s, 1)
+      const popup = view(s, 1, true)
+      await settle()
+      expect(s.getState().sizeSession(1, pane.sink, 100, 30)).toBe(false)
+      expect(s.getState().sizeSession(1, popup.sink, 140, 40)).toBe(true)
+      expect(resized).toEqual([[1, 140, 40]])
+      // The others learn the size, to draw the output at it.
+      expect(s.getState().owners[1]).toEqual({ sink: popup.sink, cols: 140, rows: 40 })
+    })
+
+    test('the owner hidden (a drawer tab not shown) hands the terminal to the view on screen, with no remount', async () => {
+      const { s } = await restored()
+      const pane = view(s, 1)
+      const drawer = view(s, 1, true)
+      await settle()
+      expect(s.getState().owners[1].sink).toBe(drawer.sink)
+      s.getState().showSink(1, drawer.sink, false)
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+      // Shown again, it does not take it from a pane on screen: it says so, and can take it back.
+      s.getState().showSink(1, drawer.sink, true)
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+      s.getState().takeSession(1, drawer.sink)
+      expect(s.getState().owners[1].sink).toBe(drawer.sink)
+      s.getState().takeSession(1, pane.sink)
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+    })
+
+    test('a drawer tab opened while the drawer is hidden takes the terminal when it is first shown', async () => {
+      const { s } = await restored()
+      const pane = view(s, 1)
+      const drawer = view(s, 1, true)
+      s.getState().showSink(1, drawer.sink, false)
+      await settle()
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+      s.getState().showSink(1, drawer.sink, true)
+      expect(s.getState().owners[1].sink).toBe(drawer.sink)
+      // Once: hidden and shown again, it no longer takes it from the pane.
+      s.getState().takeSession(1, pane.sink)
+      s.getState().showSink(1, drawer.sink, false)
+      s.getState().showSink(1, drawer.sink, true)
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+    })
+
+    test('a view shown while the owner is hidden takes it; with none on screen the owner keeps it', async () => {
+      const { s } = await restored()
+      const pane = view(s, 1)
+      const drawer = view(s, 1, true)
+      await settle()
+      s.getState().showSink(1, pane.sink, false)
+      s.getState().showSink(1, drawer.sink, false)
+      expect(s.getState().owners[1].sink).toBe(drawer.sink)
+      s.getState().showSink(1, pane.sink, true)
+      expect(s.getState().owners[1].sink).toBe(pane.sink)
+    })
+
+    test('a pane view mounted again while a popup owns the terminal joins under it, drawn from the core', async () => {
+      const { s } = await restored()
+      const first = view(s, 1)
+      const popup = view(s, 1, true)
+      await settle()
+      first.release()
+      const again = view(s, 1)
+      await settle()
+      expect(s.getState().owners[1].sink).toBe(popup.sink)
+      expect(text(again.got)).toBe('screen')
+      popup.release()
+      expect(s.getState().owners[1].sink).toBe(again.sink)
+    })
+
+    test('a popup over a pane with no view at that moment gets the screen handed to the last one', async () => {
+      const { s } = await restored()
+      // Mounted and let go (StrictMode, a tab moved): no live output since.
+      view(s, 1).release()
+      const popup = view(s, 1, true)
+      expect(text(popup.got)).toBe('screen')
+      expect(s.getState().owners[1].sink).toBe(popup.sink)
+    })
+
+    test('a view let go of leaves nothing behind: output waits for the next one', async () => {
+      const { s, core } = await restored()
+      const pane = view(s, 1)
+      const popup = view(s, 1, true)
+      await settle()
+      core.outputs[1](enc('live'))
+      pane.release()
+      popup.release()
+      await settle()
+      expect(1 in s.getState().sinks).toBe(false)
+      expect(1 in s.getState().owners).toBe(false)
+      // Terminal 2's restored screen still waits for its first view.
+      expect(s.getState().tracked()).toEqual([2])
+      core.outputs[1](enc('while away'))
+      const next = view(s, 1)
+      expect(text(next.got)).toBe('while away')
     })
 
     test('a popup over a pane that was closed gives nothing back', async () => {
-      const core = fakeSessions([live(1, '/a'), live(2, '/b')], { 1: 'screen' })
-      const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
-      await s.getState().restore(await savedPair())
-      s.getState().attachSink(1, () => {})
-      const release = s.getState().attachSink(1, () => {}, true)
+      const { s, core } = await restored()
+      const pane = view(s, 1)
+      const popup = view(s, 1, true)
       await settle()
-      s.getState().focusPane(1)
-      await s.getState().closePane()
-      release()
+      await s.getState().closePane(1)
+      popup.release()
+      pane.release()
       await settle()
       expect(1 in s.getState().sinks).toBe(false)
       expect(core.attached).toEqual([1, 2, 1])
     })
 
-    test('a view let go of leaves no sink behind: output waits for the next one', async () => {
-      const core = fakeSessions([live(1, '/a'), live(2, '/b')])
-      const s = createStore(fakePty({ first: 100 }), { workspace: () => null, sessions: core.client })
-      await s.getState().restore(await savedPair())
-      const gone: Uint8Array[] = []
-      s.getState().attachSink(1, (b) => gone.push(b))()
-      core.outputs[1](enc('while away'))
-      const next: Uint8Array[] = []
-      s.getState().attachSink(1, (b) => next.push(b))
-      expect(gone).toEqual([])
-      expect(text(next)).toBe('while away')
+    test('a terminal this store did not spawn is fed and forgotten like a pane\'s', async () => {
+      const { s } = await restored()
+      s.getState().feedTerminal(60, enc('before'))
+      const v = view(s, 60)
+      s.getState().feedTerminal(60, enc(' after'))
+      expect(text(v.got)).toBe('before after')
+      s.getState().forgetTerminal(60)
+      expect(60 in s.getState().sinks).toBe(false)
+      expect(s.getState().tracked()).not.toContain(60)
     })
+  })
+
+  test('closing pane `id` closes that pane, not the focused one', async () => {
+    const { s } = { s: createStore(fakePty(), { workspace: () => null }) }
+    await s.getState().newTab('/a')
+    await s.getState().split('row', '/b')
+    expect(s.getState().tabs[0].focused).toBe(2)
+    await s.getState().closePane(1)
+    expect(Object.keys(s.getState().panes)).toEqual(['2'])
+    expect(s.getState().tabs[0].focused).toBe(2)
   })
 
   test('with no client given, the one the terminal view provides is used, through any wrapper of restore', async () => {

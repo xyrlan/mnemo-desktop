@@ -26,6 +26,8 @@ vi.mock('../layout/app-store', async () => {
       6: { id: 6, view: 'editor' },
     } as Record<number, unknown>,
     sinks: {} as Record<number, unknown>,
+    feedTerminal: () => {},
+    forgetTerminal: () => {},
   }))
   return { store }
 })
@@ -42,10 +44,16 @@ vi.mock('../mission/types', async (orig) => ({
 vi.mock('../terminal/view', async () => {
   const { provideSessions } = await import('../terminal/sessions')
   provideSessions({ list: async () => [...held], attach: async () => new Uint8Array() })
-  return { default: ({ id, props }: { id: number; props: Record<string, unknown> }) => <div data-stub-terminal={id} data-over={String(props.over === true)} /> }
+  return {
+    default: ({ id, props }: { id: number; props: Record<string, unknown> }) => (
+      <div data-stub-terminal={id} data-present={String(props.present === true)}>
+        <textarea />
+      </div>
+    ),
+  }
 })
 
-import { all, run } from '../actions/registry'
+import { all, register, run } from '../actions/registry'
 import { slotEntries } from '../shell/slots'
 import { providedSessions } from '../terminal/sessions'
 import { store as layout } from '../layout/app-store'
@@ -53,7 +61,7 @@ import { DETACH_KEY } from '../cockpit/prompt'
 
 let popouts: typeof import('./view').popouts
 beforeAll(async () => {
-  localStorage.setItem('mnemo.popout.v1', '[44]')
+  localStorage.setItem('mnemo.session-host.v1', '[44]')
   await act(async () => {
     popouts = (await import('./view')).popouts
   })
@@ -81,7 +89,7 @@ it('ends the attach a reloaded page left, and keeps every attach out of what the
   expect(log.slice(-2)).toEqual([`write 60 ${JSON.stringify(DETACH_KEY)}`, 'kill 60'])
 })
 
-it('draws each popup over the app, a pane over its pane and an attach alone; closed by its button', async () => {
+it('draws each popup over the app as a presentation of its session; closed by its button', async () => {
   expect(slotEntries('overlay')).toHaveLength(1)
   const Overlay = slotEntries('overlay')[0].component
   const host = document.body.appendChild(document.createElement('div'))
@@ -89,10 +97,10 @@ it('draws each popup over the app, a pane over its pane and an attach alone; clo
   await act(async () => run('popout.pane.3'))
   await act(async () => run('popout.child.c1'))
   await flush()
-  const views = [...host.querySelectorAll<HTMLElement>('[data-stub-terminal]')].map((e) => [e.dataset.stubTerminal, e.dataset.over])
+  const views = [...host.querySelectorAll<HTMLElement>('[data-stub-terminal]')].map((e) => [e.dataset.stubTerminal, e.dataset.present])
   expect(views).toEqual([
     ['3', 'true'],
-    ['60', 'false'],
+    ['60', 'true'],
   ])
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close popup of claude"]')!.click())
   expect(popouts.getState().popups.map((p) => p.key)).toEqual(['child:c1'])
@@ -101,4 +109,23 @@ it('draws each popup over the app, a pane over its pane and an attach alone; clo
   await act(async () => run('popout.pane.4'))
   await act(async () => layout.setState({ panes: {} }))
   expect(popouts.getState().popups.map((p) => p.key)).toEqual(['child:c1'])
+})
+
+it('⌘W in a popup closes the popup, not the focused pane under it', async () => {
+  const closed: string[] = []
+  register({ id: 'pane.close', title: 'Close pane', run: () => void closed.push('pane') })
+  const Overlay = slotEntries('overlay')[0].component
+  const host = document.body.appendChild(document.createElement('div'))
+  await act(async () => createRoot(host).render(<Overlay />))
+  await act(async () => popouts.getState().openPane(3, 'claude'))
+  const keys = () => popouts.getState().popups.map((p) => p.key)
+  expect(keys()).toContain('pane:3')
+  host.querySelector<HTMLElement>('[data-popout="pane:3"] textarea')!.focus()
+  await act(async () => run('pane.close'))
+  expect(keys()).not.toContain('pane:3')
+  expect(closed).toEqual([])
+  // Outside a popup, it closes the pane as ever.
+  ;(document.activeElement as HTMLElement | null)?.blur()
+  await act(async () => run('pane.close'))
+  expect(closed).toEqual(['pane'])
 })

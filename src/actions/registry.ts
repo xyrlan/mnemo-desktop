@@ -18,10 +18,21 @@ export function register(a: ActionDef) {
 export function registerProvider(p: () => ActionDef[]) {
   providers.push(p)
 }
+/** Claims on actions about to run: one that returns true ran it in its own place. A popup with
+ *  the keyboard closes itself on ⌘W, where the focused pane under it would close otherwise. */
+const claims: ((id: string) => boolean)[] = []
+export function claimAction(claim: (id: string) => boolean): () => void {
+  claims.push(claim)
+  return () => {
+    const i = claims.indexOf(claim)
+    if (i >= 0) claims.splice(i, 1)
+  }
+}
 export function all(): Action[] {
   return [...actions, ...providers.flatMap((p) => p())].map(({ id, title, run }) => ({ id, title, run, shortcut: shortcutLabel(id) }))
 }
 export function run(id: string) {
+  if (claims.some((c) => c(id))) return
   const a = all().find((x) => x.id === id)
   if (a) void a.run()
 }

@@ -3,13 +3,15 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { PtyInfo, SessionClient } from './sessions'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-// A popup over a pane (#421), through the real terminal view: xterm, its addons and Tauri are
-// stand-ins. Each fake terminal fits the box it is opened in, whose size is on `data-box`.
+// A pane and a popup showing the same terminal (#421, #423), through the real terminal view: xterm,
+// its addons and Tauri are stand-ins. Each fake terminal fits the box it is opened in, whose size is
+// on `data-box`.
 
 type Handler = (params: (number | number[])[]) => boolean
 
-const { resizes, terms, FakeTerminal, core } = vi.hoisted(() => {
+const { resizes, writes, terms, FakeTerminal, core } = vi.hoisted(() => {
   const resizes: [number, number, number][] = []
+  const writes: [number, string][] = []
   /** The core: terminal 1 runs, and draws as `screen` says (its size first). */
   const core = { screen: '', onOutput: null as ((b: Uint8Array) => void) | null }
   class FakeTerminal {
@@ -49,7 +51,8 @@ const { resizes, terms, FakeTerminal, core } = vi.hoisted(() => {
       return { cols, rows }
     }
     attachCustomKeyEventHandler() {}
-    onData = () => ({ dispose() {} })
+    data: ((d: string) => void) | null = null
+    onData = (cb: (d: string) => void) => ((this.data = cb), { dispose() {} })
     onKey = () => ({ dispose() {} })
     onTitleChange = () => ({ dispose() {} })
     hasSelection = () => false
@@ -57,14 +60,14 @@ const { resizes, terms, FakeTerminal, core } = vi.hoisted(() => {
     dispose() {}
   }
   const terms: FakeTerminal[] = []
-  return { resizes, terms, FakeTerminal, core }
+  return { resizes, writes, terms, FakeTerminal, core }
 })
 type FakeTerminal = InstanceType<typeof FakeTerminal>
 
 vi.mock('../pty/client', () => ({
   tauriPty: {
     spawn: async () => 1,
-    write: async () => {},
+    write: async (id: number, d: string) => void writes.push([id, d]),
     resize: async (id: number, cols: number, rows: number) => void resizes.push([id, cols, rows]),
     kill: async () => {},
     onExit: async () => () => {},
@@ -124,50 +127,119 @@ import { store } from '../layout/app-store'
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))))
 const bytes = (t: string) => new TextEncoder().encode(t)
 
-function mount(box: string, over: boolean): { root: Root; term: FakeTerminal; host: HTMLElement } {
+function mount(box: string, props: Record<string, unknown> = {}): { root: Root; term: FakeTerminal; host: HTMLElement } {
   const host = document.body.appendChild(document.createElement('div'))
   host.dataset.box = box
   const root = createRoot(host)
   const before = terms.length
-  act(() => root.render(<TerminalPane id={1} props={over ? { over: true } : {}} />))
+  act(() => root.render(<TerminalPane id={1} props={props} />))
   return { root, term: terms[before], host }
 }
+const POPUP = { present: true }
+/** The box of a view changed (a drawer tab hidden is 0x0): its observer sees it. */
+function boxed(v: { host: HTMLElement; term: FakeTerminal }, box: string) {
+  v.host.dataset.box = box
+  act(() => observers.get(v.term.el!)!())
+}
+const veiled = (v: { host: HTMLElement }) => v.host.querySelector('[data-veil]') !== null
 
-test('a popup takes the shell to its size, and the pane under it gets its screen and its size back when it closes', async () => {
+beforeEach(() => {
   store.setState({ panes: { 1: { id: 1, view: 'terminal' } } })
-  const pane = mount('100x30', false)
+  resizes.length = 0
+  writes.length = 0
+})
+
+test('a popup takes the shell to its size; the pane under it draws every byte at that size, veiled, and gets the shell back when it closes', async () => {
+  const pane = mount('100x30')
   expect(resizes.at(-1)).toEqual([1, 100, 30])
+  expect(veiled(pane)).toBe(false)
 
   // The popup is drawn from the core's screen at the pane's size, then fits its own box.
   core.screen = '\x1b[8;30;100tclaude ❯'
-  const popup = mount('140x40', true)
+  const popup = mount('140x40', POPUP)
   await settle()
-  expect(popup.term.written).toBe('\x1bc\x1b[8;30;100tclaude ❯')
+  expect(popup.term.written).toBe('\x1b[8;30;100tclaude ❯')
   expect(resizes.at(-1)).toEqual([1, 140, 40])
-
-  // Under the popup the pane never sizes the shell, even when its own box changes.
+  expect(veiled(popup)).toBe(false)
+  expect(veiled(pane)).toBe(true)
+  // The pane draws at the shell's size, whatever its own box, and never sizes the shell.
+  expect([pane.term.cols, pane.term.rows]).toEqual([140, 40])
   const n = resizes.length
-  pane.host.dataset.box = '90x20'
-  act(() => observers.get(pane.term.el!)!())
-  expect(pane.term.cols).toBe(90)
+  boxed(pane, '90x20')
+  expect([pane.term.cols, pane.term.rows]).toEqual([140, 40])
   expect(resizes.length).toBe(n)
-  pane.host.dataset.box = '100x30'
+  boxed(pane, '100x30')
 
-  // Live output goes to the popup only.
+  // Live output reaches both; only the popup types into the shell.
   const before = pane.term.written
   core.onOutput!(bytes(' typed'))
   expect(popup.term.written.endsWith(' typed')).toBe(true)
-  expect(pane.term.written).toBe(before)
+  expect(pane.term.written).toBe(before + ' typed')
+  pane.term.data!('\x1b[2;1R')
+  popup.term.data!('x')
+  expect(writes).toEqual([[1, 'x']])
 
-  // Closed: the pane is drawn again from the screen as it is now, at the popup's size, then fits
-  // its own box and sizes the shell back.
-  core.screen = '\x1b[8;40;140tclaude ❯ typed'
+  // Closed: the pane owns the shell again, with nothing drawn anew, fits its own box, and sizes
+  // the shell back.
   act(() => popup.root.unmount())
   await settle()
-  expect(pane.term.written.endsWith('\x1bc\x1b[8;40;140tclaude ❯ typed')).toBe(true)
-  expect(pane.term.cols).toBe(100)
+  expect(pane.term.written).toBe(before + ' typed')
+  expect(pane.term.written).not.toContain('\x1bc')
+  expect([pane.term.cols, pane.term.rows]).toEqual([100, 30])
   expect(resizes.at(-1)).toEqual([1, 100, 30])
+  expect(veiled(pane)).toBe(false)
   core.onOutput!(bytes('!'))
   expect(pane.term.written.endsWith('typed!')).toBe(true)
+  act(() => pane.root.unmount())
+})
+
+test('a veiled view takes the shell back with "Show here", and gives it again the same way, with no remount', async () => {
+  const pane = mount('100x30')
+  const popup = mount('140x40', POPUP)
+  await settle()
+  const made = terms.length
+  act(() => pane.host.querySelector<HTMLButtonElement>('[data-veil] button')!.click())
+  expect(veiled(pane)).toBe(false)
+  expect(veiled(popup)).toBe(true)
+  expect(resizes.at(-1)).toEqual([1, 100, 30])
+  expect([popup.term.cols, popup.term.rows]).toEqual([100, 30])
+  act(() => popup.host.querySelector<HTMLButtonElement>('[data-veil] button')!.click())
+  expect(resizes.at(-1)).toEqual([1, 140, 40])
+  expect(veiled(pane)).toBe(true)
+  expect(terms.length).toBe(made)
+  act(() => popup.root.unmount())
+  act(() => pane.root.unmount())
+})
+
+test('a view hidden while it owns the shell (a drawer tab not shown) hands it to the one on screen', async () => {
+  const pane = mount('100x30')
+  const drawer = mount('60x40', POPUP)
+  await settle()
+  expect(resizes.at(-1)).toEqual([1, 60, 40])
+  boxed(drawer, '0x0')
+  expect(veiled(pane)).toBe(false)
+  expect(resizes.at(-1)).toEqual([1, 100, 30])
+  // Shown again, the drawer says the shell is shown elsewhere until it is asked to take it.
+  boxed(drawer, '60x40')
+  expect(veiled(drawer)).toBe(true)
+  expect(resizes.at(-1)).toEqual([1, 100, 30])
+  act(() => drawer.root.unmount())
+  act(() => pane.root.unmount())
+})
+
+test('a key after the program exited closes the popup showing it, never a pane', async () => {
+  const closePane = vi.fn(async () => {})
+  store.setState({ panes: { 1: { id: 1, view: 'terminal', exitCode: 0 } }, closePane })
+  const pane = mount('100x30')
+  const close = vi.fn()
+  const popup = mount('140x40', { present: true, close })
+  await settle()
+  act(() => popup.host.querySelector<HTMLElement>('.pane-body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true })))
+  expect(close).toHaveBeenCalledTimes(1)
+  expect(closePane).not.toHaveBeenCalled()
+  // The pane's own view closes its own pane, by id.
+  act(() => pane.host.querySelector<HTMLElement>('.pane-body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })))
+  expect(closePane).toHaveBeenCalledWith(1)
+  act(() => popup.root.unmount())
   act(() => pane.root.unmount())
 })

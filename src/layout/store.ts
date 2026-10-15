@@ -113,9 +113,16 @@ export type State = {
    *  of no open worktree. */
   parked: Record<string, WorktreeLayout>
   paletteOpen: boolean
-  /** Output subscribers keyed by pane; set by TerminalPane on mount. */
+  /** What each terminal's output is handed to: every view of it (`attachSink`). */
   sinks: Record<PaneId, (b: Uint8Array) => void>
+  /** The view of each terminal that sizes it, and the size it gave it last (#423). The others draw
+   *  the same output at that size under a veil that says it is shown elsewhere, and send nothing
+   *  to it, until one of them takes it (`takeSession`). */
+  owners: Record<PaneId, Owner>
 }
+
+/** The view sizing a terminal (`State.owners`): its sink, and the size it gave the program last. */
+export type Owner = { sink: (b: Uint8Array) => void; cols?: number; rows?: number }
 
 export type Actions = {
   /** Show worktree `path`'s workbench: the one shown is parked with its panes running, and `path`
@@ -153,9 +160,9 @@ export type Actions = {
    *  With `preview` it is the target group's preview. One without `preview` that lands on a
    *  preview tab keeps it. */
   openView(view: string, props: Record<string, unknown>, place: Place, title?: string, opts?: OpenOptions): void
-  /** Close the focused pane of the active tab (⌘W); a tab left with no pane closes, and a group
-   *  left with no tab collapses. */
-  closePane(): Promise<void>
+  /** Close the focused pane of the active tab (⌘W), or pane `id` wherever it is; a tab left with
+   *  no pane closes, and a group left with no tab collapses. */
+  closePane(id?: PaneId): Promise<void>
   /** Close every pane of the active tab except the focused one. */
   closeOthers(): Promise<void>
   /** Close every pane of a tab (kills their PTYs) and the tab itself, in whichever worktree holds it. */
@@ -213,12 +220,29 @@ export type Actions = {
   paneExited(id: PaneId, code: number | null): void
   /** The note on a pane that came back on a new shell (`Pane.renewed`) was seen. */
   shellNoticed(id: PaneId): void
-  /** Draws terminal `id`'s output with `sink` from now on; the returned function lets go of it.
-   *  A view `over` another (a popup showing a pane's session, #421) takes the output and is drawn
-   *  from the core's screen; when it lets go, the view under it is fed again, drawn anew the same
-   *  way, so it is neither blank nor left at the popup's size. A view not `over` replaces the last
-   *  one that was not (a remount), and is fed only once no view is over it. */
-  attachSink(id: PaneId, sink: (b: Uint8Array) => void, over?: boolean): () => void
+  /** A view of terminal `id` draws its output with `sink` from now on; the returned function lets
+   *  go of it. Every view of a terminal is fed every byte (#423): the pane's own, a popup's, the
+   *  drawer's. The first is handed what came before any view; one that joins others is drawn from
+   *  the core's screen first, and fed from that point on. One view owns the terminal
+   *  (`State.owners`): the first, a view that `claim`s it (a popup or drawer tab opening), or one
+   *  shown while the owner is not. When the owner goes or is hidden, the newest view on screen
+   *  owns it; nothing is drawn again. */
+  attachSink(id: PaneId, sink: (b: Uint8Array) => void, claim?: boolean): () => void
+  /** Whether the view of `sink` is on screen (a box with a size). A view shown while the owner
+   *  is hidden takes the terminal; the owner hidden hands it to the newest view on screen. */
+  showSink(id: PaneId, sink: (b: Uint8Array) => void, shown: boolean): void
+  /** The view of `sink` owns terminal `id` from now on (a "show here" on its veil). */
+  takeSession(id: PaneId, sink: (b: Uint8Array) => void): void
+  /** The owner of terminal `id` sizes it to its box; any other view is refused (false). */
+  sizeSession(id: PaneId, sink: (b: Uint8Array) => void, cols: number, rows: number): boolean
+  /** Output of a terminal this store did not spawn (the session host's attaches): handed to its
+   *  views like a pane's, and kept until one mounts. */
+  feedTerminal(id: PaneId, b: Uint8Array): void
+  /** Terminal `id` has ended and is not a pane: everything kept for its views goes. */
+  forgetTerminal(id: PaneId): void
+  /** The terminals whose output this store keeps anything for (views, seeds, output waiting):
+   *  none once a terminal's views are gone and its output was taken. For tests. */
+  tracked(): PaneId[]
   setPalette(open: boolean): void
   /** The layout as `~/.mnemo-desktop/workspace.json` keeps it, per open worktree: tabs, trees
    *  with ratios, focus, previews, the group tree with its ratios and each group's tab order and
@@ -259,15 +283,6 @@ export const PROMPT_DELAY_MS = 700
 const fields = (l: WorktreeLayout): WorktreeLayout => ({ tabs: l.tabs, activeTab: l.activeTab, groups: l.groups, groupRoot: l.groupRoot, activeGroup: l.activeGroup })
 const sameShown = (a: WorktreeLayout, b: WorktreeLayout) =>
   a.tabs === b.tabs && a.activeTab === b.activeTab && a.groups === b.groups && a.groupRoot === b.groupRoot && a.activeGroup === b.activeGroup
-
-/** `screen` after a full reset (RIS): the core's screen draws an empty terminal, and the view it
- *  goes to has drawn something else since (another size, output it missed). */
-function withReset(screen: Uint8Array): Uint8Array {
-  const out = new Uint8Array(screen.length + 2)
-  out.set([0x1b, 0x63])
-  out.set(screen, 2)
-  return out
-}
 
 export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
   const liveSessions = opts.liveSessions ?? (async () => [])
@@ -422,31 +437,93 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
     const replay = new Map<PaneId, Uint8Array[]>()
 
     type Sink = (b: Uint8Array) => void
-    /** The view of each terminal that is not over another (its pane), and the views over it,
-     *  oldest first. `sinks[id]` is the last of those, else that one. */
-    const under = new Map<PaneId, Sink>()
-    const overs = new Map<PaneId, Sink[]>()
-    /** The latest redraw of each terminal: an older one answering late draws nothing. */
-    const redraws = new Map<PaneId, number>()
+    /** A view of a terminal (`attachSink`). One `seeding` waits for the core's screen, and is fed
+     *  nothing before it: what the others get until then is in that screen. One that `claims` the
+     *  terminal takes it once it is drawn and on screen. */
+    type View = { sink: Sink; shown: boolean; seeding: boolean; claims: boolean }
+    /** The views of each terminal, oldest first. */
+    const views = new Map<PaneId, View[]>()
+    /** The seeds of each terminal, one after another (each moves the core's output to a channel of
+     *  its own); gone once the last is done. */
+    const seeds = new Map<PaneId, Promise<void>>()
 
-    /** Draws terminal `id` anew in the view fed now, from the core's screen: a full reset, then
-     *  the bytes that draw it as it is (`CSI 8 t` first: the view takes that size and refits),
-     *  then what it prints. Nothing without a client: the view shows only what it gets next. */
-    function redraw(id: PaneId) {
+    const viewOf = (id: PaneId, sink: Sink) => views.get(id)?.find((v) => v.sink === sink)
+    /** Hands terminal `id` to `v`, keeping the size the shell has. */
+    function own(id: PaneId, v: View | undefined) {
+      set((s) => {
+        if (s.owners[id]?.sink === v?.sink) return {}
+        const owners = { ...s.owners }
+        if (v) owners[id] = { ...owners[id], sink: v.sink }
+        else delete owners[id]
+        return { owners }
+      })
+    }
+    const ownerShown = (id: PaneId) => {
+      const o = get().owners[id]
+      return !!o && !!viewOf(id, o.sink)?.shown
+    }
+    /** `v` takes terminal `id` when nothing owns it, or when it is on screen and claims it or the
+     *  owner is not on screen. Never while it waits for its screen. */
+    function consider(id: PaneId, v: View) {
+      if (v.seeding) return
+      if (get().owners[id] && !(v.shown && (v.claims || !ownerShown(id)))) return
+      own(id, v)
+      v.claims = false
+    }
+
+    /** Draws view `v` of terminal `id` from the core's screen, then feeds it with the others.
+     *  Without a client it is fed from now on, from nothing. */
+    function seed(id: PaneId, v: View) {
       const sessions = opts.sessions ?? providedSessions()
       if (!sessions) return
-      const n = (redraws.get(id) ?? 0) + 1
-      redraws.set(id, n)
-      let ready = false
-      const early: Uint8Array[] = []
-      // The core sends `id`'s output to this channel from now on, in place of the one before.
-      const done = (screen: Uint8Array | null) => {
+      v.seeding = true
+      const run = async () => {
+        if (!views.get(id)?.includes(v)) return
+        let ready = false
+        const early: Uint8Array[] = []
+        let screen: Uint8Array | null = null
+        try {
+          // The core sends `id`'s output to this channel from now on, in place of the one before:
+          // what the other views got until then is in `screen`.
+          screen = await sessions.attach(id, (b) => (ready ? route(id, b) : early.push(b)))
+        } catch {
+          // Its program ended: nothing to draw.
+        }
         ready = true
-        if (redraws.get(id) !== n) return
-        if (screen) route(id, withReset(screen))
+        v.seeding = false
+        if (views.get(id)?.includes(v)) {
+          if (screen?.length) v.sink(screen)
+          consider(id, v)
+        }
         for (const b of early) route(id, b)
       }
-      sessions.attach(id, (b) => (ready ? route(id, b) : early.push(b))).then(done, () => done(null))
+      const p = (seeds.get(id) ?? Promise.resolve()).then(run)
+      seeds.set(id, p)
+      void p.then(() => {
+        if (seeds.get(id) === p) seeds.delete(id)
+      })
+    }
+
+    function letGo(id: PaneId, v: View) {
+      const list = views.get(id)
+      if (!list?.includes(v)) return
+      const left = list.filter((x) => x !== v)
+      if (!left.length) {
+        // Output waits for the next view, as before the first.
+        views.delete(id)
+        set((s) => {
+          const sinks = { ...s.sinks }
+          const owners = { ...s.owners }
+          delete sinks[id]
+          delete owners[id]
+          return { sinks, owners }
+        })
+        return
+      }
+      views.set(id, left)
+      if (get().owners[id]?.sink !== v.sink) return
+      const ready = left.filter((x) => !x.seeding)
+      own(id, ready.filter((x) => x.shown).at(-1) ?? ready.at(-1))
     }
 
     /** Output of terminal `id`: to its view, else kept for when it mounts. */
@@ -642,6 +719,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       parked: {},
       paletteOpen: false,
       sinks: {},
+      owners: {},
 
       async switchWorktree(path) {
         swap(path)
@@ -725,10 +803,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         )
       },
 
-      async closePane() {
-        const tab = active()
+      async closePane(id) {
+        const s0 = get()
+        const tab = id === undefined ? active() : [s0.tabs, ...Object.values(s0.parked).map((l) => l.tabs)].flat().find((t) => leaves(t.root).includes(id))
         if (!tab) return
-        const closing = tab.focused
+        const closing = id ?? tab.focused
         if (closing > 0) await pty.kill(closing)
         set((s) => {
           const panes = { ...s.panes }
@@ -741,7 +820,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             ...inLayoutOf(s, tab.id, (l) => {
               const root = closeLeaf(l.tabs.find((t) => t.id === tab.id)!.root, closing)
               if (root === null) return dropTab(l, tab.id)
-              return withTab(l, tab.id, (t) => ({ ...t, root, focused: leaves(root)[0] }))
+              return withTab(l, tab.id, (t) => ({ ...t, root, focused: t.focused === closing ? leaves(root)[0] : t.focused }))
             }),
           }
         })
@@ -1017,49 +1096,71 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           return { panes: { ...s.panes, [id]: pane } }
         })
       },
-      attachSink(id, sink, over = false) {
-        const feed = (to: Sink) => set((s) => ({ sinks: { ...s.sinks, [id]: to } }))
-        if (over) {
-          const drawn = id in get().sinks
-          overs.set(id, [...(overs.get(id) ?? []), sink])
-          feed(sink)
-          if (drawn) {
-            pending.delete(id)
-            replay.delete(id)
-            redraw(id)
-          } else {
-            const chunks = pending.get(id) ?? []
-            pending.delete(id)
-            for (const b of chunks) sink(b)
+      attachSink(id, sink, claim = false) {
+        const others = views.get(id) ?? []
+        const v: View = { sink, shown: true, seeding: false, claims: claim && others.length > 0 }
+        views.set(id, [...others, v])
+        if (!others.length) {
+          const all: Sink = (b) => {
+            for (const x of views.get(id) ?? []) if (!x.seeding) x.sink(b)
           }
-        } else {
-          under.set(id, sink)
-          if (overs.get(id)?.length) return () => void (under.get(id) === sink && under.delete(id))
-          feed(sink)
+          set((s) => ({ sinks: { ...s.sinks, [id]: all }, owners: { ...s.owners, [id]: { ...s.owners[id], sink } } }))
           const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
           pending.delete(id)
           if (chunks.length) replay.set(id, chunks)
           for (const b of chunks) sink(b)
+        } else {
+          seed(id, v)
+          consider(id, v)
         }
-        return () => {
-          const fed = get().sinks[id] === sink
-          if (over) overs.set(id, (overs.get(id) ?? []).filter((x) => x !== sink))
-          else if (under.get(id) === sink) under.delete(id)
-          if (!overs.get(id)?.length) overs.delete(id)
-          if (!fed) return
-          const next = overs.get(id)?.at(-1) ?? under.get(id)
-          if (!next) {
-            // Output waits for the next view, as before the first.
-            set((s) => {
-              const sinks = { ...s.sinks }
-              delete sinks[id]
-              return { sinks }
-            })
-            return
-          }
-          feed(next)
-          redraw(id)
+        return () => letGo(id, v)
+      },
+      showSink(id, sink, shown) {
+        const v = viewOf(id, sink)
+        if (!v || v.shown === shown) return
+        v.shown = shown
+        if (v.seeding) return
+        const owner = get().owners[id]?.sink
+        if (shown && owner !== sink) consider(id, v)
+        if (!shown && owner === sink) {
+          const next = views.get(id)!.filter((x) => x.shown && !x.seeding).at(-1)
+          if (next) own(id, next)
         }
+      },
+      takeSession(id, sink) {
+        const v = viewOf(id, sink)
+        if (!v) return
+        v.claims = true
+        if (v.seeding) return
+        own(id, v)
+        v.claims = false
+      },
+      sizeSession(id, sink, cols, rows) {
+        const o = get().owners[id]
+        if (o?.sink !== sink) return false
+        if (o.cols !== cols || o.rows !== rows) set((s) => ({ owners: { ...s.owners, [id]: { ...o, cols, rows } } }))
+        void pty.resize(id, cols, rows)
+        return true
+      },
+      feedTerminal(id, b) {
+        route(id, b)
+      },
+      forgetTerminal(id) {
+        views.delete(id)
+        seeds.delete(id)
+        pending.delete(id)
+        replay.delete(id)
+        set((s) => {
+          if (!(id in s.sinks) && !(id in s.owners)) return {}
+          const sinks = { ...s.sinks }
+          const owners = { ...s.owners }
+          delete sinks[id]
+          delete owners[id]
+          return { sinks, owners }
+        })
+      },
+      tracked() {
+        return [...new Set([...views.keys(), ...seeds.keys(), ...pending.keys(), ...replay.keys()])].sort((a, b) => a - b)
       },
       setPalette(open) {
         set({ paletteOpen: open })
