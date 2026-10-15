@@ -15,7 +15,8 @@ vi.mock('./Workbench', async () => {
 })
 
 import Shell from './Shell'
-import { mountInSlot, resetSlots } from './slots'
+import { mountInSlot, resetSlots, slotEntries } from './slots'
+import { NexusToasts } from '../nexus/boot'
 import { DEFAULTS, shellStore } from './store'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -61,6 +62,17 @@ test('with nothing mounted: the app’s name at the start of the top row, and th
   const status = q('[data-shell-slot="status-bar"]')!
   expect(status.className).toContain('h-6')
   expect(status.childElementCount).toBe(0)
+})
+
+test('the shell mounts no toaster of its own: it starts the Nexus\'s launch, whose toaster is in the overlay slot', async () => {
+  await render()
+  expect(slotEntries('overlay').map((e) => e.component)).toEqual([NexusToasts])
+  // One toaster, drawn by the overlay slot after the shell.
+  expect(host.querySelectorAll('section[aria-label^="Notifications"]')).toHaveLength(1)
+  expect(q('[data-shell]')!.querySelector('section')).toBeNull()
+  act(() => root.unmount())
+  expect(slotEntries('overlay')).toHaveLength(0)
+  root = createRoot(host)
 })
 
 test('each slot draws where Orca has it', async () => {

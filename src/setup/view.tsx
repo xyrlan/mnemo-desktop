@@ -1,9 +1,9 @@
 /** Setup (round 19): the four programs the app runs, found or missing, and a click that
  *  installs each missing one, or updates the mnemo the app installed (#404). mnemo installs
  *  inside the app; git, gh and Claude Code install in a terminal tab through this OS's own
- *  route. Since the Orca redesign it is onboarding's first step (`src/onboarding/`), which opens
- *  by itself at launch when `claude` or `mnemo` is missing; the pane stays for a workspace saved
- *  with it open. */
+ *  route. The Nexus's Setup window (`src/nexus/windows/setup/`) opens by itself at launch when
+ *  `claude` or `mnemo` is missing (`src/nexus/boot/`); the pane stays for a workspace saved with
+ *  it open. */
 import { useEffect, type ReactNode } from 'react'
 import { CheckCircle2, CircleDashed, Loader2, XCircle } from 'lucide-react'
 import { Badge, Button } from '@/ui'
@@ -14,9 +14,7 @@ import { registerPaneView, type PaneViewProps } from '../panes/registry'
 import { register } from '../actions/registry'
 import { ghInstall, installGh } from '../github/actions'
 import { checkAgain, setup, useLookForUpdate, useSetup } from './app-store'
-import { onboarding } from '../onboarding/app-store'
-import { afterRestore, openIfMissing } from './launch'
-import { afterStartup } from '../shell/after-startup'
+import { showNexusWindow } from '../nexus/boot/show'
 import type { Run } from './store'
 import { currentOs, ESSENTIAL, installRoute, newerMnemo, UPDATE_HINT, TOOLS, WHAT, needsSetup, type Route, type ToolName, type ToolStatus } from './tools'
 
@@ -122,7 +120,7 @@ function Action({ name }: { name: ToolName }) {
   }
 }
 
-/** Found; missing and needed; missing and optional — as onboarding's setup step marks them. */
+/** Found; missing and needed; missing and optional — as the Setup window marks them. */
 function Mark({ found, essential }: { found: boolean; essential: boolean }) {
   if (found) return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-state-done" aria-hidden />
   if (essential) return <XCircle className="mt-0.5 size-4 shrink-0 text-state-needs-you" aria-hidden />
@@ -226,17 +224,4 @@ function SetupPane({ id }: PaneViewProps) {
 
 registerPaneView('setup', SetupPane)
 
-register({ id: 'setup.open', title: 'Setup: install git, claude, mnemo and gh', run: () => onboarding.getState().show('setup') })
-
-// Once per app run, not once per hot reload: the first launch with `claude` or `mnemo` missing
-// opens onboarding at setup instead of leaving the user on a Home that cannot do anything.
-const hot = import.meta.hot?.data as { setupChecked?: boolean } | undefined
-if (!hot?.setupChecked) {
-  if (hot) hot.setupChecked = true
-  void openIfMissing({
-    restored: afterRestore(store),
-    // After the launch's first burst: it is four `--version` runs nobody waits on.
-    check: () => afterStartup().then(() => setup.getState().check()),
-    open: () => onboarding.getState().show('setup'),
-  })
-}
+register({ id: 'setup.open', title: 'Setup: install git, claude, mnemo and gh', run: () => showNexusWindow('setup') })

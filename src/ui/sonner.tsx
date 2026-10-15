@@ -7,23 +7,25 @@ import {
   TriangleAlertIcon
 } from 'lucide-react'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
+import './sonner.css'
 
+/** The app's one toaster, in the ship's look (sonner.css): the Nexus mounts it at launch
+ *  (`src/nexus/boot/`), and every `toast(...)` lands in it. */
 const Toaster = ({ ...props }: ToasterProps) => {
-  // The app is dark-first (spec, *Visual system*); a caller's `theme` prop still wins.
+  // The ship is dark; a caller's `theme` prop still wins.
   const theme = 'dark'
 
   return (
     <Sonner
       theme={theme as ToasterProps['theme']}
-      position="bottom-right"
-      // Why: Orca has persistent bottom chrome, so bottom-right toasts need
-      // breathing room above the status bar instead of sitting on its edge.
-      // mobileOffset keeps that clearance below Sonner's 600px breakpoint
-      // (narrow/resized windows and the web client), which otherwise reverts
-      // to Sonner's default 16px and lets toasts crowd the status bar again.
+      // Bottom-left over the ship, never over the drawer: its terminal's prompt is at its bottom right.
+      position="bottom-left"
+      // Why: clear of the strip along the window's bottom edge (the ship's bottom is 24px up), and
+      // mobileOffset keeps that clearance below Sonner's 600px breakpoint, which otherwise reverts
+      // to Sonner's default 16px.
       offset={{ bottom: 'calc(2.5rem + env(safe-area-inset-bottom, 0px))' }}
       mobileOffset={{ bottom: 'calc(2.5rem + env(safe-area-inset-bottom, 0px))' }}
-      className="toaster group"
+      className="toaster group nx-toaster"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
@@ -33,10 +35,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          '--normal-bg': 'var(--popover)',
-          '--normal-text': 'var(--popover-foreground)',
-          '--normal-border': 'var(--border)',
-          '--border-radius': 'var(--radius)',
+          // The ship's hull and its lit edge (src/nexus/ui/ui.css).
+          '--normal-bg': '#0e1529',
+          '--normal-bg-hover': '#121a33',
+          '--normal-text': '#dfe6ff',
+          '--normal-border': '#a5b4fc',
+          '--normal-border-hover': '#a5b4fc',
+          '--border-radius': '4px',
           '--width': 'min(26rem, calc(100vw - 2rem))'
         } as React.CSSProperties
       }

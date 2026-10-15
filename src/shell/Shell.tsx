@@ -4,7 +4,7 @@
 // handles) (MIT, 122b8c25)
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { PanelLeft, PanelRight } from 'lucide-react'
-import { Toaster, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui'
 import { cn } from '@/ui/cn'
 import { LEFT_MAX, LEFT_MIN, RIGHT_MIN, rightMaxFor, rightWidthFor, useShell } from './store'
 import { useSlot } from './slots'
@@ -13,6 +13,7 @@ import { useSidebarResize } from './use-sidebar-resize'
 import Workbench from './Workbench'
 import './shell.css'
 import { shortcutLabel } from '../actions/chords'
+import { startNexusApp } from '../nexus/boot'
 
 // Why: straddle the sidebar/workbench seam so the divider sits on the edge instead of leaving
 // a blank strip between the hover target and it.
@@ -251,7 +252,7 @@ type Props = {
 }
 
 /** Orca's app shell: left sidebar, workbench, right sidebar, status bar, and the overlays over all
- *  of it. The workbench's top groups' rows are the top band of the window, between the sidebars'
+ *  of it (the Nexus, and its toaster). The workbench's top groups' rows are the top band of the window, between the sidebars'
  *  headers. Every screen in it mounts itself through `mountInSlot`. */
 export default function Shell({ ready, notice, onDismissNotice }: Props) {
   const leftOpen = useShell((s) => s.leftOpen)
@@ -263,6 +264,9 @@ export default function Shell({ ready, notice, onDismissNotice }: Props) {
   const covered = useShell((s) => s.covered)
   const row = useRef<HTMLDivElement>(null)
   useCoveredRow(row, covered)
+  // What the app needs at launch is the Nexus's (settings, the toaster, the first run's windows).
+  // Started here until wave 2b moves the call into `src/nexus/view.tsx`; a second caller is counted.
+  useEffect(() => startNexusApp(), [])
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -284,7 +288,6 @@ export default function Shell({ ready, notice, onDismissNotice }: Props) {
         <StatusBarRow />
       </div>
       <SlotOutlet slot="overlay" />
-      <Toaster closeButton toastOptions={{ className: 'font-sans text-sm' }} />
     </TooltipProvider>
   )
 }

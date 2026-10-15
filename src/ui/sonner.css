@@ -1,0 +1,30 @@
+/* The toasts in the ship's look (src/nexus/ui/ui.css): a hull with a lit 2px edge and a hard black
+   shadow, monospace, colour for state only (a failure's edge is the danger red, a success's the
+   done green). Sonner's own sheet draws the rest; the toaster's class outranks it. */
+/* Over every Nexus window (60), confirmation (61) and menu (70), so a toast that lands while one is
+   open (the first run opens Setup about when launch toasts come) is read and clicked, not dimmed
+   under a backdrop that closes the window. theme.css pins toasters to --z-index-toast with
+   !important; the class outranks it. Notification cards are 75, the voice indicator 85. */
+[data-sonner-toaster].nx-toaster { z-index: 80 !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] {
+  padding: 10px 12px;
+  border: 2px solid var(--normal-border);
+  box-shadow: 0 0 0 2px #000, 5px 5px 0 #000;
+  font-size: 12px;
+  line-height: 1.4;
+}
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] [data-title] { font-weight: 700; }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] [data-description] { color: #7f8bb3; }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-type='error'] { border-color: var(--state-needs-you, #fb7185); }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-type='error'] [data-icon] { color: var(--state-needs-you, #fb7185); }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-type='success'] [data-icon] { color: var(--state-done, #4ade80); }
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] [data-button] {
+  height: 22px;
+  border: 2px solid #2b3a6b;
+  border-radius: 2px;
+  background: #18213f;
+  color: #dfe6ff;
+  font: inherit;
+  font-weight: 700;
+}
+[data-sonner-toaster].nx-toaster [data-sonner-toast][data-styled='true'] [data-close-button] { border-radius: 2px; }
