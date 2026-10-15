@@ -1,6 +1,6 @@
-import { useEffect, useRef, type JSX, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { closeWindow, useOpenWindow, windowDef } from './windows'
+import { closeWindow, useOpenWindow, windowDef, type WindowContext } from './windows'
 import './ui.css'
 
 export type NexusWindowProps = {
@@ -58,14 +58,26 @@ export function NexusWindow({ title, sub, width = 720, onClose, children }: Nexu
   )
 }
 
-/** Draws the registered window that is open, if any (mounted once, by the Nexus). */
-export function WindowHost(): JSX.Element | null {
+/** Draws the registered window that is open, if any (mounted once, by the Nexus). `open` opens a
+ *  figure in the drawer, true when it did (the Nexus's, as its menus get it); with none, a window
+ *  opens no figure. */
+export function WindowHost({ open: openFigure }: { open?(id: string): boolean } = {}): JSX.Element | null {
   const open = useOpenWindow()
   const def = open && windowDef(open.id)
+  const ctx = useMemo<WindowContext>(
+    () => ({
+      open: (id) => {
+        if (!openFigure?.(id)) return false
+        closeWindow()
+        return true
+      },
+    }),
+    [openFigure],
+  )
   if (!open || !def) return null
   return (
     <NexusWindow title={def.title} width={def.width} onClose={closeWindow}>
-      {def.render(open.params, closeWindow)}
+      {def.render(open.params, closeWindow, ctx)}
     </NexusWindow>
   )
 }

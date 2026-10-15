@@ -82,11 +82,14 @@ afterEach(() => {
 async function settle() {
   for (let i = 0; i < 4; i++) await act(async () => void (await new Promise((res) => setTimeout(res, 0))))
 }
+/** The robots the ship draws, and the ones a window opened in the drawer (the Nexus's `onOpen`). */
+const figures = { onShip: new Set<string>(), opened: [] as string[] }
+const openFigure = (id: string) => figures.onShip.has(id) && figures.opened.push(id) > 0
 async function open(params: Record<string, unknown> = {}) {
   await act(async () =>
     r.render(
       <>
-        <WindowHost />
+        <WindowHost open={openFigure} />
         <ConfirmHost />
       </>,
     ),
@@ -160,21 +163,19 @@ test('an issue in flight says so and cannot be picked or dispatched', async () =
   expect(button(row(40)!, 'Dispatch')).toBeUndefined()
 })
 
-test('an issue in flight links to its robot: the window closes and the robot opens as a click on it does', async () => {
-  const fig = document.body.appendChild(document.createElement('div'))
-  fig.dataset.shipId = 'c0ffee01'
-  const figure = fig.appendChild(document.createElement('button'))
-  figure.className = 'ship-figure'
-  let clicks = 0
-  figure.addEventListener('click', () => clicks++)
+test('an issue in flight links to its robot: it opens in the drawer, also where the ship draws no figure of it, and the window closes', async () => {
+  figures.onShip = new Set(['c0ffee01'])
+  figures.opened = []
   await open()
+  expect(document.querySelector('[data-ship-id]')).toBeNull()
   click(button(row(40)!, 'robot c0ffee01 →'))
   await settle()
   expect(windowStore.getState().open).toBeNull()
-  expect(clicks).toBe(1)
+  expect(figures.opened).toEqual(['c0ffee01'])
 })
 
-test('a robot the ship does not draw says so, and the window stays', async () => {
+test('a robot the ship does not have says so, and the window stays', async () => {
+  figures.onShip = new Set()
   await open()
   click(button(pr(12)!, 'robot c0ffee01 →'))
   await settle()

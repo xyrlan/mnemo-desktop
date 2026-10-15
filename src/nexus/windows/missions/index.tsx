@@ -6,5 +6,5 @@ registerWindow({
   id: 'missions',
   title: 'Missions',
   width: 920,
-  render: (params, close) => <MissionsWindow root={typeof params.root === 'string' ? params.root : undefined} close={close} />,
+  render: (params, close, ctx) => <MissionsWindow root={typeof params.root === 'string' ? params.root : undefined} close={close} open={ctx.open} />,
 })

@@ -2,8 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { externalUrl } from '../../../browser/open'
 import { CONTRACT_DIRS } from './model'
 
-/** What the MISSIONS window does outside itself: pages in the system browser, the contracts a repo
- *  holds, and a robot opened as a click on it does. */
+/** What the MISSIONS window does outside itself: pages in the system browser and the contracts a
+ *  repo holds. A robot opens through the window's `ctx.open`. */
 
 /** Opens an issue or a PR in the system browser (Google Chrome, else the default one). */
 export function openInBrowser(url: string): Promise<void> {
@@ -21,20 +21,4 @@ export async function listContracts(root: string): Promise<{ dir: string; names:
       return { dir, names: (entries ?? []).filter((e) => !e.is_dir).map((e) => e.name) }
     }),
   )
-}
-
-/** The robot `id`'s figure on the ship, which the window covers: null when the ship does not draw
- *  it (it left, or it waits folded in a full hangar). */
-export const robotFigure = (id: string): HTMLButtonElement | null =>
-  [...document.querySelectorAll<HTMLElement>('[data-ship-id]')].find((e) => e.dataset.shipId === id)?.querySelector<HTMLButtonElement>('.ship-figure') ?? null
-
-/** Opens robot `id` in the drawer exactly as a click on its figure does, once the window has
- *  closed (so the window's closing does not take the focus back from its tab). False when the ship
- *  does not draw it. */
-export function openRobot(id: string, close: () => void): boolean {
-  const fig = robotFigure(id)
-  if (!fig) return false
-  close()
-  setTimeout(() => fig.isConnected && fig.click(), 0)
-  return true
 }

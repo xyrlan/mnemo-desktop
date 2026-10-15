@@ -81,8 +81,8 @@ function sayFailure(r: ActionResult) {
 type BodyProps = {
   client: ShipClient
   usage: NexusClient
-  /** Opens a captain or a robot in the drawer. */
-  onOpen(id: string): void
+  /** Opens a captain or a robot in the drawer; false when the ship has no such figure. */
+  onOpen(id: string): boolean
   /** The ship and feed each time they are built, for the drawer beside it. */
   onShip(ship: Ship, feed: Feed | null): void
 }
@@ -224,7 +224,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
           onClose={() => setMenu(null)}
         />
       )}
-      <WindowHost />
+      <WindowHost open={onOpen} />
       <ConfirmHost />
     </>
   )
@@ -261,9 +261,10 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
   builtRef.current = built
   // A click on a figure, an exception's open, ⌥1–9, a breadcrumb: its tab, held as it opens.
   const onOpen = useCallback(
-    (id: string) => {
+    (id: string): boolean => {
       const o = openingOf(id, builtRef.current?.ship ?? null, reposRef.current, drawer.paneOfSession)
       if (o) drawer.drawer.open(o.tab, o.ref)
+      return o !== null
     },
     [drawer],
   )

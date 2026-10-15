@@ -380,3 +380,27 @@ test('with a window open, Esc typed in the drawerâ€™s terminal is the terminalâ€
   // The view's own Esc did not also collapse the drawer.
   expect(nexusStore.getState().collapsed).toBe(false)
 })
+
+test('a window opens a figure in the drawer as a menu does, and closes so its tab is in view', async () => {
+  await mount()
+  let answered: boolean[] = []
+  unregister = registerWindow({
+    id: 'zz-open',
+    title: 'Opens',
+    render: (_params, _close, ctx) => (
+      <>
+        <button type="button" data-zz-open="r-live" onClick={() => answered.push(ctx.open('r-live'))} />
+        <button type="button" data-zz-open="gone" onClick={() => answered.push(ctx.open('not-on-the-ship'))} />
+      </>
+    ),
+  })
+  await act(async () => openWindow('zz-open'))
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-zz-open="gone"]')!.click())
+  expect(answered).toEqual([false])
+  expect(windowStore.getState().open?.id).toBe('zz-open')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-zz-open="r-live"]')!.click())
+  expect(answered).toEqual([false, true])
+  expect(windowStore.getState().open).toBeNull()
+  expect(nexusStore.getState().activeTab).toBe('r-live')
+  answered = []
+})

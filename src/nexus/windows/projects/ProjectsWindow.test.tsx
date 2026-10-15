@@ -74,13 +74,13 @@ async function rig(settings: Partial<Settings> = {}, over: Partial<ProjectsDeps>
 }
 
 let root: Root | null = null
-async function mount(r: Rig) {
+async function mount(r: Rig, open?: (id: string) => boolean) {
   const host = document.body.appendChild(document.createElement('div'))
   root = createRoot(host)
   await act(async () =>
     root!.render(
       <ProjectsDepsContext.Provider value={r.deps}>
-        <ProjectsWindow close={r.close} />
+        <ProjectsWindow close={r.close} open={open} />
       </ProjectsDepsContext.Provider>,
     ),
   )
@@ -259,4 +259,15 @@ test('with no repo known, the window says what to do first', async () => {
   r.deps.home.setState({ snapshot: { ...SNAP, repos: [] } })
   await mount(r)
   expect(document.body.textContent).toContain('No repos yet. Add a folder or clone one.')
+})
+
+test('a live session opens in its drawer tab, as a click on its figure does; one the ship does not have says so', async () => {
+  const opened: string[] = []
+  await mount(await rig(), (id) => id === 'r1' && opened.push(id) > 0)
+  const live = row('mnemo-desktop')!.querySelector('[data-project-live]')!
+  await click(button(live, '▣ issue 42 · background'))
+  expect(opened).toEqual(['r1'])
+  await click(button(live, '● tidy the bar · in the app'))
+  expect(opened).toEqual(['r1'])
+  expect(document.querySelector('[role="alert"]')!.textContent).toContain('tidy the bar is not on the ship now')
 })
