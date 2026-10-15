@@ -20,7 +20,8 @@ export type Drawer = {
   /** Opens `tab`, holding `ref` for it; a figure that has a tab already is shown. A tab that showed
    *  a conversation read-only takes the live session once there is one. */
   open(tab: DrawerTab, ref: SessionRef | null): void
-  /** Closes tab `id` and lets its session go. */
+  /** Closes tab `id` and lets its session go; a pane's session no tab shows any more is handed to
+   *  `Workbench.letGo`. */
   close(id: string): Promise<void>
   /** Expands or collapses; the tabs stay held. */
   toggle(): void
@@ -37,6 +38,9 @@ export type Workbench = {
   /** `claude attach` to the child on its account, in a new tab. */
   attach(child: Target): void
   closeNexus(): void
+  /** Pane `pane`'s session is shown by no tab any more: an offscreen pane with nothing to come
+   *  back to ends (`start.ts`). */
+  letGo?(pane: PaneId): void
 }
 
 export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, workbench: Workbench): Drawer {
@@ -57,7 +61,10 @@ export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, wor
       if (!tab) return
       store.getState().removeTab(id)
       // Another tab may show the same session (a captain's pane opened from two figures): it keeps it.
-      if (tab.key !== null && !store.getState().tabs.some((t) => t.key === tab.key)) await host.getState().release(tab.key, BY)
+      if (tab.key === null || store.getState().tabs.some((t) => t.key === tab.key)) return
+      const session = host.getState().sessions[tab.key]
+      await host.getState().release(tab.key, BY)
+      if (session?.kind === 'pane' && session.pty !== null) workbench.letGo?.(session.pty)
     },
 
     toggle() {

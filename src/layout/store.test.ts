@@ -1823,3 +1823,177 @@ describe('groups', () => {
     expect(s.getState().worktreeLayout(ELSEWHERE)?.groupRoot).toMatchObject({ kind: 'group' })
   })
 })
+
+describe('offscreen panes: the sessions the Nexus starts', () => {
+  const text = (chunks: Uint8Array[]) => chunks.map((c) => new TextDecoder().decode(c)).join('')
+  const bytes = (t: string) => new TextEncoder().encode(t)
+  const live = (id: number, cwd: string, alive = true): PtyInfo => ({ id, cwd, pid: 1000 + id, alive })
+  function core(held: PtyInfo[], screens: Record<number, string> = {}) {
+    const attached: number[] = []
+    const outputs: Record<number, (b: Uint8Array) => void> = {}
+    const client: SessionClient = {
+      list: async () => held,
+      attach: async (id, onOutput) => {
+        if (!held.find((i) => i.id === id)?.alive) throw new Error(`pane ${id} has exited`)
+        attached.push(id)
+        outputs[id] = onOutput
+        return bytes(screens[id] ?? '')
+      },
+    }
+    return { client, attached, outputs }
+  }
+
+  test('one opens in no tab, types its command once the prompt is up, and changes nothing shown', async () => {
+    vi.useFakeTimers()
+    try {
+      const pty = fakePty()
+      const s = createStore(pty)
+      await s.getState().newTab('/a')
+      const shown = { tabs: s.getState().tabs, activeTab: s.getState().activeTab, groups: s.getState().groups }
+      const id = await s.getState().openOffscreen('/repo', 'claude --session-id 0000', '0000')
+      expect(s.getState().panes[id]).toEqual({ id, view: 'terminal', offscreen: true, cwd: '/repo', sessionId: '0000' })
+      expect({ tabs: s.getState().tabs, activeTab: s.getState().activeTab, groups: s.getState().groups }).toEqual(shown)
+      expect(pty.spawned).toEqual(['/a', '/repo'])
+      expect(pty.writes).toEqual([])
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(pty.writes).toEqual([[id, 'claude --session-id 0000\n']])
+      // A shell, with nothing typed.
+      const shell = await s.getState().openOffscreen('/repo')
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(pty.writes.filter(([p]) => p === shell)).toEqual([])
+      expect(s.getState().panes[shell].sessionId).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('a shell that cannot be spawned rejects, and leaves no pane', async () => {
+    const s = createStore(fakePty({ failSpawn: true }))
+    await expect(s.getState().openOffscreen('/repo', 'claude')).rejects.toThrow('boom')
+    expect(s.getState().panes).toEqual({})
+  })
+
+  test('closing one kills its shell and forgets it; what it prints after is dropped', async () => {
+    const pty = fakePty()
+    const s = createStore(pty)
+    const id = await s.getState().openOffscreen('/repo')
+    await s.getState().closePane(id)
+    expect(pty.killed).toEqual([id])
+    expect(s.getState().panes[id]).toBeUndefined()
+    pty.outputs[id](bytes('bye'))
+    expect(s.getState().tracked()).toEqual([])
+  })
+
+  test('its first view gets what it printed; once no view shows it, nothing is kept, and the next is drawn from the core', async () => {
+    const pty = fakePty()
+    const c = core([live(1, '/repo')], { 1: 'screen now' })
+    const s = createStore(pty, { sessions: c.client })
+    const id = await s.getState().openOffscreen('/repo')
+    pty.outputs[id](bytes('prompt$ '))
+    const first: Uint8Array[] = []
+    const release = s.getState().attachSink(id, (b) => first.push(b), true, 'drawer')
+    expect(text(first)).toBe('prompt$ ')
+    release()
+    pty.outputs[id](bytes('unseen output'))
+    expect(s.getState().tracked()).toEqual([])
+    const next: Uint8Array[] = []
+    s.getState().attachSink(id, (b) => next.push(b), true, 'drawer')
+    await vi.waitFor(() => expect(text(next)).toBe('screen now'))
+    expect(c.attached).toEqual([id])
+    expect(s.getState().owners[id]?.name).toBe('drawer')
+    c.outputs[id](bytes(' and on'))
+    expect(text(next)).toBe('screen now and on')
+  })
+
+  test('a pane in a tab keeps what it printed while no view shows it, as before', async () => {
+    const pty = fakePty()
+    const s = createStore(pty)
+    await s.getState().newTab('/a')
+    const release = s.getState().attachSink(1, () => {})
+    release()
+    pty.outputs[1](bytes('kept'))
+    expect(s.getState().tracked()).toEqual([1])
+  })
+
+  test('saved beside the worktrees, and only when there is one', async () => {
+    const s = createStore(fakePty())
+    await s.getState().newTab('/a')
+    expect(s.getState().snapshotForSave()).not.toHaveProperty('offscreen')
+    const id = await s.getState().openOffscreen('/repo', 'claude', 'sess-1')
+    s.getState().setTitle(id, 'claude')
+    const saved = s.getState().snapshotForSave()
+    expect(saved.offscreen).toEqual([{ pane: id, cwd: '/repo', title: 'claude', sessionId: 'sess-1' }])
+    // In no worktree's tabs.
+    expect(saved.worktrees.flatMap((w) => Object.keys(w.panes))).toEqual(['1'])
+  })
+
+  /** A file with a shell tab in /a (pane 1) and offscreen panes 5 (a shell), 6 (Claude `sess-6`)
+   *  and 7 (Claude `sess-7`). */
+  async function savedFile() {
+    const s = createStore(fakePty({ first: 5 }))
+    await s.getState().openOffscreen('/repo')
+    await s.getState().openOffscreen('/repo', undefined, 'sess-6')
+    await s.getState().openOffscreen('/repo', undefined, 'sess-7')
+    const t = createStore(fakePty())
+    await t.getState().newTab('/a')
+    return JSON.parse(JSON.stringify({ ...t.getState().snapshotForSave(), offscreen: s.getState().snapshotForSave().offscreen }))
+  }
+
+  test('restored: one whose shell kept running comes back offscreen on it, never adopted as a tab, drawn from the core once shown', async () => {
+    const c = core([live(1, '/a'), live(5, '/repo'), live(6, '/repo/sub'), live(7, '/repo')], { 6: 'claude screen' })
+    const pty = fakePty({ first: 100 })
+    const s = createStore(pty, { sessions: c.client })
+    expect(s.getState().restored).toBe(false)
+    await s.getState().restore(await savedFile())
+    expect(s.getState().restored).toBe(true)
+    expect(s.getState().panes[6]).toEqual({ id: 6, view: 'terminal', offscreen: true, cwd: '/repo/sub', sessionId: 'sess-6' })
+    expect(s.getState().panes[5]).toMatchObject({ offscreen: true, cwd: '/repo' })
+    expect(s.getState().tabs.flatMap((t) => leaves(t.root))).toEqual([1])
+    expect(Object.values(s.getState().parked).flatMap((l) => l.tabs)).toEqual([])
+    expect(pty.spawned).toEqual([])
+    // Nothing attached until a view shows it.
+    expect(c.attached).toEqual([1])
+    const drawn: Uint8Array[] = []
+    s.getState().attachSink(6, (b) => drawn.push(b), true)
+    await vi.waitFor(() => expect(text(drawn)).toBe('claude screen'))
+    expect(pty.exits[6]).toBeDefined()
+  })
+
+  test('restored: one whose shell is gone resumes its Claude session on a new shell, unless a claude runs it; a shell is forgotten', async () => {
+    vi.useFakeTimers()
+    try {
+      const c = core([live(1, '/a'), live(5, '/repo', false)])
+      const pty = fakePty({ first: 100 })
+      const s = createStore(pty, { sessions: c.client, liveSessions: async (ids) => ids.filter((id) => id === 'sess-7') })
+      await s.getState().restore(await savedFile())
+      expect(s.getState().panes[5]).toBeUndefined()
+      expect(s.getState().panes[7]).toBeUndefined()
+      expect(Object.values(s.getState().panes).filter((p) => p.offscreen)).toEqual([{ id: 100, view: 'terminal', offscreen: true, cwd: '/repo', sessionId: 'sess-6', renewed: true }])
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(pty.writes).toEqual([[100, 'claude --resume sess-6\n']])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('restored: when no one can say which sessions run, none is resumed', async () => {
+    const s = createStore(fakePty({ first: 100 }), { sessions: core([live(1, '/a')]).client, liveSessions: async () => Promise.reject(new Error('no')) })
+    await s.getState().restore(await savedFile())
+    expect(Object.values(s.getState().panes).filter((p) => p.offscreen)).toEqual([])
+  })
+
+  test('restored: a list that cannot be read is left out, and a session id that is not one never typed', async () => {
+    const c = core([live(1, '/a'), live(5, '/repo')])
+    const s = createStore(fakePty({ first: 100 }), { sessions: c.client })
+    const file = { ...(await savedFile()), offscreen: [{ pane: 5, sessionId: 'x; rm -rf ~' }, { pane: 5 }, { pane: -2 }, 'junk', { pane: 9, sessionId: 'a b' }] }
+    await s.getState().restore(file)
+    expect(s.getState().panes[5]).toEqual({ id: 5, view: 'terminal', offscreen: true, cwd: '/repo' })
+    expect(Object.values(s.getState().panes).filter((p) => p.offscreen)).toHaveLength(1)
+  })
+
+  test('restored is said even when the file cannot be read', async () => {
+    const s = createStore(fakePty(), { sessions: core([]).client })
+    await expect(s.getState().restore('not a workspace')).rejects.toThrow()
+    expect(s.getState().restored).toBe(true)
+  })
+})

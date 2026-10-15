@@ -1,5 +1,5 @@
 import type { LogEvent } from './ship-types'
-import { LOG_MAX, nexusStore } from './store'
+import { LOG_MAX, nexusStore, type DrawerTab } from './store'
 
 const ev = (id: string): LogEvent => ({ id, at: 1, kind: 'dispatched', robotId: id, captainId: null, text: '' })
 
@@ -34,4 +34,24 @@ test('triage asked from outside opens the Nexus; the view settles it, on triage 
   nexusStore.getState().askTriage()
   nexusStore.getState().settleTriageAsk(2)
   expect(nexusStore.getState()).toMatchObject({ triage: true, triageAsked: false })
+})
+
+test('a tab retargeted keeps its place and, shown, stays shown; onto a tab open already, it only goes', () => {
+  const tab = (id: string, over: Partial<DrawerTab> = {}): DrawerTab => ({ id, kind: 'session', key: `pane:${id.length}`, readOnly: null, label: id, sessionId: null, cwd: null, ...over })
+  nexusStore.setState({ tabs: [tab('a'), tab('bb'), tab('ccc')], activeTab: 'bb', collapsed: false, focusId: 'bb' })
+  nexusStore.getState().retargetTab('bb', tab('s-1', { kind: 'captain', sessionId: 's-1' }))
+  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['a', 's-1', 'ccc'])
+  expect(nexusStore.getState()).toMatchObject({ activeTab: 's-1', focusId: 's-1' })
+  nexusStore.getState().retargetTab('a', tab('ccc'))
+  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['s-1', 'ccc'])
+  expect(nexusStore.getState().activeTab).toBe('s-1')
+  nexusStore.getState().retargetTab('s-1', tab('ccc'))
+  expect(nexusStore.getState()).toMatchObject({ activeTab: 'ccc', focusId: 'ccc' })
+  // Collapsed, nothing is highlighted; an id not open changes nothing.
+  nexusStore.setState({ tabs: [tab('a')], activeTab: 'a', collapsed: true, focusId: null })
+  nexusStore.getState().retargetTab('a', tab('b'))
+  expect(nexusStore.getState()).toMatchObject({ activeTab: 'b', focusId: null, collapsed: true })
+  const before = nexusStore.getState().tabs
+  nexusStore.getState().retargetTab('zzz', tab('q'))
+  expect(nexusStore.getState().tabs).toBe(before)
 })

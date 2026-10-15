@@ -6,10 +6,10 @@ import { captainsOf, isGreen, isRunning, reposOf, robotsOf } from './find'
 export const CONFIRM_MS = 20_000
 
 /** What the prompt says it takes, under it. */
-export const HINT = '/dispatch <repo> #<issue> · /msg <#issue | captain | all> <text> · /merge green · /stop all · /land <feature>'
+export const HINT = '/new <repo> · /dispatch <repo> #<issue> · /msg <#issue | captain | all> <text> · /merge green · /stop all · /land <feature>'
 
 const START = 'start with / — e.g. /dispatch mnemo #123 · /msg #682 text · /msg all text. To talk to one session, click it.'
-const UNKNOWN = (verb: string) => `unknown /${verb} — use /dispatch, /msg, /merge green, /stop all or /land`
+const UNKNOWN = (verb: string) => `unknown /${verb} — use /new, /dispatch, /msg, /merge green, /stop all or /land`
 const CONFIRM = ' — type /yes within 20 s to confirm'
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
@@ -18,16 +18,33 @@ const labels = (rs: ShipRobot[]) => rs.map((r) => r.label).join(' ')
 /** A robot's label without its twin suffix: `#404·a` → `#404`. */
 const issueOf = (label: string) => label.replace(/·[a-z]+$/, '')
 
-function dispatch(rest: string, ship: Ship): Parsed {
-  // Word by word, each word checked alone: a pattern over the whole list backtracks.
-  const [name, ...words] = rest.split(/[\s,]+/).filter(Boolean)
-  if (!name || !words.length || !words.every((w) => /^#?\d+$/.test(w))) return { error: 'usage: /dispatch <repo> #<issue> [#<issue>…]' }
+/** The repo on the ship called `name`: by its name, its path, or its folder's name. */
+function repoCalled(name: string, ship: Ship): { root: string; name: string } | { error: string } {
   const want = name.toLowerCase()
   const repos = reposOf(ship)
   const repo = repos.find((r) => r.name.toLowerCase() === want) ?? repos.find((r) => samePath(r.root, name) || basename(r.root).toLowerCase() === want)
   if (!repo) return { error: repos.length ? `no repo called ${name} on the ship — repos: ${repos.map((r) => r.name).join(', ')}` : 'no repo is on the ship right now' }
+  return repo
+}
+
+function dispatch(rest: string, ship: Ship): Parsed {
+  // Word by word, each word checked alone: a pattern over the whole list backtracks.
+  const [name, ...words] = rest.split(/[\s,]+/).filter(Boolean)
+  if (!name || !words.length || !words.every((w) => /^#?\d+$/.test(w))) return { error: 'usage: /dispatch <repo> #<issue> [#<issue>…]' }
+  const repo = repoCalled(name, ship)
+  if ('error' in repo) return repo
   const issues = [...new Set(words.map((w) => Number(w.replace('#', ''))))]
   return { action: { kind: 'dispatch', root: repo.root, issues } }
+}
+
+/** `/new <repo>`: `claude` started in that repo, named as `/dispatch` names one, in a drawer tab.
+ *  Not a ship action: the prompt opens the session itself (`openSession`). Null for any other line. */
+export function parseNew(line: string, ship: Ship): { root: string; name: string } | { error: string } | null {
+  const m = /^\/new(?:\s+([\s\S]*))?$/i.exec(line.trim())
+  if (!m) return null
+  const name = m[1]?.trim() ?? ''
+  if (!name || /\s/.test(name)) return { error: 'usage: /new <repo> — starts claude in that repo' }
+  return repoCalled(name, ship)
 }
 
 /** `who` among the robots: `#682` is every twin of it, `#682·a` one twin; a piece's name or a
