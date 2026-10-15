@@ -1,4 +1,5 @@
 import { childNext, parentNext } from '../fleet/model'
+import { explainErrors, type ErrorSource, type SnapshotError } from '../mission/errors'
 import { basename, dirname, norm } from '../path/path'
 import { needKind, permissionAsk, type ChildSession, type Mission, type ParentSession, type Pr, type RepoGroup } from '../mission/types'
 import { accessoryOf, classOf, injectedRules, isRateLimited, labelOf } from './robot'
@@ -21,6 +22,7 @@ import {
   type SessionFeed,
   type Ship,
   type ShipInput,
+  type SnapshotException,
   type ShipRobot,
   type Zone,
 } from './ship-types'
@@ -389,6 +391,8 @@ export function buildShip(input: ShipInput): Ship {
       .filter((p) => p.robot.zone === 'stranded')
       .sort(longestFirst)
       .map((p): Exception => ({ kind: 'stranded', robotId: p.robot.id, idleMs: p.robot.idleMs })),
+    // Last: they open nothing, so ⌥1–9 keep reaching the figures that wait.
+    ...snapshotExceptions(explainErrors(snapshot.errors, SNAPSHOT_SOURCES)),
   ]
 
   const robots = aboard.map((p) => p.robot)
@@ -409,6 +413,20 @@ export function buildShip(input: ShipInput): Ship {
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+/** Every source a snapshot error can name: the ship shows all their data, so it shows them all. */
+const SNAPSHOT_SOURCES: readonly ErrorSource[] = ['sessions', 'children', 'prs', 'history', 'other']
+
+/** The snapshot's errors (`explainErrors`) as bridge exceptions, in their order, each said once:
+ *  what the status bar's "agents unknown" and the workbench's error strips said (#367). */
+export function snapshotExceptions(errors: SnapshotError[]): Exception[] {
+  const out: SnapshotException[] = []
+  for (const e of errors) {
+    if (out.some((o) => o.text === e.text)) continue
+    out.push({ kind: 'snapshot', source: e.source, text: e.text, detail: e.detail })
+  }
+  return out
+}
 
 /** A parent's own pending decision: the fleet's answer, else its `claude agents` status. */
 function parentNeeds(p: ParentSession, view: AgentView | undefined): boolean {

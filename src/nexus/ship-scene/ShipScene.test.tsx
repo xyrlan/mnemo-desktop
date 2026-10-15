@@ -2,11 +2,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { ShipScene } from '../ShipScene'
 import { SHIP_SPRITES, SPRITES } from '../sprites'
-import type { LogEvent, Ship, ShipAction, ShipSceneProps } from '../ship-types'
+import type { LogEvent, Ship, ShipAction, ShipSceneProps, SnapshotException } from '../ship-types'
 import type { MenuTarget } from '../ui/menus'
 import { closeWindow, registerWindow, windowStore } from '../ui/windows'
 import { captain, deck, dock, mission, pr, ROOT, robot, ship } from './fixtures'
-import { CONFIRM_MS } from './Bridge'
+import { CONFIRM_MS, PR_ERROR_HOLD_MS } from './Bridge'
 import { TURN_MS } from './voices'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -539,6 +539,46 @@ test('an empty fleet says so', async () => {
   await draw({ ship: ship() })
   expect($('.ship-empty')!.textContent).toBe('No live sessions.')
   expect($('.ship-colhead')).toBeNull()
+})
+
+const unread = (source: SnapshotException['source'], text: string): SnapshotException => ({ kind: 'snapshot', source, text, detail: `${source}: the line` })
+
+test('an empty fleet with the sessions unlisted does not say there are none', async () => {
+  await draw({ ship: ship({ bridge: { exceptions: [unread('sessions', 'Claude sessions could not be listed: boom')], blocked: [] } }) })
+  expect($('.ship-empty')!.textContent).toBe('Sessions unknown: the bridge says what could not be read.')
+  await draw({ ship: ship({ bridge: { exceptions: [unread('prs', 'Pull requests could not be read: boom')], blocked: [] } }) })
+  expect($('.ship-empty')!.textContent).toBe('No live sessions.')
+})
+
+test('a read that failed is a bridge row that says what to do, the line on hover, with no key and nothing to open', async () => {
+  platform('MacIntel')
+  const base = fleet()
+  await draw({ ship: { ...base, bridge: { ...base.bridge, exceptions: [...base.bridge.exceptions, unread('history', "Claude's history could not be read: boom")] } } })
+  const rows = $$('.ship-xrow')
+  expect(rows.map((r) => r.querySelector('.ship-xn')?.textContent ?? null)).toEqual(['⌥1', '⌥2', '⌥3', null])
+  const row = rows[3]
+  expect(row.dataset.kind).toBe('snapshot')
+  expect(row.querySelector('.ship-xt')!.textContent).toBe("Claude's history could not be read: boom")
+  expect((row.querySelector('.ship-xt') as HTMLElement).title).toBe('history: the line')
+  expect(row.querySelectorAll('button')).toHaveLength(0)
+  await click(row)
+  expect(calls.open).toEqual([])
+})
+
+test('a failed PR read stays on the bridge between the polls that ask gh, then leaves', async () => {
+  const gh = unread('prs', 'Pull requests could not be read: gh is not logged in.')
+  const at = 5_000_000
+  const said = () => $$('.ship-xrow[data-kind="snapshot"]').map((r) => r.querySelector('.ship-xt')!.textContent)
+  await draw({ ship: ship({ bridge: { exceptions: [gh], blocked: [] }, at }) })
+  expect(said()).toEqual([gh.text])
+  await draw({ ship: ship({ at: at + PR_ERROR_HOLD_MS - 1 }) })
+  expect(said()).toEqual([gh.text])
+  await draw({ ship: ship({ at: at + PR_ERROR_HOLD_MS + 1 }) })
+  expect(said()).toEqual([])
+  // Any other source leaves with the poll that no longer says it.
+  await draw({ ship: ship({ bridge: { exceptions: [unread('sessions', 'Claude sessions could not be listed: boom')], blocked: [] }, at }) })
+  await draw({ ship: ship({ at: at + 1 }) })
+  expect(said()).toEqual([])
 })
 
 test('reduced motion and a hidden window are marked on the scene for its stylesheet', async () => {

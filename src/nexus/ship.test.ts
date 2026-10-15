@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { child, parent } from '../mission/fixtures'
 import type { ChildSession, Mission, ParentSession, Pr, RepoGroup, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
-import { actionOf, ago, buildShip, ciAt, departuresOf, firstSentence, LINGER_MS, RUNNING_MAX_MS, STRANDED_MS, WORK_GAP_MS } from './ship'
+import { explainError } from '../mission/errors'
+import { actionOf, ago, buildShip, ciAt, departuresOf, firstSentence, LINGER_MS, RUNNING_MAX_MS, snapshotExceptions, STRANDED_MS, WORK_GAP_MS } from './ship'
 import { orphanCaptainId, type AgentView, type CheckRun, type Feed, type PrFate, type SessionFeed, type Ship, type ShipInput, type ShipRobot } from './ship-types'
 
 const NOW = Date.parse('2026-10-15T12:00:00Z')
@@ -411,7 +412,7 @@ describe('buildShip: the bridge', () => {
     ]
     const mission: Mission = { feature: 'nexus-v2', contract_path: `${ROOT}/docs/c.md`, landable: true, pieces: [] }
     const s = ship(snap(repo({ parents: [boss()], children: kids, missions: [mission] })), { agents: { [sid('s1')]: working(), [sid('s2')]: working() } })
-    expect(s.bridge.exceptions.map((e) => [e.kind, 'robotId' in e ? e.robotId : 'root' in e ? e.root : e.captainId])).toEqual([
+    expect(s.bridge.exceptions.map((e) => [e.kind, 'robotId' in e ? e.robotId : 'root' in e ? e.root : 'captainId' in e ? e.captainId : e.text])).toEqual([
       ['need', 'n1'],
       ['red', 'x1'],
       ['land', ROOT],
@@ -528,5 +529,41 @@ describe('a captain waiting on you', () => {
     const red = kid('x1', { live: false, state: 'stopped', updated_at: iso(HOUR), pr: pr(4, { ci: 'fail' }) })
     const s = ship(snap(repo({ parents: [boss()], children: [red] })), { agents: { [P1]: waits('permission') } })
     expect(s.bridge.exceptions.map((x) => x.kind)).toEqual(['captain', 'red'])
+  })
+})
+
+describe('what the snapshot could not read', () => {
+  const NO_CLAUDE = 'claude agents: No such file or directory (os error 2)'
+  const GH_OUT = 'gh pr list: To get started with GitHub CLI, please run:  gh auth login'
+  const asks: AgentView = { state: 'needs-you', waitingFor: 'permission', title: 'fleet lead' }
+
+  it('is one exception per error, in order, with what failed, what to do and the line', () => {
+    const xs = snapshotExceptions([explainError(NO_CLAUDE), explainError(GH_OUT)])
+    expect(xs).toEqual([
+      { kind: 'snapshot', source: 'sessions', text: expect.stringMatching(/^Claude sessions could not be listed: `claude` was not found\. Install Claude Code/), detail: NO_CLAUDE },
+      { kind: 'snapshot', source: 'prs', text: 'Pull requests could not be read: gh is not logged in. Run `gh auth login` in a terminal.', detail: GH_OUT },
+    ])
+  })
+
+  it('says each error once', () => {
+    expect(snapshotExceptions([explainError(GH_OUT), explainError(GH_OUT)])).toHaveLength(1)
+    expect(snapshotExceptions([])).toEqual([])
+  })
+
+  it('comes last on the bridge, from every source, without counting as needing you', () => {
+    const red = kid('x1', { live: false, state: 'stopped', updated_at: iso(HOUR), pr: pr(4, { ci: 'fail' }) })
+    const errors = [NO_CLAUDE, 'history (projects): permission denied', 'agents json: expected value', 'account work: mnemo sessions: boom']
+    const s = ship({ ...snap(repo({ parents: [boss()], children: [red] })), errors }, { agents: { [P1]: asks } })
+    expect(s.bridge.exceptions.map((x) => [x.kind, x.kind === 'snapshot' ? x.source : null])).toEqual([
+      ['captain', null],
+      ['red', null],
+      ['snapshot', 'sessions'],
+      ['snapshot', 'history'],
+      ['snapshot', 'sessions'],
+      ['snapshot', 'children'],
+    ])
+    expect(s.counts.need).toBe(1)
+    const named = s.bridge.exceptions.at(-1)
+    expect(named?.kind === 'snapshot' && named.text).toMatch(/^Background children could not be listed on account work: /)
   })
 })

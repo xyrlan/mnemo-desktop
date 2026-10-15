@@ -139,3 +139,9 @@ test('a captain waiting on you: a red bridge, a row that says what it waits on a
   expect(exceptionRow({ ...perm, waitsOn: 'question', question: 'Which schema?' })).toMatchObject({ icon: '❓', text: 'Which schema?' })
   expect(exceptionRow({ ...perm, waitsOn: 'question' })).toMatchObject({ icon: '❓', text: 'waits on a question' })
 })
+
+test('a read that failed is a lilac row with nothing to press, the backend line on hover', () => {
+  const x = { kind: 'snapshot', source: 'prs', text: 'Pull requests could not be read: gh is not logged in.', detail: 'gh pr list: gh auth login' } as const
+  expect(exceptionRow(x)).toEqual({ key: `snapshot:${x.text}`, kind: 'snapshot', robotId: null, icon: '⚠', text: x.text, title: x.detail, buttons: [] })
+  expect(toneOf(ship({ bridge: { exceptions: [x], blocked: [] } }))).toBe('lilac')
+})

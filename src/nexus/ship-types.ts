@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react'
 import type { AgentState, WaitingFor } from '../fleet/types'
+import type { ErrorSource } from '../mission/errors'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
 import type { MenuTarget } from './ui/menus'
@@ -153,6 +154,12 @@ export type Exception =
   | { kind: 'land'; root: string; mission: Mission }
   | { kind: 'stranded'; robotId: string; idleMs: number }
   | CaptainNeed
+  | SnapshotException
+
+/** A read the snapshot could not make (`mission/errors`, #367): what failed and what to do
+ *  (`text`), and the line as the backend said it (`detail`). `source`: the data it leaves out, so
+ *  an empty ship is not taken for a quiet one. */
+export type SnapshotException = { kind: 'snapshot'; source: ErrorSource; text: string; detail: string }
 
 /** A captain (a parent session) waiting on you, as the fleet sees it (`waitingFor`): what the
  *  sidebar's needs-you count counts. `question`: the feed's `ask`, when it has one. `since`: its
@@ -164,7 +171,7 @@ export type CaptainNeed = { kind: 'captain'; captainId: string; waitsOn: 'permis
 export type ShipCounts = { working: number; need: number; ready: number }
 
 /** `bridge.exceptions`: need and captain (longest wait first, together), red, land, ready (longest
- *  wait first), stranded (longest first).
+ *  wait first), stranded (longest first), then what the snapshot could not read.
  *  `bridge.blocked`: every robot whose zone is `bridge`. Decks in a fixed order: most children over
  *  the session first, then by name. */
 export type Ship = {

@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
 import type { Captain, Ship, ShipAction, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
 import { RobotFigure, Tag } from './figures'
 import { bridgeStatus, exceptionRow, toneOf, type Row, type RowButton } from './words'
+import './bridge.css'
 
 /** Rows the bridge lists; ⌥1–9 reach them, the rest are counted. */
 export const ROWS = 9
@@ -10,6 +11,25 @@ export const ROWS = 9
 export const CONFIRM_MS = 5_000
 /** Blocked robots drawn on the bridge; the rest are counted, and triage reaches them all. */
 export const BLOCKED = 2
+
+/** How long a failed PR read stays on the bridge after the snapshot last said it. The app asks
+ *  `gh` for PRs on one poll in ten (`shell/mission-poll.ts`: 30 s while shown) and the polls
+ *  between say nothing of it, so without this the row would show for one poll and blink out. */
+export const PR_ERROR_HOLD_MS = 45_000
+
+/** The bridge's rows: the ship's exceptions, then each failed PR read the snapshot said within
+ *  `PR_ERROR_HOLD_MS` and no longer says. Held rows come last, so ⌥1–9 still reach the ship's. */
+export function useRows(ship: Ship): Row[] {
+  const held = useRef(new Map<string, { row: Row; at: number }>())
+  const rows = ship.bridge.exceptions.map(exceptionRow)
+  for (const x of ship.bridge.exceptions) if (x.kind === 'snapshot' && x.source === 'prs') held.current.set(`snapshot:${x.text}`, { row: exceptionRow(x), at: ship.at })
+  const extra: Row[] = []
+  for (const [key, h] of held.current) {
+    if (ship.at - h.at > PR_ERROR_HOLD_MS) held.current.delete(key)
+    else if (!rows.some((r) => r.key === key)) extra.push(h.row)
+  }
+  return [...rows, ...extra]
+}
 
 /** ⌥1–9 are the Nexus's on macOS only: elsewhere Alt+digit is the workbench's `tab.go`. */
 export const altDigits = () => typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
@@ -52,7 +72,7 @@ const CONFIRM: Record<ShipAction['kind'], (a: ShipAction) => string> = {
  *  lilac when only a merge waits, calm when nothing does. */
 export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
   const s = useScene()
-  const rows = ship.bridge.exceptions.map(exceptionRow)
+  const rows = useRows(ship)
   const ready = ship.bridge.exceptions.flatMap((x) => (x.kind === 'ready' ? [x.robotId] : []))
   const blocked = ship.bridge.blocked
   const mac = altDigits()
@@ -89,7 +109,7 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
                 <ExceptionRow
                   key={row.key}
                   row={row}
-                  n={mac ? k + 1 : null}
+                  n={mac && (row.robotId || row.captainId) ? k + 1 : null}
                   robot={row.robotId ? s.robots.get(row.robotId) : undefined}
                   captain={row.captainId ? captains.get(row.captainId) : undefined}
                 />
@@ -147,7 +167,9 @@ function ExceptionRow({ row, n, robot, captain }: { row: Row; n: number | null; 
           {captain.name}
         </b>
       )}
-      <span className="ship-xt">{row.text}</span>
+      <span className="ship-xt" title={row.title}>
+        {row.text}
+      </span>
       {row.buttons.map((b) =>
         'action' in b ? (
           <Armed key={b.label} go={b.go} x={b.label} label={b.label} confirm={CONFIRM[b.action.kind](b.action)} action={() => b.action} />

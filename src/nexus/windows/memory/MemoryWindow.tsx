@@ -7,6 +7,7 @@ import { openWindow } from '../../ui/windows'
 import { Activity } from './Activity'
 import { Health } from './Health'
 import { Inbox } from './Inbox'
+import { VaultLevel } from './Level'
 import { Pages } from './Pages'
 import { RunLog } from './RunLog'
 import { RepoPicker, short, Tabs, useInnerEscape } from './kit'
@@ -45,7 +46,7 @@ export function innerEscape(tab: MemoryTab): boolean {
 }
 
 /** The SYSTEMS menu's Memory (spec Q8): what the vault view and the right sidebar's Memory panel
- *  showed. For the repo picked at the top: what happened lately, the rules by heat and what needs
+ *  showed, and the vault's level the status bar showed (Q11). For the repo picked at the top: what happened lately, the rules by heat and what needs
  *  review, the vault's pages by agent, and the inbox, with their actions and what they printed. */
 export function MemoryWindow(_: { close: () => void }): JSX.Element {
   const tab = useStore(memoryTab, (s) => s.tab)
@@ -67,11 +68,14 @@ export function MemoryWindow(_: { close: () => void }): JSX.Element {
       <div className="nx-mem-head">
         <Tabs tabs={TABS} on={tab} onPick={setTab} label="Memory" />
         <RepoPicker repos={repos} repo={repo} />
-        {root && (
-          <span className="nx-muted nx-mem-root" title={root}>
-            vault {short(root)}
-          </span>
-        )}
+        <span className="nx-mem-vault">
+          {root && (
+            <span className="nx-muted nx-mem-root" title={root}>
+              vault {short(root)}
+            </span>
+          )}
+          <VaultLevel />
+        </span>
       </div>
       <div className="nx-mem-body">
         {tab === 'activity' && <Activity cwd={repo?.root ?? null} onRead={read} onInbox={() => setTab('inbox')} />}

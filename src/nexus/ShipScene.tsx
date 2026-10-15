@@ -10,7 +10,7 @@ import { columns, G } from './ship-scene/geometry'
 import { useArrivals } from './ship-scene/motion'
 import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
-import { chips, rateChip } from './ship-scene/words'
+import { chips, emptyText, rateChip } from './ship-scene/words'
 import type { Deck as DeckT, Ship, ShipRobot, ShipSceneProps } from './ship-types'
 import type { MenuTarget } from './ui/menus'
 import { openWindow } from './ui/windows'
@@ -239,7 +239,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                   ))}
                 </section>
               )}
-              {!decks.length && !ship.docks.length && <p className="ship-empty">No live sessions.</p>}
+              {!decks.length && !ship.docks.length && <p className="ship-empty">{emptyText(ship)}</p>}
             </div>
           )}
         </div>
