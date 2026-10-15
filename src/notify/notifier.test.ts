@@ -12,6 +12,7 @@ let world: { shown: Shown | null; focused: boolean; now: number }
 let native: Array<[string, string]>
 let sounds: number
 let opened: Array<[string, string | null]>
+let opens: boolean
 let unsubscribed: number
 let nativeFails: boolean
 
@@ -38,7 +39,7 @@ function make(over: Partial<NotifierDeps> = {}) {
       if (nativeFails) throw new Error('denied')
     },
     sound: () => void sounds++,
-    open: (sid, w) => void opened.push([sid, w]),
+    open: (sid, w) => (opened.push([sid, w]), opens),
     now: () => world.now,
     ...over,
   })
@@ -56,6 +57,7 @@ beforeEach(() => {
   native = []
   sounds = 0
   opened = []
+  opens = true
   unsubscribed = 0
   nativeFails = false
   vi.useFakeTimers()
@@ -206,6 +208,23 @@ test('clicking a card opens its session in the Nexus, with where it runs, and th
   expect(n.cards.getState().cards).toEqual([])
   n.open(feat.id)
   expect(opened).toHaveLength(3)
+})
+
+test('a card whose click opens nothing stays, marked so, until a newer alert or a click that opens', () => {
+  const n = make()
+  emit(stop('s-feat', FEAT))
+  const [feat] = n.cards.getState().cards
+  opens = false
+  n.open(feat.id)
+  expect(n.cards.getState().cards).toMatchObject([{ id: feat.id, sessionId: 's-feat', unopened: true }])
+  // A newer alert about it is a new card's worth of news: no stale mark.
+  emit(ask('s-feat', FEAT))
+  expect(n.cards.getState().cards).toMatchObject([{ id: feat.id, kind: 'permission' }])
+  expect(n.cards.getState().cards[0].unopened).toBeUndefined()
+  opens = true
+  n.open(feat.id)
+  expect(n.cards.getState().cards).toEqual([])
+  expect(opened).toHaveLength(2)
 })
 
 test('dismiss drops only that card', () => {

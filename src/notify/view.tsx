@@ -40,7 +40,9 @@ export const notifier = createNotifier({
   // Its figure in the Nexus (Q14): a dispatched child's robot, else its captain. What it said is
   // seen once it is on screen.
   open(sessionId, worktree) {
-    if (openFigure(figureOf(missionStore.getState().snapshot, sessionId)) && worktree !== null) fleetStore.getState().markRead(worktree)
+    if (!openFigure(figureOf(missionStore.getState().snapshot, sessionId))) return false
+    if (worktree !== null) fleetStore.getState().markRead(worktree)
+    return true
   },
   now: () => Date.now(),
 })

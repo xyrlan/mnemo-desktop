@@ -59,7 +59,7 @@ function app(opts: { hooks: boolean }) {
     onLook: () => () => {},
     native: async (title, body) => void native.push([title, body]),
     sound: () => {},
-    open: () => {},
+    open: () => true,
     now: () => t,
   })
   offs.push(notifier.stop)

@@ -33,7 +33,7 @@ import { NexusMenu } from './ui/Menu'
 import { menuFor, type MenuItem, type MenuTarget } from './ui/menus'
 import { WindowHost } from './ui/Window'
 import { ConfirmHost } from './ui/confirm'
-import { openWindow, windowsIn } from './ui/windows'
+import { closeWindow, openWindow, windowsIn } from './ui/windows'
 
 /** The SYSTEMS menu: every window registered in that group, in its order. */
 const systemsItems = (): MenuItem[] => windowsIn('systems').map((d) => ({ id: d.id, label: d.title, run: () => openWindow(d.id) }))
@@ -271,12 +271,17 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
     [drawer],
   )
   // Every path in the app that goes to a session opens it here (`./outside`): a notification's
-  // click, the mission pane's attach. Its figure's tab, the Nexus open; a child the ship does not
-  // know yet is attached in a tab of its own, which becomes its robot's once the ship lists it.
+  // click, the mission pane's attach. Its figure's tab, the Nexus open and a window closed, as a
+  // window's own `ctx.open` does, so the tab is not left under it; a child the ship does not know
+  // yet is attached in a tab of its own, which becomes its robot's once the ship lists it.
   useEffect(() => {
+    const shown = () => {
+      nexusStore.getState().setOpen(true)
+      closeWindow()
+    }
     const open = (id: string) => {
       if (!onOpen(id)) return false
-      nexusStore.getState().setOpen(true)
+      shown()
       return true
     }
     return setFigures({
@@ -285,7 +290,7 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
         const id = idOf(child)
         if (open(id)) return
         drawer.drawer.open({ id, kind: 'robot', key: null, readOnly: null, label: id, sessionId: null, cwd: null }, { child })
-        nexusStore.getState().setOpen(true)
+        shown()
       },
     })
   }, [onOpen, drawer])

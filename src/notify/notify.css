@@ -1,19 +1,23 @@
 /* The notification stack in the ship's look (spec `2026-10-15-nexus-app-design.md`, Q14): the ship's
-   hull and frame (`src/nexus/ui/ui.css`, whose `.nx` tokens it reads), a column at the bottom right,
-   newest at the bottom, above the status bar while there is one. Colour means state only: the
-   card's left edge, its kind's word and its icon. */
+   hull and frame (`src/nexus/ui/ui.css`, whose `.nx` tokens it reads), a column at the top right,
+   under the ship's bar (44px and its 2px edge), newest at the top. Colour means state only: the
+   card's left edge, its kind's word and its icon.
+
+   Layering, as wave 2a's integration review settled it (everything portaled to the end of <body>):
+   windows 60, a confirmation 61, a menu 70, these cards 75, toasts 80 (bottom left), the voice
+   indicator 85. */
 
 .nx-notes {
   position: fixed;
+  top: 54px;
   right: 16px;
-  bottom: 40px;
-  z-index: var(--z-index-toast);
+  z-index: 75;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 8px;
   width: 360px;
   max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 80px);
+  max-height: calc(100vh - 70px);
   overflow-y: auto;
   pointer-events: none;
 }
@@ -56,5 +60,6 @@
 .nx-note-repo { overflow: hidden; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
 .nx-note-kind { color: var(--nx-note-tone); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 .nx-note-message { display: -webkit-box; overflow: hidden; color: var(--nx-dim); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.nx-note-unopened { color: var(--nx-pale); font-style: italic; }
 .nx .nx-note-close { flex: none; align-self: flex-start; margin: 6px; padding: 0 6px; border: 2px solid var(--nx-edge); border-radius: 2px; background: none; color: var(--nx-dim); }
 .nx .nx-note-close:hover { border-color: var(--nx-edge-hi); color: #fff; }

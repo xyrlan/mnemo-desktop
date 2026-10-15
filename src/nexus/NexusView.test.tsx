@@ -450,3 +450,18 @@ test('attaching a child opens it in the drawer: its robot’s tab, or one of its
   expect(attachInNexus('c0ffee98')).toBe(false)
   expect(openFigure('r-live')).toBe(false)
 })
+
+test('openFigure closes an open window, as the window’s own open does, so the tab is not left under it; what it cannot open leaves the window', async () => {
+  await mount()
+  unregister = registerWindow({ id: 'zz-over', title: 'Over', render: () => <p data-zz-over="" /> })
+  await act(async () => openWindow('zz-over'))
+  act(() => void openFigure('not-on-the-ship'))
+  expect(windowStore.getState().open?.id).toBe('zz-over')
+  act(() => void openFigure('r-live'))
+  expect(windowStore.getState().open).toBeNull()
+  expect(document.querySelector('[data-zz-over]')).toBeNull()
+  expect(nexusStore.getState().activeTab).toBe('r-live')
+  await act(async () => openWindow('zz-over'))
+  act(() => void attachInNexus({ id: 'c0ffee97', account_env: null }))
+  expect(windowStore.getState().open).toBeNull()
+})

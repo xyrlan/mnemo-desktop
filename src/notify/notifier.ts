@@ -6,7 +6,9 @@ import { alertFor, alertOf, cardKey, onScreen, placeOf, quietPrompt, type Alert,
 
 /** A card in the stack: one per `key` (a dispatched child's worktree, else a session), the newest
  *  alert about it. A newer alert keeps the card's `id`, so the stack updates it in place. */
-export type Card = Alert & { id: number; key: string }
+/** `unopened`: its click found nothing to open (its figure is on no deck or dock yet), so it
+ *  stayed, saying so. */
+export type Card = Alert & { id: number; key: string; unopened?: true }
 
 export type Cards = { cards: Card[] }
 
@@ -24,8 +26,8 @@ export type NotifierDeps = {
   native(title: string, body: string): Promise<void>
   sound(): void
   /** Opens session `sessionId` (working in `worktree`) in the Nexus: its figure's drawer tab
-   *  (`openFigure`). */
-  open(sessionId: string, worktree: string | null): void
+   *  (`openFigure`). False when there was nothing to open. */
+  open(sessionId: string, worktree: string | null): boolean
   now(): number
 }
 
@@ -41,7 +43,8 @@ export const COALESCE_MS = 60_000
 
 export type Notifier = {
   cards: StoreApi<Cards>
-  /** The card was clicked: its session opens in the Nexus, and the card goes. */
+  /** The card was clicked: its session opens in the Nexus, and the card goes. When it cannot
+   *  open, the card stays, marked `unopened`. */
   open(id: number): void
   dismiss(id: number): void
   stop(): void
@@ -163,8 +166,9 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     open(id) {
       const card = cards.getState().cards.find((c) => c.id === id)
       if (!card) return
-      dismiss(id)
-      deps.open(card.sessionId, card.worktree)
+      if (deps.open(card.sessionId, card.worktree)) return dismiss(id)
+      // Nothing opened: the card stays, and says why, rather than leave with nothing to show.
+      set(cards.getState().cards.map((c) => (c.id === id ? { ...c, unopened: true } : c)))
     },
     stop() {
       offs.forEach((off) => off())

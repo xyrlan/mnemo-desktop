@@ -31,14 +31,19 @@ async function mount(cards: Card[]) {
   return { host, store, opened, dismissed, root }
 }
 
+const stackEl = () => document.querySelector('[data-notification-stack]')
+
 test('no cards, no stack', async () => {
-  const { host } = await mount([])
-  expect(host.innerHTML).toBe('')
+  await mount([])
+  expect(stackEl()).toBeNull()
 })
 
-test('cards draw newest first in the DOM, in the ship\'s look, which the reversed column puts at the bottom', async () => {
+test('cards draw newest first, at the top, in the ship\'s look, at the end of <body> in a layer of their own', async () => {
   const { host } = await mount([card(1, 'done'), card(2, 'permission', { name: 'lib', repo: 'lib' }), card(3, 'question', { repo: null })])
-  const stack = host.querySelector('[data-notification-stack]')!
+  const stack = stackEl()!
+  // Portaled, as the Nexus's windows and menus are: never inside the shell's overlay slot.
+  expect(stack.parentElement).toBe(document.body)
+  expect(host.innerHTML).toBe('')
   // The ship's frame and tokens (`.nx`), its own column (`notify.css`): no workbench components.
   expect(stack.className).toBe('nx nx-notes')
   const cards = [...stack.querySelectorAll('[role="complementary"]')]
@@ -54,8 +59,8 @@ test('cards draw newest first in the DOM, in the ship\'s look, which the reverse
 })
 
 test('a click opens the card, the cross and Escape dismiss it', async () => {
-  const { host, opened, dismissed } = await mount([card(5, 'done')])
-  const [body, cross] = host.querySelectorAll('button')
+  const { opened, dismissed } = await mount([card(5, 'done')])
+  const [body, cross] = stackEl()!.querySelectorAll('button')
   await act(async () => body.click())
   expect(opened).toEqual([5])
   await act(async () => cross.click())
@@ -65,9 +70,16 @@ test('a click opens the card, the cross and Escape dismiss it', async () => {
 })
 
 test('the stack follows its store', async () => {
-  const { host, store } = await mount([card(1, 'done')])
+  const { store } = await mount([card(1, 'done')])
   await act(async () => store.setState({ cards: [] }))
-  expect(host.innerHTML).toBe('')
+  expect(stackEl()).toBeNull()
   await act(async () => store.setState({ cards: [card(2, 'question')] }))
-  expect(host.querySelectorAll('[role="complementary"]')).toHaveLength(1)
+  expect(stackEl()!.querySelectorAll('[role="complementary"]')).toHaveLength(1)
+})
+
+test('a card whose click opened nothing says so', async () => {
+  await mount([card(1, 'done'), card(2, 'question', { unopened: true })])
+  const [unopened, plain] = [...stackEl()!.querySelectorAll('[role="complementary"]')]
+  expect(unopened.querySelector('[data-unopened]')?.textContent).toBe('It is not on the ship yet: nothing to open.')
+  expect(plain.querySelector('[data-unopened]')).toBeNull()
 })
