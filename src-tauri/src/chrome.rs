@@ -262,15 +262,25 @@ pub fn shell_state(shell: u32, children: &[u32], groups: impl Fn(u32) -> Option<
     }
 }
 
-/// What pane `pane_pid`'s shell is doing (`Shell`), through Git Bash's redirector (`real_shell`).
+/// Whether `image` is Windows' console host (`System32\conhost.exe`). A console program started
+/// with no console to share (`CREATE_NO_WINDOW`, a parent with none) gets a console of its own,
+/// and its host runs as that program's child: no program it was asked to run. A pane's shell
+/// shares the app's pseudoconsole, whose host is the app's child, not the shell's.
+fn console_host(image: Option<String>) -> bool {
+    image.is_some_and(|p| p.to_ascii_lowercase().replace('/', "\\").ends_with("\\system32\\conhost.exe"))
+}
+
+/// What pane `pane_pid`'s shell is doing (`Shell`), through Git Bash's redirector (`real_shell`),
+/// its own console host aside (`console_host`).
 pub fn shell_of(
     pane_pid: u32,
     children: impl Fn(&[u32]) -> Vec<u32>,
     image: impl Fn(u32) -> Option<String>,
     groups: impl Fn(u32) -> Option<crate::procs::Groups>,
 ) -> Shell {
-    let shell = real_shell(pane_pid, &children(&[pane_pid]), image);
-    shell_state(shell, &children(&[shell]), groups)
+    let runs = |pid: u32| children(&[pid]).into_iter().filter(|c| !console_host(image(*c))).collect::<Vec<u32>>();
+    let shell = real_shell(pane_pid, &runs(pane_pid), &image);
+    shell_state(shell, &runs(shell), groups)
 }
 
 /// `running`, unless the shell is at its prompt: no Claude has the terminal then, and `claude
@@ -607,6 +617,50 @@ mod tests {
         assert_eq!(real_shell(10, &[11], crate::procs::image_of), if cfg!(windows) { real_shell(10, &[11], crate::procs::image_of) } else { 10 });
     }
 
+    /// A process's own console host is no program it runs: a console program started with no
+    /// console to share has its `conhost.exe` as its child (#460). A synthetic Windows table.
+    #[test]
+    fn a_process_s_own_console_host_is_no_program_it_runs() {
+        let image = |rows: &'static [(u32, &'static str)]| move |pid: u32| rows.iter().find(|r| r.0 == pid).map(|r| r.1.to_string());
+        let table = |rows: &'static [(u32, u32)]| move |parents: &[u32]| rows.iter().filter(|r| parents.contains(&r.1)).map(|r| r.0).collect::<Vec<u32>>();
+        let unasked = || -> Result<bool, String> { panic!("claude agents asked for a bare shell") };
+        let images = image(&[
+            (10, r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            (11, r"C:\WINDOWS\system32\conhost.exe"),
+            (12, r"C:\Windows\System32\PING.EXE"),
+            (20, r"C:\Program Files\Git\bin\bash.exe"),
+            (21, r"C:\Program Files\Git\usr\bin\bash.exe"),
+            (22, r"C:\Windows\System32\conhost.exe"),
+            (30, r"C:\Tools\conhost.exe"),
+        ]);
+        // Its console host only: bare.
+        assert_eq!(pane_runs(shell_of(10, table(&[(11, 10)]), &images, |_| None), unasked), PaneRuns::Idle);
+        // A program beside it: busy.
+        assert_eq!(shell_of(10, table(&[(11, 10), (12, 10)]), &images, |_| None), Shell::Busy);
+        // Git Bash's redirector with a console host of its own still leads to its bash.
+        assert_eq!(shell_of(20, table(&[(21, 20), (22, 20)]), &images, |_| None), Shell::Bare);
+        // A program named so outside System32 is a program.
+        assert_eq!(shell_of(10, table(&[(30, 10)]), &images, |_| None), Shell::Busy);
+        // Elsewhere no image is read: a child is a child.
+        assert_eq!(shell_of(10, table(&[(11, 10)]), |_| None, |_| None), Shell::Busy);
+    }
+
+    /// Waits until `ok`, for at most a minute; past that it fails with `what` and what `show`
+    /// says of the moment.
+    fn wait(what: &str, ok: impl Fn() -> bool, show: impl Fn() -> String) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !ok() {
+            assert!(Instant::now() < deadline, "{what}: {}", show());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The children of `pid`, each by its image where the system says it.
+    fn named_children(pid: u32) -> Vec<String> {
+        let table = crate::procs::table().expect("the process table");
+        table.children(&[pid]).into_iter().map(|c| crate::procs::image_of(c).unwrap_or_else(|| format!("process {c}"))).collect()
+    }
+
     /// What the drawer is told of a process, from the live table.
     fn runs_live(pane: u32, claude: impl FnOnce() -> Result<bool, String>) -> PaneRuns {
         let table = crate::procs::table().expect("the process table");
@@ -627,9 +681,24 @@ mod tests {
         end(sh);
     }
 
+    /// Windows: a console program started with no console to share (`proc::command`'s
+    /// `CREATE_NO_WINDOW`, as the sleeper above is) gets a console of its own, whose host,
+    /// `conhost.exe`, runs as its child from a moment after it starts. It still reads idle: that
+    /// host is no program it runs (#460).
+    #[cfg(windows)]
+    #[test]
+    fn a_console_program_s_own_console_host_runs_as_its_child_and_is_not_counted() {
+        use crate::procs::testing::{end, sleeper};
+        let idle = sleeper();
+        let pid = idle.id();
+        let hosts = || named_children(pid).iter().filter(|c| console_host(Some(c.to_string()))).count();
+        wait("its console host starts, as its child", || hosts() == 1, || format!("its children are {:?}", named_children(pid)));
+        assert_eq!(runs_live(pid, || panic!("claude agents asked for a bare process")), PaneRuns::Idle);
+        end(idle);
+    }
+
     /// A real interactive shell on a terminal, its output kept, and the cursor position it asks
-    /// for (PSReadLine waits for it) answered.
-    #[cfg(unix)]
+    /// for (PSReadLine waits for it; so does Windows' pseudoconsole) answered.
     struct Term {
         pid: u32,
         keys: std::sync::Arc<Mutex<Box<dyn std::io::Write + Send>>>,
@@ -638,20 +707,25 @@ mod tests {
         _master: Box<dyn portable_pty::MasterPty + Send>,
     }
 
-    #[cfg(unix)]
     impl Term {
-        /// `program` on a new terminal; None when it is not installed.
+        /// `program`, found on `PATH`, on a new terminal; None when it is not installed.
+        #[cfg(unix)]
         fn open(program: &str, args: &[&str]) -> Option<Term> {
-            use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-            use std::io::{Read, Write};
             let path = std::env::var_os("PATH")?;
             let found = std::env::split_paths(&path).map(|d| d.join(program)).find(|p| p.is_file())?;
+            Some(Term::open_path(found, args, &[("ENV", "/dev/null"), ("PS1", "$ "), ("TERM", "xterm-256color")]))
+        }
+
+        /// The program at `path` on a new terminal (a pseudoconsole on Windows), with `env` set.
+        fn open_path(path: std::path::PathBuf, args: &[&str], env: &[(&str, &str)]) -> Term {
+            use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+            use std::io::{Read, Write};
             let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).expect("a terminal");
-            let mut cmd = CommandBuilder::new(found);
+            let mut cmd = CommandBuilder::new(path);
             cmd.args(args);
-            cmd.env("ENV", "/dev/null");
-            cmd.env("PS1", "$ ");
-            cmd.env("TERM", "xterm-256color");
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
             let child = pair.slave.spawn_command(cmd).expect("a shell");
             drop(pair.slave);
             let pid = child.process_id().expect("its pid");
@@ -673,7 +747,7 @@ mod tests {
                     kept.lock().unwrap().push_str(&text);
                 }
             });
-            Some(Term { pid, keys, out, child, _master: pair.master })
+            Term { pid, keys, out, child, _master: pair.master }
         }
 
         /// Types `line` and Enter.
@@ -686,24 +760,17 @@ mod tests {
         /// Waits until the shell has printed `word`, typed as two halves so that its echo is not
         /// it. pwsh may take a while to start on a loaded machine.
         fn said(&self, what: &str, word: &str) {
-            let deadline = Instant::now() + Duration::from_secs(60);
-            while !self.out.lock().unwrap().contains(word) {
-                assert!(Instant::now() < deadline, "{what}; it printed {:?}", self.out.lock().unwrap());
-                std::thread::sleep(Duration::from_millis(20));
-            }
+            wait(what, || self.out.lock().unwrap().contains(word), || format!("it printed {:?}", self.out.lock().unwrap()));
         }
 
         /// Waits until the shell has printed `then` after `first`.
+        #[cfg(unix)]
         fn said_after(&self, what: &str, first: &str, then: &str) {
-            let deadline = Instant::now() + Duration::from_secs(60);
             let seen = || {
                 let out = self.out.lock().unwrap();
                 out.find(first).is_some_and(|i| out[i..].contains(then))
             };
-            while !seen() {
-                assert!(Instant::now() < deadline, "{what}; it printed {:?}", self.out.lock().unwrap());
-                std::thread::sleep(Duration::from_millis(20));
-            }
+            wait(what, seen, || format!("it printed {:?}", self.out.lock().unwrap()));
         }
 
         fn children(&self) -> Vec<u32> {
@@ -711,10 +778,7 @@ mod tests {
         }
 
         fn kill_children(&self) {
-            for p in self.children() {
-                // SAFETY: signals a process this test started.
-                unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
-            }
+            kill_below(self.pid);
         }
 
         fn end(mut self) {
@@ -724,20 +788,77 @@ mod tests {
         }
     }
 
+    /// Ends what `pid` runs: each of its children, and what they started.
+    fn kill_below(pid: u32) {
+        for p in crate::procs::table().expect("the process table").children(&[pid]) {
+            #[cfg(unix)]
+            // SAFETY: signals a process this test started.
+            unsafe {
+                libc::kill(p as libc::pid_t, libc::SIGKILL)
+            };
+            #[cfg(windows)]
+            let _ = crate::proc::command("taskkill").args(["/F", "/T", "/PID", &p.to_string()]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        }
+    }
+
+    /// Real panes on Windows: a shell on a pseudoconsole, as the app runs one. Its console host
+    /// is the pseudoconsole's, the test's child and not the shell's, so at its prompt the shell
+    /// has no child at all and reads idle; while a program runs it reads busy, and idle again
+    /// after. Git Bash is read through its redirector. `claude agents` fails throughout (#460).
+    #[cfg(windows)]
+    #[test]
+    fn a_real_windows_shell_on_a_pseudoconsole_is_idle_at_its_prompt_and_busy_while_a_program_runs() {
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        // A short PATH: under cargo the inherited one is too long for cmd to search.
+        let path = format!(r"{root}\System32;{root}");
+
+        let cmd = Term::open_path(format!(r"{root}\System32\cmd.exe").into(), &[], &[("PATH", path.as_str())]);
+        cmd.type_line("echo RE^ADY");
+        cmd.said("cmd reads the line", "READY");
+        wait("cmd at its prompt has no child: its console host is the pseudoconsole's", || cmd.children().is_empty(), || format!("{:?}", named_children(cmd.pid)));
+        assert_eq!(runs_live(cmd.pid, failing), PaneRuns::Idle, "cmd at its prompt");
+        cmd.type_line(&format!(r"{root}\System32\PING.EXE -n 30 127.0.0.1"));
+        wait("cmd runs ping", || runs_live(cmd.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(cmd.pid)));
+        kill_below(cmd.pid);
+        wait("cmd is back at its prompt", || runs_live(cmd.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(cmd.pid)));
+        cmd.end();
+
+        // Git Bash, where Git for Windows is installed, as on CI's runners.
+        let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+        let git_bash = std::path::PathBuf::from(format!(r"{program_files}\Git\bin\bash.exe"));
+        if git_bash.is_file() {
+            let bash = Term::open_path(git_bash, &["--norc", "-i"], &[("PATH", path.as_str())]);
+            bash.type_line("echo RE''ADY");
+            bash.said("bash reads the line", "READY");
+            let shell = || {
+                let table = crate::procs::table().expect("the process table");
+                real_shell(bash.pid, &table.children(&[bash.pid]), crate::procs::image_of)
+            };
+            wait("the redirector's bash is the shell", || shell() != bash.pid, || format!("{:?}", named_children(bash.pid)));
+            let inner = shell();
+            wait("Git Bash at its prompt reads idle", || runs_live(bash.pid, failing) == PaneRuns::Idle, || format!("{:?} below {:?}", named_children(inner), named_children(bash.pid)));
+            bash.type_line("/usr/bin/sleep 30");
+            wait("Git Bash runs sleep", || runs_live(bash.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(inner)));
+            kill_below(inner);
+            wait("Git Bash is back at its prompt", || runs_live(bash.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(inner)));
+            bash.end();
+        }
+    }
+
     /// `t` reads idle at its prompt, busy while `/bin/sleep` has the terminal, and idle again once
     /// it has ended. `claude agents` fails throughout.
     #[cfg(unix)]
     fn idle_then_busy(t: &Term, shell: &str) {
-        use crate::procs::testing::eventually;
         let failing = || Err(AGENTS_CANNOT_SAY.to_string());
         let gate = || claude_gate(crate::procs::table().map(|tb| shell_of(t.pid, |p| tb.children(p), crate::procs::image_of, crate::procs::groups)), failing);
         assert_eq!(runs_live(t.pid, failing), PaneRuns::Idle, "{shell} at its prompt");
         t.type_line("/bin/sleep 31");
-        eventually(&format!("{shell}: the program has the terminal"), || runs_live(t.pid, failing) == PaneRuns::Unknown);
+        wait(&format!("{shell}: the program has the terminal"), || runs_live(t.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(t.pid)));
         assert_eq!(runs_live(t.pid, || Ok(false)), PaneRuns::Other, "{shell}");
         assert_eq!(gate(), Err(AGENTS_CANNOT_SAY.to_string()), "{shell}: the gate asks claude agents");
         t.kill_children();
-        eventually(&format!("{shell}: back at its prompt"), || runs_live(t.pid, failing) == PaneRuns::Idle);
+        wait(&format!("{shell}: back at its prompt"), || runs_live(t.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(t.pid)));
         assert_eq!(gate(), Ok(false), "{shell}");
     }
 
