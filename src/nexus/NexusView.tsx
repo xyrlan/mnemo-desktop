@@ -3,17 +3,18 @@ import { STATUS_BAR, TOP_CHROME } from '../dashboard/AgentDashboardDrawer'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
 import { useMission } from '../mission/app-store'
-import { attachChild } from '../mission/rows'
 import type { Snapshot } from '../mission/types'
 import { usePulse } from '../pulse/app-store'
 import type { PulseEvent } from '../pulse/types'
 import { pollWhileShown } from '../shell/while-shown'
-import { openNexus } from './actions'
 import type { NexusClient } from './client'
 import { runAction } from './command/actions'
 import { FleetPrompt } from './command/FleetPrompt'
 import { SelectionBar } from './command/SelectionBar'
 import { Triage } from './command/Triage'
+import { liveDrawer } from './drawer/app'
+import { NexusDrawer, type DrawerDeps } from './drawer/Drawer'
+import { openingOf } from './drawer/model'
 import { useReducedMotion, useVisible } from './env'
 import { logEvents } from './log'
 import { buildShip } from './ship'
@@ -46,19 +47,16 @@ function sessionIds(snap: Snapshot): string[] {
   return ids
 }
 
-const robotsOf = (ship: Ship) => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
-const captainsOf = (ship: Ship) => [...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)]
-
-/** Until the drawer lands (wave 2): a robot is attached in a new tab, a captain is revealed where
- *  its pane is, as v1 did. */
-function openInterim(id: string, ship: Ship) {
-  const robot = robotsOf(ship).find((r) => r.id === id)
-  if (robot) return attachChild(robot.child)
-  const cap = captainsOf(ship).find((c) => c.id === id)
-  if (cap?.parent) openNexus({ sessionId: cap.parent.session_id, label: cap.name, cwd: cap.parent.cwd, pose: 'idle', halo: null, robots: [], parent: cap.parent })
+type BodyProps = {
+  client: ShipClient
+  usage: NexusClient
+  /** Opens a captain or a robot in the drawer. */
+  onOpen(id: string): void
+  /** The ship and feed each time they are built, for the drawer beside it. */
+  onShip(ship: Ship, feed: Feed | null): void
 }
 
-function ShipBody({ client, usage }: { client: ShipClient; usage: NexusClient }) {
+function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const snapshot = useMission((s) => s.snapshot)
   const repos = useFleet((f) => f.repos)
   const pulse = usePulse((s) => s.log)
@@ -98,28 +96,33 @@ function ShipBody({ client, usage }: { client: ShipClient; usage: NexusClient })
 
   const shipRef = useRef(ship)
   shipRef.current = ship
+  useEffect(() => onShip(ship, feed), [onShip, ship, feed])
   const prev = useRef<Ship | null>(null)
   useEffect(() => {
     nexusStore.getState().appendLog(logEvents(prev.current, ship, now))
     prev.current = ship
   }, [ship, now])
 
-  // Opening is the view's (the drawer's, from wave 2); every other action is the command piece's.
-  const run = useCallback(async (a: ShipAction): Promise<ActionResult> => {
-    if (a.kind === 'open') {
-      openInterim(a.id, shipRef.current)
-      return { ok: true, say: '', log: [] }
-    }
-    const r = await runAction(a, shipRef.current)
-    nexusStore.getState().appendLog(r.log)
-    return r
-  }, [])
-  const onOpen = useCallback((id: string) => openInterim(id, shipRef.current), [])
+  // Opening is the view's (the drawer's); every other action is the command piece's.
+  const run = useCallback(
+    async (a: ShipAction): Promise<ActionResult> => {
+      if (a.kind === 'open') {
+        onOpen(a.id)
+        return { ok: true, say: '', log: [] }
+      }
+      const r = await runAction(a, shipRef.current)
+      nexusStore.getState().appendLog(r.log)
+      return r
+    },
+    [onOpen],
+  )
   const s = nexusStore.getState()
 
   // The view's keys, while it is open and nothing typed into has focus: Tab triages, ⌥1–9 opens the
   // bridge's Nth exception (⌘1–9 are the worktrees'), `/` focuses the fleet prompt, Esc drops the
-  // selection. The app's chords (`actions/keys.ts`) run first, in the capture phase.
+  // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). The
+  // app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
+  // on its quick diff) next.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -137,6 +140,7 @@ function ShipBody({ client, usage }: { client: ShipClient; usage: NexusClient })
         if (!input) return
         input.focus()
       } else if (e.key === 'Escape' && st.selection.size) st.clearSelection()
+      else if (e.key === 'Escape' && st.tabs.length && !st.collapsed) st.setCollapsed(true)
       else return
       e.preventDefault()
     }
@@ -171,20 +175,47 @@ export type NexusViewProps = {
   usage: NexusClient
   /** Where the left sidebar ends, in px: the Nexus covers the workbench from there. */
   leftEdge: number
+  /** The drawer's sessions, views and diff; the app's by default. */
+  drawer?: DrawerDeps
 }
 
 /** The Nexus: a full-window view over the workbench, from the left sidebar's edge (v2 spec, "Where
- *  it sits in the app"). Nothing is read, polled or animated while it is closed. */
-export function NexusView({ client, usage, leftEdge }: NexusViewProps) {
+ *  it sits in the app"). Nothing is read, polled or animated while it is closed. The drawer sits
+ *  beside the ship, which shrinks while it is open; the drawer stays mounted, hidden, while the
+ *  Nexus is closed, so its tabs keep their terminals. */
+export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: NexusViewProps) {
   const open = useNexus((s) => s.open)
-  if (!open) return null
+  const tabs = useNexus((s) => s.tabs.length)
+  const collapsed = useNexus((s) => s.collapsed)
+  const width = useNexus((s) => s.drawerWidth)
+  const [built, setBuilt] = useState<{ ship: Ship; feed: Feed | null } | null>(null)
+  const onShip = useCallback((ship: Ship, feed: Feed | null) => setBuilt({ ship, feed }), [])
+  const repos = useFleet((f) => f.repos)
+  const reposRef = useRef(repos)
+  reposRef.current = repos
+  const builtRef = useRef(built)
+  builtRef.current = built
+  // A click on a figure, an exception's open, ⌥1–9, a breadcrumb: its tab, held as it opens.
+  const onOpen = useCallback(
+    (id: string) => {
+      const o = openingOf(id, builtRef.current?.ship ?? null, reposRef.current)
+      if (o) drawer.drawer.open(o.tab, o.ref)
+    },
+    [drawer],
+  )
+  const beside = open && tabs > 0 && !collapsed ? width : 0
   return (
-    <div
-      data-nexus-view=""
-      className="fixed z-drawer flex flex-col overflow-hidden bg-worktree-sidebar"
-      style={{ left: leftEdge, right: 0, top: TOP_CHROME, bottom: STATUS_BAR }}
-    >
-      <ShipBody client={client} usage={usage} />
-    </div>
+    <>
+      {open && (
+        <div
+          data-nexus-view=""
+          className="fixed z-drawer flex flex-col overflow-hidden bg-worktree-sidebar"
+          style={{ left: leftEdge, right: beside, top: TOP_CHROME, bottom: STATUS_BAR }}
+        >
+          <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
+        </div>
+      )}
+      <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} shown={open} onOpen={onOpen} />
+    </>
   )
 }
