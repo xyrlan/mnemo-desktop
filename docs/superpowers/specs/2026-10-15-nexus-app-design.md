@@ -89,3 +89,34 @@ Wave 2 deletes views, not the store.
 ## The round
 
 Contract: `docs/superpowers/contracts/2026-10-15-nexus-app.md`.
+
+## Wave 2: deleting the workbench
+
+Decided with the maintainer the same day (Q10–Q18; every recommendation accepted, Q18 changed by
+them: "pode já apagar tudo mesmo logo").
+
+- **Q10 · The palette (⌘K) goes.** Everything has a way in through the bar, a right-click or the
+  bridge's prompt.
+- **Q11 · The status bar goes.**
+  - The ship's bar already counts agents.
+  - Snapshot errors become a bridge exception.
+  - The vault's level moves to Memory.
+- **Q12 · Dictation (⌘E) stays,** typing into the drawer's active terminal.
+- **Q13 · WORKBENCH ⌘0 goes,** with `nexus.toggle`: there is nothing behind the ship.
+- **Q14 · System notifications stay.** Their click opens the figure in the Nexus.
+- **Q15 · Pop out goes.**
+- **Q16 · The `desktop_*` MCP tools:**
+  - `desktop_list_panes` and `desktop_terminal_read` read the Nexus's sessions, shown or not.
+  - `desktop_browser_read` and `desktop_pane_snapshot` go.
+  - `desktop_app_snapshot` stays.
+- **Q17 · Rust that only the deleted interface calls goes with it** (the marketplace's commands, the
+  browser panes', the editor's, checks', commit's). No command something still calls goes.
+- **Q18 · No pause between waves.**
+
+What depends on the workbench is moved first (wave 2a, parallel pieces, contract
+`docs/superpowers/contracts/2026-10-15-nexus-app-wave2.md`). Then one piece deletes the rest in a
+single pass (wave 2b). That order keeps the app working at every merge:
+- **Settings at launch:** they load only in `mission/view.tsx`.
+- **Toasts:** the toaster mounts only in `shell/Shell.tsx`.
+- **The drawer terminal's layout CSS** lives in `chrome/chrome.css`.
+- **Attaching a child** opens a view only the workbench draws.
