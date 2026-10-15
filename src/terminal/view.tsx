@@ -29,11 +29,12 @@ const platform = detectPlatform()
  *  owns the terminal sizes it and types into it, and the others are veiled, drawn at its size,
  *  until they take it back (`attachSink` in the layout store).
  *
- *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, and
- *  the layout's focus is not its. `props.name`: what the presentation calls it, as `owners[id].name`
- *  says while it owns the terminal (a tab's indicator). `props.active`: takes the terminal each time
- *  it turns true (a drawer tab shown again), with no remount. `props.close`: what a key closes once
- *  the program has exited; the pane's own view closes its pane.
+ *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, the
+ *  layout's focus is not its, and it draws the terminal whatever face the pane shows. `props.name`:
+ *  what the presentation calls it, as `owners[id].name` says while it owns the terminal (a tab's
+ *  indicator). `props.active`: takes the terminal each time it turns true (a drawer tab shown
+ *  again), with no remount. `props.close`: what a key closes once the program has exited; the
+ *  pane's own view closes its pane.
  *
  *  A presentation hides a view with `display: none` or a box of no size: that is how the view
  *  knows it is hidden and hands the terminal to one on screen. A transform or `visibility` keeps
@@ -226,7 +227,8 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
       tabIndex={exited || broken ? 0 : -1}
     >
       {!broken && <div ref={host} style={{ height: '100%' }} />}
-      {!broken && pane?.face === 'conversation' && <ConversationFace paneId={id} />}
+      {/* A presentation (the drawer, a popup) shows the terminal, never the pane's conversation face. */}
+      {!broken && !present && pane?.face === 'conversation' && <ConversationFace paneId={id} />}
       {pane?.renewed && !exited && (
         <div className="pane-notice" role="status">
           The shell that ran in this pane is no longer running. This is a new one, in the same folder.

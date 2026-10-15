@@ -2,7 +2,7 @@ import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
 import { closeLeaf, extract, graft, leaf, leaves, replaceRatio, splitAt, swapLeaves, type Dir, type Node, type PaneId, type Path, type Rect, type Side } from './tree'
 import { reuseHandler, showsHandler } from './reuse'
-import { mapGroups, mapLeaves, parseSaved, SAVED_VERSION, TRANSIENT_VIEWS, type Saved, type SavedLayout, type SavedTab, type SavedWorktree } from './saved'
+import { mapGroups, mapLeaves, parseSaved, SAVED_VERSION, SESSION_ID, TRANSIENT_VIEWS, type Saved, type SavedLayout, type SavedTab, type SavedWorktree } from './saved'
 import {
   dropTab,
   EMPTY_LAYOUT,
@@ -52,7 +52,16 @@ export type Pane = {
   /** Which face a terminal pane shows: the xterm (default) or its Claude session as cards (round 20).
    *  The PTY runs underneath either way. */
   face?: Face
+  /** A terminal in no tab: a session the Nexus started (`openOffscreen`), shown only through the
+   *  session host (the drawer). No worktree holds it and nothing in the workbench shows it; it is
+   *  saved and comes back like any other pane. */
+  offscreen?: true
 }
+
+/** An offscreen pane as the workspace file keeps it, beside the worktrees (`offscreen`). */
+export type SavedOffscreen = { pane: PaneId; cwd?: string; title?: string; sessionId?: string }
+/** What `snapshotForSave` writes: the worktrees, and the offscreen panes when there are any. */
+export type WorkspaceFile = Saved & { offscreen?: SavedOffscreen[] }
 export type Face = 'terminal' | 'conversation'
 /** Where `openView` puts a view. None of them splits a pane: only a terminal tab splits inside
  *  itself (`split`), and every other view is a tab of one pane.
@@ -119,6 +128,8 @@ export type State = {
    *  the same output at that size under a veil that says it is shown elsewhere, and send nothing
    *  to it, until one of them takes it (`takeSession`). */
   owners: Record<PaneId, Owner>
+  /** `restore` has settled, whatever it restored: every pane that comes back is here. */
+  restored: boolean
 }
 
 /** The view sizing a terminal (`State.owners`): its sink, the name its presentation gave it (none
@@ -153,6 +164,11 @@ export type Actions = {
   /** Types `cmd` and Enter into terminal pane `id`, just spawned, once its shell prompt is up. A
    *  command that could not be written is said in the pane. */
   typeCommand(id: PaneId, cmd: string): void
+  /** A terminal in `cwd` in no tab (`Pane.offscreen`), that types `cmd` once its shell prompt is up;
+   *  `sessionId` marks it as running that Claude session. Nothing shown changes. Rejects, with no
+   *  pane, when the shell could not be spawned. While no view shows it, what it prints is not kept:
+   *  the next view is drawn from the core's screen. */
+  openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
   /** ⌘D (`row`) and ⌘⇧D (`col`). In a terminal tab: split its focused pane. In any other tab: a new
    *  terminal tab in the group to the right (below), made when there is none. cwd: where the new
    *  shell starts; defaults to the focused pane's OSC 7 cwd. */
@@ -161,8 +177,8 @@ export type Actions = {
    *  With `preview` it is the target group's preview. One without `preview` that lands on a
    *  preview tab keeps it. */
   openView(view: string, props: Record<string, unknown>, place: Place, title?: string, opts?: OpenOptions): void
-  /** Close the focused pane of the active tab (⌘W), or pane `id` wherever it is; a tab left with
-   *  no pane closes, and a group left with no tab collapses. */
+  /** Close the focused pane of the active tab (⌘W), or pane `id` wherever it is, an offscreen one
+   *  too; a tab left with no pane closes, and a group left with no tab collapses. */
   closePane(id?: PaneId): Promise<void>
   /** Close every pane of the active tab except the focused one. */
   closeOthers(): Promise<void>
@@ -251,8 +267,8 @@ export type Actions = {
    *  with ratios, focus, previews, the group tree with its ratios and each group's tab order and
    *  shown tab, the active group, and each pane's view, props, cwd, title and session; and which
    *  worktree is shown. The tabs of no worktree are the layout of path `null`. Transient views are
-   *  left out. */
-  snapshotForSave(): Saved
+   *  left out. The offscreen panes, when there are any, under `offscreen`. */
+  snapshotForSave(): WorkspaceFile
   /** Recreate the worktrees of a saved workspace (what `workspace_read` returned), each one's tabs
    *  after the ones it already has, and show the worktree that was shown, which comes back first.
    *  A worktree that had no tab of its own before comes back with its saved groups.
@@ -271,7 +287,11 @@ export type Actions = {
    *  folder (else `ELSEWHERE`, never in a worktree it is not in), without changing what is shown;
    *  a terminal whose program ended is forgotten. Resolves once every pane exists; rejects when
    *  the file holds tabs but none could be read. A missing or empty workspace restores nothing of
-   *  its own. */
+   *  its own.
+   *
+   *  An offscreen pane whose shell kept running comes back offscreen under its id, drawn from the
+   *  core's screen once a view shows it. One whose shell is gone comes back only when it ran a
+   *  Claude session no running `claude` holds: on a new shell, resuming it, as a tab's would. */
   restore(saved: unknown): Promise<void>
 }
 
@@ -512,8 +532,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       if (!list?.includes(v)) return
       const left = list.filter((x) => x !== v)
       if (!left.length) {
-        // Output waits for the next view, as before the first.
+        // Output waits for the next view, as before the first; an offscreen pane's is not kept.
         views.delete(id)
+        if (get().panes[id]?.offscreen) {
+          blank.add(id)
+          pending.delete(id)
+          replay.delete(id)
+        }
         set((s) => {
           const sinks = { ...s.sinks }
           const owners = { ...s.owners }
@@ -538,11 +563,17 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
     function bury(ids: PaneId[]) {
       for (const id of ids) {
         gone.add(id)
+        blank.delete(id)
         pending.delete(id)
         replay.delete(id)
         seeds.delete(id)
       }
     }
+
+    /** Offscreen panes no view shows now, after one did (or since a restore): what they print is
+     *  dropped, not kept for a view that may never come, and the next view is drawn from the core's
+     *  screen (`seed`). */
+    const blank = new Set<PaneId>()
 
     /** Output of terminal `id`: to its views, else kept for when one mounts. */
     function route(id: PaneId, b: Uint8Array) {
@@ -551,7 +582,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       if (sink) {
         replay.delete(id)
         sink(b)
-      } else pending.get(id)?.push(b) ?? pending.set(id, [b])
+      } else if (!blank.has(id)) pending.get(id)?.push(b) ?? pending.set(id, [b])
     }
 
     /** Types `cmd` and Enter into the fresh shell of terminal `id`, once its prompt is up. A write
@@ -712,6 +743,34 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       }
     }
 
+    /** The offscreen panes of saved file `saved`: each back on its shell when it kept running
+     *  (`reattach` says), else on a new one resuming its Claude session when no running `claude`
+     *  holds it; forgotten otherwise. */
+    async function restoreOffscreen(saved: unknown, reattach: (old: PaneId) => PtyInfo | null) {
+      const list = parseOffscreen(saved)
+      const respawn: SavedOffscreen[] = []
+      for (const p of list) {
+        const info = reattach(p.pane)
+        if (!info) {
+          if (p.sessionId) respawn.push(p)
+          continue
+        }
+        const cwd = info.cwd || p.cwd
+        // Drawn from the core's screen once a view shows it: nothing is attached meanwhile.
+        blank.add(p.pane)
+        set((s) => ({ panes: { ...s.panes, [p.pane]: offscreenPane(p.pane, cwd, p.sessionId, p.title) } }))
+        void pty.onExit(p.pane, (code) => get().paneExited(p.pane, code))
+      }
+      if (!respawn.length) return
+      const running = await liveSessions(respawn.map((p) => p.sessionId!)).then((ids) => new Set(ids), () => null)
+      if (!running) return
+      for (const p of respawn) {
+        if (running.has(p.sessionId!)) continue
+        const id = await get().openOffscreen(p.cwd, `claude --resume ${p.sessionId}`, p.sessionId).catch(() => null)
+        if (id !== null) set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], renewed: true } } }))
+      }
+    }
+
     /** Saved layout `w` with its tabs as `made` (named from the saved ids by `named`) and its
      *  groups under new ids; its shown tab the one saved, else the one its active group showed. */
     function restoredLayout(w: SavedLayout, made: Tab[], named: Map<string, string>): WorktreeLayout {
@@ -739,6 +798,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       paletteOpen: false,
       sinks: {},
       owners: {},
+      restored: false,
 
       async switchWorktree(path) {
         swap(path)
@@ -807,6 +867,18 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 
       typeCommand,
 
+      async openOffscreen(cwd, cmd, sessionId) {
+        let assigned: PaneId | null = null
+        const early: Uint8Array[] = []
+        const id = await pty.spawn({ cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, onOutput: (b) => (assigned === null ? early.push(b) : route(assigned, b)) })
+        assigned = id
+        if (early.length) pending.set(id, [...(pending.get(id) ?? []), ...early])
+        set((s) => ({ panes: { ...s.panes, [id]: offscreenPane(id, cwd, sessionId) } }))
+        void pty.onExit(id, (code) => get().paneExited(id, code))
+        if (cmd) typeCommand(id, cmd)
+        return id
+      },
+
       async split(dir, cwd) {
         const tab = active()
         if (!tab) return
@@ -824,6 +896,18 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       async closePane(id) {
         const s0 = get()
         const tab = id === undefined ? active() : [s0.tabs, ...Object.values(s0.parked).map((l) => l.tabs)].flat().find((t) => leaves(t.root).includes(id))
+        if (!tab && id !== undefined && s0.panes[id]?.offscreen) {
+          bury([id])
+          set((s) => {
+            const panes = { ...s.panes }
+            const sinks = { ...s.sinks }
+            delete panes[id]
+            delete sinks[id]
+            return { panes, sinks }
+          })
+          if (id > 0) await pty.kill(id)
+          return
+        }
         if (!tab) return
         const closing = id ?? tab.focused
         bury([closing])
@@ -1126,6 +1210,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
             for (const x of views.get(id) ?? []) if (!x.seeding) x.sink(b)
           }
           set((s) => ({ sinks: { ...s.sinks, [id]: all } }))
+          // An offscreen pane no view showed since: drawn from the core's screen, and it owns the
+          // terminal once drawn.
+          if (blank.delete(id)) {
+            seed(id, v)
+            if (!v.seeding) own(id, v)
+            return () => letGo(id, v)
+          }
           own(id, v)
           const chunks = [...(replay.get(id) ?? []), ...(pending.get(id) ?? [])]
           pending.delete(id)
@@ -1196,7 +1287,10 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           layouts.unshift([null, !away?.tabs.length ? loose : loose.tabs.length ? joinTabs(loose, away.tabs, fresh) : away])
         } else if (away?.tabs.length) layouts.push([null, away])
         const worktrees = layouts.map(([path, l]): SavedWorktree => ({ path, ...saveLayout(l, s.panes) }))
-        return { version: SAVED_VERSION, activeWorktree: s.activeWorktree, worktrees }
+        const offscreen = Object.values(s.panes).flatMap((p): SavedOffscreen[] =>
+          p.offscreen && p.id > 0 ? [{ pane: p.id, ...(p.cwd ? { cwd: p.cwd } : {}), ...(p.title ? { title: p.title } : {}), ...(p.sessionId ? { sessionId: p.sessionId } : {}) }] : [],
+        )
+        return { version: SAVED_VERSION, activeWorktree: s.activeWorktree, worktrees, ...(offscreen.length ? { offscreen } : {}) }
       },
 
       async restore(saved) {
@@ -1211,10 +1305,20 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
           claimed.add(old)
           return attachPane(sessions, old, info.cwd || cwd)
         }
+        /** Offscreen pane `old`'s shell, when it still runs: claimed, and attached once a view shows it. */
+        const offscreen = (old: PaneId) => {
+          const info = held.find((i) => i.id === old)
+          if (!sessions || !info?.alive || claimed.has(old)) return null
+          claimed.add(old)
+          return info
+        }
         try {
+          // First: the shells they kept are theirs, never a tab the restore adopts.
+          await restoreOffscreen(saved, offscreen)
           await restoreSaved(saved, reattach)
         } finally {
           if (sessions) await adopt(sessions, held.filter((i) => !claimed.has(i.id)))
+          set({ restored: true })
         }
       },
     }
@@ -1222,6 +1326,32 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 }
 
 const NO_TABS: Tab[] = []
+
+function offscreenPane(id: PaneId, cwd: string | undefined, sessionId: string | undefined, title?: string): Pane {
+  return { id, view: 'terminal', offscreen: true, ...(cwd ? { cwd } : {}), ...(sessionId ? { sessionId } : {}), ...(title ? { title } : {}) }
+}
+
+/** The offscreen panes a saved file lists (`WorkspaceFile.offscreen`); what cannot be read is left
+ *  out. A session id is typed into a shell on restore: only an id gets through. */
+function parseOffscreen(saved: unknown): SavedOffscreen[] {
+  const list = typeof saved === 'object' && saved !== null ? (saved as { offscreen?: unknown }).offscreen : undefined
+  if (!Array.isArray(list)) return []
+  const seen = new Set<PaneId>()
+  return list.flatMap((x): SavedOffscreen[] => {
+    if (typeof x !== 'object' || x === null) return []
+    const { pane, cwd, title, sessionId } = x as Record<string, unknown>
+    if (!Number.isInteger(pane) || (pane as number) <= 0 || seen.has(pane as number)) return []
+    seen.add(pane as number)
+    return [
+      {
+        pane: pane as number,
+        ...(typeof cwd === 'string' && cwd ? { cwd } : {}),
+        ...(typeof title === 'string' && title ? { title } : {}),
+        ...(typeof sessionId === 'string' && SESSION_ID.test(sessionId) ? { sessionId } : {}),
+      },
+    ]
+  })
+}
 
 /** Whether `folder` is worktree `w` or lies in it (a sibling whose name only starts the same does not). */
 function inside(folder: string | undefined, w: string): boolean {

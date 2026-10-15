@@ -1,5 +1,5 @@
-import { toast } from '@/ui'
 import type { PaneId } from '../../layout/tree'
+import { liveSessions } from './app'
 
 /** A session the drawer starts (spec `2026-10-15-nexus-app-design.md`, Q1, Q4): `claude` in a repo,
  *  or `claude --resume <id>`; a plain shell; a saved command. Each runs in a pane with no view on
@@ -9,20 +9,21 @@ export type SessionSpec =
   | { kind: 'shell'; root: string }
   | { kind: 'command'; root: string; command: string; label: string }
 
-/** Starts the session and opens it in the drawer. Stub until the round's `sessions` piece lands. */
+/** Starts the session and opens it in a drawer tab showing its live terminal, the Nexus open
+ *  (`./start`). `claude` is typed as *Launch agent* types it, under a session id of its own, so its
+ *  tab is its captain's; a session one of the app's panes runs already is shown instead. A command
+ *  is typed once the prompt is up. What could not start is said, and nothing is opened. */
 export async function openSession(spec: SessionSpec): Promise<void> {
-  toast(`Opening a ${spec.kind} session is not built yet`)
+  return liveSessions.openSession(spec)
 }
 
 /** The pane the app runs Claude session `sessionId` in, or null when it runs outside the app (a
- *  captain's **Close** ends only a session the app holds, Q2). Stub until `sessions` lands. */
+ *  captain's **Close** ends only a session the app holds, Q2). */
 export function paneOf(sessionId: string): PaneId | null {
-  void sessionId
-  return null
+  return liveSessions.paneOf(sessionId)
 }
 
-/** Ends the session in pane `pane`: its terminal closes and its drawer tab goes. Stub until
- *  `sessions` lands. */
+/** Ends the session in pane `pane`: its terminal closes and its drawer tab goes. */
 export async function endSession(pane: PaneId): Promise<void> {
-  toast(`Ending the session in pane ${pane} is not built yet`)
+  return liveSessions.endSession(pane)
 }

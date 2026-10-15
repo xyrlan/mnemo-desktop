@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { FleetPromptProps, ShipAction } from '../ship-types'
-import { CONFIRM_MS, HINT, parseCommand } from './parse'
+import { openSession } from '../drawer/open'
+import { CONFIRM_MS, HINT, parseCommand, parseNew } from './parse'
 
 type Out = { text: string; err: boolean }
 type Pending = { action: ShipAction; until: number }
@@ -38,10 +39,32 @@ export function FleetPrompt({ ship, run }: FleetPromptProps): JSX.Element | null
     }
   }
 
+  /** `/new <repo>`: the session opens in a drawer tab. */
+  const start = async (repo: { root: string; name: string }) => {
+    setBusy(true)
+    say('…', false)
+    try {
+      await openSession({ kind: 'claude', root: repo.root })
+      say(`▸ claude started in ${repo.name}`, false)
+    } catch (e) {
+      say(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      if (live.current) setBusy(false)
+    }
+  }
+
   const submit = () => {
     const typed = line.trim()
     if (!typed || busy) return
     setLine('')
+    const fresh = parseNew(typed, ship)
+    if (fresh) {
+      if ('error' in fresh) return say(fresh.error, true)
+      // An order, like any other: a batch still waiting for its `/yes` lapses.
+      pending.current = null
+      window.clearTimeout(lapse.current)
+      return void start(fresh)
+    }
     const p = parseCommand(typed, ship)
     if ('error' in p) return say(p.error, true)
     if ('yes' in p) {

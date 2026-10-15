@@ -1,21 +1,19 @@
 import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { createStore } from 'zustand/vanilla'
-import { register, run } from '../../actions/registry'
-import { BACKSPACE, CLEAR_LINE, ENTER, promptBytes } from '../../chat-input/pty'
-import type { ConversationViewProps } from '../../conversation/ConversationView'
 import type { DiffClient } from '../../diff/client'
 import type { PaneViewProps } from '../../panes/registry'
 import type { Ship } from '../ship-types'
 import { nexusStore } from '../store'
-import { sessionAgent } from './agent'
 import { NexusDrawer, type DrawerDeps } from './Drawer'
-import { fakeHost, INPUT, reposFixture, settle, shipFixture } from './fixtures'
-import { claimFace } from './keys'
+import { fakeHost, reposFixture, settle, shipFixture } from './fixtures'
 import { openingOf, OUTSIDE } from './model'
 import { createDrawer, viewName } from './sessions'
 import { readWidth, WIDTH_KEY } from './width'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+const opened = vi.hoisted(() => [] as { id: string; params: unknown }[])
+vi.mock('../ui/windows', () => ({ openWindow: (id: string, params: unknown) => void opened.push({ id, params }) }))
 
 /** What each terminal view went through: mounts, and `props.active` at each render. */
 const views: Record<number, { mounts: number; active: boolean[]; props: Record<string, unknown> }> = {}
@@ -33,29 +31,6 @@ function StubTerminal({ id, props }: PaneViewProps) {
   )
 }
 
-type ConvProps = Pick<ConversationViewProps, 'sessionId' | 'cwd' | 'status' | 'agent' | 'onOpenTerminal'>
-/** What each conversation view went through, by session: mounts, and its props last drawn. */
-const convs: Record<string, { mounts: number; props: ConvProps }> = {}
-function StubConversation(props: ConvProps) {
-  const c = (convs[props.sessionId ?? ''] ??= { mounts: 0, props })
-  c.props = props
-  useEffect(() => {
-    c.mounts++
-  }, [c])
-  return (
-    <div data-stub-conversation={props.sessionId ?? ''}>
-      <textarea data-composer="" />
-    </div>
-  )
-}
-
-/** The keys typed into each PTY, as the conversations' agents type them. */
-const typed: string[] = []
-const screen = INPUT
-const write = async (pty: number, d: string) => void typed.push(`${pty} ${JSON.stringify(d)}`)
-const keys = { writePty: write, screen: () => screen, sleep: async () => {} }
-const sinks = { pane: { ...keys, runsClaude: async () => true }, attach: keys }
-
 const diffAsked: string[] = []
 const diff: DiffClient = {
   files: async (w) => (diffAsked.push(w), { root: w, truncated: false, files: [{ path: 'src/a.ts', oldPath: null, status: 'modified', additions: 1, deletions: 1, binary: false }] }),
@@ -66,15 +41,14 @@ let root: Root
 function mount(over: { shown?: boolean; ship?: Ship } = {}) {
   const { host, log } = fakeHost()
   const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
-  const owners = createStore<{ owners: Record<number, { name?: string } | undefined> }>(() => ({ owners: {} }))
+  const owners = createStore<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>(() => ({ owners: {} }))
   const opened: string[] = []
   const deps: DrawerDeps = {
     drawer,
     host,
     owners,
     terminal: StubTerminal,
-    conversation: StubConversation,
-    agent: (session) => sessionAgent(session, sinks),
+    conversation: ({ sessionId }) => <div data-stub-conversation={sessionId ?? ''} />,
     diff,
     worktreeOf: (cwd) => cwd,
     goToRepo: () => {},
@@ -100,9 +74,8 @@ const key = (init: KeyboardEventInit, target: EventTarget = document.body) => ac
 
 beforeEach(() => {
   for (const k of Object.keys(views)) delete views[Number(k)]
-  for (const k of Object.keys(convs)) delete convs[k]
-  typed.length = 0
   diffAsked.length = 0
+  opened.length = 0
   nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null, drawerWidth: 600 })
   Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
   Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true })
@@ -275,142 +248,50 @@ test('a robot’s breadcrumbs name its own repo, not its captain’s deck', asyn
   expect(panel('r-other').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo▸◆ nexus round▸#90')
 })
 
-const face = (id: string) => panel(id).dataset.drawerFace
-const shows = (id: string) => panel(id).querySelector<HTMLElement>('[data-drawer-conversation]')!.style.visibility
-const flip = (id: string, to: 'conversation' | 'terminal') => act(() => panel(id).querySelector<HTMLButtonElement>(`[data-drawer-face-switch] [data-face="${to}"]`)!.click())
-
-test('a new tab opens on its conversation, its live terminal mounted underneath and owning the session', async () => {
+test('a live tab shows its terminal only: no conversation over it, no switch, and the terminal has the keyboard', async () => {
   const { open, host } = mount()
   open('cap-1')
   open('r-live')
   await act(settle)
   const attach = host.getState().sessions['child:r-live'].pty!
-  for (const [id, pty, session] of [['cap-1', 7, 'cap-1'], ['r-live', attach, 's-live']] as const) {
-    expect(face(id)).toBe('conversation')
-    expect(shows(id)).toBe('visible')
+  for (const [id, pty] of [['cap-1', 7], ['r-live', attach]] as const) {
     expect(panel(id).querySelector(`[data-drawer-terminal] [data-stub-terminal="${pty}"]`)).not.toBeNull()
-    expect(convs[session].props).toMatchObject({ sessionId: session, agent: expect.any(Object), onOpenTerminal: expect.any(Function) })
+    expect(panel(id).querySelector('[data-stub-conversation]')).toBeNull()
+    expect(panel(id).querySelector('[data-drawer-face-switch]')).toBeNull()
   }
   expect(views[attach].props).toMatchObject({ present: true, name: viewName('r-live'), active: true })
-  expect(panel('r-live').querySelector('[data-face="conversation"]')?.getAttribute('aria-pressed')).toBe('true')
-  // The conversation has the keyboard.
   await act(() => new Promise((r) => requestAnimationFrame(r)))
-  expect(document.activeElement?.hasAttribute('data-composer')).toBe(true)
+  expect(document.activeElement?.closest(`[data-stub-terminal="${attach}"]`)).not.toBeNull()
 })
 
-test('the switch flips a tab between its conversation and its terminal, remounting neither, and each tab keeps its own', async () => {
-  const { open } = mount()
-  open('r-pane')
-  open('cap-1')
-  await act(settle)
-  flip('cap-1', 'terminal')
-  expect(face('cap-1')).toBe('terminal')
-  expect(shows('cap-1')).toBe('hidden')
-  expect(panel('cap-1').querySelector('[data-face="terminal"]')?.getAttribute('aria-pressed')).toBe('true')
-  await act(() => new Promise((r) => requestAnimationFrame(r)))
-  expect(document.activeElement?.closest('[data-stub-terminal="7"]')).not.toBeNull()
-  // Another tab, shown, is on its conversation still; back on this one, the terminal is.
-  act(() => nexusStore.getState().activateTab('r-pane'))
-  expect(face('r-pane')).toBe('conversation')
-  act(() => nexusStore.getState().activateTab('cap-1'))
-  expect(face('cap-1')).toBe('terminal')
-  flip('cap-1', 'conversation')
-  expect(face('cap-1')).toBe('conversation')
-  expect(views[7].mounts).toBe(1)
-  expect(views[7].active).toEqual([true, false, true])
-  expect(convs['cap-1'].mounts).toBe(1)
-})
-
-test('⌘⇧C with the Nexus open flips the tab shown, wherever the focus is, and never the pane under the Nexus', async () => {
-  const ran: string[] = []
-  register({ id: 'pane.toggle-face', title: 'Toggle conversation', run: () => void ran.push('pane.toggle-face') })
-  const unclaim = claimFace(nexusStore)
-  const { open } = mount()
-  open('cap-1')
-  open('cap-2')
-  await act(settle)
-  act(() => nexusStore.getState().activateTab('cap-1'))
-  // In the terminal, in the conversation, anywhere a click in the tab put the keyboard, or on the ship.
-  act(() => panel('cap-1').querySelector<HTMLElement>('[data-composer]')!.focus())
-  act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('terminal')
-  act(() => panel('cap-1').querySelector<HTMLElement>('[data-stub-terminal] textarea')!.focus())
-  act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('conversation')
-  act(() => panel('cap-1').focus())
-  act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('terminal')
-  const ship = document.body.appendChild(document.createElement('textarea'))
-  act(() => ship.focus())
-  act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('conversation')
-  expect(views[7].mounts).toBe(1)
-  expect(convs['cap-1'].mounts).toBe(1)
-  // A read-only tab has no terminal: nothing flips.
-  act(() => nexusStore.getState().activateTab('cap-2'))
-  act(() => run('pane.toggle-face'))
-  expect(panel('cap-2').dataset.drawerFace).toBeUndefined()
-  expect(panel('cap-2').querySelector('[data-drawer-face-switch]')).toBeNull()
-  // Collapsed, nothing flips either.
-  act(() => nexusStore.getState().activateTab('cap-1'))
-  act(() => nexusStore.getState().setCollapsed(true))
-  act(() => run('pane.toggle-face'))
-  expect(face('cap-1')).toBe('conversation')
-  expect(ran).toEqual([])
-  // A popup over the Nexus shows a pane of its own; with the Nexus closed, the chord is the workbench's.
-  const popup = document.body.appendChild(document.createElement('div'))
-  popup.dataset.popout = ''
-  const inPopup = popup.appendChild(document.createElement('textarea'))
-  act(() => inPopup.focus())
-  act(() => run('pane.toggle-face'))
-  act(() => ship.focus())
-  act(() => nexusStore.getState().setOpen(false))
-  act(() => run('pane.toggle-face'))
-  expect(ran).toEqual(['pane.toggle-face', 'pane.toggle-face'])
-  unclaim()
-})
-
-test('while the attach starts, the conversation says so and has nothing to type into', () => {
+test('a robot’s tab opens its full diff in the Changes window; a captain’s has none', async () => {
   const { open } = mount()
   open('r-live')
-  expect(panel('r-live').querySelector('[data-drawer-attaching]')).not.toBeNull()
-  expect(convs['s-live'].props.agent).toBeUndefined()
-})
-
-test('the conversation’s opener of the terminal shows it; a closed tab opens again on its conversation', async () => {
-  const { open, drawer } = mount()
   open('cap-1')
   await act(settle)
-  act(() => convs['cap-1'].props.onOpenTerminal!())
-  expect(face('cap-1')).toBe('terminal')
-  await act(() => drawer.close('cap-1'))
-  open('cap-1')
-  expect(face('cap-1')).toBe('conversation')
+  expect(panel('cap-1').querySelector('[data-drawer-full-diff]')).toBeNull()
+  act(() => panel('r-live').querySelector<HTMLButtonElement>('[data-drawer-full-diff]')!.click())
+  expect(opened).toEqual([{ id: 'changes', params: { robotId: 'r-live', worktree: '/work/mnemo-desktop-wt-682/src', label: '#682·a' } }])
 })
 
-test('the composer types into the session’s own PTY: the pane’s, or the child’s attach', async () => {
-  const { open, host } = mount()
-  open('cap-1')
-  open('r-live')
-  await act(settle)
-  const attach = host.getState().sessions['child:r-live'].pty!
-  await act(() => convs['cap-1'].props.agent!.send('ship it'))
-  await act(() => convs['s-live'].props.agent!.send('and land'))
-  const keys = (pty: number, text: string) => [CLEAR_LINE, BACKSPACE, promptBytes(text) + ENTER].map((k) => `${pty} ${JSON.stringify(k)}`)
-  expect(typed).toEqual([...keys(7, 'ship it'), ...keys(attach, 'and land')])
+test('a session the Nexus started: named for what it runs until the ship knows it, and never revealed in the workbench', async () => {
+  const { drawer, owners } = mount()
+  act(() => owners.setState({ panes: { 30: { offscreen: true } } }))
+  act(() => drawer.open({ id: 'session:30', kind: 'session', key: null, readOnly: null, label: 'shell · mnemo-desktop', sessionId: null, cwd: '/work/mnemo-desktop' }, { pane: 30 }))
+  act(() => drawer.open({ id: 'new-1', kind: 'captain', key: null, readOnly: null, label: 'claude · mnemo-desktop', sessionId: 'new-1', cwd: '/work/mnemo-desktop' }, { pane: 31 }))
+  expect([...document.querySelectorAll('[data-drawer-tab]')].map((t) => t.textContent)).toEqual(['shell · mnemo-desktop', 'claude · mnemo-desktop'])
+  expect(panel('session:30').textContent).toContain('/work/mnemo-desktop')
+  expect(panel('new-1').textContent).toContain('not on the ship yet')
+  expect(panel('session:30').querySelector('[data-stub-terminal="30"]')).not.toBeNull()
 })
 
-test('the conversation is told what the session waits on, so its foot answers it or points at the terminal', async () => {
-  const ship = shipFixture()
-  const deck = ship.decks[0]
-  deck.flight[0] = { ...deck.flight[0], child: { ...deck.flight[0].child, waiting_for: 'permission prompt' } }
-  deck.captains[0] = { ...deck.captains[0], parent: { ...deck.captains[0].parent!, status: 'waiting', waiting_for: 'dialog open' } }
-  const { open } = mount({ ship })
+test('a captain in a workbench pane can be shown there; one in an offscreen pane cannot', async () => {
+  const { open, owners } = mount()
   open('cap-1')
-  open('r-live')
-  await act(settle)
-  expect(convs['s-live'].props.status).toEqual({ busy: false, waiting: 'permission' })
-  expect(convs['cap-1'].props.status).toEqual({ busy: false, waiting: null, parked: true })
+  expect(panel('cap-1').querySelector('[data-open-as-tab]')).not.toBeNull()
+  act(() => owners.setState({ panes: { 7: { offscreen: true } } }))
+  expect(panel('cap-1').querySelector('[data-open-as-tab]')).toBeNull()
+  expect(panel('cap-1').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo-desktop▸◆ nexus round')
 })
 
 test('the default width is 42% of the window as it is now; a width dragged and saved wins', () => {

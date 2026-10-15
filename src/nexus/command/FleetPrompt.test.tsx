@@ -2,8 +2,17 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { ActionResult, ShipAction } from '../ship-types'
 import { FleetPrompt } from './FleetPrompt'
-import { ship } from './fixtures'
+import type { SessionSpec } from '../drawer/open'
+import { MNEMO, ship } from './fixtures'
 import { CONFIRM_MS } from './parse'
+
+const started = vi.hoisted(() => ({ specs: [] as SessionSpec[], fail: null as string | null }))
+vi.mock('../drawer/open', () => ({
+  openSession: async (spec: SessionSpec) => {
+    if (started.fail) throw new Error(started.fail)
+    started.specs.push(spec)
+  },
+}))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -17,6 +26,8 @@ const run = async (a: ShipAction): Promise<ActionResult> => {
 
 beforeEach(async () => {
   ran.length = 0
+  started.specs.length = 0
+  started.fail = null
   host = document.body.appendChild(document.createElement('div'))
   root = createRoot(host)
   await act(async () => root.render(<FleetPrompt ship={ship()} run={run} />))
@@ -84,4 +95,23 @@ test('another order drops the batch waiting for /yes', async () => {
   await type('/msg #103 hi')
   await type('/yes')
   expect(ran).toEqual([{ kind: 'message', ids: ['103'], text: 'hi' }])
+})
+
+test('/new <repo> starts claude in that repo, in the drawer, and says so; a repo not on the ship starts nothing', async () => {
+  await type('/new mnemo')
+  expect(started.specs).toEqual([{ kind: 'claude', root: MNEMO }])
+  expect(out().textContent).toBe('▸ claude started in mnemo')
+  await type('/new elsewhere')
+  expect(started.specs).toHaveLength(1)
+  expect(out().textContent).toContain('no repo called elsewhere')
+  expect(ran).toEqual([])
+  expect(host.querySelector('[data-fleet-hint]')!.textContent).toContain('/new <repo>')
+})
+
+test('/new replaces a batch waiting for its /yes', async () => {
+  await type('/stop all')
+  await type('/new mnemo')
+  await type('/yes')
+  expect(out().textContent).toBe('nothing to confirm')
+  expect(ran).toEqual([])
 })

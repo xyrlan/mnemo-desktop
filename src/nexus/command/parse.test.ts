@@ -1,5 +1,5 @@
 import { MNEMO, ROOT, ship } from './fixtures'
-import { parseCommand } from './parse'
+import { HINT, parseCommand, parseNew } from './parse'
 
 const s = ship()
 const err = (line: string) => {
@@ -11,7 +11,7 @@ const err = (line: string) => {
 test('anything that is not a verb is a hint, never an action', () => {
   expect(err('merge everything')).toMatch(/^start with \//)
   expect(err('')).toMatch(/^start with \//)
-  expect(err('/deploy prod')).toBe('unknown /deploy — use /dispatch, /msg, /merge green, /stop all or /land')
+  expect(err('/deploy prod')).toBe('unknown /deploy — use /new, /dispatch, /msg, /merge green, /stop all or /land')
 })
 
 test('/dispatch names a repo on the ship and one or more issues', () => {
@@ -69,4 +69,16 @@ test('/land takes a landable mission by its feature', () => {
   expect(parseCommand('/land nexus-v2', s)).toEqual({ action: { kind: 'land', root: ROOT, feature: 'nexus-v2' } })
   expect(err('/land other')).toBe('mission other is not landable — landable now: nexus-v2')
   expect(err('/land')).toBe('usage: /land <feature> — landable now: nexus-v2')
+})
+
+test('/new names a repo on the ship as /dispatch does; any other line is not it', () => {
+  expect(parseNew('/new mnemo', s)).toEqual({ root: MNEMO, name: 'mnemo' })
+  expect(parseNew('  /NEW Mnemo-Desktop ', s)).toEqual({ root: ROOT, name: 'mnemo-desktop' })
+  expect(parseNew(`/new ${ROOT}`, s)).toEqual({ root: ROOT, name: 'mnemo-desktop' })
+  expect(parseNew('/new elsewhere', s)).toEqual({ error: 'no repo called elsewhere on the ship — repos: mnemo-desktop, mnemo' })
+  expect(parseNew('/new', s)).toEqual({ error: 'usage: /new <repo> — starts claude in that repo' })
+  expect(parseNew('/new mnemo now', s)).toEqual({ error: 'usage: /new <repo> — starts claude in that repo' })
+  expect(parseNew('/newer mnemo', s)).toBeNull()
+  expect(parseNew('/dispatch mnemo #1', s)).toBeNull()
+  expect(HINT.startsWith('/new <repo> · ')).toBe(true)
 })

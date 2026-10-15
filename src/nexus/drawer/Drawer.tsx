@@ -1,34 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
-import { EyeOff, MessageSquare, SquareTerminal, X } from 'lucide-react'
-import { shortcutLabel } from '../../actions/chords'
-import type { ChatAgent } from '../../conversation/agent'
+import { EyeOff, X } from 'lucide-react'
 import type { ConversationViewProps } from '../../conversation/ConversationView'
 import { STATUS_BAR } from '../../shell/edges'
 import type { ChangedFile, DiffClient } from '../../diff/client'
 import type { AgentState, RepoNode } from '../../fleet/types'
 import type { PaneViewProps } from '../../panes/registry'
-import type { HostedSession, SessionHost } from '../../session/host'
+import type { SessionHost } from '../../session/host'
 import type { Feed, Ship } from '../ship-types'
-import { faceOf, nexusStore, useNexus, type DrawerFace, type DrawerTab } from '../store'
-import { statusOf } from './agent'
+import { nexusStore, useNexus, type DrawerTab } from '../store'
+import { openWindow } from '../ui/windows'
 import { Chips, QuickDiff, useChanges, type DiffAsk } from './changes'
 import { isToggleKey, toggleLabel } from './keys'
-import { contextOf, crumbsOf, findFigure, labelOf, lineOf, sessionIdOf, spriteOf, stateOf, tokens, type Figure } from './model'
+import { contextOf, crumbsOf, findFigure, labelOf, lineOf, spriteOf, stateOf, tokens, type Figure } from './model'
 import { viewName, type Drawer } from './sessions'
 import { clampWidth, saveWidth, shownWidth } from './width'
 
 /** The Nexus drawer (v2 spec, "Acting from it"): a right-hand panel beside the ship with one tab per
- *  session opened from it. Each tab shows the session's conversation (#437), with a composer that
- *  types into the session's real terminal, drawn underneath through the session host; ⌘⇧C or the
- *  header's switch shows that terminal instead. A session with none to borrow shows its
- *  conversation read-only.
- *
- *  What the session waits on is never behind the conversation: its foot shows the card that
- *  answers a permission or a question, typed into the same terminal, and for anything else (a
- *  dialog, a prompt the transcript has not written yet) an *Open terminal* line in place of the
- *  composer, which would answer it blind.
+ *  session opened from it. Each tab shows the session's live terminal, through the session host
+ *  (the drawer shows terminals only: spec `2026-10-15-nexus-app-design.md`). A session with none to
+ *  borrow shows its conversation read-only.
  *
  *  The drawer stays mounted while it has tabs, also collapsed and while the Nexus is closed, hidden
  *  with `display: none`: a terminal view that is hidden that way hands its session to one on screen
@@ -38,15 +30,12 @@ export type DrawerDeps = {
   drawer: Drawer
   host: SessionHost
   /** The layout store (`src/layout/store.ts`): its owners say whether a tab's view owns its
-   *  session; its panes, which session a pane's Claude runs now (it changes on a `/clear`). */
-  owners: StoreApi<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { sessionId?: string } | undefined> }>
+   *  session; its panes, which pane is offscreen (no workbench view to reveal). */
+  owners: StoreApi<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>
   /** Draws a terminal: the terminal pane view (`src/terminal/view.tsx`) in the app. */
   terminal: ComponentType<PaneViewProps>
-  /** Draws a conversation (`src/conversation/ConversationView.tsx`): read-only with no agent. */
-  conversation: ComponentType<Pick<ConversationViewProps, 'sessionId' | 'cwd' | 'status' | 'agent' | 'onOpenTerminal'>>
-  /** How a session's conversation types into its terminal (`./agent`). Without it, the
-   *  conversation only reads. */
-  agent?(session: Pick<HostedSession, 'kind' | 'pty' | 'error'>): ChatAgent | undefined
+  /** Draws a conversation read-only (`src/conversation/ConversationView.tsx` with no agent). */
+  conversation: ComponentType<Pick<ConversationViewProps, 'sessionId' | 'cwd'>>
   diff: DiffClient
   /** The deepest worktree the app knows that holds `cwd`. */
   worktreeOf(cwd: string): string
@@ -276,7 +265,6 @@ type PanelProps = {
 function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked, onPick }: PanelProps) {
   const session = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key] : undefined))
   const pty = session?.pty ?? null
-  const face = useNexus((s) => faceOf(s, tab.id))
   const figure = findFigure(ship, tab.id)
   const cwd = (figure && (figure.kind === 'robot' ? figure.robot.child.cwd : figure.captain.parent?.cwd)) ?? tab.cwd
   const worktree = useMemo(() => (cwd ? deps.worktreeOf(cwd) : null), [cwd, deps])
@@ -285,39 +273,20 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
   const Terminal = deps.terminal
   const Conversation = deps.conversation
   const close = useCallback(() => void deps.drawer.close(tab.id), [deps.drawer, tab.id])
-  // A presentation's view under the tab's own name; shown again, it takes the session back. It is
-  // the same under the conversation as on its own: a flip remounts nothing and moves no ownership.
+  // A presentation's view under the tab's own name; shown again, it takes the session back.
   const props = useMemo(() => ({ present: true, name: viewName(tab.id), close, active: active && shown }), [tab.id, close, active, shown])
 
-  // The conversation: a pane's Claude, as the pane says now (a `/clear` starts another session);
-  // else the figure's, else what the tab knew as it opened.
-  const paneSession = useStore(deps.owners, (s) => (session?.kind === 'pane' && pty !== null ? s.panes?.[pty]?.sessionId : undefined))
-  const sessionId = paneSession ?? (figure && sessionIdOf(figure)) ?? tab.sessionId
-  const kind = session?.kind
-  const error = session?.error
-  const agent = useMemo(() => (kind && pty !== null ? deps.agent?.({ kind, pty, error }) : undefined), [deps, kind, pty, error])
-  // Every ship built carries new figures: the status changes only when what it says does.
-  const s = statusOf(figure)
-  const status = useMemo(() => s, [s?.busy, s?.waiting, s?.parked]) // eslint-disable-line react-hooks/exhaustive-deps
-  const openTerminal = useCallback(() => nexusStore.getState().setFace(tab.id, 'terminal'), [tab.id])
-
-  // Shown, it takes the keyboard: the composer, or the terminal. A conversation with no composer
-  // (its foot shows a card, or sends you to the terminal) gives it to the panel, never leaving it
-  // in the terminal under the conversation, where a key would answer what waits there unseen.
+  // Shown, it takes the keyboard: its terminal.
   useEffect(() => {
     if (!active || !shown || pty === null) return
-    const where = face === 'conversation' ? '[data-drawer-conversation]' : '[data-drawer-terminal]'
-    const frame = requestAnimationFrame(() => {
-      const target = panel.current?.querySelector<HTMLElement>(`${where} textarea`) ?? (face === 'conversation' ? panel.current : null)
-      target?.focus()
-    })
+    const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>('[data-drawer-terminal] textarea')?.focus())
     return () => cancelAnimationFrame(frame)
-  }, [active, shown, pty, face])
+  }, [active, shown, pty])
 
   return (
-    // Focusable, so a click anywhere in it gives the drawer the keyboard, ⌘⇧C with it.
-    <div ref={panel} role="tabpanel" tabIndex={-1} data-drawer-panel={tab.id} data-drawer-face={tab.key === null ? undefined : face} className="min-h-0 min-w-0 flex-1 flex-col outline-none" style={{ display: active ? 'flex' : 'none' }}>
-      <Header tab={tab} figure={figure} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} face={tab.key === null ? null : face} />
+    // Focusable, so a click anywhere in it gives the drawer the keyboard.
+    <div ref={panel} role="tabpanel" tabIndex={-1} data-drawer-panel={tab.id} className="min-h-0 min-w-0 flex-1 flex-col outline-none" style={{ display: active ? 'flex' : 'none' }}>
+      <Header tab={tab} figure={figure} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} />
       {worktree && <Chips list={changes.list} error={changes.error} picked={picked} onPick={(f, el) => onPick(worktree, f, el)} />}
       <div className="relative min-h-0 flex-1 overflow-hidden border-t border-border bg-background">
         {tab.key === null ? (
@@ -333,32 +302,11 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
           </div>
         ) : (
           <>
-            {/* Laid out under the conversation too, at its own size, so its program never notices
-                a flip; isolated, so its canvas never paints over the conversation. */}
-            <div className="isolate h-full pt-1 pl-2" data-drawer-terminal="">
+            <div className="h-full pt-1 pl-2" data-drawer-terminal="">
               {pty !== null && <Terminal id={pty} props={props} />}
             </div>
-            {/* Hidden, not unmounted, while the terminal shows: it keeps its place and its draft. */}
-            <div
-              className="absolute inset-0 z-10 flex flex-col bg-background"
-              data-drawer-conversation=""
-              aria-hidden={face !== 'conversation'}
-              style={{ visibility: face === 'conversation' ? 'visible' : 'hidden' }}
-            >
-              {/* No terminal yet, so no foot: what it would answer waits for the attach. */}
-              {pty === null && !error && (
-                <p className="shrink-0 border-b border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground" data-drawer-attaching="">
-                  Attaching… the conversation answers once its terminal is up.
-                </p>
-              )}
-              {sessionId && cwd ? (
-                <Conversation sessionId={sessionId} cwd={cwd} status={status} agent={agent} onOpenTerminal={openTerminal} />
-              ) : (
-                <p className="p-4 text-center text-sm text-muted-foreground">No transcript is known for this session yet: its terminal is one switch away.</p>
-              )}
-            </div>
-            {error && <p className="absolute inset-0 z-20 flex items-center justify-center bg-background p-4 text-center text-sm text-muted-foreground">{error}</p>}
-            {pty === null && !error && face === 'terminal' && <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">Attaching…</div>}
+            {session?.error && <p className="absolute inset-0 flex items-center justify-center bg-background p-4 text-center text-sm text-muted-foreground">{session.error}</p>}
+            {pty === null && !session?.error && <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">Attaching…</div>}
           </>
         )}
       </div>
@@ -374,46 +322,30 @@ type HeaderProps = {
   repos: readonly RepoNode[]
   deps: DrawerDeps
   onOpen(id: string): void
-  /** How the tab shows its live session; null when it has none (read-only). */
-  face: DrawerFace | null
 }
 
-const FACES: { face: DrawerFace; label: string; Icon: typeof MessageSquare }[] = [
-  { face: 'conversation', label: 'Conversation', Icon: MessageSquare },
-  { face: 'terminal', label: 'Terminal', Icon: SquareTerminal },
-]
+const SMALL = 'shrink-0 rounded-sm border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground'
 
-/** *Conversation · Terminal*: how the tab shows its session. */
-function FaceSwitch({ tab, face }: { tab: DrawerTab; face: DrawerFace }) {
-  const chord = shortcutLabel('pane.toggle-face')
+/** A robot's *Changes*: the full diff of its worktree, in the ship's Changes window. */
+function ChangesButton({ id, worktree, label }: { id: string; worktree: string; label: string }) {
   return (
-    <div role="group" aria-label="Show the session as" className="flex shrink-0 rounded-sm border border-border p-px" data-drawer-face-switch="">
-      {FACES.map(({ face: f, label, Icon }) => (
-        <button
-          key={f}
-          type="button"
-          aria-pressed={face === f}
-          data-face={f}
-          title={chord ? `${label} (${chord} flips)` : label}
-          className={`flex items-center gap-1 rounded-[3px] px-1.5 text-[11px] ${face === f ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          onClick={() => nexusStore.getState().setFace(tab.id, f)}
-        >
-          <Icon className="size-3" aria-hidden />
-          {label}
-        </button>
-      ))}
-    </div>
+    <button type="button" data-drawer-full-diff="" className={SMALL} title="The full diff of its worktree" onClick={() => openWindow('changes', { robotId: id, worktree, label })}>
+      Changes
+    </button>
   )
 }
 
-function Header({ tab, figure, ship, feed, repos, deps, onOpen, face }: HeaderProps) {
-  const kind = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key]?.kind : undefined))
+function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
+  const session = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key] : undefined))
+  const kind = session?.kind
+  // A pane the Nexus started has no place in the workbench to be shown in.
+  const offscreen = useStore(deps.owners, (s) => (kind === 'pane' && session?.pty != null ? !!s.panes?.[session.pty]?.offscreen : false))
   if (!figure)
     return (
       <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs">
         <b className="min-w-0 flex-1 truncate">{tab.label}</b>
-        <span className="text-muted-foreground">no longer on the ship</span>
-        {face && <FaceSwitch tab={tab} face={face} />}
+        <span className="truncate text-muted-foreground">{tab.key === null ? 'no longer on the ship' : tab.kind === 'session' ? (tab.cwd ?? '') : 'not on the ship yet'}</span>
+        {tab.kind === 'robot' && tab.cwd && <ChangesButton id={tab.id} worktree={tab.cwd} label={tab.label} />}
       </div>
     )
   const state = stateOf(figure)
@@ -448,12 +380,12 @@ function Header({ tab, figure, ship, feed, repos, deps, onOpen, face }: HeaderPr
         <span className={`shrink-0 rounded-sm border border-current px-1.5 text-[11px] font-semibold ${TEXT[state.tone]}`} data-drawer-state="">
           {state.text}
         </span>
-        {face && <FaceSwitch tab={tab} face={face} />}
-        {(kind === 'pane' || kind === 'attach') && (
+        {child && <ChangesButton id={figure.kind === 'robot' ? figure.robot.id : tab.id} worktree={child.cwd} label={labelOf(figure)} />}
+        {((kind === 'pane' && !offscreen) || kind === 'attach') && (
           <button
             type="button"
             data-open-as-tab=""
-            className="shrink-0 rounded-sm border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            className={SMALL}
             title={kind === 'pane' ? 'Show its pane in the workbench' : 'Attach it in a workbench tab instead'}
             onClick={() => void deps.drawer.reveal(tab.id, child)}
           >
