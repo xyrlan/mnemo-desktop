@@ -1,9 +1,9 @@
 import type { StoreApi } from 'zustand/vanilla'
 import type { Pane } from '../../layout/store'
 import type { PaneId } from '../../layout/tree'
-import { basename } from '../../path/path'
 import type { DrawerTab, NexusState } from '../store'
 import type { Drawer } from './sessions'
+import { shellLabel } from './start'
 
 /** The drawer's tabs across a restart (contract `sessions`): each tab on a pane's session (a
  *  session the Nexus started, a captain or robot in a pane) comes back on that session while the
@@ -11,7 +11,7 @@ import type { Drawer } from './sessions'
  *  child's attach and a read-only tab are opened again from the ship. Every other terminal the app
  *  keeps is reachable too: one no tab shows and no live Claude's captain leads to (a workbench
  *  tab's shell, a pane whose Claude ended: #459) opens in a tab of its own (`adoptShells`,
- *  `adoptIdle`; the launch's order is `./launch`). */
+ *  `adoptPanes`; the launch's order is `./launch`). */
 
 export const TABS_KEY = 'mnemo.nexus-drawer.v1'
 
@@ -89,8 +89,7 @@ function open(adopt: Pane[], drawer: Drawer, nexus: StoreApi<NexusState>, quiet:
   for (const p of adopt) {
     const id = `session:${p.id}`
     if (nexus.getState().tabs.some((t) => t.id === id)) continue
-    const label = p.title || (p.cwd ? `shell · ${basename(p.cwd) || p.cwd}` : 'shell')
-    drawer.open({ id, kind: 'session', key: null, readOnly: null, label, sessionId: null, cwd: p.cwd ?? null }, { pane: p.id })
+    drawer.open({ id, kind: 'session', key: null, readOnly: null, label: shellLabel(p), sessionId: null, cwd: p.cwd ?? null }, { pane: p.id })
   }
   if (was.activeTab) nexus.getState().activateTab(was.activeTab)
   if (quiet) nexus.getState().setCollapsed(was.collapsed || !was.activeTab)
@@ -100,7 +99,7 @@ function open(adopt: Pane[], drawer: Drawer, nexus: StoreApi<NexusState>, quiet:
  *  session: a workbench tab's shell, kept in the workspace file from before the Nexus was the app
  *  (#459), or a shell the restore found running that no saved pane claimed. Nothing on the ship
  *  leads to it, so each opens in a drawer tab of its own, after the tabs kept. A pane with a
- *  Claude session is left to its captain until `adoptIdle` asks whether a Claude runs there.
+ *  Claude session is left to its captain until the launch's `check` asks what runs there.
  *  `only`: just these panes, quietly (a pane whose Claude session went: `lostPanes`). */
 export function adoptShells(panes: Record<PaneId, Pane>, drawer: Drawer, nexus: StoreApi<NexusState>, only?: ReadonlySet<PaneId>): void {
   open(
@@ -111,32 +110,13 @@ export function adoptShells(panes: Record<PaneId, Pane>, drawer: Drawer, nexus: 
   )
 }
 
-/** The terminals no drawer tab shows that still hold a Claude session id, each asked whether a
- *  Claude runs in it (`runsClaude`), once the restore's resumes have had time to start
- *  (`RESUME_WINDOW_MS`). Each opens in a drawer tab of its own, quietly, unless a Claude is found
- *  running there, whose captain leads to it:
- *  - one that runs none (its Claude ended while the app was closed, its resume never started, the
- *    session runs elsewhere: #459) is a shell, and is no longer that session's pane (`markIdle`):
- *    no captain or tab follows the id, which it keeps for the next launch to resume;
- *  - one the app cannot tell about (`claude agents` answering on no account) may hold a running
- *    Claude, and a tab on it is no harm: nothing else leads to it while nothing can say. */
-export async function adoptIdle(
-  panes: () => Record<PaneId, Pane>,
-  drawer: Drawer,
-  nexus: StoreApi<NexusState>,
-  runsClaude: (pane: PaneId) => Promise<boolean>,
-  markIdle: (pane: PaneId, sessionId: string) => void,
-): Promise<void> {
-  const asked = unshown(panes(), nexus).filter((p) => p.sessionId)
-  const runs = await Promise.all(asked.map((p) => runsClaude(p.id).then((r): boolean | null => r, () => null)))
-  for (const [i, p] of asked.entries()) if (runs[i] === false && panes()[p.id]?.sessionId === p.sessionId) markIdle(p.id, p.sessionId!)
-  const now = new Set(unshown(panes(), nexus).map((p) => p.id))
-  open(
-    asked.filter((p, i) => runs[i] !== true && now.has(p.id)).map((p) => panes()[p.id]),
-    drawer,
-    nexus,
-    true,
-  )
+/** Opens each of `adopt` that no drawer tab shows in a drawer tab of its own, quietly: a terminal
+ *  that holds a Claude session id but was found running no Claude (its Claude ended while the app
+ *  was closed, its resume never started, the session runs elsewhere: #459), or where something
+ *  runs that nobody can say what (`claude agents` failing). Nothing else leads to it (`check` in
+ *  `./launch`). */
+export function adoptPanes(adopt: Pane[], drawer: Drawer, nexus: StoreApi<NexusState>): void {
+  open(unshown(Object.fromEntries(adopt.map((p) => [p.id, p])), nexus), drawer, nexus, true)
 }
 
 /** The panes whose Claude session went between `prev` and `panes`: an id they held is gone. */

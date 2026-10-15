@@ -5,7 +5,7 @@
  *  repo opens as a shell in a tab. */
 import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
-import { paneRunsClaude } from '../../chrome/running'
+import { paneRuns } from '../../chrome/running'
 import { ConversationView } from '../../conversation/ConversationView'
 import { tauriDiff } from '../../diff/client'
 import { fleetStore } from '../../fleet/store'
@@ -44,26 +44,28 @@ function newId(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
 }
 
-let launch: Launch | null = null
 export const liveSessions: Sessions = (sessions = createSessions({
   layout,
   drawer,
   nexus: nexusStore,
   skipPermissions: () => (settingsStore.getState() as { skipPermissions?: boolean }).skipPermissions !== false,
   newId,
-  runsClaude: paneRunsClaude,
-  restoredAt: () => launch?.restoredAt() ?? null,
+  runs: paneRuns,
   now: Date.now,
 }))
 
 // The drawer's part of the launch: the workbench's tabs pocketed, the tabs kept from the last run
 // back, every terminal reachable; from then on tabs follow their pane's Claude session.
-launch = launchDrawer({ layout, drawer, nexus: nexusStore, sessions: liveSessions, runsClaude: paneRunsClaude, storage: storage(), now: Date.now })
+const launch: Launch = launchDrawer({ layout, drawer, nexus: nexusStore, sessions: liveSessions, runs: paneRuns, storage: storage() })
 
-// Which Claude session each terminal runs, shown in a tab or not: tabs follow it (`followPanes`),
-// and the restore resumes it.
+// Which Claude session each terminal runs, shown in a tab or not, then what runs in each
+// (`Launch.check`): tabs follow it (`followPanes`), and the restore resumes it. A pane whose
+// session could not be learnt keeps the one it had, and is still checked.
 const stopLearning = pollWhileShown(
-  () => Promise.all(Object.values(layout.getState().panes).flatMap((p) => (p.view === 'terminal' ? [learnSession(p.id, tauriSession, layout)] : []))),
+  async () => {
+    await Promise.allSettled(Object.values(layout.getState().panes).flatMap((p) => (p.view === 'terminal' ? [learnSession(p.id, tauriSession, layout)] : [])))
+    await launch.check()
+  },
   SESSION_POLL_MS,
   { hiddenMs: SESSION_HIDDEN_MS, wait: true },
 )
@@ -81,7 +83,7 @@ export const liveDrawer: DrawerDeps = {
 }
 
 import.meta.hot?.dispose(() => {
-  launch?.stop()
+  launch.stop()
   unclaim()
   drawer.dispose()
   stopLearning()

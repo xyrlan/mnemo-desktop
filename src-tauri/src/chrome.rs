@@ -192,19 +192,109 @@ pub async fn chrome_session(pane_pid: u32) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || session_of(pane_pid)).await.map_err(|e| e.to_string())?
 }
 
+/// `claude_running` over the app's accounts and the live process table.
+fn claude_running_now(pane_pid: u32) -> Result<bool, String> {
+    let now = Instant::now();
+    let accounts = crate::mission::account_dirs::accounts();
+    let cached = crate::mission::agents_last(&accounts).map(|(at, answers)| (at, merge_agents(answers)));
+    // Asked after this call began; a caller asking at the same moment shares it.
+    let fresh = || merge_agents(ask_agents_on(&accounts, Instant::now()));
+    claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
+}
+
 /// Whether a terminal pane runs Claude Code this moment: the gate before keys are typed into it.
-/// A pid from the cached `claude agents` answer is checked live, so this is cheap and still
-/// refuses the moment Claude exits (`claude_running`). An error when the app cannot tell, which the
-/// person is told as that and not as "Claude is no longer running".
+/// A shell at its prompt has no Claude in its terminal, which needs no `claude agents` (it may be
+/// failing, or `claude` missing: #460). Else a pid from the cached `claude agents` answer is
+/// checked live, so this is cheap and still refuses the moment Claude exits (`claude_running`). An
+/// error when the app cannot tell, which the person is told as that and not as "Claude is no
+/// longer running".
 #[tauri::command]
 pub async fn chrome_claude_running(pane_pid: u32) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let now = Instant::now();
-        let accounts = crate::mission::account_dirs::accounts();
-        let cached = crate::mission::agents_last(&accounts).map(|(at, answers)| (at, merge_agents(answers)));
-        // Asked after this call began; a caller asking at the same moment shares it.
-        let fresh = || merge_agents(ask_agents_on(&accounts, Instant::now()));
-        claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
+        let shell = crate::procs::table().map(|t| shell_state(&t.children(&[pane_pid]), crate::procs::foreground(pane_pid)));
+        claude_gate(shell, || claude_running_now(pane_pid))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What a pane's shell is doing, from the process table (#460).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shell {
+    /// It runs nothing.
+    Bare,
+    /// It is at its prompt: what it started runs in the background (powerlevel10k's `gitstatusd`,
+    /// a job started with `&`), the terminal being its own.
+    Background,
+    /// A program it started has the terminal; or it runs something, and the system has no
+    /// foreground to say whose the terminal is (Windows).
+    Busy,
+}
+
+/// The state of a shell with `children`, whose terminal is its own or not (`procs::foreground`).
+pub fn shell_state(children: &[u32], foreground: Option<bool>) -> Shell {
+    match (children.is_empty(), foreground) {
+        (true, _) => Shell::Bare,
+        (false, Some(true)) => Shell::Background,
+        (false, _) => Shell::Busy,
+    }
+}
+
+/// `running`, unless the shell is at its prompt: no Claude has the terminal then, and `claude
+/// agents` is not asked. A table that could not be read leaves it to `running`.
+fn claude_gate(shell: Result<Shell, String>, running: impl FnOnce() -> Result<bool, String>) -> Result<bool, String> {
+    match shell {
+        Ok(Shell::Bare | Shell::Background) => Ok(false),
+        _ => running(),
+    }
+}
+
+/// What runs under a pane's shell, for what the drawer decides about the pane (#460): whether to
+/// end it, show it as a session's, or resume that session elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneRuns {
+    /// The shell is at its prompt, so no Claude runs there, whatever `claude agents` says or fails
+    /// to; what it left in the background is no Claude `claude agents` lists.
+    Idle,
+    /// A Claude Code session `claude agents` lists runs under it.
+    Claude,
+    /// A program has the terminal that `claude agents` does not list as a Claude: another program,
+    /// or a Claude still starting (a typed `claude --resume` has the terminal at once, and is
+    /// listed once it has started).
+    Other,
+    /// A program has the terminal, and `claude agents` could not say what.
+    Unknown,
+}
+
+/// What runs under a pane's `shell`: a Claude or not as `claude` answers. A shell at its prompt
+/// runs none unless `claude` lists one under it (stopped, or in the background); a bare one asks
+/// nothing.
+pub fn pane_runs(shell: Shell, claude: impl FnOnce() -> Result<bool, String>) -> PaneRuns {
+    if shell == Shell::Bare {
+        return PaneRuns::Idle;
+    }
+    match (shell, claude()) {
+        (_, Ok(true)) => PaneRuns::Claude,
+        (Shell::Background, _) => PaneRuns::Idle,
+        (_, Ok(false)) => PaneRuns::Other,
+        (_, Err(_)) => PaneRuns::Unknown,
+    }
+}
+
+/// What runs in a terminal pane now (`PaneRuns`), given its shell's pid. An error only when the
+/// process table could not be read.
+#[tauri::command]
+pub async fn chrome_pane_runs(pane_pid: u32) -> Result<PaneRuns, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let table = crate::procs::table()?;
+        // A `claude agents` answer a few seconds old is enough here, and costs no process spawn
+        // for every pane that runs something else (`live_agents`).
+        let claude = || {
+            let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
+            Ok(!agents.is_empty() && session_below(pane_pid, &agents, |pids| table.children(pids)).is_some())
+        };
+        Ok(pane_runs(shell_state(&table.children(&[pane_pid]), crate::procs::foreground(pane_pid)), claude))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -400,6 +490,117 @@ mod tests {
 
         // An idle pane is refused either way.
         assert_eq!(claude_running(5003, cached.clone(), t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(false));
+    }
+
+    #[test]
+    fn a_shell_at_its_prompt_is_idle_whatever_claude_agents_says() {
+        let unasked = || -> Result<bool, String> { panic!("claude agents asked for a bare shell") };
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        assert_eq!(pane_runs(Shell::Bare, unasked), PaneRuns::Idle);
+        // A helper in the background (`gitstatusd`), with `claude agents` failing or not.
+        assert_eq!(pane_runs(Shell::Background, failing), PaneRuns::Idle);
+        assert_eq!(pane_runs(Shell::Background, || Ok(false)), PaneRuns::Idle);
+        // A Claude stopped with Ctrl+Z is still listed: still that session's pane.
+        assert_eq!(pane_runs(Shell::Background, || Ok(true)), PaneRuns::Claude);
+        assert_eq!(pane_runs(Shell::Busy, || Ok(true)), PaneRuns::Claude);
+        // A `claude --resume` the shell just started, not listed yet; or another program.
+        assert_eq!(pane_runs(Shell::Busy, || Ok(false)), PaneRuns::Other);
+        assert_eq!(pane_runs(Shell::Busy, failing), PaneRuns::Unknown);
+        assert_eq!(shell_state(&[], Some(false)), Shell::Bare);
+        assert_eq!(shell_state(&[9102], Some(true)), Shell::Background);
+        assert_eq!(shell_state(&[9102], Some(false)), Shell::Busy);
+        // Windows: no foreground to ask, so a shell running anything is busy.
+        assert_eq!(shell_state(&[9102], None), Shell::Busy);
+        // As the front reads it.
+        assert_eq!(serde_json::to_string(&PaneRuns::Unknown).unwrap(), "\"unknown\"");
+    }
+
+    /// What the drawer is told of a process, from the live table.
+    fn runs_live(pane: u32, claude: impl FnOnce() -> Result<bool, String>) -> PaneRuns {
+        let table = crate::procs::table().expect("the process table");
+        pane_runs(shell_state(&table.children(&[pane]), crate::procs::foreground(pane)), claude)
+    }
+
+    /// The real table, with no terminal: a process that started nothing is idle with no `claude
+    /// agents` asked; a shell that has started a program is not.
+    #[test]
+    fn a_real_shell_at_its_prompt_is_idle_and_one_running_a_program_is_not() {
+        use crate::procs::testing::{end, eventually, shell, sleeper};
+        let idle = sleeper();
+        assert_eq!(runs_live(idle.id(), || panic!("claude agents asked for a bare shell")), PaneRuns::Idle);
+        end(idle);
+        let sh = shell();
+        let pane = sh.id();
+        eventually("the shell starts its program", || runs_live(pane, || Ok(false)) == PaneRuns::Other);
+        end(sh);
+    }
+
+    /// A real interactive shell on a terminal: at its prompt it is idle, also with a job left in
+    /// the background, as powerlevel10k leaves `gitstatusd`; while a program has the terminal it
+    /// is not. `claude agents` fails throughout (#460).
+    #[cfg(unix)]
+    #[test]
+    fn a_real_shell_on_a_terminal_is_idle_at_its_prompt_with_a_job_in_the_background() {
+        use crate::procs::testing::eventually;
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        use std::io::{Read, Write};
+        let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).expect("a terminal");
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-i");
+        cmd.env("ENV", "/dev/null");
+        cmd.env("PS1", "$ ");
+        let mut child = pair.slave.spawn_command(cmd).expect("a shell");
+        drop(pair.slave);
+        let pid = child.process_id().expect("its pid");
+        let mut reader = pair.master.try_clone_reader().expect("its output");
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while matches!(reader.read(&mut buf), Ok(n) if n > 0) {}
+        });
+        let mut keys = pair.master.take_writer().expect("its input");
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let children = || crate::procs::table().expect("the process table").children(&[pid]);
+
+        eventually("the shell has its terminal", || crate::procs::foreground(pid) == Some(true));
+        assert_eq!(runs_live(pid, failing), PaneRuns::Idle);
+        keys.write_all(b"sleep 30 &\n").unwrap();
+        eventually("the job runs", || !children().is_empty());
+        assert_eq!(crate::procs::foreground(pid), Some(true));
+        assert_eq!(runs_live(pid, failing), PaneRuns::Idle);
+        assert_eq!(claude_gate(Ok(shell_state(&children(), crate::procs::foreground(pid))), failing), Ok(false));
+        keys.write_all(b"sleep 31\n").unwrap();
+        eventually("the program has the terminal", || crate::procs::foreground(pid) == Some(false));
+        assert_eq!(runs_live(pid, failing), PaneRuns::Unknown);
+        assert_eq!(runs_live(pid, || Ok(false)), PaneRuns::Other);
+
+        for p in children() {
+            // SAFETY: signals a process this test started.
+            unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// An account switch exits Claude and waits until it is gone before resuming it on the new
+    /// account (`accounts/follow.ts`). With `claude agents` failing, a shell back at its prompt is
+    /// still seen to run no Claude; one running something is still a question nobody can answer.
+    #[test]
+    fn the_claude_gate_sees_a_shell_at_its_prompt_run_no_claude_with_claude_agents_failing() {
+        use crate::procs::testing::{end, eventually, shell, sleeper};
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let gate = |pane: u32| claude_gate(crate::procs::table().map(|t| shell_state(&t.children(&[pane]), crate::procs::foreground(pane))), failing);
+        let idle = sleeper();
+        assert_eq!(gate(idle.id()), Ok(false));
+        end(idle);
+        let sh = shell();
+        let pane = sh.id();
+        eventually("the shell starts its program", || gate(pane).is_err());
+        end(sh);
+        // No table: what `claude_running` says.
+        assert_eq!(claude_gate(Err("no table".into()), failing), Err(AGENTS_CANNOT_SAY.to_string()));
+        assert_eq!(claude_gate(Ok(Shell::Bare), || -> Result<bool, String> { panic!("claude agents asked for a shell at its prompt") }), Ok(false));
+        assert_eq!(claude_gate(Ok(Shell::Background), failing), Ok(false));
+        assert_eq!(claude_gate(Ok(Shell::Busy), || Ok(true)), Ok(true));
     }
 
     #[test]

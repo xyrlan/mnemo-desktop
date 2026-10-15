@@ -191,6 +191,36 @@ pub fn parent_of(pid: u32) -> Option<u32> {
     rest.next()?.parse().ok()
 }
 
+/// Whether the terminal process `pid` runs on has `pid`'s own process group in the foreground: a
+/// shell at its prompt, whatever it left running in the background (powerlevel10k's `gitstatusd`,
+/// a job started with `&`). False while a program the shell started has the terminal. None for a
+/// process with no terminal, one that has exited, or where the system does not say.
+#[cfg(target_os = "macos")]
+pub fn foreground(pid: u32) -> Option<bool> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is a plain C struct of exactly `size` bytes that the call fills.
+    let n = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    // With no controlling terminal the kernel leaves `e_tpgid` 0.
+    (n == size && info.pbi_status != libc::SZOMB && info.e_tpgid != 0).then_some(info.e_tpgid == info.pbi_pgid)
+}
+
+#[cfg(target_os = "linux")]
+pub fn foreground(pid: u32) -> Option<bool> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // `pid (comm) state ppid pgrp session tty_nr tpgid …`; `tpgid` is -1 with no terminal.
+    let rest: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().take(6).collect();
+    let [state, _, pgrp, _, tty, tpgid] = rest[..] else { return None };
+    let (pgrp, tpgid) = (pgrp.parse::<i64>().ok()?, tpgid.parse::<i64>().ok()?);
+    (state != "Z" && state != "X" && tty != "0" && tpgid > 0).then_some(tpgid == pgrp)
+}
+
+/// Windows has no foreground process group to ask.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn foreground(_pid: u32) -> Option<bool> {
+    None
+}
+
 /// Elsewhere a process's parent is a row of the whole table: a snapshot per question. Ask
 /// `parents` once when there are several.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

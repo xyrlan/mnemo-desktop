@@ -279,6 +279,7 @@ pub fn run() {
             // -- chrome commands --
             chrome::chrome_session,
             chrome::chrome_claude_running,
+            chrome::chrome_pane_runs,
             commands::pty_pid,
 
             // -- workspace commands --

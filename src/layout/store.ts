@@ -165,6 +165,10 @@ export type Actions = {
   /** Types `cmd` and Enter into terminal pane `id`, just spawned, once its shell prompt is up. A
    *  command that could not be written is said in the pane. */
   typeCommand(id: PaneId, cmd: string): void
+  /** When a command was last given to terminal pane `id` to type (`typeCommand`: the restore's
+   *  `claude --resume`, `openOffscreen`'s), or typed into it once its prompt was up, by
+   *  `Date.now()`; undefined when none was. What it starts may not run yet. */
+  typedAt(id: PaneId): number | undefined
   /** A terminal in `cwd` in no tab (`Pane.offscreen`), that types `cmd` once its shell prompt is up;
    *  `sessionId` marks it as running that Claude session. Nothing shown changes. Rejects, with no
    *  pane, when the shell could not be spawned. While no view shows it, what it prints is not kept:
@@ -627,10 +631,14 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       } else if (!blank.has(id)) hold(id, [b])
     }
 
+    /** When a command was last given to each pane to type, then when it was typed (`typedAt`). */
+    const commandAt = new Map<PaneId, number>()
     /** Types `cmd` and Enter into the fresh shell of terminal `id`, once its prompt is up. A write
      *  the PTY refuses is said in the pane (#331): nothing else would tell the command never ran. */
     function typeCommand(id: PaneId, cmd: string) {
+      commandAt.set(id, Date.now())
       setTimeout(() => {
+        commandAt.set(id, Date.now())
         pty.write(id, typed(cmd)).catch((e) => {
           if (get().panes[id]) route(id, notTyped(cmd, e))
         })
@@ -913,6 +921,7 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       typeCommand,
+      typedAt: (id) => commandAt.get(id),
 
       async openOffscreen(cwd, cmd, sessionId) {
         let assigned: PaneId | null = null

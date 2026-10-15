@@ -18,3 +18,21 @@ export async function paneRunsClaude(pane: PaneId): Promise<boolean> {
     throw new Error(`Cannot tell whether Claude is running in that terminal (${why}): nothing was sent`)
   }
 }
+
+/** What runs in terminal pane `pane` now (`chrome_pane_runs`, #460): `idle`, its shell is at its
+ *  prompt (whatever it left in the background, as powerlevel10k's `gitstatusd`), so no Claude runs
+ *  there whatever `claude agents` says; `claude`, a Claude Code session runs there; `other`, a
+ *  program has the terminal that `claude agents` does not list as a Claude (another program, or a
+ *  Claude still starting); `unknown`, a program has it and nobody could say what. A shell that has
+ *  exited is idle. */
+export type PaneRuns = 'idle' | 'claude' | 'other' | 'unknown'
+
+export async function paneRuns(pane: PaneId): Promise<PaneRuns> {
+  const pid = await ptyPid(pane).then(
+    (p) => p,
+    () => undefined,
+  )
+  if (pid === null) return 'idle'
+  if (pid === undefined) return 'unknown'
+  return invoke<PaneRuns>('chrome_pane_runs', { panePid: pid }).catch((): PaneRuns => 'unknown')
+}

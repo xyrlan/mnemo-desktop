@@ -10,7 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }))
 
-import { paneRunsClaude } from './running'
+import { paneRuns, paneRunsClaude } from './running'
 
 beforeEach(() => {
   calls.length = 0
@@ -46,4 +46,22 @@ it('says it cannot tell when the process tree could not be walked, not that Clau
     'Cannot tell whether Claude is running in that terminal (the process table could not be read: CreateToolhelp32Snapshot: Access is denied.): nothing was sent',
   )
   expect((said as Error).message).not.toMatch(/no longer running/)
+})
+
+it('says what runs in a pane: the shell at its prompt, a Claude, something else, or that nobody can tell (#460)', async () => {
+  for (const runs of ['idle', 'claude', 'other', 'unknown']) {
+    answer = (cmd) => (cmd === 'pty_pid' ? 4321 : runs)
+    await expect(paneRuns(3)).resolves.toBe(runs)
+  }
+  expect(calls.slice(0, 2)).toEqual([
+    { cmd: 'pty_pid', args: { id: 3 } },
+    { cmd: 'chrome_pane_runs', args: { panePid: 4321 } },
+  ])
+  // A shell that has exited runs nothing; one whose pid or table could not be read, nobody can say.
+  answer = () => null
+  await expect(paneRuns(3)).resolves.toBe('idle')
+  answer = () => Promise.reject('no such pane')
+  await expect(paneRuns(3)).resolves.toBe('unknown')
+  answer = (cmd) => (cmd === 'pty_pid' ? 4321 : Promise.reject('the process table could not be read'))
+  await expect(paneRuns(3)).resolves.toBe('unknown')
 })

@@ -1,7 +1,7 @@
 import type { Pane } from '../../layout/store'
 import { nexusStore, type DrawerTab } from '../store'
 import { fakeHost } from './fixtures'
-import { adoptIdle, adoptShells, lostPanes, readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
+import { adoptPanes, adoptShells, lostPanes, readTabs, reopenTabs, TABS_KEY, tabsToSave, writeTabs } from './persist'
 import { createDrawer } from './sessions'
 
 const tab = (over: Partial<DrawerTab>): DrawerTab => ({ id: 'x', kind: 'captain', key: null, readOnly: null, label: 'x', sessionId: null, cwd: '/work/mnemo', ...over })
@@ -83,7 +83,7 @@ test('a shell the restore brought back that no tab shows gets a tab of its own, 
     // A workbench tab's shell from before the Nexus was the app, and one with a title of its own.
     3: term(3, { cwd: '/work/mnemo-desktop', offscreen: true }),
     4: term(4, { cwd: '/work/notes', title: 'vim todo.md', offscreen: true }),
-    // Its captain opens it: it holds a Claude session (`adoptIdle` asks, later, whether one runs).
+    // Its captain opens it: it holds a Claude session (the launch's `check` asks what runs there).
     5: term(5, { cwd: '/work/mnemo', sessionId: 'cap-5', offscreen: true }),
     6: term(6, { cwd: '/w' }),
     7: term(7, { cwd: '/w', exitCode: 0 }),
@@ -112,35 +112,25 @@ test('with no tab kept, the last shell adopted is shown', () => {
   expect(nexusStore.getState()).toMatchObject({ activeTab: 'session:2', collapsed: false })
 })
 
-test('a pane that holds a Claude session id but runs no Claude gets a tab, quietly, and is marked idle for it; one that cannot be told gets a tab too; one that runs Claude is left to its captain (#460)', async () => {
+test('a pane that holds a Claude session id but runs none gets a tab, quietly; one a tab shows already gets no second (#460)', () => {
   const { host } = fakeHost()
   const drawer = createDrawer(host, nexusStore, {})
   const panes: Record<number, Pane> = {
-    1: term(1, { cwd: '/w/a', sessionId: 'live', offscreen: true }),
     2: term(2, { cwd: '/w/b', sessionId: 'stale', offscreen: true }),
-    3: term(3, { cwd: '/w/c', sessionId: 'unknown', offscreen: true }),
+    3: term(3, { cwd: '/w/c', sessionId: 'unknown', offscreen: true, title: 'vim' }),
     4: term(4, { cwd: '/w/d', sessionId: 'shown', offscreen: true }),
   }
   drawer.open({ id: 'shown', kind: 'captain', key: null, readOnly: null, label: 'd', sessionId: 'shown', cwd: '/w/d' }, { pane: 4 })
   nexusStore.getState().setCollapsed(true)
-  const asked: number[] = []
-  const runs = async (p: number) => {
-    asked.push(p)
-    if (p === 3) throw new Error('claude agents could not say')
-    return p === 1
-  }
-  const idle: [number, string][] = []
-  await adoptIdle(() => panes, drawer, nexusStore, runs, (pane, id) => void idle.push([pane, id]))
-  expect(asked).toEqual([1, 2, 3])
-  expect(idle).toEqual([[2, 'stale']])
-  expect(nexusStore.getState().tabs.map((t) => [t.id, t.key])).toEqual([
-    ['shown', 'pane:4'],
-    ['session:2', 'pane:2'],
-    ['session:3', 'pane:3'],
+  adoptPanes(Object.values(panes), drawer, nexusStore)
+  expect(nexusStore.getState().tabs.map((t) => [t.id, t.key, t.label])).toEqual([
+    ['shown', 'pane:4', 'd'],
+    ['session:2', 'pane:2', 'shell · b'],
+    ['session:3', 'pane:3', 'vim'],
   ])
   // Quietly: the drawer stays collapsed on the tab it showed.
   expect(nexusStore.getState()).toMatchObject({ activeTab: 'shown', collapsed: true })
-  // The ids stay with the panes, for the next launch to resume.
+  // The ids stay with the panes, for a later launch to resume.
   expect([panes[2].sessionId, panes[3].sessionId]).toEqual(['stale', 'unknown'])
 })
 

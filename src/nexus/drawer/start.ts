@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla'
+import type { PaneRuns } from '../../chrome/running'
 import type { Pane } from '../../layout/store'
 import type { PaneId } from '../../layout/tree'
 import { basename } from '../../path/path'
@@ -16,6 +17,7 @@ export type SessionLayout = StoreApi<{
   openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
   closePane(id?: PaneId): Promise<void>
   setSessionId(id: PaneId, sessionId: string | undefined): void
+  typedAt(id: PaneId): number | undefined
 }>
 
 export type StartDeps = {
@@ -26,36 +28,48 @@ export type StartDeps = {
   skipPermissions(): boolean
   /** A new Claude session id: a UUID (`claude --session-id`). */
   newId(): string
-  /** Whether a Claude runs under pane `pane`'s shell now; rejects when that cannot be told. */
-  runsClaude(pane: PaneId): Promise<boolean>
-  /** When the restore brought the saved panes back; null before it has. */
-  restoredAt(): number | null
+  /** What runs in pane `pane` now (`paneRuns`); never rejects. */
+  runs(pane: PaneId): Promise<PaneRuns>
   now(): number
 }
 
-/** How long after a Claude was started in a pane (the restore's `claude --resume`, typed once the
- *  new shell's prompt is up, or a session started here) it may not show as running yet: `claude
- *  agents` lists a session once it has started. */
+/** How long after a command was given to a pane (`typedAt`: the restore's `claude --resume`, a
+ *  session started here) a Claude it starts may not be seen running: the shell types it once its
+ *  prompt is up, and `claude agents` lists a session once it has started. A pane nothing was typed
+ *  into has nothing coming up (#460). */
 export const RESUME_WINDOW_MS = 15_000
 
 export type Sessions = {
   /** Rejects with what could not be done: every caller says it, where it was asked from. */
   openSession(spec: SessionSpec): Promise<void>
   /** The live terminal pane holding Claude session `sessionId`, unless it was found running none
-   *  (`markIdle`); null with none. */
+   *  (`observe`); null with none. */
   paneOf(sessionId: string): PaneId | null
   endSession(pane: PaneId): Promise<void>
   /** No drawer tab shows pane `pane` any more (`Release.letGo`): it ends unless a Claude runs in
    *  it, whose captain opens it again. A shell or a saved command, ended or not, has nothing on the
    *  ship to come back from. Offscreen or kept from the workbench's tabs alike: nothing else shows
-   *  either. A pane kept because its Claude runs (or that cannot be told) ends once that Claude
-   *  does (`lost`). */
+   *  either. A pane kept because its Claude runs, may be coming up, or something runs there that
+   *  nobody can say what (`claude agents` failing, `claude` missing), ends once nothing does
+   *  (`observe`) or its Claude session goes (`lost`). A shell at its prompt runs no Claude,
+   *  whatever `claude agents` says: it ends (#460). */
   letGo(pane: PaneId): Promise<void>
-  /** Pane `pane` holds Claude session `sessionId`, but was found running no Claude: it is not that
-   *  session's pane, for a captain or a tab (`followPanes`), while it holds that id. The id stays,
-   *  so the next launch can still resume it. */
-  markIdle(pane: PaneId, sessionId: string): void
+  /** Pane `pane` was found running `runs` (`check` in `./launch` asks every pane that holds a
+   *  Claude session id, or that no tab shows, at each session poll). One running a Claude is its
+   *  session's pane from then on (`isLive`). One whose shell is at its prompt, with nothing coming
+   *  up (`mayBeStarting`), runs no Claude: while it holds the same id it is not that session's
+   *  pane, for a captain or a tab (`isIdle`). The id stays, so a later launch can still resume it.
+   *  A pane a tab let go ends here once nothing may run in it: true when it did. */
+  observe(pane: PaneId, runs: PaneRuns): Promise<boolean>
+  /** Pane `pane` was found running a Claude while holding `sessionId`: tabs follow it there. */
+  isLive(pane: PaneId, sessionId: string): boolean
+  /** Pane `pane` was found running nothing while holding `sessionId`, and runs no Claude since. */
   isIdle(pane: PaneId, sessionId: string): boolean
+  /** A Claude may still be coming up in pane `pane`: a command was given to it less than
+   *  `RESUME_WINDOW_MS` ago (`typedAt`). */
+  mayBeStarting(pane: PaneId): boolean
+  /** A drawer tab let pane `pane` go, and it was kept while something may run in it. */
+  isReleased(pane: PaneId): boolean
   /** Pane `pane`'s Claude session went (its id cleared). One a drawer tab let go while its Claude
    *  ran, that no tab shows now, ends, as `letGo` would have ended it then: true when it did. */
   lost(pane: PaneId): Promise<boolean>
@@ -75,34 +89,47 @@ export function labelFor(spec: SessionSpec): string {
   return `${spec.kind === 'claude' ? 'claude' : 'shell'} · ${basename(spec.root) || spec.root}`
 }
 
+/** What a session tab on terminal `p` is called: the terminal's title, else a shell in its folder. */
+export function shellLabel(p: Pick<Pane, 'title' | 'cwd'> | undefined): string {
+  return p?.title || (p?.cwd ? `shell · ${basename(p.cwd) || p.cwd}` : 'shell')
+}
+
 const tabKey = (pane: PaneId) => `pane:${pane}`
 const why = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const failed = (what: string, e: unknown) => new Error(`${what}: ${why(e)}`)
 
 export function createSessions(d: StartDeps): Sessions {
   const panes = () => d.layout.getState().panes
-  /** Panes found running no Claude, by the session id they held then. */
+  /** Panes found running nothing, by the session id they held then. */
   const idle = new Map<PaneId, string>()
-  /** Panes a drawer tab let go while their Claude ran, or while that could not be told. */
+  /** Panes found running a Claude, by the session id they held then. */
+  const live = new Map<PaneId, string>()
+  /** Panes a drawer tab let go while something may have run in them. */
   const released = new Set<PaneId>()
-  /** When a Claude was last started in each pane by `openSession`. */
-  const started = new Map<PaneId, number>()
   const isIdle = (pane: PaneId, sessionId: string) => idle.get(pane) === sessionId
   const shown = (pane: PaneId) => d.nexus.getState().tabs.some((t) => t.key === tabKey(pane))
+  const alive = (p: Pane) => p.view === 'terminal' && p.id > 0 && p.exitCode === undefined && !p.error
 
   function paneOf(sessionId: string): PaneId | null {
     if (!sessionId) return null
-    return (
-      Object.values(panes()).find((p) => p.view === 'terminal' && p.id > 0 && p.exitCode === undefined && !p.error && p.sessionId === sessionId && !isIdle(p.id, sessionId))
-        ?.id ?? null
-    )
+    return Object.values(panes()).find((p) => alive(p) && p.sessionId === sessionId && !isIdle(p.id, sessionId))?.id ?? null
   }
 
-  /** A Claude may still be coming up in pane `pane`: the restore, or a start here, was less than
-   *  `RESUME_WINDOW_MS` ago (#460). */
   function mayBeStarting(pane: PaneId): boolean {
-    const now = d.now()
-    return [d.restoredAt(), started.get(pane)].some((at) => at !== null && at !== undefined && now - at < RESUME_WINDOW_MS)
+    const at = d.layout.getState().typedAt(pane)
+    return at !== undefined && d.now() - at < RESUME_WINDOW_MS
+  }
+
+  /** What `runs` says of pane `pane`, kept by the session id it holds. */
+  function mark(pane: PaneId, runs: PaneRuns) {
+    const id = panes()[pane]?.sessionId
+    if (runs === 'claude') {
+      idle.delete(pane)
+      if (id) live.set(pane, id)
+    } else if (runs === 'idle' && !mayBeStarting(pane)) {
+      live.delete(pane)
+      if (id) idle.set(pane, id)
+    }
   }
 
   /** Shows pane `pane` in the drawer under `tab`. */
@@ -116,17 +143,23 @@ export function createSessions(d: StartDeps): Sessions {
     async openSession(spec) {
       const label = labelFor(spec)
       if (spec.kind === 'claude') {
-        // A session one of the app's panes runs already is shown, never started a second time:
-        // nor one that may still be coming up there (the restore's resume, a start here, less than
-        // `RESUME_WINDOW_MS` ago), nor one the app cannot tell about (#460). A pane that holds its
-        // id but runs no Claude (it ended while the app was closed, or its resume never started) is
-        // no such pane: the session resumes in a new one, which alone holds the id from then on.
-        const held = spec.resume ? paneOf(spec.resume) : null
-        const running = held !== null && (mayBeStarting(held) || (await d.runsClaude(held).catch(() => true))) ? held : null
         const id = spec.resume ?? d.newId()
         const tab: DrawerTab = { id, kind: 'captain', key: null, readOnly: null, label, sessionId: id, cwd: spec.root }
-        if (running !== null) return show(tab, running)
-        if (spec.resume) for (const p of Object.values(panes())) if (p.sessionId === spec.resume) d.layout.getState().setSessionId(p.id, undefined)
+        if (spec.resume) {
+          // A session one of the app's panes runs already is shown, never started a second time:
+          // nor one that may be coming up there (a resume typed less than `RESUME_WINDOW_MS` ago,
+          // or one still starting after that: the shell runs it), nor one where something runs
+          // that nobody can say what (#460). Only when every pane holding its id is at its prompt
+          // (its Claude ended while the app was closed, its resume never started) does the session
+          // resume, in a new pane, which alone holds the id from then on.
+          const holders = Object.values(panes()).filter((p) => alive(p) && p.sessionId === spec.resume)
+          const runs = await Promise.all(holders.map((p) => d.runs(p.id)))
+          holders.forEach((p, i) => mark(p.id, runs[i]))
+          const busy = holders.filter((p, i) => runs[i] !== 'idle' || mayBeStarting(p.id))
+          const running = busy.find((p) => runs[holders.indexOf(p)] === 'claude') ?? busy[0]
+          if (running) return show(tab, running.id)
+          for (const p of Object.values(panes())) if (p.sessionId === spec.resume) d.layout.getState().setSessionId(p.id, undefined)
+        }
         const cmd = claudeCommand(d.skipPermissions(), spec.resume ? { resume: spec.resume } : { sessionId: id })
         let pane: PaneId
         try {
@@ -134,7 +167,6 @@ export function createSessions(d: StartDeps): Sessions {
         } catch (e) {
           throw failed(`Could not start claude in ${spec.root}`, e)
         }
-        started.set(pane, d.now())
         return show(tab, pane)
       }
       let pane: PaneId
@@ -155,18 +187,30 @@ export function createSessions(d: StartDeps): Sessions {
     async letGo(pane) {
       const p = panes()[pane]
       if (!p || p.view !== 'terminal') return
-      const ended = p.exitCode !== undefined || !!p.error
-      // When that cannot be told, it is kept: a session is never ended on a guess.
-      if (!ended && (await d.runsClaude(pane).catch(() => true))) return void released.add(pane)
+      if (p.exitCode === undefined && !p.error) {
+        const runs = await d.runs(pane)
+        mark(pane, runs)
+        // A Claude runs there, may be coming up, or what runs cannot be told: it is kept, since a
+        // session is never ended on a guess. A shell at its prompt, or another program, ends.
+        if (runs === 'claude' || runs === 'unknown' || (runs === 'other' && mayBeStarting(pane))) return void released.add(pane)
+      }
       // Shown again meanwhile: it stays.
       if (shown(pane)) return
       await d.layout.getState().closePane(pane)
     },
 
-    markIdle(pane, sessionId) {
-      idle.set(pane, sessionId)
+    async observe(pane, runs) {
+      if (!panes()[pane]) return false
+      mark(pane, runs)
+      if (!released.has(pane) || shown(pane) || runs === 'claude' || runs === 'unknown' || mayBeStarting(pane)) return false
+      released.delete(pane)
+      await d.layout.getState().closePane(pane)
+      return true
     },
+    isLive: (pane, sessionId) => live.get(pane) === sessionId,
     isIdle,
+    mayBeStarting,
+    isReleased: (pane) => released.has(pane),
 
     async lost(pane) {
       if (!released.has(pane) || shown(pane) || !panes()[pane]) return false
@@ -177,17 +221,26 @@ export function createSessions(d: StartDeps): Sessions {
   }
 }
 
-/** Tab ids follow the Claude session their pane runs (`Pane.sessionId`, which the session poll
- *  keeps current): a shell where `claude` was typed, a `claude --resume` that took another id, a
- *  `/clear`. The tab becomes that session's captain's. A robot's tab is its child's, whatever its
- *  pane runs; a pane `isIdle` for its id is no captain's. */
-export function followPanes(nexus: StoreApi<NexusState>, panes: Record<PaneId, Pick<Pane, 'sessionId'>>, isIdle: (pane: PaneId, sessionId: string) => boolean = () => false): void {
+/** What `followPanes` asks of the sessions (`Sessions.isLive`, `Sessions.isIdle`). */
+export type Seen = Pick<Sessions, 'isLive' | 'isIdle'>
+
+/** Tab ids follow the Claude session their pane was found running (`Pane.sessionId`, which the
+ *  session poll keeps current, once `Sessions.observe` saw a Claude there: `isLive`): a shell where
+ *  `claude` was typed, a `claude --resume` that took another id, a `/clear`. The tab becomes that
+ *  session's captain's. An id the pane holds but was never seen running there (restored from the
+ *  last run, kept over a shell whose Claude ended) is not followed; and a captain's tab on a pane
+ *  found running nothing under its id (`isIdle`) becomes a shell's again, on every launch (#460). A
+ *  robot's tab is its child's, whatever its pane runs. */
+export function followPanes(nexus: StoreApi<NexusState>, panes: Record<PaneId, Pick<Pane, 'sessionId' | 'title' | 'cwd'>>, seen: Seen): void {
   for (const t of nexus.getState().tabs) {
     if (t.kind === 'robot' || !t.key?.startsWith('pane:')) continue
     const pane = Number(t.key.slice(5))
     const sessionId = panes[pane]?.sessionId
-    // An id found running no Claude there is not followed: the tab stays a shell's (#460).
-    if (!sessionId || sessionId === t.id || isIdle(pane, sessionId)) continue
+    if (t.kind === 'captain' && sessionId === t.id && seen.isIdle(pane, sessionId)) {
+      nexus.getState().retargetTab(t.id, { ...t, id: `session:${pane}`, kind: 'session', sessionId: null, label: shellLabel(panes[pane]) })
+      continue
+    }
+    if (!sessionId || sessionId === t.id || !seen.isLive(pane, sessionId)) continue
     nexus.getState().retargetTab(t.id, { ...t, id: sessionId, kind: 'captain', sessionId })
   }
 }
