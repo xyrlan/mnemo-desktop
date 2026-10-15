@@ -65,12 +65,15 @@ export function Indicator({ store, shortcut, hold = [], onStop, onDismiss }: Pro
   const stopLabel = 'Stop dictation'
 
   return (
+    // z 85: over every window (60), confirmation (61), menu (70), notification card (75), toast
+    // (80) and Triage (`z-modal`), so Stop shows and takes the click while a field in one is dictated
+    // into. Its tooltip (`z-tooltip`, 90) stays above it.
     <div
       data-ui=""
       data-testid="dictation-indicator"
       data-phase={phase.kind}
       className={cn(
-        'fixed bottom-12 left-1/2 z-50 -translate-x-1/2 overflow-hidden',
+        'fixed bottom-12 left-1/2 z-[85] -translate-x-1/2 overflow-hidden',
         'border border-border bg-popover/95 text-sm text-popover-foreground shadow-floating backdrop-blur',
         'transition-[width,border-radius,opacity] duration-200 ease-out motion-reduce:transition-none',
         wide ? 'w-[min(28rem,calc(100vw-2rem))] rounded-xl' : 'max-w-[min(28rem,calc(100vw-2rem))] rounded-full',
