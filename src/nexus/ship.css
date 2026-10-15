@@ -708,3 +708,8 @@
 @keyframes ship-walk-off { 0% { translate: 0 0; opacity: 1; } 80% { opacity: 1; } 100% { translate: var(--off) 0; opacity: 0; } }
 @keyframes ship-new { 0% { background: #4338ca88; } 100% { background: transparent; } }
 @keyframes ship-hold { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---------- the bar's PROJECTS · MISSIONS · SYSTEMS (Nexus is the app) ---------- */
+.ship-nav { display: flex; gap: 6px; margin-left: 8px; }
+.ship-scene .ship-navbtn { padding: 2px 9px; border: 2px solid var(--ship-edge); border-radius: 2px; background: #18213f; color: var(--ship-pale); font-weight: 700; letter-spacing: 1px; }
+.ship-scene .ship-navbtn:hover { border-color: var(--ship-lilac); color: #fff; }

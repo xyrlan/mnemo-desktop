@@ -26,6 +26,23 @@ import type { ActionResult, AgentView, Feed, Ship, ShipAction } from './ship-typ
 import { ShipScene } from './ShipScene'
 import { nexusStore, useNexus } from './store'
 import { startNexusUsage } from './usage'
+import { NexusMenu } from './ui/Menu'
+import { menuFor, type MenuItem, type MenuTarget } from './ui/menus'
+import { WindowHost } from './ui/Window'
+import { ConfirmHost } from './ui/confirm'
+import { openWindow, windowsIn } from './ui/windows'
+
+/** The SYSTEMS menu: every window registered in that group, in its order. */
+const systemsItems = (): MenuItem[] => windowsIn('systems').map((d) => ({ id: d.id, label: d.title, run: () => openWindow(d.id) }))
+
+/** What a menu is titled: the figure's, the deck's or the dock's name. */
+function menuHead(t: MenuTarget, ship: Ship): string | undefined {
+  if (t.kind === 'systems') return undefined
+  if (t.kind === 'deck' || t.kind === 'dock') return [...ship.decks, ...ship.docks].find((d) => d.root === t.id)?.name
+  const robots = [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
+  const captains = [...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)]
+  return t.kind === 'robot' ? robots.find((r) => r.id === t.id)?.label : captains.find((c) => c.id === t.id)?.name
+}
 
 /** How often the feed is read while the Nexus is shown. */
 export const FEED_MS = 3_000
@@ -172,9 +189,12 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
     return () => document.removeEventListener('keydown', onKey)
   }, [onOpen])
 
+  const [menu, setMenu] = useState<{ target: MenuTarget; x: number; y: number } | null>(null)
+
   return (
     <>
       <ShipScene
+        onMenu={(target, x, y) => setMenu({ target, x, y })}
         ship={ship}
         log={log}
         focusId={focusId}
@@ -189,6 +209,17 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
       />
       <Triage ship={ship} open={triage} onClose={() => s.setTriage(false)} onOpen={onOpen} run={run} />
       <SelectionBar ship={ship} selection={selection} onClear={s.clearSelection} run={run} />
+      {menu && (
+        <NexusMenu
+          x={menu.x}
+          y={menu.y}
+          head={menuHead(menu.target, ship)}
+          items={menu.target.kind === 'systems' ? systemsItems() : menuFor(menu.target, ship, { open: onOpen })}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      <WindowHost />
+      <ConfirmHost />
     </>
   )
 }

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
-import { AccountSwitcher } from '../accounts/AccountSwitcher'
 import { shortcutLabel } from '../actions/chords'
 import { run } from '../actions/registry'
 import { pollWhileShown } from '../shell/while-shown'
@@ -13,6 +12,9 @@ import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
 import { chips, rateChip } from './ship-scene/words'
 import type { Deck as DeckT, Ship, ShipRobot, ShipSceneProps } from './ship-types'
+import type { MenuTarget } from './ui/menus'
+import { openWindow } from './ui/windows'
+import { ShipAccounts } from './accounts/ShipAccounts'
 import './ship.css'
 
 /** The scroll box's inner width where nothing is laid out (jsdom). */
@@ -82,7 +84,7 @@ const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.d
  *  waits for you and the fleet prompt, a deck per repo with live children, the docks, and the
  *  ship's log. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
  *  and while the window is hidden all of it pauses. */
-export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, bridge, reducedMotion, visible }: ShipSceneProps): JSX.Element {
+export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onMenu, bridge, reducedMotion, visible }: ShipSceneProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const box = useWidth(scroller)
   const width = Math.max(G.minWidth, (box ?? UNMEASURED) - 2 * G.pad)
@@ -147,7 +149,18 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
 
   return (
     <SceneContext.Provider value={ctx}>
-      <div className="ship-scene" data-ship-scene="" data-reduced={reducedMotion ? '' : undefined} data-paused={visible ? undefined : ''}>
+      <div
+        className="ship-scene"
+        data-ship-scene=""
+        data-reduced={reducedMotion ? '' : undefined}
+        data-paused={visible ? undefined : ''}
+        onContextMenu={(e) => {
+          const t = menuTarget(e.target as HTMLElement, ship)
+          if (!t) return
+          e.preventDefault()
+          onMenu(t, e.clientX, e.clientY)
+        }}
+      >
         <header className="ship-top">
           <span className="ship-brand">NEXUS</span>
           <span className="ship-chip" data-chip="working">
@@ -170,10 +183,26 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
           <span className="ship-chip" data-chip="rate" title={rate.title}>
             {rate.text}
           </span>
-          {/* The sidebar's own switcher, in the app's dark tokens whatever the theme: the hull is. */}
-          <div className="ship-accounts dark font-sans">
-            <AccountSwitcher className="w-full" portal={dark} />
-          </div>
+          <ShipAccounts portal={dark} />
+          <nav className="ship-nav" aria-label="ship">
+            <button type="button" className="ship-navbtn" onClick={() => openWindow('projects')}>
+              PROJECTS
+            </button>
+            <button type="button" className="ship-navbtn" onClick={() => openWindow('missions')}>
+              MISSIONS
+            </button>
+            <button
+              type="button"
+              className="ship-navbtn"
+              aria-haspopup="menu"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                onMenu({ kind: 'systems', id: '' }, r.left, r.bottom + 4)
+              }}
+            >
+              SYSTEMS ▾
+            </button>
+          </nav>
           <button type="button" className="ship-exit" title={`Back to the workbench (${shortcutLabel('nexus.toggle') ?? ''})`} onClick={() => run('nexus.toggle')}>
             WORKBENCH <kbd>{shortcutLabel('nexus.toggle')}</kbd>
           </button>
@@ -218,4 +247,20 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
       </div>
     </SceneContext.Provider>
   )
+}
+
+/** What a right-click landed on: the nearest figure (a robot or a captain, told apart by the ship),
+ *  else the deck or the dock around it. */
+function menuTarget(el: HTMLElement, ship: Ship): MenuTarget | null {
+  const fig = el.closest<HTMLElement>('[data-ship-id]')
+  if (fig) {
+    const id = fig.dataset.shipId!
+    const robots = [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
+    return robots.some((r) => r.id === id) ? { kind: 'robot', id } : { kind: 'captain', id }
+  }
+  const deck = el.closest<HTMLElement>('[data-deck]')
+  if (deck) return { kind: 'deck', id: deck.dataset.deck! }
+  const dock = el.closest<HTMLElement>('[data-dock]')
+  if (dock) return { kind: 'dock', id: dock.dataset.dock! }
+  return null
 }
