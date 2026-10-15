@@ -1,0 +1,83 @@
+import { register, run } from '../../actions/registry'
+import { nexusStore } from '../store'
+import { fakeHost, reposFixture, shipFixture } from './fixtures'
+import { claimClose, isToggleKey } from './keys'
+import { openingOf } from './model'
+import { createDrawer } from './sessions'
+
+const ran: string[] = []
+register({ id: 'pane.close', title: 'Close pane', run: () => void ran.push('pane.close') })
+register({ id: 'tab.close', title: 'Close tab', run: () => void ran.push('tab.close') })
+
+beforeEach(() => {
+  ran.length = 0
+  document.body.innerHTML = ''
+  nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null })
+})
+
+function setup() {
+  const { host } = fakeHost()
+  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
+  for (const id of ['cap-1', 'r-pane']) {
+    const o = openingOf(id, shipFixture(), reposFixture)!
+    drawer.open(o.tab, o.ref)
+  }
+  const unclaim = claimClose(drawer, nexusStore)
+  const root = document.body.appendChild(document.createElement('div'))
+  root.dataset.nexusDrawer = ''
+  const inside = root.appendChild(document.createElement('textarea'))
+  const outside = document.body.appendChild(document.createElement('textarea'))
+  return { host, unclaim, inside, outside }
+}
+
+test('⌘W and ⇧⌘W with the Nexus open close the drawer’s tab shown, wherever the focus is', () => {
+  const { host, unclaim, inside, outside } = setup()
+  inside.focus()
+  run('pane.close')
+  expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['cap-1'])
+  expect(host.getState().sessions['pane:9']).toBeUndefined()
+  // On the ship, the quick diff, or nowhere at all.
+  outside.focus()
+  run('tab.close')
+  expect(nexusStore.getState().tabs).toEqual([])
+  expect(ran).toEqual([])
+  unclaim()
+})
+
+test('with the Nexus open and the drawer collapsed or empty, they close nothing: never the pane or tab under it', () => {
+  const { unclaim, outside } = setup()
+  outside.focus()
+  nexusStore.getState().setCollapsed(true)
+  run('pane.close')
+  run('tab.close')
+  expect(nexusStore.getState().tabs).toHaveLength(2)
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false })
+  run('pane.close')
+  expect(ran).toEqual([])
+  unclaim()
+})
+
+test('with the Nexus closed, or a popup focused over it, ⌘W is not the drawer’s', () => {
+  const { unclaim, outside } = setup()
+  const popup = document.body.appendChild(document.createElement('div'))
+  popup.dataset.popout = 'pane:3'
+  const inPopup = popup.appendChild(document.createElement('textarea'))
+  inPopup.focus()
+  run('pane.close')
+  expect(ran).toEqual(['pane.close'])
+  outside.focus()
+  nexusStore.getState().setOpen(false)
+  run('pane.close')
+  run('tab.close')
+  expect(ran).toEqual(['pane.close', 'pane.close', 'tab.close'])
+  expect(nexusStore.getState().tabs).toHaveLength(2)
+  unclaim()
+})
+
+test('⌘\\ on a Mac, Ctrl+Shift+\\ elsewhere: plain Ctrl+\\ is the shell’s', () => {
+  const k = (over: Partial<KeyboardEvent>) => ({ key: '\\', code: 'Backslash', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over })
+  expect(isToggleKey(k({ metaKey: true }), 'mac')).toBe(true)
+  expect(isToggleKey(k({ ctrlKey: true }), 'mac')).toBe(false)
+  expect(isToggleKey(k({ ctrlKey: true, shiftKey: true, key: '|' }), 'other')).toBe(true)
+  expect(isToggleKey(k({ ctrlKey: true }), 'other')).toBe(false)
+})
