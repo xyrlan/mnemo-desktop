@@ -375,7 +375,7 @@ export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS,
                 type="button"
                 className="cv-pr flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
                 title={p.url}
-                onClick={() => openUrl(p.url, `#${p.number}`)}
+                onClick={() => openUrl(p.url)}
               >
                 <GitPullRequest className="size-3.5" aria-hidden />#{p.number}
               </button>

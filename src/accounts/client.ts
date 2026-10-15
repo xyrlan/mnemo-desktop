@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { store as layout } from '../layout/app-store'
 import { nexusRoutes } from '../nexus/outside'
 import type { Account, AccountsState, PlanUsage, Shared } from './types'
 
@@ -23,8 +22,8 @@ export interface AccountsClient {
   usage(account: Account, refresh: boolean): Promise<PlanUsage>
   /** Calls `cb` with every new state; resolves to the unsubscribe. */
   onChanged(cb: (state: AccountsState) => void): Promise<() => void>
-  /** Opens a terminal that runs `cmd`, spawned on whichever account is active now: a workbench tab,
-   *  or a drawer tab while the Nexus covers the workbench. */
+  /** Opens a terminal that runs `cmd`, spawned on whichever account is active now, in a drawer
+   *  tab. */
   openTerminal(cmd: string): Promise<void>
 }
 
@@ -39,5 +38,5 @@ export const tauriAccounts: AccountsClient = {
   movePane: (pane, id) => invoke<void>('accounts_move_pane', { pane, id }),
   usage: (a, refresh) => invoke<PlanUsage>('plan_usage', { configDir: a.configDir, isDefault: a.isDefault, refresh }),
   onChanged: (cb) => listen<AccountsState>(CHANGED_EVENT, (e) => cb(e.payload)),
-  openTerminal: (cmd) => nexusRoutes()?.terminal(undefined, cmd, 'Sign in') ?? layout.getState().openCommandTab(undefined, cmd),
+  openTerminal: (cmd) => nexusRoutes().terminal(undefined, cmd, 'Sign in'),
 }

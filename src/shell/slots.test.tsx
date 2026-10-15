@@ -27,17 +27,15 @@ const drawn = (slot: ShellSlot) => {
   return host.textContent
 }
 
-test('the five slots are the contract’s: the tab rows are the workbench’s own, one per group', () => {
-  expect(SLOTS).toEqual(['left-sidebar', 'right-sidebar', 'status-bar', 'titlebar-right', 'overlay'])
+test('the one slot is the overlay: the workbench’s columns, bars and rows went with it (#459)', () => {
+  expect(SLOTS).toEqual(['overlay'])
 })
 
-test('a slot draws what is mounted in it, in mount order, and nothing of the others', () => {
+test('a slot draws what is mounted in it, in mount order', () => {
   mountInSlot('overlay', B)
   mountInSlot('overlay', A)
-  mountInSlot('status-bar', C)
-  expect(drawn('overlay')).toBe('ba')
-  expect(drawn('status-bar')).toBe('c')
-  expect(drawn('left-sidebar')).toBe('')
+  mountInSlot('overlay', C)
+  expect(drawn('overlay')).toBe('bac')
 })
 
 test('the returned function takes the component out, once', () => {
@@ -63,16 +61,8 @@ test('the same component mounted twice draws once, until both mounts are undone'
   expect(host.textContent).toBe('')
 })
 
-test('the same component may sit in two slots', () => {
-  const off = mountInSlot('titlebar-right', A)
-  mountInSlot('status-bar', A)
-  off()
-  expect(slotEntries('titlebar-right')).toEqual([])
-  expect(slotEntries('status-bar').map((e) => e.component)).toEqual([A])
-})
-
 test('a slot that does not exist is refused, not silently dropped', () => {
-  expect(() => mountInSlot('left' as ShellSlot, A)).toThrow(/no slot named "left"/)
+  expect(() => mountInSlot('status-bar' as ShellSlot, A)).toThrow(/no slot named "status-bar"/)
 })
 
 test('a component that throws is replaced by a line saying so; its neighbours keep drawing', () => {
@@ -82,12 +72,12 @@ test('a component that throws is replaced by a line saying so; its neighbours ke
     return <span>fixed</span>
   }
   const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-  mountInSlot('status-bar', A)
-  mountInSlot('status-bar', Boom)
-  mountInSlot('status-bar', B)
-  drawn('status-bar')
+  mountInSlot('overlay', A)
+  mountInSlot('overlay', Boom)
+  mountInSlot('overlay', B)
+  drawn('overlay')
   const alert = host.querySelector('[role="alert"]')!
-  expect(alert.textContent).toContain('status-bar · Boom crashed')
+  expect(alert.textContent).toContain('overlay · Boom crashed')
   expect(host.textContent).toMatch(/^a.*b$/)
   broken = false
   act(() => (alert.querySelector('button') as HTMLButtonElement).click())
@@ -115,21 +105,21 @@ const reloaded = (name: string, text: string) => {
 }
 
 test('a hot-reloaded mount replaces its earlier one, in its place, instead of drawing a second copy', () => {
-  const firstOff = mountInSlot('status-bar', reloaded('StatusBar', 'old'))
-  mountInSlot('status-bar', C)
-  const again = reloaded('StatusBar', 'new')
-  mountInSlot('status-bar', again)
-  mountInSlot('status-bar', reloaded('StatusBar', 'newer'))
-  expect(drawn('status-bar')).toBe('newerc')
+  const firstOff = mountInSlot('overlay', reloaded('Indicator', 'old'))
+  mountInSlot('overlay', C)
+  const again = reloaded('Indicator', 'new')
+  mountInSlot('overlay', again)
+  mountInSlot('overlay', reloaded('Indicator', 'newer'))
+  expect(drawn('overlay')).toBe('newerc')
   // The earlier run's undo no longer names anything drawn.
   act(() => firstOff())
   expect(host.textContent).toBe('newerc')
-  expect(slotEntries('status-bar')).toHaveLength(2)
+  expect(slotEntries('overlay')).toHaveLength(2)
 })
 
 test('the undo of the mount that replaced it still takes it out', () => {
-  mountInSlot('overlay', reloaded('Pet', 'old'))
-  const off = mountInSlot('overlay', reloaded('Pet', 'new'))
+  mountInSlot('overlay', reloaded('Nexus', 'old'))
+  const off = mountInSlot('overlay', reloaded('Nexus', 'new'))
   act(() => off())
   expect(slotEntries('overlay')).toEqual([])
 })

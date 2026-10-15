@@ -20,3 +20,4 @@
 .nx-set-repos { margin: 0; padding: 0; list-style: none; }
 .nx-set-repos:empty { display: none; }
 .nx-set-repo { flex: 0 0 140px; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
+.nx-set-about { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; overflow-wrap: anywhere; }

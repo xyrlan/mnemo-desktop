@@ -1,12 +1,11 @@
-/** The app's one session host (`./host`), for every presentation: the popups, the drawer. */
+/** The app's one session host (`./host`), for every presentation of a session: the drawer's tabs. */
 import { store as layout } from '../layout/app-store'
 import { tauriPty } from '../pty/client'
 import { paneShell } from '../pty/typed'
-import { providedSessions, provideSessions } from '../terminal/sessions'
+import { hideFrom, providedSessions, provideSessions } from '../terminal/sessions'
 // Imported first: the terminal view offers the core's terminals as it loads, and the attach PTYs
 // are then hidden from what it offers.
 import '../terminal/view'
-import { hideFrom } from '../floating/store'
 import { createSessionHost, endLeftovers } from './host'
 
 function storage(): Storage | null {

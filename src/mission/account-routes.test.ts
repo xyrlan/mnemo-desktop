@@ -1,115 +1,58 @@
 import { vi } from 'vitest'
 
 /** Every place that types a command at a background child types it on the child's own account:
- *  Approve (`cockpit/approve.ts`), the Dispatch tab's Take over and Stop (`dispatch/run.ts`), and
- *  the mission pane's attach (`rows.tsx`). */
+ *  Approve (`cockpit/approve.ts`), in its hidden attach and in the drawer tab it opens to answer by
+ *  hand. The drawer's own attach is the session host's (`session/host.ts`). */
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
-const written: [number, string][] = []
-vi.mock('../pty/client', () => ({
-  tauriPty: {
-    spawn: async () => 1,
-    write: async (pane: number, data: string) => void written.push([pane, data]),
-    resize: async () => {},
-    kill: async () => {},
-    onExit: async () => () => {},
-  },
-}))
 
 import { answerPrompt, answerStore } from '../cockpit/approve'
-import { stopChild, takeOver } from '../dispatch/run'
-import { PROMPT_DELAY_MS } from '../layout/store'
-import { store as appStore } from '../layout/app-store'
-import { attachChild } from './rows'
+import { setNexusRoutes } from '../nexus/outside'
 import { child } from './fixtures'
 
 const onWork = child({ id: 'b0b0b0b0', session_id: 'b0b0b0b0-1', cwd: '/r-wt-1', account: 'work', account_env: { config_dir: '/Users/me/.claude-work' } })
-const onDefault = child({ id: 'a1a1a1a1', cwd: '/r-wt-2', account: 'default', account_env: { config_dir: null } })
 const PROMPT = ['Do you want to proceed?', '❯ 1. Yes', '  2. No']
 
 let commands: [string | undefined, string][]
-let views: { cmd: unknown; title: string | undefined }[]
+let unset: () => void
 
 beforeEach(() => {
   commands = []
-  views = []
-  written.length = 0
   answerStore.setState({ answers: {} })
-  appStore.setState({
-    tabs: [],
-    activeTab: '',
-    panes: {},
-    openCommandTab: async (cwd, cmd) => {
-      commands.push([cwd, cmd])
-      appStore.setState((s) => ({ panes: { ...s.panes, 8: { id: 8, view: 'terminal', cwd } } }))
-    },
-    openView: (_view, props, _place, title) => void views.push({ cmd: props?.cmd, title }),
-    split: async () => {
-      const id = 20 + Object.keys(appStore.getState().panes).length
-      appStore.setState((s) => ({ panes: { ...s.panes, [id]: { id, view: 'terminal' } } }))
-    },
-  })
+  unset = setNexusRoutes({ terminal: async (cwd, cmd) => void commands.push([cwd, cmd]), page: async () => {}, pages: () => {} })
 })
 
-test("Approve presses the key in a hidden attach on the child's account", async () => {
+afterEach(() => unset())
+
+/** A hidden attach that shows `screen` once the attach is typed. */
+function attach(screen: string[]) {
   const keys: string[] = []
-  let screen = ['~/ $ ']
+  let shown = ['~/ $ ']
   const session = {
-    lines: () => screen,
+    lines: () => shown,
     write: async (data: string) => {
       keys.push(data)
-      screen = data.startsWith('exec ') ? PROMPT : ['❯ ']
+      shown = data.startsWith('exec ') ? screen : ['❯ ']
     },
     exited: () => false,
     close: async () => {},
   }
-  const a = await answerPrompt(onWork, 'yes', { open: async () => session, waitingFor: async () => 'permission prompt', sleep: async () => {}, timeoutMs: 100, stepMs: 100 })
+  return { keys, session }
+}
+
+const quick = { waitingFor: async () => 'permission prompt', sleep: async () => {}, timeoutMs: 100, stepMs: 100 }
+
+test("Approve presses the key in a hidden attach on the child's account", async () => {
+  const { keys, session } = attach(PROMPT)
+  const a = await answerPrompt(onWork, 'yes', { ...quick, open: async () => session })
   expect(a.phase).toBe('sent')
   expect(keys.slice(0, 2)).toEqual(['exec env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0\r', '1'])
   expect(commands).toEqual([])
 })
 
-test("Take over and Stop under the Dispatch tab run on the child's account", async () => {
-  vi.useFakeTimers()
-  try {
-    await takeOver(onWork)
-    await stopChild(onDefault)
-    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
-  } finally {
-    vi.useRealTimers()
-  }
-  expect(written.map(([, d]) => d)).toEqual([
-    'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0\n',
-    'env -u CLAUDE_CONFIG_DIR claude stop a1a1a1a1\n',
-  ])
-})
-
-test('on Windows, Take over and Stop are typed for cmd, with one account and with two', async () => {
-  const agent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0')
-  vi.useFakeTimers()
-  try {
-    await takeOver({ ...onWork, account_env: { config_dir: 'C:\\Users\\Jo Doe\\.claude-work' } })
-    await stopChild(onDefault)
-    await stopChild({ ...onDefault, id: 'c2c2c2c2', account_env: null })
-    await vi.advanceTimersByTimeAsync(PROMPT_DELAY_MS)
-    attachChild({ ...onWork, account_env: { config_dir: 'C:\\Users\\Jo Doe\\.claude-work' } })
-  } finally {
-    vi.useRealTimers()
-    agent.mockRestore()
-  }
-  expect(written.map(([, d]) => d)).toEqual([
-    'cmd /d /s /c "set "CLAUDE_CONFIG_DIR=C:\\Users\\Jo Doe\\.claude-work"& claude attach b0b0b0b0"\r',
-    'cmd /d /s /c "set "CLAUDE_CONFIG_DIR="& claude stop a1a1a1a1"\r',
-    'claude stop c2c2c2c2\r',
-  ])
-  expect(views).toEqual([{ cmd: 'cmd /d /s /c "set "CLAUDE_CONFIG_DIR=C:\\Users\\Jo Doe\\.claude-work"& claude attach b0b0b0b0"', title: 'attach b0b0b0b0' }])
-})
-
-test("the mission pane's attach runs on the child's account; an id alone is typed as before", () => {
-  attachChild(onWork, 'split-col')
-  attachChild('c2c2c2c2')
-  expect(views).toEqual([
-    { cmd: 'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0', title: 'attach b0b0b0b0' },
-    { cmd: 'claude attach c2c2c2c2', title: 'attach c2c2c2c2' },
-  ])
+test("an answer that cannot be pressed opens the attach in a drawer tab, on the child's account", async () => {
+  const { session } = attach(['Attaching…'])
+  const a = await answerPrompt(onWork, 'yes', { ...quick, open: async () => session })
+  expect(a.phase).toBe('error')
+  expect(commands).toEqual([['/r-wt-1', 'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0']])
 })

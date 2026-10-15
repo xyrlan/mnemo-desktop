@@ -23,11 +23,7 @@ test('the terminal brings its own layout and messages: the drawer draws it with 
   const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs
   const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '')
   const css = strip(fs.readFileSync(terminalCss, 'utf8'))
-  const chrome = strip(fs.readFileSync('src/chrome/chrome.css', 'utf8'))
-  for (const cls of ['pane-body', 'terminal-body', 'pane-message', 'pane-notice']) {
-    expect(css).toMatch(new RegExp(`\\.${cls}\\s*\\{`))
-    expect(chrome).not.toMatch(new RegExp(`\\.${cls}\\b`))
-  }
+  for (const cls of ['pane-body', 'terminal-body', 'pane-message', 'pane-notice']) expect(css).toMatch(new RegExp(`\\.${cls}\\s*\\{`))
   // No rule waits for a workbench `.pane` around the terminal.
   expect(css).not.toMatch(/\.pane\s/)
   expect(fs.readFileSync('src/terminal/view.tsx', 'utf8')).toMatch(/^import '\.\/terminal\.css'$/m)

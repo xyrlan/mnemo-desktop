@@ -22,27 +22,21 @@ export type Drawer = {
    *  the tab's), in its place, letting the old one go. */
   open(tab: DrawerTab, ref: SessionRef | null): void
   /** Closes tab `id` and lets its session go; a pane's session no tab shows any more is handed to
-   *  `Workbench.letGo`. */
+   *  `Release.letGo`. */
   close(id: string): Promise<void>
   /** Expands or collapses; the tabs stay held. */
   toggle(): void
   dispose(): void
 }
 
-/** What the drawer tells the rest of the app. A session is shown in the drawer only: *open as tab*,
- *  which showed it in the workbench, went in wave 2a (`routes`). */
-export type Workbench = {
+/** What the drawer tells the rest of the app. A session is shown in the drawer only. */
+export type Release = {
   /** Pane `pane`'s session is shown by no tab any more: an offscreen pane with nothing to come
    *  back to ends (`start.ts`). */
   letGo?(pane: PaneId): void
-  /** Read by nothing: what *open as tab* used. Callers outside the `routes` piece still pass them;
-   *  wave 2b removes them. */
-  goToPane?: unknown
-  attach?: unknown
-  closeNexus?: unknown
 }
 
-export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, workbench: Workbench): Drawer {
+export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, release: Release): Drawer {
   // A session the host no longer has (its pane closed, its attach ended) takes its tab.
   const unwatch = host.subscribe((h) => {
     for (const t of store.getState().tabs) if (t.key !== null && !h.sessions[t.key]) store.getState().removeTab(t.id)
@@ -53,7 +47,7 @@ export function createDrawer(host: SessionHost, store: StoreApi<NexusState>, wor
     if (key === null || store.getState().tabs.some((t) => t.key === key)) return
     const session = host.getState().sessions[key]
     await host.getState().release(key, BY)
-    if (session?.kind === 'pane' && session.pty !== null) workbench.letGo?.(session.pty)
+    if (session?.kind === 'pane' && session.pty !== null) release.letGo?.(session.pty)
   }
 
   const drawer: Drawer = {

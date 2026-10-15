@@ -1,24 +1,16 @@
-//! Pane chrome: what the header bar above a pane shows about its cwd (repo, branch).
-//! Every bar polls, so answers are cached per cwd for a few seconds and a directory
-//! outside any repo costs one `git` spawn per TTL, not one per render.
-//!
-//! It also learns which Claude Code session a terminal pane runs when `claude` was typed by
-//! hand: the pids of every account's `claude agents` matched against the process tree under the
-//! pane's shell. That answer is the app's one per account, shared with the mission poll and Home
+//! Which Claude Code session a terminal pane runs when `claude` was typed by hand: the pids of
+//! every account's `claude agents` matched against the process tree under the pane's shell. That
+//! answer is the app's one per account, shared with the mission poll and Home
 //! (`mission::agents_of`).
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::mission::{repo_root, run};
 pub use crate::procs::parent_of;
 
-const TTL: Duration = Duration::from_secs(5);
-
-/// A value per key that is recomputed once it is older than `ttl`. Misses (`None`)
-/// are cached too: that is the common case for a shell sitting in `~`.
+/// A value per key that is recomputed once it is older than `ttl`. Misses (`None`) are cached
+/// too. Not single-flight: `mission/spawn_tests.rs` replays the old pane poll with it.
 pub struct Cache<T> {
     ttl: Duration,
     entries: Mutex<HashMap<String, (Instant, T)>>,
@@ -42,35 +34,6 @@ impl<T: Clone> Cache<T> {
         entries.insert(key.to_string(), (now, v.clone()));
         v
     }
-}
-
-/// The branch checked out in `cwd` (a worktree reports its own), the short commit when
-/// HEAD is detached, None outside a repo.
-pub fn branch_of(cwd: &str) -> Option<String> {
-    let dir = Some(Path::new(cwd));
-    if !Path::new(cwd).is_dir() {
-        return None;
-    }
-    let name = match run("git", &["rev-parse", "--abbrev-ref", "HEAD"], dir) {
-        Ok(out) => out.trim().to_string(),
-        // An unborn branch (no commit yet) has no HEAD to parse but still has a name.
-        Err(_) => run("git", &["symbolic-ref", "--quiet", "--short", "HEAD"], dir).ok()?.trim().to_string(),
-    };
-    match name.as_str() {
-        "" => None,
-        "HEAD" => run("git", &["rev-parse", "--short", "HEAD"], dir).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-        _ => Some(name),
-    }
-}
-
-/// The name of the repository `cwd` belongs to: the main checkout's folder, so a worktree
-/// beside it shows the repo rather than the worktree folder.
-pub fn repo_of(cwd: &str) -> Option<String> {
-    if !Path::new(cwd).is_dir() {
-        return None;
-    }
-    let root = repo_root(cwd)?;
-    Path::new(&root).file_name().map(|n| n.to_string_lossy().trim_end_matches(".git").to_string()).filter(|n| !n.is_empty())
 }
 
 /// How deep under a pane's shell a Claude session is looked for: a wrapper script and `npx`
@@ -151,10 +114,16 @@ fn children_of() -> Result<impl FnMut(&[u32]) -> Vec<u32>, String> {
     Ok(move |pids: &[u32]| table.children(pids))
 }
 
-/// The Claude Code session running under a pane's shell, None when there is none (or `claude`
-/// is not installed). An error when the process tree could not be walked.
+/// What `claude agents` failing on every account means for a pane: the app cannot tell what runs in
+/// it, which is never "no Claude runs there" (#460). A pane keeps the session it had, and nothing
+/// is ended, adopted as a bare shell or resumed a second time on this answer.
+pub const AGENTS_CANNOT_SAY: &str = "claude agents could not say which Claude sessions run";
+
+/// The Claude Code session running under a pane's shell, None when there is none. An error when the
+/// process tree could not be walked, or when `claude agents` could not answer on any account
+/// (`AGENTS_CANNOT_SAY`; `claude` not installed reads the same).
 pub fn session_of(pane_pid: u32) -> Result<Option<String>, String> {
-    let Some(agents) = live_agents() else { return Ok(None) };
+    let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
     if agents.is_empty() {
         return Ok(None);
     }
@@ -194,7 +163,8 @@ const VOUCH: Duration = Duration::from_secs(30);
 /// it is refused at once. Only when no cached pid vouches (none cached, or a Claude started since)
 /// is `claude agents` asked again, and its answer kept for the next check. The tree under the pane
 /// is then read by `walk`, after that answer and not before it: its error is "cannot tell", and is
-/// never turned into "Claude is not running".
+/// never turned into "Claude is not running". Nor is a `claude agents` that no account answered
+/// (`AGENTS_CANNOT_SAY`).
 pub fn claude_running<W: FnMut(&[u32]) -> Vec<u32>>(
     pane_pid: u32,
     cached: Option<(Instant, Option<HashMap<u32, (String, u64)>>)>,
@@ -209,29 +179,10 @@ pub fn claude_running<W: FnMut(&[u32]) -> Vec<u32>>(
         }
     }
     match fresh() {
-        Some(agents) if !agents.is_empty() => Ok(session_below(pane_pid, &agents, walk()?).is_some()),
-        _ => Ok(false),
+        Some(agents) if agents.is_empty() => Ok(false),
+        Some(agents) => Ok(session_below(pane_pid, &agents, walk()?).is_some()),
+        None => Err(AGENTS_CANNOT_SAY.to_string()),
     }
-}
-
-fn branches() -> &'static Cache<Option<String>> {
-    static C: std::sync::OnceLock<Cache<Option<String>>> = std::sync::OnceLock::new();
-    C.get_or_init(|| Cache::new(TTL))
-}
-
-fn repos() -> &'static Cache<Option<String>> {
-    static C: std::sync::OnceLock<Cache<Option<String>>> = std::sync::OnceLock::new();
-    C.get_or_init(|| Cache::new(TTL))
-}
-
-#[tauri::command]
-pub async fn chrome_branch(cwd: String) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || branches().get_or(&cwd, Instant::now(), || branch_of(&cwd))).await.ok().flatten()
-}
-
-#[tauri::command]
-pub async fn chrome_repo(cwd: String) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || repos().get_or(&cwd, Instant::now(), || repo_of(&cwd))).await.ok().flatten()
 }
 
 /// The Claude Code session a terminal pane runs, given its shell's pid (`pty_pid`). An error when
@@ -241,19 +192,152 @@ pub async fn chrome_session(pane_pid: u32) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || session_of(pane_pid)).await.map_err(|e| e.to_string())?
 }
 
+/// `claude_running` over the app's accounts and the live process table.
+fn claude_running_now(pane_pid: u32) -> Result<bool, String> {
+    let now = Instant::now();
+    let accounts = crate::mission::account_dirs::accounts();
+    let cached = crate::mission::agents_last(&accounts).map(|(at, answers)| (at, merge_agents(answers)));
+    // Asked after this call began; a caller asking at the same moment shares it.
+    let fresh = || merge_agents(ask_agents_on(&accounts, Instant::now()));
+    claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
+}
+
 /// Whether a terminal pane runs Claude Code this moment: the gate before keys are typed into it.
-/// A pid from the cached `claude agents` answer is checked live, so this is cheap and still
-/// refuses the moment Claude exits (`claude_running`). An error when the app cannot tell, which the
-/// person is told as that and not as "Claude is no longer running".
+/// A shell at its prompt has no Claude in its terminal, which needs no `claude agents` (it may be
+/// failing, or `claude` missing: #460). Else a pid from the cached `claude agents` answer is
+/// checked live, so this is cheap and still refuses the moment Claude exits (`claude_running`). An
+/// error when the app cannot tell, which the person is told as that and not as "Claude is no
+/// longer running".
 #[tauri::command]
 pub async fn chrome_claude_running(pane_pid: u32) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let now = Instant::now();
-        let accounts = crate::mission::account_dirs::accounts();
-        let cached = crate::mission::agents_last(&accounts).map(|(at, answers)| (at, merge_agents(answers)));
-        // Asked after this call began; a caller asking at the same moment shares it.
-        let fresh = || merge_agents(ask_agents_on(&accounts, Instant::now()));
-        claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
+        let shell = crate::procs::table().map(|t| shell_of(pane_pid, |p| t.children(p), crate::procs::image_of, crate::procs::groups));
+        claude_gate(shell, || claude_running_now(pane_pid))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What a pane's shell is doing, from the process table (#460).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shell {
+    /// It runs nothing.
+    Bare,
+    /// It is at its prompt, and what it started runs in the background: in groups of its own, not
+    /// the terminal's (powerlevel10k's `gitstatusd`, a job started with `&`).
+    Background,
+    /// Something it started is in the terminal's foreground group; or it runs something, and the
+    /// system has no groups to say whose turn the terminal is (Windows).
+    Busy,
+}
+
+/// The process a pane's shell is, given its pid: that one, unless it is Git for Windows'
+/// `bin\bash.exe`. That is a redirector (`git-wrapper.c`): it starts `usr\bin\bash.exe` beside
+/// it and waits, so its one child is the shell, and what that runs is what the pane runs.
+pub fn real_shell(pane_pid: u32, children: &[u32], image: impl Fn(u32) -> Option<String>) -> u32 {
+    let [only] = children else { return pane_pid };
+    let (Some(outer), Some(inner)) = (image(pane_pid), image(*only)) else { return pane_pid };
+    let path = |p: String| p.to_ascii_lowercase().replace('/', "\\");
+    let (outer, inner) = (path(outer), path(inner));
+    match outer.strip_suffix("\\bin\\bash.exe") {
+        Some(git) if inner == format!("{git}\\usr\\bin\\bash.exe") => *only,
+        _ => pane_pid,
+    }
+}
+
+/// The state of shell `shell` with `children`. It is at its prompt when the terminal's foreground
+/// group is its own and none of its children is in it: a shell without job control (pwsh on macOS
+/// or Linux, zsh with `no_monitor`) keeps the program in front in its own group, as it keeps a
+/// job started with `&`, and both read busy. One whose groups cannot be read reads busy too.
+pub fn shell_state(shell: u32, children: &[u32], groups: impl Fn(u32) -> Option<crate::procs::Groups>) -> Shell {
+    if children.is_empty() {
+        return Shell::Bare;
+    }
+    let Some(own) = groups(shell) else { return Shell::Busy };
+    let behind = |pid: &u32| groups(*pid).is_some_and(|g| g.pgid != own.foreground);
+    if own.pgid == own.foreground && children.iter().all(behind) {
+        Shell::Background
+    } else {
+        Shell::Busy
+    }
+}
+
+/// Whether `image` is Windows' console host (`System32\conhost.exe`). A console program started
+/// with no console to share (`CREATE_NO_WINDOW`, a parent with none) gets a console of its own,
+/// and its host runs as that program's child: no program it was asked to run. A pane's shell
+/// shares the app's pseudoconsole, whose host is the app's child, not the shell's.
+fn console_host(image: Option<String>) -> bool {
+    image.is_some_and(|p| p.to_ascii_lowercase().replace('/', "\\").ends_with("\\system32\\conhost.exe"))
+}
+
+/// What pane `pane_pid`'s shell is doing (`Shell`), through Git Bash's redirector (`real_shell`),
+/// its own console host aside (`console_host`).
+pub fn shell_of(
+    pane_pid: u32,
+    children: impl Fn(&[u32]) -> Vec<u32>,
+    image: impl Fn(u32) -> Option<String>,
+    groups: impl Fn(u32) -> Option<crate::procs::Groups>,
+) -> Shell {
+    let runs = |pid: u32| children(&[pid]).into_iter().filter(|c| !console_host(image(*c))).collect::<Vec<u32>>();
+    let shell = real_shell(pane_pid, &runs(pane_pid), &image);
+    shell_state(shell, &runs(shell), groups)
+}
+
+/// `running`, unless the shell is at its prompt: no Claude has the terminal then, and `claude
+/// agents` is not asked. A table that could not be read leaves it to `running`.
+fn claude_gate(shell: Result<Shell, String>, running: impl FnOnce() -> Result<bool, String>) -> Result<bool, String> {
+    match shell {
+        Ok(Shell::Bare | Shell::Background) => Ok(false),
+        _ => running(),
+    }
+}
+
+/// What runs under a pane's shell, for what the drawer decides about the pane (#460): whether to
+/// end it, show it as a session's, or resume that session elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneRuns {
+    /// The shell is at its prompt, so no Claude runs there, whatever `claude agents` says or fails
+    /// to; what it left in the background is no Claude `claude agents` lists.
+    Idle,
+    /// A Claude Code session `claude agents` lists runs under it.
+    Claude,
+    /// A program has the terminal that `claude agents` does not list as a Claude: another program,
+    /// or a Claude still starting (a typed `claude --resume` has the terminal at once, and is
+    /// listed once it has started).
+    Other,
+    /// A program has the terminal, and `claude agents` could not say what.
+    Unknown,
+}
+
+/// What runs under a pane's `shell`: a Claude or not as `claude` answers. A shell at its prompt
+/// runs none unless `claude` lists one under it (stopped, or in the background); a bare one asks
+/// nothing.
+pub fn pane_runs(shell: Shell, claude: impl FnOnce() -> Result<bool, String>) -> PaneRuns {
+    if shell == Shell::Bare {
+        return PaneRuns::Idle;
+    }
+    match (shell, claude()) {
+        (_, Ok(true)) => PaneRuns::Claude,
+        (Shell::Background, _) => PaneRuns::Idle,
+        (_, Ok(false)) => PaneRuns::Other,
+        (_, Err(_)) => PaneRuns::Unknown,
+    }
+}
+
+/// What runs in a terminal pane now (`PaneRuns`), given its shell's pid. An error only when the
+/// process table could not be read.
+#[tauri::command]
+pub async fn chrome_pane_runs(pane_pid: u32) -> Result<PaneRuns, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let table = crate::procs::table()?;
+        // A `claude agents` answer a few seconds old is enough here, and costs no process spawn
+        // for every pane that runs something else (`live_agents`).
+        let claude = || {
+            let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
+            Ok(!agents.is_empty() && session_below(pane_pid, &agents, |pids| table.children(pids)).is_some())
+        };
+        Ok(pane_runs(shell_of(pane_pid, |p| table.children(p), crate::procs::image_of, crate::procs::groups), claude))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -262,8 +346,9 @@ pub async fn chrome_claude_running(pane_pid: u32) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mission::run;
     use std::cell::Cell;
-    
+
     #[test]
     fn cache_reuses_within_the_ttl_and_recomputes_after() {
         let c = Cache::new(Duration::from_secs(5));
@@ -438,15 +523,412 @@ mod tests {
         assert_eq!(claude_running(5004, Some((t0, Some(before))), t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
         assert_eq!(asked.get(), 1);
 
-        // Too old to vouch, or nothing cached, or `claude` missing.
+        // Too old to vouch, or nothing cached, or `claude agents` answering on no account (`claude`
+        // missing reads the same): that is "cannot tell", never "not running" (#460).
         asked.set(0);
         assert_eq!(claude_running(5001, cached.clone(), t0 + VOUCH, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
         assert_eq!(claude_running(5001, None, t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(true));
-        assert_eq!(claude_running(5001, Some((t0, None)), t0, parents(&[]), fresh(None), || Ok(pgrep(&calls))), Ok(false));
+        assert_eq!(claude_running(5001, Some((t0, None)), t0, parents(&[]), fresh(None), || Ok(pgrep(&calls))), Err(AGENTS_CANNOT_SAY.to_string()));
         assert_eq!(asked.get(), 3);
 
         // An idle pane is refused either way.
         assert_eq!(claude_running(5003, cached.clone(), t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(false));
+    }
+
+    #[test]
+    fn a_shell_at_its_prompt_is_idle_whatever_claude_agents_says() {
+        let unasked = || -> Result<bool, String> { panic!("claude agents asked for a bare shell") };
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        assert_eq!(pane_runs(Shell::Bare, unasked), PaneRuns::Idle);
+        // A helper in the background (`gitstatusd`), with `claude agents` failing or not.
+        assert_eq!(pane_runs(Shell::Background, failing), PaneRuns::Idle);
+        assert_eq!(pane_runs(Shell::Background, || Ok(false)), PaneRuns::Idle);
+        // A Claude stopped with Ctrl+Z is still listed: still that session's pane.
+        assert_eq!(pane_runs(Shell::Background, || Ok(true)), PaneRuns::Claude);
+        assert_eq!(pane_runs(Shell::Busy, || Ok(true)), PaneRuns::Claude);
+        // A `claude --resume` the shell just started, not listed yet; or another program.
+        assert_eq!(pane_runs(Shell::Busy, || Ok(false)), PaneRuns::Other);
+        assert_eq!(pane_runs(Shell::Busy, failing), PaneRuns::Unknown);
+        // As the front reads it.
+        assert_eq!(serde_json::to_string(&PaneRuns::Unknown).unwrap(), "\"unknown\"");
+    }
+
+    /// Shell 10's groups, and its children's: (pgid, the terminal's foreground group).
+    fn groups_of(rows: &'static [(u32, u32, u32)]) -> impl Fn(u32) -> Option<crate::procs::Groups> {
+        move |pid| rows.iter().find(|r| r.0 == pid).map(|r| crate::procs::Groups { pgid: r.1, foreground: r.2 })
+    }
+
+    /// The rule of #460's fourth review: a shell is at its prompt only when the terminal's
+    /// foreground group is its own and nothing it started is in that group.
+    #[test]
+    fn a_shell_is_at_its_prompt_only_when_nothing_it_started_has_the_terminal() {
+        // Job control, at the prompt: a job behind it is in a group of its own.
+        assert_eq!(shell_state(10, &[11], groups_of(&[(10, 10, 10), (11, 11, 10)])), Shell::Background);
+        // Job control, a program in front: the terminal is that program's group's.
+        assert_eq!(shell_state(10, &[11], groups_of(&[(10, 10, 11), (11, 11, 11)])), Shell::Busy);
+        // No job control (pwsh on macOS or Linux, zsh with `no_monitor`): the program in front
+        // stays in the shell's group, and the terminal with it.
+        assert_eq!(shell_state(10, &[11], groups_of(&[(10, 10, 10), (11, 10, 10)])), Shell::Busy);
+        // There, a helper started in a group of its own (gitstatus sets `monitor` to start
+        // `gitstatusd`) is behind; a job started with `&` is not, and reads busy.
+        assert_eq!(shell_state(10, &[12], groups_of(&[(10, 10, 10), (12, 12, 10)])), Shell::Background);
+        assert_eq!(shell_state(10, &[11, 12], groups_of(&[(10, 10, 10), (11, 10, 10), (12, 12, 10)])), Shell::Busy);
+        // A child whose groups could not be read (gone since the table was read): busy until
+        // asked again. Windows has no groups: any child is busy.
+        assert_eq!(shell_state(10, &[11], groups_of(&[(10, 10, 10)])), Shell::Busy);
+        assert_eq!(shell_state(10, &[11], |_| None), Shell::Busy);
+        assert_eq!(shell_state(10, &[], |_| -> Option<crate::procs::Groups> { panic!("groups asked for a bare shell") }), Shell::Bare);
+    }
+
+    /// Git for Windows' `bin\bash.exe` starts `usr\bin\bash.exe` and waits: the pane is judged by
+    /// that bash. A synthetic table, as Windows gives it (#460).
+    #[test]
+    fn a_git_bash_pane_is_judged_by_the_bash_its_redirector_starts() {
+        let image = |rows: &'static [(u32, &'static str)]| move |pid: u32| rows.iter().find(|r| r.0 == pid).map(|r| r.1.to_string());
+        let table = |rows: &'static [(u32, u32)]| move |parents: &[u32]| rows.iter().filter(|r| parents.contains(&r.1)).map(|r| r.0).collect::<Vec<u32>>();
+        let git = image(&[(10, r"C:\Program Files\Git\bin\bash.exe"), (11, r"C:\Program Files\Git\usr\bin\bash.exe"), (12, r"C:\Users\me\.local\bin\claude.exe")]);
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+
+        // At its prompt: idle, with `claude agents` failing too (F2, F5), and the gate is closed.
+        let at_prompt = table(&[(11, 10)]);
+        assert_eq!(real_shell(10, &[11], &git), 11);
+        assert_eq!(shell_of(10, &at_prompt, &git, |_| None), Shell::Bare);
+        assert_eq!(pane_runs(shell_of(10, &at_prompt, &git, |_| None), failing), PaneRuns::Idle);
+        assert_eq!(claude_gate(Ok(shell_of(10, &at_prompt, &git, |_| None)), failing), Ok(false));
+        // Running Claude: busy.
+        let running = table(&[(11, 10), (12, 11)]);
+        assert_eq!(shell_of(10, &running, &git, |_| None), Shell::Busy);
+        assert_eq!(pane_runs(shell_of(10, &running, &git, |_| None), || Ok(true)), PaneRuns::Claude);
+
+        // As a per-user install, in the case and slashes it may come in.
+        let per_user = image(&[(10, "c:/users/me/appdata/local/programs/git/bin/bash.exe"), (11, r"C:\Users\Me\AppData\Local\Programs\Git\usr\bin\bash.exe")]);
+        assert_eq!(real_shell(10, &[11], per_user), 11);
+        // Not a redirector: Cygwin's own `bin\bash.exe` running a program; cmd running bash; a
+        // bash beside another Git's; a redirector with two children, or none readable.
+        let cygwin = image(&[(10, r"C:\cygwin64\bin\bash.exe"), (11, r"C:\cygwin64\bin\sleep.exe")]);
+        assert_eq!(real_shell(10, &[11], cygwin), 10);
+        let cmd = image(&[(10, r"C:\Windows\System32\cmd.exe"), (11, r"C:\Program Files\Git\usr\bin\bash.exe")]);
+        assert_eq!(real_shell(10, &[11], cmd), 10);
+        let elsewhere = image(&[(10, r"C:\Program Files\Git\bin\bash.exe"), (11, r"D:\PortableGit\usr\bin\bash.exe")]);
+        assert_eq!(real_shell(10, &[11], elsewhere), 10);
+        assert_eq!(real_shell(10, &[11, 12], &git), 10);
+        assert_eq!(real_shell(10, &[11], |_| None), 10);
+        // Elsewhere no image is read, and the pane is its shell.
+        assert_eq!(real_shell(10, &[11], crate::procs::image_of), if cfg!(windows) { real_shell(10, &[11], crate::procs::image_of) } else { 10 });
+    }
+
+    /// A process's own console host is no program it runs: a console program started with no
+    /// console to share has its `conhost.exe` as its child (#460). A synthetic Windows table.
+    #[test]
+    fn a_process_s_own_console_host_is_no_program_it_runs() {
+        let image = |rows: &'static [(u32, &'static str)]| move |pid: u32| rows.iter().find(|r| r.0 == pid).map(|r| r.1.to_string());
+        let table = |rows: &'static [(u32, u32)]| move |parents: &[u32]| rows.iter().filter(|r| parents.contains(&r.1)).map(|r| r.0).collect::<Vec<u32>>();
+        let unasked = || -> Result<bool, String> { panic!("claude agents asked for a bare shell") };
+        let images = image(&[
+            (10, r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            (11, r"C:\WINDOWS\system32\conhost.exe"),
+            (12, r"C:\Windows\System32\PING.EXE"),
+            (20, r"C:\Program Files\Git\bin\bash.exe"),
+            (21, r"C:\Program Files\Git\usr\bin\bash.exe"),
+            (22, r"C:\Windows\System32\conhost.exe"),
+            (30, r"C:\Tools\conhost.exe"),
+        ]);
+        // Its console host only: bare.
+        assert_eq!(pane_runs(shell_of(10, table(&[(11, 10)]), &images, |_| None), unasked), PaneRuns::Idle);
+        // A program beside it: busy.
+        assert_eq!(shell_of(10, table(&[(11, 10), (12, 10)]), &images, |_| None), Shell::Busy);
+        // Git Bash's redirector with a console host of its own still leads to its bash.
+        assert_eq!(shell_of(20, table(&[(21, 20), (22, 20)]), &images, |_| None), Shell::Bare);
+        // A program named so outside System32 is a program.
+        assert_eq!(shell_of(10, table(&[(30, 10)]), &images, |_| None), Shell::Busy);
+        // Elsewhere no image is read: a child is a child.
+        assert_eq!(shell_of(10, table(&[(11, 10)]), |_| None, |_| None), Shell::Busy);
+    }
+
+    /// Waits until `ok`, for at most a minute; past that it fails with `what` and what `show`
+    /// says of the moment.
+    fn wait(what: &str, ok: impl Fn() -> bool, show: impl Fn() -> String) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !ok() {
+            assert!(Instant::now() < deadline, "{what}: {}", show());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The children of `pid`, each by its image where the system says it.
+    fn named_children(pid: u32) -> Vec<String> {
+        let table = crate::procs::table().expect("the process table");
+        table.children(&[pid]).into_iter().map(|c| crate::procs::image_of(c).unwrap_or_else(|| format!("process {c}"))).collect()
+    }
+
+    /// What the drawer is told of a process, from the live table.
+    fn runs_live(pane: u32, claude: impl FnOnce() -> Result<bool, String>) -> PaneRuns {
+        let table = crate::procs::table().expect("the process table");
+        pane_runs(shell_of(pane, |p| table.children(p), crate::procs::image_of, crate::procs::groups), claude)
+    }
+
+    /// The real table, with no terminal: a process that started nothing is idle with no `claude
+    /// agents` asked; a shell that has started a program is not.
+    #[test]
+    fn a_real_shell_at_its_prompt_is_idle_and_one_running_a_program_is_not() {
+        use crate::procs::testing::{end, eventually, shell, sleeper};
+        let idle = sleeper();
+        assert_eq!(runs_live(idle.id(), || panic!("claude agents asked for a bare shell")), PaneRuns::Idle);
+        end(idle);
+        let sh = shell();
+        let pane = sh.id();
+        eventually("the shell starts its program", || runs_live(pane, || Ok(false)) == PaneRuns::Other);
+        end(sh);
+    }
+
+    /// Windows: a console program started with no console to share (`proc::command`'s
+    /// `CREATE_NO_WINDOW`, as the sleeper above is) gets a console of its own, whose host,
+    /// `conhost.exe`, runs as its child from a moment after it starts. It still reads idle: that
+    /// host is no program it runs (#460).
+    #[cfg(windows)]
+    #[test]
+    fn a_console_program_s_own_console_host_runs_as_its_child_and_is_not_counted() {
+        use crate::procs::testing::{end, sleeper};
+        let idle = sleeper();
+        let pid = idle.id();
+        let hosts = || named_children(pid).iter().filter(|c| console_host(Some(c.to_string()))).count();
+        wait("its console host starts, as its child", || hosts() == 1, || format!("its children are {:?}", named_children(pid)));
+        assert_eq!(runs_live(pid, || panic!("claude agents asked for a bare process")), PaneRuns::Idle);
+        end(idle);
+    }
+
+    /// A real interactive shell on a terminal, its output kept, and the cursor position it asks
+    /// for (PSReadLine waits for it; so does Windows' pseudoconsole) answered.
+    struct Term {
+        pid: u32,
+        keys: std::sync::Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+        out: std::sync::Arc<Mutex<String>>,
+        child: Box<dyn portable_pty::Child + Send + Sync>,
+        _master: Box<dyn portable_pty::MasterPty + Send>,
+    }
+
+    impl Term {
+        /// `program`, found on `PATH`, on a new terminal; None when it is not installed.
+        #[cfg(unix)]
+        fn open(program: &str, args: &[&str]) -> Option<Term> {
+            let path = std::env::var_os("PATH")?;
+            let found = std::env::split_paths(&path).map(|d| d.join(program)).find(|p| p.is_file())?;
+            Some(Term::open_path(found, args, &[("ENV", "/dev/null"), ("PS1", "$ "), ("TERM", "xterm-256color")]))
+        }
+
+        /// The program at `path` on a new terminal (a pseudoconsole on Windows), with `env` set.
+        fn open_path(path: std::path::PathBuf, args: &[&str], env: &[(&str, &str)]) -> Term {
+            use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+            use std::io::{Read, Write};
+            let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).expect("a terminal");
+            let mut cmd = CommandBuilder::new(path);
+            cmd.args(args);
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
+            let child = pair.slave.spawn_command(cmd).expect("a shell");
+            drop(pair.slave);
+            let pid = child.process_id().expect("its pid");
+            let keys = std::sync::Arc::new(Mutex::new(pair.master.take_writer().expect("its input")));
+            let out = std::sync::Arc::new(Mutex::new(String::new()));
+            let mut reader = pair.master.try_clone_reader().expect("its output");
+            let (answer, kept) = (keys.clone(), out.clone());
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = match reader.read(&mut buf) {
+                        Ok(n) if n > 0 => n,
+                        _ => break,
+                    };
+                    let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    for _ in text.matches("\x1b[6n") {
+                        let _ = answer.lock().unwrap().write_all(b"\x1b[1;1R");
+                    }
+                    kept.lock().unwrap().push_str(&text);
+                }
+            });
+            Term { pid, keys, out, child, _master: pair.master }
+        }
+
+        /// Types `line` and Enter.
+        fn type_line(&self, line: &str) {
+            let mut keys = self.keys.lock().unwrap();
+            keys.write_all(line.as_bytes()).unwrap();
+            keys.write_all(b"\r").unwrap();
+        }
+
+        /// Waits until the shell has printed `word`, typed as two halves so that its echo is not
+        /// it. pwsh may take a while to start on a loaded machine.
+        fn said(&self, what: &str, word: &str) {
+            wait(what, || self.out.lock().unwrap().contains(word), || format!("it printed {:?}", self.out.lock().unwrap()));
+        }
+
+        /// Waits until the shell has printed `then` after `first`.
+        #[cfg(unix)]
+        fn said_after(&self, what: &str, first: &str, then: &str) {
+            let seen = || {
+                let out = self.out.lock().unwrap();
+                out.find(first).is_some_and(|i| out[i..].contains(then))
+            };
+            wait(what, seen, || format!("it printed {:?}", self.out.lock().unwrap()));
+        }
+
+        fn children(&self) -> Vec<u32> {
+            crate::procs::table().expect("the process table").children(&[self.pid])
+        }
+
+        fn kill_children(&self) {
+            kill_below(self.pid);
+        }
+
+        fn end(mut self) {
+            self.kill_children();
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// Ends what `pid` runs: each of its children, and what they started.
+    fn kill_below(pid: u32) {
+        for p in crate::procs::table().expect("the process table").children(&[pid]) {
+            #[cfg(unix)]
+            // SAFETY: signals a process this test started.
+            unsafe {
+                libc::kill(p as libc::pid_t, libc::SIGKILL)
+            };
+            #[cfg(windows)]
+            let _ = crate::proc::command("taskkill").args(["/F", "/T", "/PID", &p.to_string()]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        }
+    }
+
+    /// Real panes on Windows: a shell on a pseudoconsole, as the app runs one. Its console host
+    /// is the pseudoconsole's, the test's child and not the shell's, so at its prompt the shell
+    /// has no child at all and reads idle; while a program runs it reads busy, and idle again
+    /// after. Git Bash is read through its redirector. `claude agents` fails throughout (#460).
+    #[cfg(windows)]
+    #[test]
+    fn a_real_windows_shell_on_a_pseudoconsole_is_idle_at_its_prompt_and_busy_while_a_program_runs() {
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        // A short PATH: under cargo the inherited one is too long for cmd to search.
+        let path = format!(r"{root}\System32;{root}");
+
+        let cmd = Term::open_path(format!(r"{root}\System32\cmd.exe").into(), &[], &[("PATH", path.as_str())]);
+        cmd.type_line("echo RE^ADY");
+        cmd.said("cmd reads the line", "READY");
+        wait("cmd at its prompt has no child: its console host is the pseudoconsole's", || cmd.children().is_empty(), || format!("{:?}", named_children(cmd.pid)));
+        assert_eq!(runs_live(cmd.pid, failing), PaneRuns::Idle, "cmd at its prompt");
+        cmd.type_line(&format!(r"{root}\System32\PING.EXE -n 30 127.0.0.1"));
+        wait("cmd runs ping", || runs_live(cmd.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(cmd.pid)));
+        kill_below(cmd.pid);
+        wait("cmd is back at its prompt", || runs_live(cmd.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(cmd.pid)));
+        cmd.end();
+
+        // Git Bash, where Git for Windows is installed, as on CI's runners.
+        let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+        let git_bash = std::path::PathBuf::from(format!(r"{program_files}\Git\bin\bash.exe"));
+        if git_bash.is_file() {
+            let bash = Term::open_path(git_bash, &["--norc", "-i"], &[("PATH", path.as_str())]);
+            bash.type_line("echo RE''ADY");
+            bash.said("bash reads the line", "READY");
+            let shell = || {
+                let table = crate::procs::table().expect("the process table");
+                real_shell(bash.pid, &table.children(&[bash.pid]), crate::procs::image_of)
+            };
+            wait("the redirector's bash is the shell", || shell() != bash.pid, || format!("{:?}", named_children(bash.pid)));
+            let inner = shell();
+            wait("Git Bash at its prompt reads idle", || runs_live(bash.pid, failing) == PaneRuns::Idle, || format!("{:?} below {:?}", named_children(inner), named_children(bash.pid)));
+            bash.type_line("/usr/bin/sleep 30");
+            wait("Git Bash runs sleep", || runs_live(bash.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(inner)));
+            kill_below(inner);
+            wait("Git Bash is back at its prompt", || runs_live(bash.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(inner)));
+            bash.end();
+        }
+    }
+
+    /// `t` reads idle at its prompt, busy while `/bin/sleep` has the terminal, and idle again once
+    /// it has ended. `claude agents` fails throughout.
+    #[cfg(unix)]
+    fn idle_then_busy(t: &Term, shell: &str) {
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let gate = || claude_gate(crate::procs::table().map(|tb| shell_of(t.pid, |p| tb.children(p), crate::procs::image_of, crate::procs::groups)), failing);
+        assert_eq!(runs_live(t.pid, failing), PaneRuns::Idle, "{shell} at its prompt");
+        t.type_line("/bin/sleep 31");
+        wait(&format!("{shell}: the program has the terminal"), || runs_live(t.pid, failing) == PaneRuns::Unknown, || format!("{:?}", named_children(t.pid)));
+        assert_eq!(runs_live(t.pid, || Ok(false)), PaneRuns::Other, "{shell}");
+        assert_eq!(gate(), Err(AGENTS_CANNOT_SAY.to_string()), "{shell}: the gate asks claude agents");
+        t.kill_children();
+        wait(&format!("{shell}: back at its prompt"), || runs_live(t.pid, failing) == PaneRuns::Idle, || format!("{:?}", named_children(t.pid)));
+        assert_eq!(gate(), Ok(false), "{shell}");
+    }
+
+    /// Real interactive shells on terminals: at the prompt each is idle, also with a job left in
+    /// the background, as powerlevel10k leaves `gitstatusd`; while a program has the terminal each
+    /// is not. That holds for shells without job control too (zsh with `no_monitor`, pwsh), where
+    /// the program in front keeps the shell's own group. `claude agents` fails throughout (#460).
+    #[cfg(unix)]
+    #[test]
+    fn a_real_shell_on_a_terminal_is_idle_at_its_prompt_with_a_job_in_the_background() {
+        use crate::procs::testing::eventually;
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+
+        // sh, with job control.
+        let sh = Term::open("sh", &["-i"]).expect("sh");
+        idle_then_busy(&sh, "sh");
+        sh.type_line("/bin/sleep 30 &");
+        eventually("the job runs", || !sh.children().is_empty());
+        assert_eq!(runs_live(sh.pid, failing), PaneRuns::Idle);
+        sh.end();
+
+        // zsh with `no_monitor`, where it is installed.
+        if let Some(zsh) = Term::open("zsh", &["-f", "-i"]) {
+            zsh.type_line("setopt no_monitor; print RE''ADY");
+            zsh.said("zsh reads the line", "READY");
+            idle_then_busy(&zsh, "zsh no_monitor");
+            // gitstatus sets `monitor` to start `gitstatusd`: a group of its own, behind.
+            zsh.type_line("() { setopt local_options monitor; /bin/sleep 301 &! }; print DA''EMON");
+            zsh.said("the helper starts", "DAEMON");
+            eventually("the helper runs", || !zsh.children().is_empty());
+            assert_eq!(runs_live(zsh.pid, failing), PaneRuns::Idle, "zsh no_monitor with a helper behind");
+            // A job started with `&` there stays in the shell's group: busy, so nothing is ended.
+            zsh.type_line("/bin/sleep 302 &");
+            eventually("the job runs", || zsh.children().len() == 2);
+            assert_eq!(runs_live(zsh.pid, failing), PaneRuns::Unknown, "zsh no_monitor with a job in its group");
+            zsh.end();
+        }
+
+        // pwsh, which has no job control on macOS or Linux, where it is installed.
+        if let Some(pwsh) = Term::open("pwsh", &["-NoProfile", "-NoLogo"]) {
+            // PSReadLine asks where the cursor is once it reads the keys itself. Typed before
+            // that, Enter reaches it through the terminal as a new line, which it does not run.
+            pwsh.said_after("pwsh reads the keys itself", "PS ", "\x1b[6n");
+            pwsh.type_line("Write-Output ('RE'+'ADY')");
+            pwsh.said("pwsh reads the line", "READY");
+            idle_then_busy(&pwsh, "pwsh");
+            pwsh.end();
+        }
+    }
+
+    /// An account switch exits Claude and waits until it is gone before resuming it on the new
+    /// account (`accounts/follow.ts`). With `claude agents` failing, a shell back at its prompt is
+    /// still seen to run no Claude; one running something is still a question nobody can answer.
+    #[test]
+    fn the_claude_gate_sees_a_shell_at_its_prompt_run_no_claude_with_claude_agents_failing() {
+        use crate::procs::testing::{end, eventually, shell, sleeper};
+        let failing = || Err(AGENTS_CANNOT_SAY.to_string());
+        let gate = |pane: u32| claude_gate(crate::procs::table().map(|t| shell_of(pane, |p| t.children(p), crate::procs::image_of, crate::procs::groups)), failing);
+        let idle = sleeper();
+        assert_eq!(gate(idle.id()), Ok(false));
+        end(idle);
+        let sh = shell();
+        let pane = sh.id();
+        eventually("the shell starts its program", || gate(pane).is_err());
+        end(sh);
+        // No table: what `claude_running` says.
+        assert_eq!(claude_gate(Err("no table".into()), failing), Err(AGENTS_CANNOT_SAY.to_string()));
+        assert_eq!(claude_gate(Ok(Shell::Bare), || -> Result<bool, String> { panic!("claude agents asked for a shell at its prompt") }), Ok(false));
+        assert_eq!(claude_gate(Ok(Shell::Background), failing), Ok(false));
+        assert_eq!(claude_gate(Ok(Shell::Busy), || Ok(true)), Ok(true));
     }
 
     #[test]
@@ -569,42 +1051,5 @@ mod tests {
         let cached = t.elapsed();
         eprintln!("claude agents --json {asked:?}, table walk {walked:?}, cached pid checked live {cached:?}");
         assert!(cached < Duration::from_millis(5), "{cached:?}");
-    }
-
-    #[test]
-    fn branch_and_repo_of_checkouts_worktrees_and_plain_dirs() {
-        let tmp = crate::testutil::temp_dir("chrome");
-        let main = tmp.join("proj");
-        let plain = tmp.join("plain");
-        std::fs::create_dir_all(&main).unwrap();
-        std::fs::create_dir_all(&plain).unwrap();
-        let git = |args: &[&str], cwd: &Path| {
-            let out = crate::proc::command("git").args(args).current_dir(cwd).output().unwrap();
-            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        };
-        let s = |p: &Path| p.to_str().unwrap().to_string();
-        git(&["init", "-q", "-b", "main"], &main);
-        // Unborn: no commit yet, the branch still has a name.
-        assert_eq!(branch_of(&s(&main)).as_deref(), Some("main"));
-
-        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], &main);
-        std::fs::create_dir_all(main.join("src/deep")).unwrap();
-        assert_eq!(branch_of(&s(&main.join("src/deep"))).as_deref(), Some("main"));
-        assert_eq!(repo_of(&s(&main.join("src/deep"))).as_deref(), Some("proj"));
-
-        let wt = tmp.join("proj-wt-chrome");
-        git(&["worktree", "add", "-q", "-b", "feat/round5/chrome", &s(&wt)], &main);
-        assert_eq!(branch_of(&s(&wt)).as_deref(), Some("feat/round5/chrome"));
-        assert_eq!(repo_of(&s(&wt)).as_deref(), Some("proj"));
-
-        let sha = git(&["rev-parse", "--short", "HEAD"], &main);
-        git(&["checkout", "-q", "--detach"], &main);
-        assert_eq!(branch_of(&s(&main)), Some(sha));
-
-        assert_eq!(branch_of(&s(&plain)), None);
-        assert_eq!(repo_of(&s(&plain)), None);
-        assert_eq!(branch_of(&s(&tmp.join("missing"))), None);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

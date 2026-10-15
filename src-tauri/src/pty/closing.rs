@@ -62,24 +62,7 @@ pub fn name_of(pid: u32) -> Option<String> {
 /// The file its image was started from, without the folder or `.exe`.
 #[cfg(windows)]
 pub fn name_of(pid: u32) -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
-    let mut buf = [0u16; 1024];
-    let mut len = buf.len() as u32;
-    // SAFETY: the handle is checked and closed once; the call writes at most `len` units into `buf`.
-    let ok = unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return None;
-        }
-        let ok = QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len);
-        CloseHandle(process);
-        ok
-    };
-    if ok == 0 {
-        return None;
-    }
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
+    let path = crate::procs::image_of(pid)?;
     let file = path.rsplit('\\').next().unwrap_or(&path);
     let stem = if file.to_ascii_lowercase().ends_with(".exe") { &file[..file.len() - 4] } else { file };
     Some(stem.to_string()).filter(|n| !n.is_empty())

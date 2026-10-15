@@ -24,7 +24,7 @@ export function Md({ text, className }: { text: string; className?: string }) {
   const { rules } = useCards()
   return (
     <div className={cn('cv-md', className)}>
-      <Markdown text={text} onWiki={(slug) => rules.open(slug)} onLink={(href) => openUrl(href, href)} />
+      <Markdown text={text} onWiki={(slug) => rules.open(slug)} onLink={(href) => openUrl(href)} />
     </div>
   )
 }

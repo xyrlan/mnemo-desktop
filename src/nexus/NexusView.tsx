@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/ui'
-import { claimAction } from '../actions/registry'
-import { STATUS_BAR } from '../shell/edges'
-import { shellStore } from '../shell/store'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
-import { idOf } from '../mission/account'
 import { useMission } from '../mission/app-store'
 import type { Snapshot } from '../mission/types'
 import { usePulse } from '../pulse/app-store'
@@ -96,7 +92,6 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const log = useNexus((s) => s.log)
   const selection = useNexus((s) => s.selection)
   const triage = useNexus((s) => s.triage)
-  const triageAsked = useNexus((s) => s.triageAsked)
   const focusId = useNexus((s) => s.focusId)
   const known = useKnownRepos()
   const reducedMotion = useReducedMotion()
@@ -146,11 +141,6 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
     prev.current = ship
   }, [ship, now])
 
-  // Triage asked for from the sidebar opens only on cards to triage: with none, the Nexus alone.
-  useEffect(() => {
-    if (triageAsked) nexusStore.getState().settleTriageAsk(ship.counts.need)
-  }, [triageAsked, ship])
-
   // Opening is the view's (the drawer's); every other action is the command piece's.
   const run = useCallback(
     async (a: ShipAction): Promise<ActionResult> => {
@@ -166,8 +156,8 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   )
   const s = nexusStore.getState()
 
-  // The view's keys, while it is open and nothing typed into has focus: Tab triages, ⌥1–9 opens the
-  // bridge's Nth exception (⌘1–9 are the worktrees'), `/` focuses the fleet prompt, Esc drops the
+  // The view's keys, while nothing typed into has focus: Tab triages, ⌥1–9 opens the bridge's Nth
+  // exception, `/` focuses the fleet prompt, Esc drops the
   // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). With
   // anything open over the ship (`OVER_THE_SHIP`) they are that's. The app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
   // on its quick diff) next.
@@ -240,17 +230,10 @@ export type NexusViewProps = {
   drawer?: DrawerDeps
 }
 
-/** ⌘1–9 go to a worktree (v2 spec, "Where it sits in the app"): from the Nexus too, which leaves
- *  for the workbench to show it rather than switch it unseen underneath. */
-const WORKTREE_GO = /^worktree\.go\.[1-9]$/
-
-/** The Nexus: the whole window but the status bar, over the workbench and its sidebar, which stay
- *  mounted under it with their panes running, out of reach (v2 spec, "Where it sits in the app"). The window's
- *  native title bar is above it, traffic lights and dragging included. Nothing is read, polled or
- *  animated while it is closed. The drawer sits beside the ship, which shrinks while it is open; the
- *  drawer stays mounted, hidden, while the Nexus is closed, so its tabs keep their terminals. */
+/** The Nexus, the app: the whole window, under its native title bar (traffic lights and dragging
+ *  included). The drawer sits beside the ship, which shrinks while it is open; collapsed, the drawer
+ *  stays mounted, hidden, so its tabs keep their terminals. */
 export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps) {
-  const open = useNexus((s) => s.open)
   const tabs = useNexus((s) => s.tabs.length)
   const collapsed = useNexus((s) => s.collapsed)
   const width = useShownWidth()
@@ -271,54 +254,28 @@ export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps
     [drawer],
   )
   // Every path in the app that goes to a session opens it here (`./outside`): a notification's
-  // click, the mission pane's attach. Its figure's tab, the Nexus open and a window closed, as a
-  // window's own `ctx.open` does, so the tab is not left under it; a child the ship does not know
-  // yet is attached in a tab of its own, which becomes its robot's once the ship lists it.
-  useEffect(() => {
-    const shown = () => {
-      nexusStore.getState().setOpen(true)
-      closeWindow()
-    }
-    const open = (id: string) => {
-      if (!onOpen(id)) return false
-      shown()
-      return true
-    }
-    return setFigures({
-      open,
-      attach(child) {
-        const id = idOf(child)
-        if (open(id)) return
-        drawer.drawer.open({ id, kind: 'robot', key: null, readOnly: null, label: id, sessionId: null, cwd: null }, { child })
-        shown()
-      },
-    })
-  }, [onOpen, drawer])
-  // Open, the sidebars and the workbench under it are out of reach, keys and focus included (the
-  // shell's `covered`); closed, the shell gives their focus back.
-  useEffect(() => {
-    shellStore.getState().setCovered(open)
-    return () => shellStore.getState().setCovered(false)
-  }, [open])
+  // click. Its figure's tab, a window closed, as a window's own `ctx.open` does, so the tab is not
+  // left under it.
   useEffect(
     () =>
-      claimAction((id) => {
-        if (WORKTREE_GO.test(id) && nexusStore.getState().open) nexusStore.getState().setOpen(false)
-        return false
+      setFigures({
+        open(id) {
+          if (!onOpen(id)) return false
+          closeWindow()
+          return true
+        },
       }),
-    [],
+    [onOpen],
   )
-  const beside = open && tabs > 0 && !collapsed ? width : 0
+  const beside = tabs > 0 && !collapsed ? width : 0
   return (
     <>
-      {open && (
-        <div data-nexus-view="" className="fixed inset-x-0 top-0 z-drawer flex flex-col overflow-hidden bg-[#0c1326]" style={{ bottom: STATUS_BAR }}>
-          <div data-nexus-ship="" className="flex min-h-0 flex-1 flex-col" style={{ marginRight: beside }}>
-            <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
-          </div>
+      <div data-nexus-view="" className="fixed inset-0 z-drawer flex flex-col overflow-hidden bg-[#0c1326]">
+        <div data-nexus-ship="" className="flex min-h-0 flex-1 flex-col" style={{ marginRight: beside }}>
+          <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
         </div>
-      )}
-      <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} repos={repos} shown={open} onOpen={onOpen} />
+      </div>
+      <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} repos={repos} onOpen={onOpen} />
     </>
   )
 }

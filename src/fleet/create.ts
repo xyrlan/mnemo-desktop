@@ -15,7 +15,7 @@ export type FleetSources = {
   mission(): Snapshot
   /** The panes shown now, for the pane each session runs in. */
   panes(): Record<number, { id: number; sessionId?: string }>
-  /** The worktree whose workbench is shown, which is read as long as it is. */
+  /** The worktree shown whole, which is read as long as it is; none in the Nexus. */
   shown(): string | null
   listWorktrees(repo: string): Promise<WorktreeInfo[]>
   subscribeAgentEvents(cb: (e: AgentEvent) => void): () => void

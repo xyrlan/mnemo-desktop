@@ -121,9 +121,10 @@ export async function preparePage(page, setup, { trace = false, log = () => {}, 
 
 /**
  * Renders one scenario and writes the PNG. Returns what a caller may want to check: the
- * commands the scenario left unanswered and the errors the page threw.
+ * commands the scenario left unanswered, the errors the page threw, and what `inspect` read of
+ * the page after the shot (a test's look at the DOM).
  */
-export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs = DEFAULT_SETTLE_MS, trace = false, log = (l) => process.stderr.write(l + '\n') }) {
+export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs = DEFAULT_SETTLE_MS, trace = false, log = (l) => process.stderr.write(l + '\n'), inspect }) {
   const setup = getScenario(name)
   if (!setup) throw new Error(`no scenario named ${name} (have: ${scenarioNames().join(', ') || 'none'})`)
   const { chromium } = await import('playwright')
@@ -132,6 +133,7 @@ export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs
   const { server, url } = await startVite()
   let browser
   let unanswered
+  let inspected
   try {
     browser = await chromium.launch()
     const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1 })
@@ -150,11 +152,12 @@ export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs
 
     await mkdir(path.dirname(path.resolve(out)), { recursive: true })
     await page.screenshot({ path: out })
+    if (inspect) inspected = await inspect(page)
   } finally {
     await browser?.close()
     await server.close()
   }
-  return { unanswered: [...unanswered].sort(), pageErrors }
+  return { unanswered: [...unanswered].sort(), pageErrors, inspected }
 }
 
 async function main() {

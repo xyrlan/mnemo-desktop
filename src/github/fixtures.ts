@@ -1,6 +1,6 @@
 import { withPrs, shipped } from '../cockpit/fixtures'
 import type { RepoGroup, Snapshot } from '../mission/types'
-import type { Board, Issue } from './types'
+import type { Issue } from './types'
 
 /** Issues of the `mnemo` repo in the cockpit fixtures: some already worked on, a dozen not. */
 export function issue(over: Partial<Issue> & { number: number }): Issue {
@@ -22,19 +22,3 @@ export const mnemoIssues: Issue[] = [
   issue({ number: 43, title: 'closed by a PR the snapshot lacks', prs: [99], updated_at: '2026-08-04T00:00:00Z' }),
   ...Array.from({ length: 12 }, (_, i) => issue({ number: i + 1, labels: [i % 2 ? 'ui' : 'bug'], assignees: i === 11 ? ['me'] : [] })),
 ]
-
-export const board: Board = {
-  title: 'mnemo',
-  url: 'https://github.com/users/me/projects/4',
-  columns: [
-    { name: 'Todo', items: [{ id: 'I1', title: 'issue 1', number: 1, url: 'https://github.com/me/mnemo/issues/1', kind: 'Issue' }] },
-    {
-      name: 'In Progress',
-      items: [
-        { id: 'I40', title: 'dispatched issue', number: 40, url: 'https://github.com/me/mnemo/issues/40', kind: 'Issue' },
-        { id: 'P13', title: 'docs', number: 13, url: 'https://github.com/me/mnemo/pull/13', kind: 'PullRequest' },
-      ],
-    },
-    { name: 'Done', items: [{ id: 'D1', title: 'someday', number: null, url: null, kind: 'DraftIssue' }] },
-  ],
-}

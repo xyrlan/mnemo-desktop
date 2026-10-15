@@ -20,7 +20,7 @@ export type McpSession = {
   cwd?: string
   /** The Claude Code session it runs. */
   sessionId?: string
-  /** On screen now: the drawer shows its tab, the Nexus open and the drawer expanded. */
+  /** On screen now: the drawer shows its tab, expanded. */
   shown: boolean
   exitCode?: number | null
   /** Why there is no terminal to read: the tab shows the conversation read-only, or a child's
@@ -32,7 +32,6 @@ export type Sources = {
   tabs: DrawerTab[]
   activeTab: string | null
   collapsed: boolean
-  open: boolean
   hosted: Record<SessionKey, HostedSession>
   panes: Record<PaneId, Pane>
 }
@@ -56,7 +55,7 @@ export function sessionsOf(src: Sources): McpSession[] {
       title: p?.title,
       cwd: p?.cwd ?? t.cwd ?? undefined,
       sessionId: p?.sessionId ?? t.sessionId ?? undefined,
-      shown: src.open && !src.collapsed && src.activeTab === t.id,
+      shown: !src.collapsed && src.activeTab === t.id,
       exitCode: p?.exitCode,
       note,
     })

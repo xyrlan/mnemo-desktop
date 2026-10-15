@@ -1,11 +1,16 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open as pickFolder } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState, type JSX, type ReactNode } from 'react'
+import { aboutLine, buildInfo, type BuildInfo } from '../../../about/info'
+import { newerLine, newerRelease, openRelease, type NewerRelease } from '../../../about/release'
 import { useFleet } from '../../../fleet/store'
 import { loadShells, shells, type Shells } from '../../../pty/shells'
 import { onWindows } from '../../../pty/typed'
 import { settingsStore, useSettings } from '../../../settings/app-store'
 import type { Settings } from '../../../settings/store'
+import type { Language } from '../../../voice/client'
+import { LANGUAGE_NAMES, LANGUAGES } from '../../../voice/controller'
+import { chooseLanguage, useDictationLanguage } from '../../../voice/language'
 import { registerWindow } from '../../ui/windows'
 import './settings.css'
 
@@ -81,6 +86,49 @@ function WindowsShell({ save, failed }: { save: ReturnType<typeof useSave>['save
           if (await save('windowsShell', id)) setKnown(await loadShells(askShells))
         }}
       />
+    </Setting>
+  )
+}
+
+/** The build that is running, so a stale bundle reads as stale, with a newer release beside it
+ *  when GitHub has one. */
+function About() {
+  const [build, setBuild] = useState<BuildInfo | null>(null)
+  const [newer, setNewer] = useState<NewerRelease | null>(null)
+  useEffect(() => {
+    let live = true
+    void buildInfo().then((b) => live && setBuild(b))
+    void newerRelease().then((r) => live && setNewer(r))
+    return () => {
+      live = false
+    }
+  }, [])
+  const line = aboutLine(build)
+  if (!line && !newer) return null
+  return (
+    <p className="nx-muted nx-set-about" data-about="">
+      <span>{line}</span>
+      {newer && (
+        <button type="button" className="nx-btn" onClick={() => void openRelease(newer).catch((why) => console.warn('could not open the release page:', why))}>
+          {newerLine(newer)}
+        </button>
+      )}
+    </p>
+  )
+}
+
+/** The language dictation listens for. It is this machine's, not in the settings file. */
+function DictationLanguage() {
+  const language = useDictationLanguage()
+  const [failed, setFailed] = useState<string>()
+  const pick = (l: Language) =>
+    void chooseLanguage(l).then(
+      () => setFailed(undefined),
+      (e: unknown) => setFailed(say(e)),
+    )
+  return (
+    <Setting id="dictationLanguage" name="Dictation language" what="The language dictation listens for. Any detects it on each take, and gets a short one wrong more often." failed={failed}>
+      <Choice label="Dictation language" value={language} options={LANGUAGES.map((l) => ({ value: l, label: LANGUAGE_NAMES[l] }))} pick={pick} />
     </Setting>
   )
 }
@@ -245,6 +293,7 @@ export function SettingsWindow(_props: { close: () => void }): JSX.Element {
           pick={(v) => void save('replyLanguage', v)}
         />
       </Setting>
+      <DictationLanguage />
       <h3 className="nx-section">New sessions</h3>
       <Setting
         id="skipPermissions"
@@ -270,6 +319,7 @@ export function SettingsWindow(_props: { close: () => void }): JSX.Element {
       <h3 className="nx-section">Repos</h3>
       <CloneBase save={save} failed={why('cloneBase')} />
       <RepoSetup save={save} failed={why('repoSetup')} />
+      <About />
     </div>
   )
 }

@@ -134,11 +134,11 @@ export function createVoice(deps: VoiceDeps): Voice {
 
 export const LANGUAGES: Language[] = ['pt', 'en', 'auto']
 
-/** How each language reads in the palette. */
+/** How each language reads in the Settings window. */
 export const LANGUAGE_NAMES: Record<Language, string> = {
   pt: 'Portuguese',
   en: 'English',
-  auto: 'any (detected per take)',
+  auto: 'Any',
 }
 
 /** The language dictation starts on: the one saved, else the first of the system's preferred

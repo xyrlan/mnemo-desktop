@@ -31,7 +31,7 @@ export function useRows(ship: Ship): Row[] {
   return [...rows, ...extra]
 }
 
-/** ⌥1–9 are the Nexus's on macOS only: elsewhere Alt+digit is the workbench's `tab.go`. */
+/** ⌥1–9 are the Nexus's on macOS only: elsewhere Alt+digit is left to the terminal it is typed in. */
 export const altDigits = () => typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
 /** A button that acts on its second press within `CONFIRM_MS`. The action is taken at the first

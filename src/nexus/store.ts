@@ -8,33 +8,20 @@ import { readWidth } from './drawer/width'
 export const LOG_MAX = 500
 
 export type NexusState = {
-  /** The app opens on the Nexus (v2 spec, "Where it sits in the app"); ⌘0 and the sidebar's
-   *  Nexus entry flip it. */
-  open: boolean
-  setOpen(open: boolean): void
-  toggle(): void
   /** Robots shift+clicked, by id. */
   selection: ReadonlySet<string>
   toggleSelect(id: string): void
   clearSelection(): void
   triage: boolean
   setTriage(open: boolean): void
-  /** Triage asked for from outside the view (the sidebar's needs-you count): the Nexus opens, and
-   *  the view opens triage only when its ship has a card to triage (`settleTriageAsk`): a robot or
-   *  a captain waiting on you, the sessions the count counts. */
-  triageAsked: boolean
-  askTriage(): void
-  /** The view's answer to `askTriage`, from the ship it built (`counts.need`): `needs` robots and
-   *  captains wait on a decision, each a triage card. */
-  settleTriageAsk(needs: number): void
   /** The ship's log, oldest first, at most `LOG_MAX`; an event already logged (same `id`) is skipped. */
   log: LogEvent[]
   appendLog(events: LogEvent[]): void
   /** The session the drawer shows; its figure is highlighted. */
   focusId: string | null
   setFocus(id: string | null): void
-  /** The last feed read, kept while the Nexus is closed: a ship built on reopen is drawn with it,
-   *  not as if no session had acted since. */
+  /** The last feed read, kept across the view's mounts: a ship built on a remount is drawn with
+   *  it, not as if no session had acted since. */
   feed: Feed | null
   setFeed(feed: Feed): void
   /** The drawer's tabs, in the order they were opened: one per session. The holds are the
@@ -81,9 +68,6 @@ export type DrawerTab = {
 const focused = (activeTab: string | null, collapsed: boolean) => ({ activeTab, collapsed, focusId: collapsed ? null : activeTab })
 
 export const nexusStore: StoreApi<NexusState> = createStore<NexusState>((set) => ({
-  open: true,
-  setOpen: (open) => set({ open }),
-  toggle: () => set((s) => ({ open: !s.open })),
   selection: new Set(),
   toggleSelect: (id) =>
     set((s) => {
@@ -94,9 +78,6 @@ export const nexusStore: StoreApi<NexusState> = createStore<NexusState>((set) =>
   clearSelection: () => set({ selection: new Set() }),
   triage: false,
   setTriage: (triage) => set({ triage }),
-  triageAsked: false,
-  askTriage: () => set({ open: true, triageAsked: true }),
-  settleTriageAsk: (needs) => set({ triageAsked: false, triage: needs > 0 }),
   log: [],
   appendLog: (events) =>
     set((s) => {

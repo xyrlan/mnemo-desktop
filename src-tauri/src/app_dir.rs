@@ -2,8 +2,8 @@
 //! build (issue #168). A `pnpm tauri dev` run beside the installed app, with the same `HOME`,
 //! must not restore the installed app's workspace (and with it `claude --resume` every live
 //! session), write over it, or take its MCP socket. Everything the app writes as its own —
-//! workspace, settings, usage, looked, vault level, marketplace, MCP socket and registration,
-//! shell integration — goes through `app_dir`.
+//! workspace, settings, usage, looked, vault level, MCP socket and registration, shell
+//! integration — goes through `app_dir`.
 //!
 //! Downloads the user would not want twice stay under the release dir for both builds (see
 //! `shared_dir`): managed tools, whose dir the user's shell rc puts on `PATH`, and voice

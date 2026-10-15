@@ -52,22 +52,19 @@ describe('voice view', () => {
     expect(title).toMatch(/hold (⌥Space|Alt\+Space)/)
   })
 
-  it('offers each dictation language by name; a first run starts on the system language, unsaved', async () => {
+  it('a first run starts on the system language, unsaved; a language chosen is told and saved', async () => {
     // jsdom's navigator.languages is ['en-US'].
     expect(navigator.languages[0]).toMatch(/^en/)
-    const titles = () => all().filter((a) => a.id.startsWith('voice.language.')).map((a) => a.title)
-    expect(titles()).toEqual([
-      'Dictation language: Portuguese',
-      'Dictation language: English (current)',
-      'Dictation language: any (detected per take)',
-    ])
+    // No palette action for it any more: the Settings window chooses it.
+    expect(all().filter((a) => a.id.startsWith('voice.language.'))).toEqual([])
     await vi.waitFor(() => expect(languages).toEqual(['en']))
     expect(localStorage.getItem('mnemo.voice.language')).toBeNull()
 
-    run('voice.language.pt')
-    await vi.waitFor(() => expect(languages).toEqual(['en', 'pt']))
+    const { chooseLanguage, languageStore } = await import('./language')
+    await chooseLanguage('pt')
+    expect(languages).toEqual(['en', 'pt'])
     expect(localStorage.getItem('mnemo.voice.language')).toBe('pt')
-    await vi.waitFor(() => expect(titles()[0]).toBe('Dictation language: Portuguese (current)'))
+    expect(languageStore.getState().language).toBe('pt')
   })
 
   it('mounts the indicator in the overlay slot', () => {

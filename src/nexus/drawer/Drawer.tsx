@@ -3,7 +3,6 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
 import { EyeOff, X } from 'lucide-react'
 import type { ConversationViewProps } from '../../conversation/ConversationView'
-import { STATUS_BAR } from '../../shell/edges'
 import type { ChangedFile, DiffClient } from '../../diff/client'
 import type { AgentState, RepoNode } from '../../fleet/types'
 import type { PaneViewProps } from '../../panes/registry'
@@ -22,16 +21,15 @@ import { clampWidth, saveWidth, shownWidth } from './width'
  *  (the drawer shows terminals only: spec `2026-10-15-nexus-app-design.md`). A session with none to
  *  borrow shows its conversation read-only.
  *
- *  The drawer stays mounted while it has tabs, also collapsed and while the Nexus is closed, hidden
- *  with `display: none`: a terminal view that is hidden that way hands its session to one on screen
+ *  The drawer stays mounted while it has tabs, also collapsed, hidden with `display: none`: a terminal view that is hidden that way hands its session to one on screen
  *  and keeps drawing what it is fed, and one shown again takes the session back (`props.active`). */
 
 export type DrawerDeps = {
   drawer: Drawer
   host: SessionHost
   /** The layout store (`src/layout/store.ts`): its owners say whether a tab's view owns its
-   *  session. (`panes` is read by nothing since *open as tab* went; wave 2b drops it.) */
-  owners: StoreApi<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>
+   *  session. */
+  owners: StoreApi<{ owners: Record<number, { name?: string } | undefined> }>
   /** Draws a terminal: the terminal pane view (`src/terminal/view.tsx`) in the app. */
   terminal: ComponentType<PaneViewProps>
   /** Draws a conversation read-only (`src/conversation/ConversationView.tsx` with no agent). */
@@ -52,8 +50,6 @@ export type NexusDrawerProps = {
   feed: Feed | null
   /** The fleet's repos: a robot's breadcrumbs name its own. */
   repos: readonly RepoNode[]
-  /** The Nexus is open. */
-  shown: boolean
   /** Opens a figure in the drawer (a breadcrumb). */
   onOpen(id: string): void
 }
@@ -74,7 +70,7 @@ export function useShownWidth(): number {
   return shownWidth(chosen, vw)
 }
 
-export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDrawerProps) {
+export function NexusDrawer({ deps, ship, feed, repos, onOpen }: NexusDrawerProps) {
   const tabs = useNexus((s) => s.tabs)
   const activeTab = useNexus((s) => s.activeTab)
   const collapsed = useNexus((s) => s.collapsed)
@@ -82,7 +78,7 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
   const [diff, setDiff] = useState<DiffAsk | null>(null)
   const closeDiff = useCallback(() => setDiff(null), [])
   const root = useRef<HTMLElement>(null)
-  const open = shown && tabs.length > 0 && !collapsed
+  const open = tabs.length > 0 && !collapsed
   const active = tabs.find((t) => t.id === activeTab) ?? null
   const activeSession = useStore(deps.host, (h) => (active?.key ? h.sessions[active.key] : undefined))
 
@@ -93,11 +89,11 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
     if (!open && root.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
   }, [open])
 
-  // ⌘\ toggles it while the Nexus is open, from anywhere in it, a tab's terminal too. Esc closes the
+  // ⌘\ toggles it from anywhere in the Nexus, a tab's terminal too. Esc closes the
   // quick diff first; with none open, the view's Esc (`NexusView`) collapses the drawer.
   const diffOpen = diff !== null
   useEffect(() => {
-    if (!shown || !tabs.length) return
+    if (!tabs.length) return
     const onKey = (e: KeyboardEvent) => {
       if (isToggleKey(e)) deps.drawer.toggle()
       else if (e.key === 'Escape' && diffOpen) setDiff(null)
@@ -107,7 +103,7 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
-  }, [deps.drawer, shown, tabs.length, diffOpen])
+  }, [deps.drawer, tabs.length, diffOpen])
 
   if (!tabs.length) return null
   return (
@@ -119,7 +115,7 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
         data-session-pty={activeSession?.pty ?? ''}
         aria-label="Sessions"
         className="fixed right-0 z-drawer flex-col border-l border-border bg-card text-card-foreground shadow-[-6px_0_16px_rgba(0,0,0,0.18)]"
-        style={{ display: open ? 'flex' : 'none', top: 0, bottom: STATUS_BAR, width }}
+        style={{ display: open ? 'flex' : 'none', top: 0, bottom: 0, width }}
       >
         <ResizeEdge width={width} />
         {/* As tall as the ship's bar beside it (`.ship-top`, 44 px): the Nexus takes the whole window
@@ -150,7 +146,7 @@ export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDra
           ))}
         </div>
       </aside>
-      {shown && collapsed && (
+      {collapsed && (
         <button
           type="button"
           data-drawer-handle=""
