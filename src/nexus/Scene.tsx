@@ -175,7 +175,7 @@ function NexusView({ spot, scale, arriving, onArrived, touch }: { spot: NexusSpo
   const { nexus } = spot
   return (
     <>
-      <span className="nexus-orbit" style={at(square(spot.x, spot.y, spot.r * 2))} aria-hidden />
+      {spot.robots.length > 0 && <span className="nexus-orbit" style={at(square(spot.x, spot.y, spot.r * 2))} aria-hidden />}
       <button
         type="button"
         className="nexus-core"
