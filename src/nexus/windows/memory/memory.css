@@ -4,7 +4,9 @@
 .nx-mem { display: flex; flex-direction: column; gap: 8px; height: min(calc(100vh - 140px), 760px); min-height: 0; }
 .nx-mem-head { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 10px; }
 .nx-mem-body { display: flex; flex: 1; flex-direction: column; gap: 6px; min-height: 0; }
-.nx-mem-root { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-mem-vault { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; margin-left: auto; }
+.nx-mem-root { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-mem-level { flex: none; color: var(--nx-ink); font-variant-numeric: tabular-nums; }
 .nx-mem-grow { flex: 1; min-width: 0; }
 .nx-mem-end { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .nx-mem-name { display: block; overflow: hidden; color: var(--nx-ink); text-overflow: ellipsis; white-space: nowrap; }

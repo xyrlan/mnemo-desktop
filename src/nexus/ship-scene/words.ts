@@ -124,7 +124,7 @@ const issueOf = (r: ShipRobot) => r.label.replace(/·[a-z]$/, '')
 export type Tone = 'red' | 'lilac' | 'calm'
 
 /** Red for a question (a child's or a captain's) or a red CI, lilac when only a merge (or a
- *  landing, or a stranded child) waits, calm when nothing does. */
+ *  landing, a stranded child, a read that failed) waits, calm when nothing does. */
 export function toneOf(ship: Ship): Tone {
   const x = ship.bridge.exceptions
   if (ship.bridge.blocked.length || x.some((e) => e.kind === 'need' || e.kind === 'captain' || e.kind === 'red')) return 'red'
@@ -137,8 +137,9 @@ export function bridgeStatus(ship: Ship): string {
 }
 
 export type RowButton = { label: string; go?: boolean } & ({ action: ShipAction } | { open: string } | { triage: true })
-/** `robotId` / `captainId`: the figure the row is about, which a click on it opens. */
-export type Row = { key: string; kind: Exception['kind']; robotId: string | null; captainId?: string; icon: string; text: string; buttons: RowButton[] }
+/** `robotId` / `captainId`: the figure the row is about, which a click on it opens. `title`: the
+ *  text's hover, when there is more to it. */
+export type Row = { key: string; kind: Exception['kind']; robotId: string | null; captainId?: string; icon: string; text: string; title?: string; buttons: RowButton[] }
 
 /** What a waiting captain waits on, as its bridge row and triage card say it. */
 export function captainWait(x: Extract<Exception, { kind: 'captain' }>): string {
@@ -213,7 +214,17 @@ export function exceptionRow(x: Exception): Row {
           { label: 'stop', action: { kind: 'stop', robotIds: [x.robotId] } },
         ],
       }
+    case 'snapshot':
+      // Nothing to press: the text says what to do, and the row leaves once the read succeeds.
+      return { key: `snapshot:${x.text}`, kind: x.kind, robotId: null, icon: '⚠', text: x.text, title: x.detail, buttons: [] }
   }
+}
+
+/** What an empty ship says. With the sessions or the children unlisted, none is not known to be
+ *  none (#367): the bridge says what failed. */
+export function emptyText(ship: Ship): string {
+  const unlisted = ship.bridge.exceptions.some((x) => x.kind === 'snapshot' && (x.source === 'sessions' || x.source === 'children'))
+  return unlisted ? 'Sessions unknown: the bridge says what could not be read.' : 'No live sessions.'
 }
 
 export const LOG_ICON: Record<LogKind, string> = {

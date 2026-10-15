@@ -9,6 +9,9 @@ const t = vi.hoisted(() => ({
   /** What `vault_run` answers, by `mnemo` subcommand and first argument. */
   run: {} as Record<string, RunResult>,
   feed: null as unknown,
+  /** What `vault_level` answers, and the best xp `vault_level_best` has recorded. */
+  level: null as unknown,
+  best: 0,
   fleet: {
     repos: [
       { root: '/Users/you/code/mnemo-desktop', name: 'mnemo-desktop', worktrees: [] },
@@ -114,6 +117,11 @@ vi.mock('@tauri-apps/api/core', () => ({
         return HEALTH
       case 'vault_ego':
         return EGO
+      case 'vault_level':
+        return t.level
+      case 'vault_level_best':
+        t.best = Math.max(t.best, args!.xp as number)
+        return t.best
       case 'memory_feed':
         if (t.feed === null) throw 'no vault for this project'
         return t.feed
@@ -159,6 +167,8 @@ beforeEach(async () => {
   t.calls.length = 0
   t.run = { stale: { stdout: '', stderr: '', code: 0 }, inbox: { stdout: LISTING, stderr: '', code: 0 } }
   t.feed = FEED
+  t.level = { root: '/Users/you/vault', pages: 120, rules_fired: 30, fires: 72, fired_recent: 10, dormant: 4, label_only: 0, inbox: 2, error: null }
+  t.best = 0
   repoChoice.setState({ root: null })
   memoryTab.setState({ tab: 'activity' })
   vault.setState({ selected: null, page: null, filter: '', query: '', log: [], inboxSelected: null, inboxNotice: null, inboxAll: false, health: null })
@@ -353,4 +363,25 @@ test('a page opens in the system’s editor, its folder in the file manager, nev
   await click(button('Open folder', w))
   expect(opened()).toEqual([path, path.slice(0, path.lastIndexOf('/'))])
   expect(t.calls.some(([c]) => c === 'browser_create')).toBe(false)
+})
+
+test('the head shows the vault level, as the status bar did, with how far into the next on hover', async () => {
+  await open()
+  // 120 pages + 5 × 30 fired + 72 fires = 342 xp.
+  const lv = document.querySelector<HTMLElement>('[data-memory-window] [data-vault-level]')!
+  expect(lv.textContent).toBe('lv 3')
+  expect(lv.title).toBe('vault level 3 · 42/100 xp to level 4')
+  expect(t.calls.filter(([c]) => c === 'vault_level_best')[0][1]).toEqual({ xp: 342 })
+})
+
+test('the level never falls with the fire logs, and says no vault when there is none', async () => {
+  t.best = 510
+  await open()
+  expect(document.querySelector('[data-vault-level]')!.textContent).toBe('lv 5')
+  await act(async () => closeWindow())
+  t.level = { ...(t.level as object), error: 'no vault at ~/vault' }
+  await open()
+  const none = document.querySelector<HTMLElement>('[data-vault-level]')!
+  expect(none.dataset.vaultLevel).toBe('none')
+  expect(none.textContent).toBe('no vault')
 })
