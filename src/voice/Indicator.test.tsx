@@ -107,7 +107,7 @@ describe('dictation indicator', () => {
   it('says when the text had nowhere to land, and shows notes and errors', async () => {
     await draw()
     set({ kind: 'done', text: 'lost words', landed: false })
-    expect(status()).toBe('No text field focused')
+    expect(status()).toBe('Not typed: the field it was for is gone')
     expect(host.querySelector('p')?.textContent).toBe('lost words')
 
     set({ kind: 'note', text: 'no speech heard' })

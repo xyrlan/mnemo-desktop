@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // A plain recorder, not vi.fn(): the controller's rejections are strings.
 // Hoisted with the mocks: `./view` calls invoke as it is imported.
@@ -11,6 +15,9 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+// Where it types is `./target`'s (target.test.ts): here, a terminal, or nowhere.
+const where = vi.hoisted(() => ({ target: { kind: 'pty', pane: 7 } as { kind: 'pty'; pane: number } | null }))
+vi.mock('./target', () => ({ dictationTarget: () => where.target }))
 
 import { all, run } from '../actions/registry'
 import { slotEntries } from '../shell/slots'
@@ -24,6 +31,20 @@ describe('voice view', () => {
     expect(calls).not.toContain('voice_stop')
     run('dictation.toggle')
     await vi.waitFor(() => expect(calls).toContain('voice_stop'))
+  })
+
+  it('with nowhere to type, dictation.toggle says so and opens no microphone', async () => {
+    const Shown = slotEntries('overlay').find((e) => e.component.name === 'DictationIndicator')!.component
+    const host = document.body.appendChild(document.createElement('div'))
+    const root = createRoot(host)
+    act(() => root.render(<Shown />))
+    calls.length = 0
+    where.target = null
+    await act(async () => run('dictation.toggle'))
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="dictation-text"]')?.textContent ?? '').toMatch(/^Nowhere to dictate/))
+    expect(calls).not.toContain('voice_start')
+    where.target = { kind: 'pty', pane: 7 }
+    act(() => root.unmount())
   })
 
   it('names the hold chord where dictation is offered', () => {

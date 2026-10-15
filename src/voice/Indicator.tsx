@@ -38,7 +38,7 @@ function label(phase: Exclude<Phase, { kind: 'idle' }>, downloading: boolean): s
     case 'transcribing':
       return downloading ? 'Waiting for the model…' : 'Processing…'
     case 'done':
-      return phase.landed ? 'Dictated' : 'No text field focused'
+      return phase.landed ? 'Dictated' : 'Not typed: the field it was for is gone'
     case 'note':
       return phase.text
     case 'error':

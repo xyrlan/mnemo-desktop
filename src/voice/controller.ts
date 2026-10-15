@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { Language, Progress, VoiceClient } from './client'
-import type { Target } from './route'
+import { NOWHERE, type DictationTarget } from './route'
 
 /** What the indicator shows. `idle` hides it. */
 export type Phase =
@@ -23,7 +23,8 @@ export type VoiceState = {
 
 export type Voice = {
   store: StoreApi<VoiceState>
-  /** Opens a take (⌥Space's press). No-op while one is open. */
+  /** Opens a take (⌥Space's press). No-op while one is open; with nowhere to type, says so and
+   *  opens nothing. */
   begin(): void
   /** Closes the take, transcribes and inserts (⌥Space's release, the indicator's Stop). */
   end(): Promise<void>
@@ -39,8 +40,9 @@ export type Voice = {
 
 export type VoiceDeps = {
   client: VoiceClient
-  target(): Target
-  insert(target: Target, text: string): Promise<boolean>
+  /** Where the take's text goes, resolved as it begins; null: nowhere. */
+  target(): DictationTarget | null
+  insert(target: DictationTarget, text: string): Promise<boolean>
   /** How long a result stays on the indicator, in ms. */
   linger?: number
 }
@@ -58,7 +60,7 @@ export function createVoice(deps: VoiceDeps): Voice {
   }
 
   /** The open take: its target and whether the microphone actually opened. */
-  let take: { target: Target; opened: Promise<boolean>; ending: boolean } | null = null
+  let take: { target: DictationTarget; opened: Promise<boolean>; ending: boolean } | null = null
 
   async function open(): Promise<string | null> {
     try {
@@ -74,6 +76,8 @@ export function createVoice(deps: VoiceDeps): Voice {
   function begin() {
     if (take) return
     const target = deps.target()
+    // Nothing is recorded that could only be thrown away.
+    if (!target) return show({ kind: 'note', text: NOWHERE }, true)
     show({ kind: 'starting' })
     const t = { target, opened: Promise.resolve(false), ending: false }
     t.opened = open().then(
