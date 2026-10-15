@@ -10,7 +10,6 @@ import { tauriSession, useSessionLearn, type SessionClient } from './session'
 import { pulseStore, usePulse } from '../pulse/app-store'
 import type { Pulse } from '../pulse/store'
 import { openRule } from '../pulse/open'
-import Overlay from '../pulse/Overlay'
 import DropZoneOverlay from './DropZoneOverlay'
 import { PaneAccount } from '../accounts/PaneAccount'
 import './chrome.css'
@@ -172,7 +171,6 @@ export default function PaneBar({ id, client = tauriChrome, sessions = tauriSess
           <X aria-hidden />
         </button>
       </div>
-      <Overlay pane={id} />
       <DropZoneOverlay pane={id} />
     </>
   )
