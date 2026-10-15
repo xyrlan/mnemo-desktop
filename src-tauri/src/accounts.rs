@@ -118,11 +118,38 @@ pub struct PaneAccount {
 }
 
 /// Every read-modify-write of the files here: the commands, the startup sync and a spawn's read
-/// may run at once.
+/// may run at once. Never held across `share`'s moves: a spawn, the list and a switch take it on
+/// the main thread (#407).
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The work on the account folders that moves things: one `share`, or the startup `sync`, at a
+/// time. Taken before `LOCK`, never while holding it.
+static MOVING: Mutex<()> = Mutex::new(());
+
+fn moving() -> std::sync::MutexGuard<'static, ()> {
+    MOVING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The folder `share` is moving things in, set and cleared under `LOCK`: `remove` refuses its
+/// account meanwhile, so its id, and with it its folder, cannot go to an account added meanwhile.
+static SHARING: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn sharing() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
+    SHARING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Clears `SHARING` when the share ends, however it ends.
+struct Sharing;
+
+impl Drop for Sharing {
+    fn drop(&mut self) {
+        let _g = lock();
+        *sharing() = None;
+    }
 }
 
 /// What the last `bring_in_step` of each account, by config dir, could not do, in sentences:
@@ -288,8 +315,11 @@ impl Place {
     }
 
     pub fn state(&self) -> Result<AccountsState, String> {
-        let _g = lock();
-        Ok(self.state_of(&self.load()?))
+        let list = {
+            let _g = lock();
+            self.load()?
+        };
+        Ok(self.state_of(&list))
     }
 
     pub fn switch(&self, id: &str) -> Result<AccountsState, String> {
@@ -361,6 +391,9 @@ impl Place {
         if list.accounts[i].is_default {
             return Err("the default account cannot be removed".into());
         }
+        if sharing().as_ref() == Some(&list.accounts[i].config_dir) {
+            return Err(format!("{} is being shared with the default account: remove it once that ends.", list.accounts[i].label));
+        }
         list.accounts.remove(i);
         if list.active == id {
             list.active = list.accounts[0].id.clone();
@@ -374,13 +407,23 @@ impl Place {
     /// `~/.claude` lacks moves there, `history.jsonl`'s lines it lacks are added to it, and a
     /// copy equal to its own goes. Whatever differs from the default account's stays aside,
     /// and `kept` says where. An entry that cannot be linked is put back as it was.
+    ///
+    /// `LOCK` is held only to read the list: the moves can take long, and a spawn, the list and a
+    /// switch would wait on them (#407). Shares run one at a time (`MOVING`), and the account
+    /// cannot be removed until this one ends (`SHARING`).
     pub fn share(&self, id: &str) -> Result<Shared, String> {
-        let _g = lock();
-        let list = self.load()?;
-        let e = list.accounts.iter().find(|e| e.id == id).ok_or_else(|| format!("no account `{id}`"))?;
-        if e.is_default {
-            return Err("the default account is what the others share".into());
-        }
+        let _m = moving();
+        let (e, _sharing) = {
+            let _g = lock();
+            let list = self.load()?;
+            let e = list.accounts.into_iter().find(|e| e.id == id).ok_or_else(|| format!("no account `{id}`"))?;
+            if e.is_default {
+                return Err("the default account is what the others share".into());
+            }
+            *sharing() = Some(e.config_dir.clone());
+            (e, Sharing)
+        };
+        let e = &e;
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let aside_dir = e.config_dir.join(ASIDE).join(stamp.to_string());
         let (own, _) = self.drifted(e);
@@ -413,12 +456,19 @@ impl Place {
             let also = if kept.is_empty() { String::new() } else { format!(" Kept apart: {}.", kept.join(", ")) };
             return Err(format!("{}{also}", not_linked(&failed)));
         }
+        // The list as it is now: a switch or a rename may have come meanwhile.
+        let list = {
+            let _g = lock();
+            self.load()?
+        };
         Ok(Shared { state: self.state_of(&list), kept })
     }
 
     /// At startup: every account's missing links made and its `mcpServers` brought in step.
     /// Entries that are an account's own are left alone and reported (`problem`).
     pub fn sync(&self) -> Result<AccountsState, String> {
+        // Never beside a share: an entry it has moved aside and not linked yet reads as missing.
+        let _m = moving();
         let _g = lock();
         let list = self.load()?;
         for e in list.accounts.iter().filter(|e| !e.is_default) {
@@ -1180,6 +1230,179 @@ mod tests {
         assert_eq!(p.share("work").unwrap().kept, Vec::<String>::new());
         assert!(p.share("default").is_err());
         assert!(p.share("nope").is_err());
+    }
+
+    /// Holds a share at its first link, the middle of its file work, until the test opens it
+    /// (#407). `Link` is a plain `fn`, so each test that holds a share has a gate of its own.
+    struct Gate {
+        /// Whether a share has reached it, and whether it is open.
+        at: Mutex<(bool, bool)>,
+        moved: std::sync::Condvar,
+    }
+
+    impl Gate {
+        const fn new() -> Self {
+            Self { at: Mutex::new((false, false)), moved: std::sync::Condvar::new() }
+        }
+
+        fn pass(&self) {
+            let mut at = self.at.lock().unwrap();
+            at.0 = true;
+            self.moved.notify_all();
+            while !at.1 {
+                at = self.moved.wait(at).unwrap();
+            }
+        }
+
+        /// Whether a share reached the gate, waiting for it a while.
+        fn reached(&self) -> bool {
+            let at = self.at.lock().unwrap();
+            self.moved.wait_timeout_while(at, std::time::Duration::from_secs(60), |at| !at.0).unwrap().0.0
+        }
+
+        fn open(&self) {
+            self.at.lock().unwrap().1 = true;
+            self.moved.notify_all();
+        }
+    }
+
+    /// Opens the gate when the test ends, passed or not, so a held share never outlives it.
+    struct Opens(&'static Gate);
+
+    impl Drop for Opens {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+
+    /// What `f` answers from another thread, or `None` when it has not answered in 10 s. A call
+    /// that waits for a held share never answers until the gate opens.
+    fn promptly<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(10)).ok()
+    }
+
+    static HELD: Gate = Gate::new();
+
+    fn held(target: &Path, at: &Path, kind: Kind) -> std::io::Result<()> {
+        HELD.pass();
+        link(target, at, kind)
+    }
+
+    #[test]
+    fn a_share_at_work_keeps_no_new_pane_list_or_switch_waiting() {
+        let (p, dir) = never_linked("share-held");
+        let _opens = Opens(&HELD);
+        let sharing = {
+            let p = p.clone().linking(held);
+            std::thread::spawn(move || p.share("work"))
+        };
+        assert!(HELD.reached(), "the share never reached its first link");
+
+        let q = p.clone();
+        let pane = promptly(move || q.for_new_pane()).expect("a new pane waited for the share");
+        assert_eq!(pane, PaneAccount { id: "default".into(), config_dir: None });
+        let q = p.clone();
+        let s = promptly(move || q.state()).expect("the list waited for the share").unwrap();
+        assert_eq!(s.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["default", "work"]);
+        let q = p.clone();
+        assert_eq!(promptly(move || q.switch("work")).expect("switching waited for the share").unwrap().active, "work");
+        let q = p.clone();
+        let pane = promptly(move || q.for_new_pane()).expect("a new pane waited for the share");
+        assert_eq!(pane, PaneAccount { id: "work".into(), config_dir: Some(dir.clone()) }, "the switch holds for the next pane");
+
+        HELD.open();
+        let shared = sharing.join().unwrap().unwrap();
+        assert_eq!(shared.state.active, "work", "the share answers the list as the switch left it");
+        assert_eq!((shared.state.accounts[1].problem.as_deref(), shared.state.accounts[1].unshared.len()), (None, 0));
+        assert!(same_place(&std::fs::read_link(dir.join("projects")).unwrap(), &p.home.join(".claude/projects")));
+    }
+
+    static HELD_RACE: Gate = Gate::new();
+
+    fn held_race(target: &Path, at: &Path, kind: Kind) -> std::io::Result<()> {
+        HELD_RACE.pass();
+        link(target, at, kind)
+    }
+
+    #[test]
+    fn a_share_raced_by_a_remove_a_rename_and_a_second_share_ends_as_the_disk_is() {
+        let (p, dir) = never_linked("share-race");
+        let default = p.home.join(".claude");
+        let _opens = Opens(&HELD_RACE);
+        let first = {
+            let p = p.clone().linking(held_race);
+            std::thread::spawn(move || p.share("work"))
+        };
+        assert!(HELD_RACE.reached(), "the share never reached its first link");
+
+        // Removing it while its folder is moving is refused, and says why.
+        let q = p.clone();
+        let err = promptly(move || q.remove("work")).expect("removing waited for the share").unwrap_err();
+        assert_eq!(err, "Work is being shared with the default account: remove it once that ends.");
+        // A rename touches only the list.
+        let q = p.clone();
+        promptly(move || q.rename("work", "Job")).expect("renaming waited for the share").unwrap();
+        // A second share of it waits for the first, and finds nothing left to put back.
+        let second = {
+            let p = p.clone();
+            std::thread::spawn(move || p.share("work"))
+        };
+
+        HELD_RACE.open();
+        let first = first.join().unwrap().unwrap();
+        let second = second.join().unwrap().unwrap();
+        assert_eq!(second.kept, Vec::<String>::new());
+        for s in [&first.state, &second.state] {
+            assert_eq!(s.accounts.iter().map(|a| (a.id.as_str(), a.label.as_str())).collect::<Vec<_>>(), [("default", "Default"), ("work", "Job")]);
+            assert_eq!((s.accounts[1].problem.as_deref(), s.accounts[1].unshared.len()), (None, 0));
+        }
+        // What they answered is what is on disk: each entry that was its own is the link now.
+        for name in ["projects", "history.jsonl", "settings.json", "CLAUDE.md", "skills"] {
+            assert!(same_place(&std::fs::read_link(dir.join(name)).unwrap(), &default.join(name)), "{name} is not the link");
+        }
+        assert_eq!(read_json(&default.join("projects/-other/s3.jsonl")), json!({ "of": "work" }));
+
+        // Once the share has ended it can go, its folder staying on disk.
+        let s = p.remove("work").unwrap();
+        assert_eq!(s.accounts.len(), 1);
+        assert!(dir.is_dir());
+    }
+
+    static HELD_SYNC: Gate = Gate::new();
+
+    fn held_sync(target: &Path, at: &Path, kind: Kind) -> std::io::Result<()> {
+        HELD_SYNC.pass();
+        link(target, at, kind)
+    }
+
+    /// The startup sync links what an account lacks: beside a share, that would be the entry the
+    /// share has just moved aside, and the share's own link would then fail.
+    #[test]
+    fn the_startup_sync_waits_for_a_share_at_work() {
+        let (p, dir) = never_linked("share-sync");
+        let _opens = Opens(&HELD_SYNC);
+        let sharing = {
+            let p = p.clone().linking(held_sync);
+            std::thread::spawn(move || p.share("work"))
+        };
+        assert!(HELD_SYNC.reached(), "the share never reached its first link");
+        let syncing = {
+            let p = p.clone();
+            std::thread::spawn(move || p.sync())
+        };
+        // Long enough for a sync that does not wait to have linked `projects`.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        HELD_SYNC.open();
+        let shared = sharing.join().unwrap().unwrap();
+        assert_eq!(shared.state.accounts[1].unshared, Vec::<String>::new());
+        assert_eq!(syncing.join().unwrap().unwrap().accounts[1].problem, None);
+        assert!(same_place(&std::fs::read_link(dir.join("projects")).unwrap(), &p.home.join(".claude/projects")));
+        assert_eq!(read_json(&p.home.join(".claude/projects/-other/s3.jsonl")), json!({ "of": "work" }));
     }
 
     #[test]
