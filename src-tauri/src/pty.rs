@@ -408,7 +408,7 @@ impl PtyManager {
         match self.via()? {
             Via::Here(h) => h.write(id, data),
             #[cfg(unix)]
-            Via::Daemon(c) => c.tell(Op::Write { id }, data),
+            Via::Daemon(c) => c.write(id, data),
         }
     }
 
@@ -1242,14 +1242,50 @@ mod tests {
         drop(rx);
         let second = app(&socket);
         second.list().unwrap();
-        // Typed by nobody: end it from the daemon's side.
+        // Typed by nobody: end it from the daemon's side. An app types only into what it hears.
         let third = app(&socket);
+        let (sink, _) = recorder();
+        third.attach(id, sink).unwrap();
         third.write(id, b"\n").unwrap();
         eventually("the exit", || second.list().unwrap().first().is_some_and(|i| !i.alive));
         let (sink, _) = recorder();
         assert!(second.attach(id, sink).unwrap_err().contains("exited"));
         second.kill(id);
         assert!(second.list().unwrap().is_empty());
+    }
+
+    /// #405: what is typed, pasted or dictated into a pane whose shell ended, or into no pane,
+    /// fails through the daemon as it does in process (`write_after_exit_is_error`).
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_the_daemon_to_a_shell_that_exited_or_to_no_pane_fails() {
+        let (socket, _srv, _) = daemon("wexit");
+        let m = app(&socket);
+        let (id, rx) = sh(&m, "exit 3");
+        assert_eq!(collect(&rx).1, Some(Some(3)));
+        let err = m.write(id, b"x").unwrap_err();
+        assert_eq!(err, format!("pane {id} has exited"));
+        assert_eq!(m.write(999_999, b"x").unwrap_err(), "pane 999999 not found");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_the_daemon_reaches_a_live_shell() {
+        let (socket, _srv, _) = daemon("wlive");
+        let m = app(&socket);
+        let (id, rx) = sh(&m, "read x; printf 'got:%s' \"$x\"; exit 0");
+        m.write(id, b"abc\n").unwrap();
+        let (out, exit) = collect(&rx);
+        assert!(String::from_utf8_lossy(&out).contains("got:abc"), "{out:?}");
+        assert_eq!(exit, Some(Some(0)));
+        // A shell the app attached to after it started takes what is typed too.
+        let (id, _) = sh(&m, "read x; printf 'then:%s' \"$x\"; read y");
+        let second = app(&socket);
+        let (sink, rx2) = recorder();
+        second.attach(id, sink).unwrap();
+        second.write(id, b"def\n").unwrap();
+        assert!(until(&rx2, "then:def").contains("then:def"));
+        second.kill(id);
     }
 
     #[cfg(unix)]

@@ -48,7 +48,8 @@ pub struct Spec {
     pub cols: u16,
 }
 
-/// App → daemon. `Write` carries its bytes as the payload and gets no reply.
+/// App → daemon. `Write` carries its bytes as the payload and gets no reply: the app sends it
+/// only to a terminal whose output it hears and whose exit it has not (`client.rs`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Op {
