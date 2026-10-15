@@ -1,14 +1,15 @@
 /** Onboarding's first step: the four programs the app runs (`src/setup/`), found or missing,
- *  with a click that installs each missing one. mnemo installs here; git, gh and Claude Code
- *  install in a terminal tab, and the dialog steps aside until the user leaves it. */
+ *  with a click that installs each missing one, and one that updates the mnemo the app installed
+ *  when a newer release is out. mnemo installs here; git, gh and Claude Code install in a
+ *  terminal tab, and the dialog steps aside until the user leaves it. */
 import { CheckCircle2, CircleDashed, Loader2, XCircle } from 'lucide-react'
 import { Badge, Button, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui'
 import { cn } from '@/ui/cn'
 import { store } from '../layout/app-store'
 import { ghInstall } from '../github/actions'
-import { setup, useSetup } from '../setup/app-store'
+import { checkAgain, setup, useLookForUpdate, useSetup } from '../setup/app-store'
 import type { Run } from '../setup/store'
-import { ESSENTIAL, TOOLS, WHAT, currentOs, installRoute, needsSetup, type Route, type ToolName, type ToolStatus } from '../setup/tools'
+import { ESSENTIAL, TOOLS, WHAT, currentOs, installRoute, needsSetup, newerMnemo, UPDATE_HINT, type Route, type ToolName, type ToolStatus } from '../setup/tools'
 import { onboarding } from './app-store'
 
 /** Opens `route` in a terminal tab, with the dialog out of the way until the user leaves it. */
@@ -26,12 +27,12 @@ function route(name: Exclude<ToolName, 'mnemo'>): Route {
 /** What a missing tool's button says. */
 const LABEL: Record<ToolName, string> = { git: 'Install git', claude: 'Install Claude Code', mnemo: 'Install mnemo', gh: 'Install gh' }
 
-function Output({ run }: { run: Run }) {
+function Output({ run, head }: { run: Run; head: string }) {
   if (!run.running && !run.lines.length && !run.ok && !run.error) return null
   return (
     <div className="mt-2 rounded-md border border-border bg-background/60 px-2.5 py-2 text-xs" data-run>
       <div className={cn('font-medium', run.error ? 'text-destructive' : run.ok ? 'text-state-done' : 'text-muted-foreground')}>
-        {run.error ? 'installing mnemo failed' : (run.ok ?? 'installing mnemo…')}
+        {run.error ? `${head} failed` : (run.ok ?? `${head}…`)}
       </div>
       {run.lines.length > 0 && (
         <pre className="mt-1 max-h-24 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
@@ -51,9 +52,24 @@ function Mark({ found, essential }: { found: boolean; essential: boolean }) {
 
 function Tool({ name, row }: { name: ToolName; row: ToolStatus | undefined }) {
   const mnemo = useSetup((s) => s.mnemo)
+  const latest = useSetup((s) => s.latest)
   const path = row?.path ?? null
   const essential = ESSENTIAL.includes(name)
   const r = name === 'mnemo' ? null : route(name)
+  // Only the mnemo the app installed is ever offered a newer release.
+  const ours = name === 'mnemo' && !!path && !!row?.managed
+  const update = ours && newerMnemo(row!.version, latest.tag) ? latest.tag : null
+  const said = !ours
+    ? null
+    : latest.error
+      ? `could not look for a newer mnemo: ${latest.error}`
+      : update
+        ? `${update} is out: ${UPDATE_HINT}`
+        : latest.tag
+          ? 'the latest release'
+          : latest.asking
+            ? 'looking for a newer release…'
+            : null
   return (
     <li
       className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2.5"
@@ -86,8 +102,19 @@ function Tool({ name, row }: { name: ToolName; row: ToolStatus | undefined }) {
             )}
           </div>
         )}
-        {name === 'mnemo' && <Output run={mnemo} />}
+        {said && (
+          <div className="mt-1 text-[11px] break-words text-muted-foreground" data-latest>
+            {said}
+          </div>
+        )}
+        {name === 'mnemo' && <Output run={mnemo} head={path ? 'updating mnemo' : 'installing mnemo'} />}
       </div>
+      {update && (
+        <Button size="sm" disabled={mnemo.running} onClick={() => void setup.getState().installMnemo()}>
+          {mnemo.running && <Loader2 className="animate-spin" />}
+          {mnemo.running ? 'Updating…' : `Update to ${update}`}
+        </Button>
+      )}
       {!path &&
         (r ? (
           <Button size="sm" variant="outline" onClick={() => inTab(r)}>
@@ -117,6 +144,7 @@ export function SetupStep({ onContinue }: { onContinue(): void }) {
   const statusError = useSetup((s) => s.statusError)
   const path = useSetup((s) => s.path)
   const ready = !!rows && !needsSetup(rows)
+  useLookForUpdate()
   return (
     <>
       <DialogHeader>
@@ -150,7 +178,7 @@ export function SetupStep({ onContinue }: { onContinue(): void }) {
         </Button>
       </div>
       <DialogFooter>
-        <Button variant="outline" disabled={checking} onClick={() => void setup.getState().check()}>
+        <Button variant="outline" disabled={checking} onClick={() => void checkAgain()}>
           {checking && <Loader2 className="animate-spin" />}
           {checking ? 'Checking…' : 'Check again'}
         </Button>

@@ -12,6 +12,8 @@ export interface SetupClient {
   /** Installs the latest mnemo release into the app's own directory, then `mnemo init`.
    *  Resolves with the installed tag; rejects with what failed. */
   installMnemo(): Promise<string>
+  /** The latest mnemo release's tag, when this system has a build of it; rejects with why not. */
+  latestMnemo(): Promise<string>
   /** Puts the app's tool directories on the user's own PATH; resolves with what changed. */
   addToPath(): Promise<string>
   /** Subscribes to `tools-install` lines; resolves with the unsubscribe once listening. */
@@ -22,6 +24,7 @@ export function makeSetupClient(invoke: Invoke, listen: Listen): SetupClient {
   return {
     status: () => invoke<ToolStatus[]>('tools_status'),
     installMnemo: () => invoke<string>('tools_install_mnemo'),
+    latestMnemo: () => invoke<string>('tools_mnemo_latest'),
     addToPath: () => invoke<string>('tools_add_to_path'),
     onInstallLine: (cb) => listen<InstallLine>('tools-install', (e) => cb(e.payload)),
   }

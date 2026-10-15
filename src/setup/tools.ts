@@ -35,6 +35,30 @@ export const currentOs = (): Os => osOf(typeof navigator === 'undefined' ? '' : 
 
 export const found = (rows: ToolStatus[], name: ToolName) => rows.find((r) => r.name === name)?.path ?? null
 
+/** `1.10.0` from `mnemo 1.10.0` (`--version`'s first line) or from `v1.10.0` (a release tag):
+ *  the last X.Y.Z it ends with, as numbers. Null for anything else, a prerelease suffix included. */
+function numbers(s: string): [number, number, number] | null {
+  const m = /(?:^|[\sv])(\d+)\.(\d+)\.(\d+)$/.exec(s.trim())
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+/** Whether release `tag` is later than the installed mnemo (its `--version` line). A version
+ *  either side cannot read is not newer: Setup offers nothing rather than something wrong. The
+ *  same rule as the app's own release check (`src-tauri/src/newer_release.rs`, `newer`). */
+export function newerMnemo(installed: string | null, tag: string | null): boolean {
+  const [i, t] = [installed && numbers(installed), tag && numbers(tag)]
+  if (!i || !t) return false
+  const d = t.findIndex((n, k) => n !== i[k])
+  return d >= 0 && t[d] > i[d]
+}
+
+/** The mnemo found is the one the app installed: the only one Setup ever offers to update. */
+export const managedMnemo = (rows: ToolStatus[] | null) => !!rows?.some((r) => r.name === 'mnemo' && r.path && r.managed)
+
+/** What an Update button does, said beside it on both setup screens. */
+export const UPDATE_HINT =
+  "downloads it into the app's own folder, checks it, swaps it in whole, then refreshes mnemo's hooks; the mnemo you have stays if anything fails before the swap"
+
 /** Setup opens by itself when `claude` or `mnemo` is missing; a row `tools_status` left out
  *  counts as missing. */
 export const needsSetup = (rows: ToolStatus[]) => ESSENTIAL.some((n) => !found(rows, n))
