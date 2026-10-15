@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VoiceClient } from './client'
 import { createVoice, firstLanguage, LANGUAGES, type VoiceDeps } from './controller'
-import type { Target } from './route'
+import { insert, type Target } from './route'
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -95,6 +95,21 @@ describe('voice controller', () => {
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(2))
     expect(client.stop).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(phase()).toEqual({ kind: 'listening', device: null }))
+  })
+
+  it('a pane whose shell exited shows why the dictation did not land, not "Dictated" (#405)', async () => {
+    // The app rejects `pty_write` with the host's reason (src-tauri/src/pty/client.rs).
+    const writePty = vi.fn(async (pane: number) => Promise.reject(`pane ${pane} has exited`))
+    const voice = createVoice({
+      client: setup().client,
+      target: () => PTY,
+      insert: (target, text) => insert(target, text, { writePty, typeInMonaco: async () => true }),
+      linger: 2000,
+    })
+    voice.begin()
+    await voice.end()
+    expect(writePty).toHaveBeenCalledWith(1, 'hello world')
+    expect(voice.store.getState().phase).toEqual({ kind: 'error', message: 'pane 1 has exited' })
   })
 
   it('reports silence and failures without inserting', async () => {

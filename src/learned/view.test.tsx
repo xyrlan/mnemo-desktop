@@ -19,8 +19,8 @@ vi.mock('@tauri-apps/api/core', () => ({
       const stdout = t.answers[args!.step as string]?.shift()
       return stdout === undefined ? { stdout: '', stderr: 'no answer', code: 1 } : { stdout, stderr: '', code: 0 }
     }
-    if (cmd === 'install_review_run') return 'install-review:clubinho'
-    if (cmd === 'install_review_project') return (args!.cwd as string).startsWith('/r/clubinho') ? { project: 'clubinho', root: '/r/clubinho' } : null
+    if (cmd === 'install_review_run') return 'install-review:repo-a'
+    if (cmd === 'install_review_project') return (args!.cwd as string).startsWith('/r/repo-a') ? { project: 'repo-a', root: '/r/repo-a' } : null
     return null
   },
 }))
@@ -31,7 +31,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   },
 }))
 
-const T = { project: 'clubinho', root: '/r/clubinho' }
+const T = { project: 'repo-a', root: '/r/repo-a' }
 const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))))
 const click = (el: Element | null | undefined) => act(() => void (el as HTMLElement).click())
 const button = (el: Element, text: string | RegExp) =>
@@ -39,7 +39,7 @@ const button = (el: Element, text: string | RegExp) =>
 const emit = async (name: string, payload: unknown) => {
   await act(async () => (t.on[name] ?? []).forEach((h) => h({ payload })))
 }
-const line = (text: string) => emit('job-line', { id: 'install-review:clubinho', stream: 'out', line: text })
+const line = (text: string) => emit('job-line', { id: 'install-review:repo-a', stream: 'out', line: text })
 const called = (cmd: string) => t.calls.filter(([c]) => c === cmd).map(([, a]) => a)
 
 let host: HTMLDivElement
@@ -77,13 +77,13 @@ test('consent: the dry run\'s sessions and calls, and nothing runs before yes', 
   const { parseDryRun } = await import('./types')
   learned.getState().ask(T, parseDryRun(dryRun)!)
   await mount()
-  expect(host.textContent).toContain('mnemo can read your last 44 sessions in clubinho and learn from them. About 19 model calls on your Claude plan.')
+  expect(host.textContent).toContain('mnemo can read your last 44 sessions in repo-a and learn from them. About 19 model calls on your Claude plan.')
   expect(button(host, 'Read my history')).toBeTruthy()
   expect(called('install_review_run')).toEqual([])
   await click(button(host, 'Not now'))
   await flush()
   expect(called('install_review_run')).toEqual([])
-  expect(called('install_review_record')).toEqual([{ project: 'clubinho', decision: 'not-now' }])
+  expect(called('install_review_record')).toEqual([{ project: 'repo-a', decision: 'not-now' }])
   expect(host.textContent).toContain('Nothing was read.')
 })
 
@@ -95,7 +95,7 @@ test('running: the bars follow the progress lines, and closing the screen does n
   await mount()
   await click(button(host, 'Read my history'))
   await flush()
-  expect(called('install_review_run')).toEqual([{ project: 'clubinho', root: '/r/clubinho' }])
+  expect(called('install_review_run')).toEqual([{ project: 'repo-a', root: '/r/repo-a' }])
   const lines = progress.split('\n').filter(Boolean)
   await line(lines[1])
   const bars = () => [...host.querySelectorAll('[role="progressbar"]')].map((b) => [b.getAttribute('aria-label'), b.getAttribute('aria-valuenow')])
@@ -111,7 +111,7 @@ test('running: the bars follow the progress lines, and closing the screen does n
   act(() => root!.unmount())
   root = null
   await line(lines.at(-1)!)
-  await emit('job-exit', { id: 'install-review:clubinho', code: 0 })
+  await emit('job-exit', { id: 'install-review:repo-a', code: 0 })
   await flush()
   expect(learned.getState().phase.kind).toBe('review')
 
@@ -134,7 +134,7 @@ test('review: groups with counts, keep all/none, an expandable excerpt, and a fa
   await click(button(project, 'keep none'))
   expect(groups()[0]).toBe('Project facts0 of 2 keptkeep all')
   await click(button(project, 'keep all'))
-  const staging = host.querySelector('[data-key="project/clubinho__staging-db-is-shared"]')!
+  const staging = host.querySelector('[data-key="project/repo-a__staging-db-is-shared"]')!
   await act(() => void staging.querySelector<HTMLInputElement>('input')!.click())
   expect(groups()[0]).toBe('Project facts1 of 2 keptkeep all')
 
@@ -146,15 +146,15 @@ test('review: groups with counts, keep all/none, an expandable excerpt, and a fa
   await flush()
   const steps = called('install_review_step').slice(1)
   expect(steps).toEqual([
-    { step: 'promote', project: 'clubinho', root: '/r/clubinho', keys: ['project/clubinho__cron-annual-bloqueado-183', 'feedback/clubinho__answer-in-portuguese', 'reference/clubinho__asaas-sandbox', 'user/clubinho__runs-on-a-mac'] },
-    { step: 'drop', project: 'clubinho', root: '/r/clubinho', keys: ['project/clubinho__staging-db-is-shared'] },
+    { step: 'promote', project: 'repo-a', root: '/r/repo-a', keys: ['project/repo-a__cron-annual-bloqueado-183', 'feedback/repo-a__answer-in-portuguese', 'reference/repo-a__asaas-sandbox', 'user/repo-a__runs-on-a-mac'] },
+    { step: 'drop', project: 'repo-a', root: '/r/repo-a', keys: ['project/repo-a__staging-db-is-shared'] },
   ])
   expect(host.textContent).toContain('Kept 3, dropped 1.')
-  expect(host.querySelector('[data-failed="user/clubinho__runs-on-a-mac"]')?.textContent).toBe('user/clubinho__runs-on-a-mac not staged')
+  expect(host.querySelector('[data-failed="user/repo-a__runs-on-a-mac"]')?.textContent).toBe('user/repo-a__runs-on-a-mac not staged')
   expect(host.textContent).toContain('1 page was not decided and stays staged until 2026-10-08')
   const [row] = called('usage_log') as { row: Record<string, unknown> }[]
-  expect(row.row).toMatchObject({ event: 'install-review', project: 'clubinho', shown: 5, kept: 3, dropped: 1, failed: 1, skipped: false })
-  expect(called('install_review_record')).toEqual([{ project: 'clubinho', decision: 'kept' }])
+  expect(row.row).toMatchObject({ event: 'install-review', project: 'repo-a', shown: 5, kept: 3, dropped: 1, failed: 1, skipped: false })
+  expect(called('install_review_record')).toEqual([{ project: 'repo-a', decision: 'kept' }])
 })
 
 test('decide later: nothing decided, and the pages expire on the listing\'s date', async () => {
@@ -168,7 +168,7 @@ test('decide later: nothing decided, and the pages expire on the listing\'s date
   expect(host.textContent).toContain('Nothing decided. The pages stay staged until 2026-10-08, then expire')
   const [row] = called('usage_log') as { row: Record<string, unknown> }[]
   expect(row.row).toMatchObject({ shown: 5, kept: 0, dropped: 0, skipped: true })
-  expect(called('install_review_record')).toEqual([{ project: 'clubinho', decision: 'later' }])
+  expect(called('install_review_record')).toEqual([{ project: 'repo-a', decision: 'later' }])
 })
 
 test('the vault inbox opens the review of the repo it is in', async () => {
@@ -177,13 +177,13 @@ test('the vault inbox opens the review of the repo it is in', async () => {
   const { reviewWhatWasLearned } = await import('./open')
   const { store } = await import('../layout/app-store')
   const { learned } = await import('./app-store')
-  reviewWhatWasLearned('/r/clubinho/src')
+  reviewWhatWasLearned('/r/repo-a/src')
   await flush()
   const s = store.getState()
   expect(Object.values(s.panes).filter((p) => p.view === 'learned')).toHaveLength(1)
   expect(learned.getState()).toMatchObject({ target: T, phase: { kind: 'review' } })
   // A second open goes to the same pane.
-  reviewWhatWasLearned('/r/clubinho')
+  reviewWhatWasLearned('/r/repo-a')
   await flush()
   expect(Object.values(store.getState().panes).filter((p) => p.view === 'learned')).toHaveLength(1)
 })

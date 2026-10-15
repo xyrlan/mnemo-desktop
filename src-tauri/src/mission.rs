@@ -1478,7 +1478,7 @@ mod tests {
         let p = parse_agents(AGENTS).unwrap();
         assert!(!p.is_empty());
         assert!(p.iter().all(|x| x.pid.is_some()));
-        assert!(p.iter().any(|x| x.cwd == "/Users/xyrlan/github/mnemo" && x.status == "busy"));
+        assert!(p.iter().any(|x| x.cwd == "/Users/you/github/mnemo" && x.status == "busy"));
     }
 
     #[test]
@@ -1486,7 +1486,7 @@ mod tests {
         let c = parse_sessions(SESSIONS).unwrap();
         let e = c.iter().find(|x| x.id == "a43d3832").unwrap();
         assert_eq!(e.tempo, "active");
-        assert_eq!(e.cwd, "/Users/xyrlan/github/mnemo-desktop-wt-c-editor");
+        assert_eq!(e.cwd, "/Users/you/github/mnemo-desktop-wt-c-editor");
         assert!(e.tokens > 0);
         assert!(e.live);
         assert_eq!(e.intent.as_deref(), Some("You are building one piece of the feature \"panes\": editor"));
@@ -1679,21 +1679,21 @@ mod tests {
         let parents = parse_agents(AGENTS).unwrap();
         let children = parse_sessions(SESSIONS).unwrap();
         let mut roots = HashMap::new();
-        roots.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-editor".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
-        roots.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-browser".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
-        roots.insert("/Users/xyrlan/github/mnemo".to_string(), "/Users/xyrlan/github/mnemo".to_string());
+        roots.insert("/Users/you/github/mnemo-desktop-wt-c-editor".to_string(), "/Users/you/github/mnemo-desktop".to_string());
+        roots.insert("/Users/you/github/mnemo-desktop-wt-c-browser".to_string(), "/Users/you/github/mnemo-desktop".to_string());
+        roots.insert("/Users/you/github/mnemo".to_string(), "/Users/you/github/mnemo".to_string());
         let mut branches = HashMap::new();
-        branches.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-editor".to_string(), "feat/panes/editor".to_string());
-        branches.insert("/Users/xyrlan/github/mnemo-desktop-wt-c-browser".to_string(), "feat/panes/browser".to_string());
+        branches.insert("/Users/you/github/mnemo-desktop-wt-c-editor".to_string(), "feat/panes/editor".to_string());
+        branches.insert("/Users/you/github/mnemo-desktop-wt-c-browser".to_string(), "feat/panes/browser".to_string());
         let mut contracts = HashMap::new();
         let (f, p) = parse_contract(CONTRACT).unwrap();
-        contracts.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), vec![("docs/contracts/panes.md".to_string(), f, p)]);
+        contracts.insert("/Users/you/github/mnemo-desktop".to_string(), vec![("docs/contracts/panes.md".to_string(), f, p)]);
         let mut prs = HashMap::new();
         let mut list = parse_prs(PRS).unwrap();
         list.push(Pr { number: 9, url: "u".into(), state: "OPEN".into(), head: "feat/panes/editor".into(), ci: "pass".into(), draft: false, failing: vec![] });
-        prs.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), list);
-        roots.insert("/Users/xyrlan/github/mnemo-desktop".to_string(), "/Users/xyrlan/github/mnemo-desktop".to_string());
-        roots.insert("/Users/xyrlan/github/mnemo-wt-244".to_string(), "/Users/xyrlan/github/mnemo".to_string());
+        prs.insert("/Users/you/github/mnemo-desktop".to_string(), list);
+        roots.insert("/Users/you/github/mnemo-desktop".to_string(), "/Users/you/github/mnemo-desktop".to_string());
+        roots.insert("/Users/you/github/mnemo-wt-244".to_string(), "/Users/you/github/mnemo".to_string());
         // Children are created from their jobs; the fixture has only process starts.
         let starts = parse_agent_starts(AGENTS);
         let child_starts = children.iter().filter_map(|c| Some((c.id.clone(), *starts.get(c.session_id.as_ref()?)?))).collect();
@@ -1732,10 +1732,10 @@ mod tests {
 
     #[test]
     fn join_groups_parents_by_repo_and_orders_focused_first() {
-        let groups = fixture_join(Some("/Users/xyrlan/github/mnemo"));
+        let groups = fixture_join(Some("/Users/you/github/mnemo"));
         assert_eq!(groups[0].name, "mnemo");
         assert!(groups[0].parents.iter().any(|p| p.status == "busy"));
-        let groups = fixture_join(Some("/Users/xyrlan/github/mnemo-desktop"));
+        let groups = fixture_join(Some("/Users/you/github/mnemo-desktop"));
         assert_eq!(groups[0].name, "mnemo-desktop");
     }
 
@@ -1920,8 +1920,8 @@ mod tests {
         assert_eq!(iso_ms("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(iso_ms("2024-02-29T12:00:00.5Z"), Some(1709208000500));
         assert_eq!(iso_ms("yesterday"), None);
-        assert_eq!(project_dir_name("/Users/xyrlan/github/mnemo-desktop"), "-Users-xyrlan-github-mnemo-desktop");
-        assert_eq!(project_dir_name("/Users/xyrlan/.claude/jobs/1f87be87/tmp"), "-Users-xyrlan--claude-jobs-1f87be87-tmp");
+        assert_eq!(project_dir_name("/Users/you/github/mnemo-desktop"), "-Users-you-github-mnemo-desktop");
+        assert_eq!(project_dir_name("/Users/you/.claude/jobs/1f87be87/tmp"), "-Users-you--claude-jobs-1f87be87-tmp");
     }
 
     /// Against this machine's real `claude agents` and transcripts:
@@ -2407,7 +2407,7 @@ mod account_tests {
         assert_eq!(c.name.as_deref(), Some("panes editor decomposition"));
         assert_eq!((c.state.as_str(), c.tempo.as_str()), ("working", "active"));
         assert_eq!(c.detail, "building panes feature; reviewing decomposition");
-        assert_eq!(c.cwd, "/Users/xyrlan/github/mnemo-desktop-wt-c-editor");
+        assert_eq!(c.cwd, "/Users/you/github/mnemo-desktop-wt-c-editor");
         assert_eq!(c.tokens, 37338);
         assert_eq!(c.intent.as_deref(), Some("You are building one piece of the feature \"panes\": editor"));
         assert_eq!(c.updated_at.as_deref(), Some("2026-09-15T00:41:37.696Z"));

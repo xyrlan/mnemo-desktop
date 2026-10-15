@@ -26,6 +26,21 @@ test('navigate replaces a clean buffer, parks the path while dirty', () => {
   expect(st().sessions[-1]).toMatchObject({ path: '/c.ts', pending: undefined, dirty: false })
 })
 
+test('a save conflict belongs to the file it was found on: opening another drops it', () => {
+  const s = createSessions()
+  const st = () => s.getState()
+  st().open(-1, '/a.ts', '/w')
+  st().setConflict(-1, 'changed')
+  st().navigate(-1, '/b.ts')
+  expect(st().sessions[-1]).toMatchObject({ path: '/b.ts', conflict: undefined })
+
+  st().setDirty(-1, true)
+  st().setConflict(-1, 'gone')
+  st().navigate(-1, '/c.ts')
+  st().discard(-1)
+  expect(st().sessions[-1]).toMatchObject({ path: '/c.ts', conflict: undefined })
+})
+
 test('navigating to the open file is a no-op that clears pending', () => {
   const s = createSessions()
   s.getState().open(-1, '/a.ts', '/w')
@@ -40,7 +55,7 @@ test('prune forgets closed panes and disposes their buffers', () => {
   const disposed: number[] = []
   for (const id of [-1, -2]) {
     s.getState().open(id, `/f${id}`, '/w')
-    s.buffers.set(id, { path: `/f${id}`, savedVersion: 1, model: { dispose: () => disposed.push(id) } })
+    s.buffers.set(id, { path: `/f${id}`, savedVersion: 1, stamp: '', model: { dispose: () => disposed.push(id) } })
   }
   s.getState().prune([-2, 5])
   expect(Object.keys(s.getState().sessions)).toEqual(['-2'])

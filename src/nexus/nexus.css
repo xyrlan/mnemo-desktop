@@ -146,6 +146,8 @@
   pointer-events: none;
 }
 .nexus-badge { display: block; }
+/* The waving flag's second frame: shown only while the loop below swaps the two. */
+.nexus-wave-b { opacity: 0; }
 .nexus-tool {
   position: absolute;
   right: calc(4px * var(--s));
@@ -254,6 +256,8 @@
 .nexus-scene:not([data-reduced]) .nexus-tool { animation: nexus-swing 0.6s ease-in-out infinite alternate; }
 .nexus-scene:not([data-reduced]) .nexus-badge[data-badge='alert'] { animation: nexus-hop 0.9s steps(1) infinite; }
 .nexus-scene:not([data-reduced]) .nexus-badge[data-badge='zzz'] { animation: nexus-float 2.4s ease-in-out infinite; }
+.nexus-scene:not([data-reduced]) .nexus-badge[data-badge='flag-pending'] .nexus-wave-a { animation: nexus-wave-out 0.9s steps(1) infinite; }
+.nexus-scene:not([data-reduced]) .nexus-badge[data-badge='flag-pending'] .nexus-wave-b { animation: nexus-wave-in 0.9s steps(1) infinite; }
 .nexus-scene:not([data-reduced]) [data-halo='needs-you'] > .nexus-halo { animation: nexus-pulse 1.2s ease-in-out infinite; }
 .nexus-scene:not([data-reduced]) .nexus-core[data-pose='busy'] .nexus-glow { animation: nexus-pulse 0.7s ease-in-out infinite; }
 .nexus-scene:not([data-reduced]) .nexus-core[data-pose='waiting'] .nexus-glow { animation: nexus-pulse 1.4s ease-in-out infinite; }
@@ -287,6 +291,8 @@
 @keyframes nexus-breathe { 50% { scale: 1 1.025; } }
 @keyframes nexus-sway { 25% { rotate: -2deg; } 75% { rotate: 2deg; } }
 @keyframes nexus-swing { from { rotate: -28deg; } to { rotate: 18deg; } }
+@keyframes nexus-wave-out { 50% { opacity: 0; } }
+@keyframes nexus-wave-in { 50% { opacity: 1; } }
 @keyframes nexus-hop { 50% { translate: 0 calc(-2px * var(--s)); } }
 @keyframes nexus-float { 50% { translate: calc(1px * var(--s)) calc(-3px * var(--s)); opacity: 0.7; } }
 @keyframes nexus-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }

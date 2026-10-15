@@ -26,8 +26,8 @@ vi.mock('@tauri-apps/api/core', () => ({
       const stdout = t.answers[args!.step as string]?.shift()
       return stdout === undefined ? { stdout: '', stderr: 'no answer', code: 1 } : { stdout, stderr: '', code: 0 }
     }
-    if (cmd === 'install_review_run') return 'install-review:clubinho'
-    if (cmd === 'install_review_project') return (args!.cwd as string).startsWith('/r/clubinho') ? { project: 'clubinho', root: '/r/clubinho' } : null
+    if (cmd === 'install_review_run') return 'install-review:repo-a'
+    if (cmd === 'install_review_project') return (args!.cwd as string).startsWith('/r/repo-a') ? { project: 'repo-a', root: '/r/repo-a' } : null
     return null
   },
 }))
@@ -48,7 +48,7 @@ const emit = async (name: string, payload: unknown) => {
   await act(async () => (t.on[name] ?? []).forEach((h) => h({ payload })))
 }
 const dialog = () => document.querySelector<HTMLElement>('[data-onboarding]')
-const noPages = JSON.stringify({ project: 'clubinho', origin: 'backfill', pages: [] })
+const noPages = JSON.stringify({ project: 'repo-a', origin: 'backfill', pages: [] })
 
 // The first import pulls in the app's stores and the UI kit: slow on a cold cache.
 beforeAll(async () => {
@@ -185,37 +185,37 @@ test('Continue reaches the consent for the open repo; yes starts the run, and th
   const { homeStore } = await import('../home/app-store')
   const { learned } = await import('../learned/app-store')
   act(() => store.getState().showHome())
-  homeStore.setState({ selected: '/r/clubinho' })
+  homeStore.setState({ selected: '/r/repo-a' })
   learned.setState({ target: null, phase: { kind: 'idle' }, pages: [], checked: {}, expanded: {}, openedAt: null })
   t.answers = { list: [noPages, listing], 'dry-run': [dryRun] }
   await openFromPalette()
   await click(button(dialog()!, 'Continue'))
   await flush()
   expect(dialog()?.dataset.onboarding).toBe('learned')
-  expect(called('install_review_project')).toEqual([{ cwd: '/r/clubinho' }])
-  expect(dialog()!.textContent).toContain('mnemo can read your last 44 sessions in clubinho and learn from them. About 19 model calls on your Claude plan.')
+  expect(called('install_review_project')).toEqual([{ cwd: '/r/repo-a' }])
+  expect(dialog()!.textContent).toContain('mnemo can read your last 44 sessions in repo-a and learn from them. About 19 model calls on your Claude plan.')
   expect(called('install_review_run')).toEqual([])
 
   await click(button(dialog()!, 'Read my history'))
   await flush()
-  expect(called('install_review_run')).toEqual([{ project: 'clubinho', root: '/r/clubinho' }])
+  expect(called('install_review_run')).toEqual([{ project: 'repo-a', root: '/r/repo-a' }])
   const lines = progress.split('\n').filter(Boolean)
-  await emit('job-line', { id: 'install-review:clubinho', stream: 'out', line: lines[1] })
+  await emit('job-line', { id: 'install-review:repo-a', stream: 'out', line: lines[1] })
   expect(dialog()!.querySelector('[role="progressbar"]')!.getAttribute('aria-valuenow')).toBe('7')
   expect(button(dialog()!, 'Close')).toBeTruthy()
 
-  await emit('job-line', { id: 'install-review:clubinho', stream: 'out', line: lines.at(-1)! })
-  await emit('job-exit', { id: 'install-review:clubinho', code: 0 })
+  await emit('job-line', { id: 'install-review:repo-a', stream: 'out', line: lines.at(-1)! })
+  await emit('job-exit', { id: 'install-review:repo-a', code: 0 })
   await flush()
   expect(dialog()!.querySelectorAll('[data-key]')).toHaveLength(5)
   expect(dialog()!.textContent).toContain('mnemo learned 5 pages from your history.')
-  const staging = dialog()!.querySelector('[data-key="project/clubinho__staging-db-is-shared"]')!
+  const staging = dialog()!.querySelector('[data-key="project/repo-a__staging-db-is-shared"]')!
   await act(() => void staging.querySelector<HTMLInputElement>('input')!.click())
   expect(button(dialog()!, 'Keep selected (4)')).toBeTruthy()
   await click(button(dialog()!, 'Decide later'))
   await flush()
   expect(dialog()!.textContent).toContain('Nothing decided.')
-  expect(called('install_review_record')).toEqual([{ project: 'clubinho', decision: 'later' }])
+  expect(called('install_review_record')).toEqual([{ project: 'repo-a', decision: 'later' }])
   await click(button(dialog()!, 'Done'))
   await flush()
   expect(dialog()).toBeNull()

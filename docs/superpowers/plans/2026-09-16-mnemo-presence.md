@@ -67,7 +67,7 @@ not json
 `src-tauri/fixtures/pulse/friction-ledger.jsonl`:
 ```jsonl
 {"id": "f-20260916-aaaa", "ts": "2026-09-16T10:00:00Z", "session_id": "e7fb983c-6dc5-4d69-91b3-dce4ad7682da", "project": "mnemo", "quote": "nao era isso", "rule_text": "Ask before rewriting a whole file.", "briefing": "x.md", "contradicts": [], "link_basis": "none", "injected_in_session": [], "origin": "user", "backfilled": false}
-{"id": "f-20260814-6455", "ts": "2026-08-14T10:34:35Z", "session_id": "9165fe70-afe9-4430-a505-5dbfdf4211c2", "project": "meunu", "quote": "pusha e abre PR", "rule_text": "Push, open PR, merge in order.", "briefing": "y.md", "contradicts": [], "link_basis": "none", "injected_in_session": [], "origin": "user", "backfilled": true}
+{"id": "f-20260814-6455", "ts": "2026-08-14T10:34:35Z", "session_id": "9165fe70-afe9-4430-a505-5dbfdf4211c2", "project": "repo-b", "quote": "pusha e abre PR", "rule_text": "Push, open PR, merge in order.", "briefing": "y.md", "contradicts": [], "link_basis": "none", "injected_in_session": [], "origin": "user", "backfilled": true}
 ```
 
 `src-tauri/fixtures/pulse/dispatch-parents.jsonl`:
@@ -1004,7 +1004,7 @@ test('an event from another repo never appears', async () => {
   const host = document.createElement('div')
   const root = createRoot(host)
   await act(async () => root.render(<Overlay place="mnemo-desktop" store={store} />))
-  await act(async () => store.getState().push(ev({ project: 'clubinho', agent: 'clubinho' })))
+  await act(async () => store.getState().push(ev({ project: 'repo-a', agent: 'repo-a' })))
   expect(host.querySelector('.pv-overlay')).toBeNull()
   act(() => root.unmount())
 })
@@ -1193,7 +1193,7 @@ test('a pulse from the pane repo also plays the overlay scene', async () => {
 })
 
 test('a pulse from another repo plays no overlay', async () => {
-  await push(ev({ project: 'clubinho', agent: 'clubinho' }))
+  await push(ev({ project: 'repo-a', agent: 'repo-a' }))
   expect(host.querySelector('.pv-overlay')).toBeNull()
 })
 ```

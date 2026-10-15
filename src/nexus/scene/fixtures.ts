@@ -59,3 +59,16 @@ export function world(territories: Territory[], at = 1_000_000): World {
 
 /** `n` robots `r0`…, each with a fresh id under `prefix`. */
 export const robots = (n: number, prefix = 'r', over: Partial<Robot> = {}): Robot[] => Array.from({ length: n }, (_, i) => robot(`${prefix}${i}`, over))
+
+/** A typical fleet on the spec's 2026-10-14 numbers ("Facts"): 7 territories, 12 live nexuses and 15
+ *  live robots in all, 3 to each of the 5 parents that have any. */
+export const typicalFleet = (): World =>
+  world([
+    territory('atlas', [nexus('a1f0c2d9', robots(3, 'a')), nexus('a2b7e410'), nexus('a3c8d521')]),
+    territory('beacon-tools', [nexus('b1d2e3f4', robots(3, 'b')), nexus('b2e3f405')]),
+    territory('cinder', [nexus('c1e2f3a4', robots(3, 'c')), nexus('c2f3a4b5')]),
+    territory('drift', [nexus('d1a2b3c4', robots(3, 'd')), nexus('d2b3c4d5')]),
+    territory('ember', [nexus('e1b2c3d4', robots(3, 'e'))]),
+    territory('fable-docs', [nexus('f1c2d3e4')]),
+    territory('grove', [nexus('g1d2e3f4')]),
+  ])

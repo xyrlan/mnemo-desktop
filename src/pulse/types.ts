@@ -15,4 +15,6 @@ export type PulseEvent = {
   tool?: string
   hits?: number
   session_id?: string
+  /** The file an enrichment's Edit/Write/Read touched, as the log spells it. Only `enrich` carries one. */
+  file_path?: string
 }

@@ -9,9 +9,9 @@ import type { JobHandlers, LearnedClient, ReviewProject, Step } from './client'
 import { createLearnedStore, type Phase } from './store'
 import { parseDryRun } from './types'
 
-const T: ReviewProject = { project: 'clubinho', root: '/r/clubinho' }
+const T: ReviewProject = { project: 'repo-a', root: '/r/repo-a' }
 const ok = (stdout: string): RunResult => ({ stdout, stderr: '', code: 0 })
-const EMPTY = '{"project": "clubinho", "origin": "backfill", "pages": [], "counts": {}}'
+const EMPTY = '{"project": "repo-a", "origin": "backfill", "pages": [], "counts": {}}'
 
 /** A client over the fixtures. `answers[step]` is what each call prints, in turn. */
 function fake(answers: Partial<Record<Step, RunResult[]>> = {}) {
@@ -25,7 +25,7 @@ function fake(answers: Partial<Record<Step, RunResult[]>> = {}) {
     client: null as unknown as LearnedClient,
   }
   f.client = {
-    project: async (cwd) => (cwd.startsWith('/r/clubinho') ? T : null),
+    project: async (cwd) => (cwd.startsWith('/r/repo-a') ? T : null),
     step: async (step, _t, keys = []) => {
       f.steps.push({ step, keys })
       return answers[step]?.shift() ?? { stdout: '', stderr: `no answer for ${step}`, code: 1 }
@@ -53,7 +53,7 @@ describe('consent', () => {
     const f = fake({ list: [ok(EMPTY)], 'dry-run': [ok(dryRun)] })
     const s = createLearnedStore(f.client)
     await s.getState().open(T)
-    expect(s.getState().phase).toEqual({ kind: 'consent', dry: { project: 'clubinho', sessions: 44, callsEstimate: 19, priceUsd: 1.2 } })
+    expect(s.getState().phase).toEqual({ kind: 'consent', dry: { project: 'repo-a', sessions: 44, callsEstimate: 19, priceUsd: 1.2 } })
     expect(f.steps.map((x) => x.step)).toEqual(['list', 'dry-run'])
     expect(f.runs).toBe(0)
   })
@@ -65,7 +65,7 @@ describe('consent', () => {
     await s.getState().notNow()
     expect(kind(s.getState().phase)).toBe('declined')
     expect(f.runs).toBe(0)
-    expect(f.records).toEqual([['clubinho', 'not-now']])
+    expect(f.records).toEqual([['repo-a', 'not-now']])
     expect(f.rows).toEqual([])
   })
 
@@ -111,15 +111,15 @@ describe('running', () => {
     expect(s.getState().phase).toEqual({ kind: 'running', harvest: null, extract: null, err: [] })
     const [h] = f.handlers
     const lines = progress.split('\n').filter(Boolean)
-    h.line('install-review:clubinho', 'out', lines[1])
+    h.line('install-review:repo-a', 'out', lines[1])
     expect(s.getState().phase).toMatchObject({ harvest: { done: 3, of: 44 }, extract: null })
     // Another job's lines are not this run's.
     h.line('merge:7', 'out', '{"event": "harvest", "done": 40, "of": 44}')
-    h.line('install-review:clubinho', 'err', 'session 12: timed out')
-    h.line('install-review:clubinho', 'out', lines[3])
+    h.line('install-review:repo-a', 'err', 'session 12: timed out')
+    h.line('install-review:repo-a', 'out', lines[3])
     expect(s.getState().phase).toMatchObject({ harvest: { done: 3, of: 44 }, extract: { done: 1, of: 8 }, err: ['session 12: timed out'] })
-    h.line('install-review:clubinho', 'out', lines.at(-1)!)
-    h.exit('install-review:clubinho', 0)
+    h.line('install-review:repo-a', 'out', lines.at(-1)!)
+    h.exit('install-review:repo-a', 0)
     await done
     expect(kind(s.getState().phase)).toBe('review')
     expect(f.handlers).toEqual([])
@@ -131,8 +131,8 @@ describe('running', () => {
     s.getState().ask(T, parseDryRun(dryRun)!)
     const done = s.getState().consent()
     await flush()
-    f.handlers[0].line('install-review:clubinho', 'err', 'no Claude Code login')
-    f.handlers[0].exit('install-review:clubinho', 2)
+    f.handlers[0].line('install-review:repo-a', 'err', 'no Claude Code login')
+    f.handlers[0].exit('install-review:repo-a', 2)
     await done
     expect(s.getState().phase).toEqual({ kind: 'error', message: 'mnemo backfill exited 2:\nno Claude Code login' })
   })
@@ -144,8 +144,8 @@ describe('running', () => {
       s.getState().ask(T, parseDryRun(dryRun)!)
       const done = s.getState().consent()
       await flush()
-      for (const l of lines) f.handlers[0].line('install-review:clubinho', 'out', l)
-      f.handlers[0].exit('install-review:clubinho', code)
+      for (const l of lines) f.handlers[0].line('install-review:repo-a', 'out', l)
+      f.handlers[0].exit('install-review:repo-a', code)
       await done
       return s.getState().phase
     }
@@ -155,11 +155,11 @@ describe('running', () => {
 
   test('a run that cannot start says why', async () => {
     const f = fake()
-    f.runError = 'job install-review:clubinho is already running'
+    f.runError = 'job install-review:repo-a is already running'
     const s = createLearnedStore(f.client)
     s.getState().ask(T, parseDryRun(dryRun)!)
     await s.getState().consent()
-    expect(s.getState().phase).toEqual({ kind: 'error', message: 'mnemo backfill: job install-review:clubinho is already running' })
+    expect(s.getState().phase).toEqual({ kind: 'error', message: 'mnemo backfill: job install-review:repo-a is already running' })
   })
 
   test('while it runs, opening the review again does not restart or replace it', async () => {
@@ -187,37 +187,37 @@ describe('review', () => {
     const { s } = await reviewing({}, { t: 0 })
     expect(Object.values(s.getState().checked)).toEqual([true, true, true, true, true])
     s.getState().setType('project', false)
-    expect(s.getState().checked).toMatchObject({ 'project/clubinho__cron-annual-bloqueado-183': false, 'project/clubinho__staging-db-is-shared': false, 'feedback/clubinho__answer-in-portuguese': true })
+    expect(s.getState().checked).toMatchObject({ 'project/repo-a__cron-annual-bloqueado-183': false, 'project/repo-a__staging-db-is-shared': false, 'feedback/repo-a__answer-in-portuguese': true })
     s.getState().setType('project', true)
-    s.getState().toggle('feedback/clubinho__answer-in-portuguese')
-    expect(s.getState().checked['feedback/clubinho__answer-in-portuguese']).toBe(false)
-    s.getState().expand('reference/clubinho__asaas-sandbox')
-    expect(s.getState().expanded).toEqual({ 'reference/clubinho__asaas-sandbox': true })
+    s.getState().toggle('feedback/repo-a__answer-in-portuguese')
+    expect(s.getState().checked['feedback/repo-a__answer-in-portuguese']).toBe(false)
+    s.getState().expand('reference/repo-a__asaas-sandbox')
+    expect(s.getState().expanded).toEqual({ 'reference/repo-a__asaas-sandbox': true })
   })
 
   test('[Keep selected] promotes the checked, drops the unchecked, and shows the failed key', async () => {
     const clock = { t: 1_000 }
     const { f, s } = await reviewing({ promote: [ok(promoteFailed)], drop: [ok(drop)] }, clock)
-    s.getState().toggle('project/clubinho__staging-db-is-shared')
+    s.getState().toggle('project/repo-a__staging-db-is-shared')
     clock.t = 95_400
     await s.getState().keep()
     expect(f.steps.slice(1)).toEqual([
       {
         step: 'promote',
-        keys: ['project/clubinho__cron-annual-bloqueado-183', 'feedback/clubinho__answer-in-portuguese', 'reference/clubinho__asaas-sandbox', 'user/clubinho__runs-on-a-mac'],
+        keys: ['project/repo-a__cron-annual-bloqueado-183', 'feedback/repo-a__answer-in-portuguese', 'reference/repo-a__asaas-sandbox', 'user/repo-a__runs-on-a-mac'],
       },
-      { step: 'drop', keys: ['project/clubinho__staging-db-is-shared'] },
+      { step: 'drop', keys: ['project/repo-a__staging-db-is-shared'] },
     ])
     expect(s.getState().phase).toEqual({
       kind: 'done',
       skipped: false,
-      kept: ['project/clubinho__cron-annual-bloqueado-183', 'feedback/clubinho__answer-in-portuguese', 'reference/clubinho__asaas-sandbox'],
-      dropped: ['project/clubinho__staging-db-is-shared'],
-      failed: [{ key: 'user/clubinho__runs-on-a-mac', error: 'not staged' }],
+      kept: ['project/repo-a__cron-annual-bloqueado-183', 'feedback/repo-a__answer-in-portuguese', 'reference/repo-a__asaas-sandbox'],
+      dropped: ['project/repo-a__staging-db-is-shared'],
+      failed: [{ key: 'user/repo-a__runs-on-a-mac', error: 'not staged' }],
       expiresAt: '2026-10-08T10:12:07',
     })
-    expect(f.rows).toEqual([{ event: 'install-review', project: 'clubinho', shown: 5, kept: 3, dropped: 1, failed: 1, seconds: 94, skipped: false }])
-    expect(f.records).toEqual([['clubinho', 'kept']])
+    expect(f.rows).toEqual([{ event: 'install-review', project: 'repo-a', shown: 5, kept: 3, dropped: 1, failed: 1, seconds: 94, skipped: false }])
+    expect(f.records).toEqual([['repo-a', 'kept']])
   })
 
   test('the measurement row holds no page text', async () => {
@@ -233,19 +233,19 @@ describe('review', () => {
     expect(f.steps.map((x) => x.step)).toEqual(['list', 'promote'])
     const phase = s.getState().phase
     expect(phase.kind === 'done' && phase.failed).toHaveLength(5)
-    expect(phase.kind === 'done' && phase.failed[0]).toEqual({ key: 'project/clubinho__cron-annual-bloqueado-183', error: 'mnemo: vault is locked' })
+    expect(phase.kind === 'done' && phase.failed[0]).toEqual({ key: 'project/repo-a__cron-annual-bloqueado-183', error: 'mnemo: vault is locked' })
   })
 
   test('[Decide later] decides nothing and says when the pages expire', async () => {
     const clock = { t: 0 }
     const { f, s } = await reviewing({}, clock)
-    s.getState().toggle('user/clubinho__runs-on-a-mac')
+    s.getState().toggle('user/repo-a__runs-on-a-mac')
     clock.t = 12_000
     await s.getState().later()
     expect(f.steps.map((x) => x.step)).toEqual(['list'])
     expect(s.getState().phase).toEqual({ kind: 'done', skipped: true, kept: [], dropped: [], failed: [], expiresAt: '2026-10-08T10:12:03' })
-    expect(f.rows).toEqual([{ event: 'install-review', project: 'clubinho', shown: 5, kept: 0, dropped: 0, failed: 0, seconds: 12, skipped: true }])
-    expect(f.records).toEqual([['clubinho', 'later']])
+    expect(f.rows).toEqual([{ event: 'install-review', project: 'repo-a', shown: 5, kept: 0, dropped: 0, failed: 0, seconds: 12, skipped: true }])
+    expect(f.records).toEqual([['repo-a', 'later']])
   })
 
   test('a decision is taken once: a second click does nothing', async () => {

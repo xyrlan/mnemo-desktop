@@ -24,8 +24,9 @@ export type RobotPose = 'working' | 'idle' | 'waiting' | 'sleeping'
 
 /** The icon over the robot's head (spec Q18). `alert` is "needs you"; `zzz` a rate-limit stall;
  *  `flag-pending` an open PR whose checks run; `flag-ready` an open PR whose checks passed;
- *  `fire` failing checks or a conflict. */
-export type Badge = 'alert' | 'zzz' | 'flag-pending' | 'flag-ready' | 'fire' | null
+ *  `flag-draft` a draft PR, whatever its checks do short of failing; `fire` failing checks or a
+ *  conflict. */
+export type Badge = 'alert' | 'zzz' | 'flag-pending' | 'flag-ready' | 'flag-draft' | 'fire' | null
 
 /** Why a robot leaves (spec Q12): `merged` celebrates and warps out; `powered-down` (stopped
  *  without a PR, once its parent has its notice) switches off and fades. A robot with an exit is
