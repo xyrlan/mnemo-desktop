@@ -9,12 +9,16 @@ import './index'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 /** The settings file and what was written to it; `refuse` names a command that rejects. */
-const file = vi.hoisted(() => ({ saved: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], refuse: {} as Record<string, string> }))
+const file = vi.hoisted(() => ({ saved: {} as Record<string, unknown>, writes: [] as Record<string, unknown>[], refuse: {} as Record<string, string>, languages: [] as string[], opened: [] as string[] }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: async (cmd: string, args?: { value?: Record<string, unknown> }) => {
+  invoke: async (cmd: string, args?: { value?: Record<string, unknown>; language?: string; url?: string }) => {
     if (file.refuse[cmd]) throw new Error(file.refuse[cmd])
     if (cmd === 'settings_read') return file.saved
     if (cmd === 'settings_write') return void file.writes.push(args!.value!)
+    if (cmd === 'voice_set_language') return void file.languages.push(args!.language!)
+    if (cmd === 'app_build_info') return { version: '0.5.5', sha: '9f3ab21', built_at: '2026-10-15 13:49 UTC' }
+    if (cmd === 'app_newer_release') return { version: '0.6.0', url: 'https://example.com/releases/0.6.0', told: true }
+    if (cmd === 'browser_open_external') return void file.opened.push(args!.url!)
     return null
   },
 }))
@@ -74,7 +78,7 @@ test('Settings is the last of the three SYSTEMS windows', () => {
 
 test('each setting a person chooses is there with what it does, showing what is saved', async () => {
   await render({ outgoing: 'en', outgoingChosen: true, replyLanguage: 'pt', skipPermissions: false })
-  expect([...win().querySelectorAll('[data-setting]')].map((s) => s.getAttribute('data-setting'))).toEqual(['outgoing', 'replyLanguage', 'skipPermissions', 'cloneBase', 'repoSetup'])
+  expect([...win().querySelectorAll('[data-setting]')].map((s) => s.getAttribute('data-setting'))).toEqual(['outgoing', 'replyLanguage', 'dictationLanguage', 'skipPermissions', 'cloneBase', 'repoSetup'])
   for (const s of win().querySelectorAll('[data-setting]')) expect(s.querySelector('.nx-muted')!.textContent!.length).toBeGreaterThan(20)
   expect(pressed('outgoing')).toEqual(['In English'])
   expect(pressed('replyLanguage')).toEqual(['Portuguese'])
@@ -94,6 +98,30 @@ test('a choice is saved as it is made, the whole file written', async () => {
     ['en', true, 'en', false],
   ])
   expect(pressed('skipPermissions')).toEqual(['Off'])
+})
+
+test('the dictation language is chosen here, told to dictation and kept on this machine, not in the file', async () => {
+  file.languages = []
+  await render()
+  await press('dictationLanguage', 'Portuguese')
+  expect(file.languages).toEqual(['pt'])
+  expect(pressed('dictationLanguage')).toEqual(['Portuguese'])
+  expect(localStorage.getItem('mnemo.voice.language')).toBe('pt')
+  expect(file.writes).toEqual([])
+  file.refuse.voice_set_language = 'no model yet'
+  await press('dictationLanguage', 'Any')
+  expect(pressed('dictationLanguage')).toEqual(['Portuguese'])
+  expect(setting('dictationLanguage').querySelector('[role="alert"]')!.textContent).toBe('Not saved: no model yet')
+})
+
+test('the build that runs is named at the bottom, with a newer release to open', async () => {
+  file.opened = []
+  await render()
+  const about = win().querySelector<HTMLElement>('[data-about]')!
+  expect(about.textContent).toContain('mnemo 0.5.5 · 9f3ab21 · built 2026-10-15 13:49 UTC')
+  await act(async () => about.querySelector<HTMLButtonElement>('button')!.click())
+  expect(about.querySelector('button')!.textContent).toBe('0.6.0 is out')
+  expect(file.opened).toEqual(['https://example.com/releases/0.6.0'])
 })
 
 test('a write that fails is said under its setting', async () => {

@@ -59,15 +59,3 @@ export async function callTool(deps: ToolDeps, method: string, params: Record<st
       throw new Error(`unknown tool ${method}`)
   }
 }
-
-/** What the browser view offered `desktop_browser_read` and `desktop_pane_snapshot`, which went
- *  with the workbench (Q16). `src/browser/view.tsx` registers it still; wave 2b deletes that view,
- *  and this with it. */
-export type BrowserBridge = {
-  url(id: PaneId): string | undefined
-  read(id: PaneId): Promise<string>
-  snapshot(id: PaneId): Promise<{ mime: string; data: string }>
-}
-
-/** Nothing reads it any more. */
-export function registerBrowserBridge(_: BrowserBridge) {}

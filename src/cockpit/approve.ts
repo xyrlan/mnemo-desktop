@@ -1,6 +1,5 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import { store as appStore } from '../layout/app-store'
 import { nexusRoutes } from '../nexus/outside'
 import { permissionAsk, splitAsk, type ChildSession } from '../mission/types'
 import { attachCmd } from '../mission/account'
@@ -88,12 +87,10 @@ export async function answerPrompt(child: ChildSession, choice: Choice, deps: Pa
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e)
     if (e instanceof Refused) return put(child.id, { choice, phase: 'error', error: why, at: Date.now() })
-    // While the Nexus covers the workbench, the attach opens in its drawer, where it is seen.
-    const nexus = nexusRoutes()
-    await (nexus
-      ? nexus.terminal(child.cwd || undefined, attachCmd(child), `attach · ${child.id}`)
-      : appStore.getState().openCommandTab(child.cwd || undefined, attachCmd(child), child.session_id ?? undefined)
-    ).catch(() => {})
+    // The attach opens in the drawer, where it is seen.
+    await nexusRoutes()
+      .terminal(child.cwd || undefined, attachCmd(child), `attach · ${child.id}`)
+      .catch(() => {})
     return put(child.id, { choice, phase: 'error', error: `${why}: answer it in the attach that opened`, at: Date.now() })
   }
 }

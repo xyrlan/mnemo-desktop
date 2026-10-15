@@ -25,7 +25,6 @@ function sources(over: Partial<Sources> = {}): Sources {
     ],
     activeTab: 'cap',
     collapsed: false,
-    open: true,
     hosted: { 'pane:1': hosted('pane:1', 1), 'child:5a': hosted('child:5a', 40), 'child:6b': hosted('child:6b', null) },
     panes,
     ...over,
@@ -63,6 +62,5 @@ describe('sessionsOf', () => {
     expect(shown({})).toEqual(['cap'])
     expect(shown({ activeTab: 'bot' })).toEqual(['bot'])
     expect(shown({ collapsed: true })).toEqual([])
-    expect(shown({ open: false })).toEqual([])
   })
 })

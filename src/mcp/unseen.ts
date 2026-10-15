@@ -90,7 +90,8 @@ export type ReaderDeps = {
   /** The lines of a terminal view mounted for `id` (`readBuffer`), undefined with none. */
   shown(id: PaneId): string[] | undefined
   /** Whether `id` may be read with a view of its own: an offscreen pane, whose next view is drawn
-   *  from the core's screen whatever this read takes. A workbench pane's kept output is not. */
+   *  from the core's screen whatever this read takes. Every terminal pane the app keeps is one: a
+   *  workbench tab's is made one as the drawer starts (`pocketTabs`, #459). */
   unseen(id: PaneId): boolean
   readUnseen(id: PaneId): Promise<string[] | null>
 }

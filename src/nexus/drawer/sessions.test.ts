@@ -2,13 +2,13 @@ import { DETACH_KEY } from '../../cockpit/prompt'
 import { nexusStore } from '../store'
 import { fakeHost, reposFixture, settle, shipFixture } from './fixtures'
 import { CHILD_ENDED, ENDED, OUTSIDE, openingOf } from './model'
-import { BY, createDrawer, type Workbench } from './sessions'
+import { BY, createDrawer, type Release } from './sessions'
 
 function setup() {
   const { host, log, exits } = fakeHost()
   const done: string[] = []
-  const workbench: Workbench = { letGo: (pane) => void done.push(`let go ${pane}`) }
-  const drawer = createDrawer(host, nexusStore, workbench)
+  const release: Release = { letGo: (pane) => void done.push(`let go ${pane}`) }
+  const drawer = createDrawer(host, nexusStore, release)
   const ship = shipFixture()
   const open = (id: string) => {
     const o = openingOf(id, ship, reposFixture)
@@ -18,7 +18,7 @@ function setup() {
   return { host, log, exits, done, drawer, open }
 }
 
-beforeEach(() => nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null }))
+beforeEach(() => nexusStore.setState({ tabs: [], activeTab: null, collapsed: false, focusId: null }))
 
 test('opening the same figure twice gives one tab, one hold and one attach', async () => {
   const { host, log, open } = setup()

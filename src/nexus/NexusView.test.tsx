@@ -5,7 +5,7 @@ import type { NexusClient } from './client'
 import { NexusView } from './NexusView'
 import type { ShipClient } from './ship-client'
 import type { Feed, Ship, ShipSceneProps } from './ship-types'
-import { attachInNexus, openFigure } from './outside'
+import { openFigure } from './outside'
 import { nexusStore } from './store'
 import { liveDrawer } from './drawer/app'
 import { shipFixture } from './drawer/fixtures'
@@ -22,7 +22,7 @@ vi.mock('./drawer/app', async () => {
   const { createStore } = await import('zustand/vanilla')
   const { nexusStore } = await import('./store')
   const { host } = fakeHost()
-  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
+  const drawer = createDrawer(host, nexusStore, {})
   return {
     liveDrawer: {
       drawer,
@@ -101,7 +101,7 @@ beforeEach(() => Object.defineProperty(window, 'innerWidth', { value: 1600, conf
 afterEach(async () => {
   for (const r of roots.splice(0)) act(() => r.unmount())
   for (const t of nexusStore.getState().tabs) await liveDrawer.drawer.close(t.id)
-  nexusStore.setState({ open: true, collapsed: false, drawerWidth: 600, feed: null, triage: false, triageAsked: false, selection: new Set() })
+  nexusStore.setState({ collapsed: false, drawerWidth: 600, feed: null, triage: false, selection: new Set() })
   seen.ship = null
   seen.feeds.length = 0
   seen.logged = 0
@@ -110,20 +110,12 @@ afterEach(async () => {
 const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
   act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })))
 
-test('open, it reads the feed and draws the ship', async () => {
+test('it reads the feed and draws the ship, over the whole window', async () => {
   const client = fake()
   await render(client)
   expect(view()).not.toBeNull()
   expect(client.asked).toBeGreaterThan(0)
   expect(document.querySelector('[data-ship-scene]')).not.toBeNull()
-})
-
-test('closed, it reads nothing and draws nothing', async () => {
-  nexusStore.getState().setOpen(false)
-  const client = fake()
-  await render(client)
-  expect(view()).toBeNull()
-  expect(client.asked).toBe(0)
 })
 
 test('an exception opens its robot in the drawer, and the ship shrinks beside it', async () => {
@@ -151,30 +143,18 @@ test('Esc collapses the drawer, the ship grows back; Esc in a tab’s terminal i
   expect(document.querySelector('[data-drawer-handle]')).not.toBeNull()
 })
 
-test('closed with tabs open, the ship is gone and the drawer kept, hidden', async () => {
-  Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
-  await mount()
-  press({ key: '1', code: 'Digit1', altKey: true })
-  await act(async () => nexusStore.getState().setOpen(false))
-  expect(view()).toBeNull()
-  expect((document.querySelector('[data-nexus-drawer]') as HTMLElement).style.display).toBe('none')
-  expect(document.querySelector('[data-stub-terminal]')).not.toBeNull()
-})
-
-test('reopened, the ship is drawn with the last feed, and nothing is logged before this opening’s first feed', async () => {
+test('remounted, the ship is drawn with the last feed, and nothing is logged before this mount’s first feed', async () => {
   await mount()
   const first = nexusStore.getState().feed
   expect(first).not.toBeNull()
   expect(seen.logged).toBeGreaterThan(0)
-  await act(async () => nexusStore.getState().setOpen(false))
+  for (const r of roots.splice(0)) act(() => r.unmount())
   seen.feeds.length = 0
   seen.logged = 0
   // A feed that has not answered yet.
   let answer: (f: Feed) => void = () => {}
   const slow: ShipClient = { feed: () => new Promise<Feed>((r) => (answer = r)) }
-  for (const r of roots.splice(0)) act(() => r.unmount())
   await render(slow)
-  await act(async () => nexusStore.getState().setOpen(true))
   expect(seen.feeds.length).toBeGreaterThan(0)
   expect(seen.feeds.every((f) => f === first)).toBe(true)
   expect(seen.logged).toBe(0)
@@ -190,19 +170,6 @@ test('an action from the ship that is refused says why', async () => {
   expect(toast.error).toHaveBeenCalledWith('merge refused: checks are red')
 })
 
-test('triage asked from the sidebar opens on a blocked robot', async () => {
-  const blocked = (): Ship => {
-    const s = shipFixture()
-    const r = { ...s.decks[0].flight[0], state: 'need' as const, zone: 'bridge' as const, need: { kind: 'question' as const, text: 'which one?', options: ['a', 'b'] } }
-    return { ...s, bridge: { exceptions: [{ kind: 'need', robotId: r.id, need: r.need }], blocked: [r] }, counts: { ...s.counts, need: 1 } }
-  }
-  seen.ship = blocked
-  nexusStore.getState().setOpen(false)
-  await mount()
-  await act(async () => nexusStore.getState().askTriage())
-  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true, triageAsked: false })
-})
-
 /** A real ship (`buildShip`) whose one captain waits on a permission, and no child. */
 const LEAD = '11111111-aaaa-4bbb-8ccc-000000000001'
 async function captainWaits(): Promise<() => Ship> {
@@ -212,14 +179,13 @@ async function captainWaits(): Promise<() => Ship> {
   return () => buildShip({ snapshot, feed: null, agents: { [LEAD]: { state: 'needs-you', waitingFor: 'permission', title: 'fleet lead' } }, events: [], firstSeen: {}, now: 1_000 })
 }
 
-test('triage asked from the sidebar when only a captain waits opens on its card', async () => {
+test('Tab opens triage on a captain’s card when only a captain waits', async () => {
   const ship = await captainWaits()
   expect(ship().counts.need).toBe(1)
   seen.ship = ship
-  nexusStore.getState().setOpen(false)
   await mount()
-  await act(async () => nexusStore.getState().askTriage())
-  expect(nexusStore.getState()).toMatchObject({ open: true, triage: true, triageAsked: false })
+  press({ key: 'Tab' })
+  expect(nexusStore.getState().triage).toBe(true)
   const card = document.querySelector('[data-triage-card]')!
   expect([card.getAttribute('data-triage-card'), card.getAttribute('data-triage-kind')]).toEqual([LEAD, 'captain'])
   expect(document.querySelector('[data-triage-question]')!.textContent).toBe('🔒 waits on a permission')
@@ -424,31 +390,17 @@ test('a window opens a figure in the drawer as a menu does, and closes so its ta
   answered = []
 })
 
-test('openFigure opens a figure from anywhere in the app as a click does, the Nexus opened; false for what the ship does not know', async () => {
+test('openFigure opens a figure from anywhere in the app as a click does; false for what the ship does not know, or with no Nexus mounted', async () => {
   expect(openFigure('r-live')).toBe(false)
   await mount()
-  act(() => nexusStore.getState().setOpen(false))
   let opened = false
   act(() => void (opened = openFigure('r-live')))
   expect(opened).toBe(true)
-  expect(nexusStore.getState()).toMatchObject({ open: true, activeTab: 'r-live', collapsed: false })
+  expect(nexusStore.getState()).toMatchObject({ activeTab: 'r-live', collapsed: false })
   expect(document.querySelector('[data-drawer-tab="r-live"]')).not.toBeNull()
   act(() => void (opened = openFigure('not-on-the-ship')))
   expect(opened).toBe(false)
   expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['r-live'])
-})
-
-test('attaching a child opens it in the drawer: its robot’s tab, or one of its own while the ship does not know it', async () => {
-  await mount()
-  act(() => nexusStore.getState().setOpen(false))
-  act(() => void attachInNexus('r-live'))
-  expect(nexusStore.getState()).toMatchObject({ open: true, activeTab: 'r-live' })
-  act(() => void attachInNexus({ id: 'c0ffee99', account_env: null }))
-  expect(nexusStore.getState().tabs.at(-1)).toMatchObject({ id: 'c0ffee99', kind: 'robot', key: 'child:c0ffee99', label: 'c0ffee99' })
-  expect(nexusStore.getState().activeTab).toBe('c0ffee99')
-  for (const r of roots.splice(0)) act(() => r.unmount())
-  expect(attachInNexus('c0ffee98')).toBe(false)
-  expect(openFigure('r-live')).toBe(false)
 })
 
 test('openFigure closes an open window, as the window’s own open does, so the tab is not left under it; what it cannot open leaves the window', async () => {
@@ -461,7 +413,6 @@ test('openFigure closes an open window, as the window’s own open does, so the 
   expect(windowStore.getState().open).toBeNull()
   expect(document.querySelector('[data-zz-over]')).toBeNull()
   expect(nexusStore.getState().activeTab).toBe('r-live')
-  await act(async () => openWindow('zz-over'))
-  act(() => void attachInNexus({ id: 'c0ffee97', account_env: null }))
-  expect(windowStore.getState().open).toBeNull()
+  for (const r of roots.splice(0)) act(() => r.unmount())
+  expect(openFigure('r-live')).toBe(false)
 })

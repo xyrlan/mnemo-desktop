@@ -256,7 +256,7 @@ const MODS: Record<string, 'meta' | 'ctrl' | 'alt' | 'shift' | 'mod'> = {
 
 const isMac = () => typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
-/** `"Meta+k"`, `"Cmd+Shift+D"`, `"ArrowDown ArrowDown Enter"`: chords joined by `+`, pressed
+/** `"Meta+e"`, `"Cmd+Shift+D"`, `"ArrowDown ArrowDown Enter"`: chords joined by `+`, pressed
  *  one after another when separated by spaces (`Space` is the space bar). `Mod` is ⌘ on a Mac
  *  and Ctrl elsewhere, like the app's own chords. */
 export function parseKeys(keys: string, mac = isMac()): Chord[] {

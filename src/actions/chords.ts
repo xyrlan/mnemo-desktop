@@ -16,48 +16,17 @@ type Binding = { mac: Chord; other: Chord }
 // A Mac has ⌘, which no shell reads. Elsewhere the shell owns plain Ctrl (Ctrl+W, Ctrl+D,
 // Ctrl+K…) and AltGr arrives as Ctrl+Alt, so no chord here is plain Ctrl or holds Ctrl with Alt:
 //   ⌘ key    → Ctrl+Shift+key  (as Windows Terminal and VS Code do)
-//   ⌘⇧ key   → Alt+Shift+key   where Ctrl+Shift+key is now taken (D, W, B) or is the terminal's
-//              copy (C); Ctrl+Shift+key where it is free (G, [, ])
-//   ⌘⌥ key   → Alt+Shift+arrow, Ctrl+Shift+A
-//   ⌃ digit  → Alt+digit
+//   ⌘⇧ key   → Alt+Shift+key   where Ctrl+Shift+key is taken (W)
 const mod = (key: string): Binding => ({ mac: { meta: true, key }, other: { ctrl: true, shift: true, key } })
 const modShift = (key: string, other: Chord): Binding => ({ mac: { meta: true, shift: true, key }, other })
-const focus = (key: string): Binding => ({ mac: { meta: true, alt: true, key }, other: { alt: true, shift: true, key } })
 
+/** The app's chords: ⌘W and ⇧⌘W close what is on top of the Nexus (the drawer claims them), ⌘E
+ *  dictates. The Nexus's own keys (⌥1–9, Tab, `/`, Esc, ⌘\) are bound inside it. */
 const BINDINGS: Record<string, Binding> = {
-  'tab.new': mod('t'),
-  'pane.split.row': mod('d'),
   'pane.close': mod('w'),
   'dictation.toggle': mod('e'),
-  'palette.open': mod('k'),
-  'worktree.jump': mod('j'),
-  'workspace.new': mod('n'),
-  'sidebar.toggle-left': mod('b'),
-  'sidebar.toggle-right': mod('l'),
-  'pane.split.col': modShift('d', { alt: true, shift: true, key: 'd' }),
   'tab.close': modShift('w', { alt: true, shift: true, key: 'w' }),
-  'tab.new-browser': modShift('b', { alt: true, shift: true, key: 'b' }),
-  'pane.toggle-face': modShift('c', { alt: true, shift: true, key: 'c' }),
-  'diff.open': modShift('g', { ctrl: true, shift: true, key: 'g' }),
-  'tab.prev': modShift('[', { ctrl: true, shift: true, key: '[' }),
-  'tab.next': modShift(']', { ctrl: true, shift: true, key: ']' }),
-  'focus.left': focus('arrowleft'),
-  'focus.right': focus('arrowright'),
-  'focus.up': focus('arrowup'),
-  'focus.down': focus('arrowdown'),
-  'floating-terminal.toggle': { mac: { meta: true, alt: true, key: 'a', code: 'KeyA' }, other: { ctrl: true, shift: true, key: 'a' } },
-  // ⌘1–9 go to a worktree; ⌘0 to the whole fleet (Nexus v2). Shift types ")" on the 0 key.
-  'nexus.toggle': { mac: { meta: true, key: '0' }, other: { ctrl: true, shift: true, key: '0', code: 'Digit0' } },
 }
-for (let n = 1; n <= 9; n++) {
-  const key = String(n)
-  // With Shift the digit row types "!", "@"…, and some layouts need Shift for the digit itself.
-  BINDINGS[`worktree.go.${n}`] = { mac: { meta: true, key }, other: { ctrl: true, shift: true, key, code: `Digit${n}` } }
-  BINDINGS[`tab.go.${n}`] = { mac: { ctrl: true, key }, other: { alt: true, key, code: `Digit${n}` } }
-}
-
-/** What Shift makes of a key on a US layout. */
-const SHIFTED: Record<string, string> = { '[': '{', ']': '}' }
 
 type KeyEvent = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
 
@@ -66,7 +35,7 @@ function matches(c: Chord, e: KeyEvent, platform: Platform): boolean {
   // A Mac's ⌘ chords have always fired with ⌃ held too.
   if (e.ctrlKey !== !!c.ctrl && !(platform === 'mac' && c.meta)) return false
   const k = e.key.toLowerCase()
-  return k === c.key || (c.shift && k === SHIFTED[c.key]) || (c.code !== undefined && e.code === c.code)
+  return k === c.key || (c.code !== undefined && e.code === c.code)
 }
 
 export function actionForChord(e: KeyEvent, platform: Platform): string | null {

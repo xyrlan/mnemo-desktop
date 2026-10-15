@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react'
-import { layoutDagre, type CardData, type CardNode } from '../graph'
+import { layoutDagre, type CardData, type CardNode } from '../graph/layout'
 import { confidenceTone } from './rules'
 import type { GraphNode, VaultGraph } from './types'
 

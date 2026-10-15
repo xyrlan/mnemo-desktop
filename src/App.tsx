@@ -1,36 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { toast } from '@/ui'
 import { store } from './layout/app-store'
-import Palette from './palette/Palette'
 import { detectPlatform, installKeys } from './actions/keys'
 import { installNotAPage } from './actions/not-a-page'
-import { registerBuiltins } from './actions/registry'
 import { startWorkspace, type Workspace } from './layout/persist'
 import Shell from './shell/Shell'
-import { registerShellActions } from './shell/actions'
 import { tellNewerRelease } from './about/release'
-import { pollMission, refreshGithubEvery, reloadUnknownTitles, showFirstWorktree } from './shell/live'
+import { pollMission, refreshGithubEvery, reloadUnknownTitles } from './shell/live'
 
-// Every `src/<view>/view.tsx` registers its pane view, or mounts its screen in a shell slot
-// (`mountInSlot`, src/shell/slots.ts), on import. A new one therefore needs no edit here.
+// Every `src/<dir>/view.tsx` mounts its screen in the shell's overlay slot (`mountInSlot`,
+// src/shell/slots.ts) or connects what it needs, on import: the Nexus, its notifications, the
+// pulse, dictation, the desktop MCP and the terminal view the drawer draws. A new one needs no
+// edit here.
 import.meta.glob('./*/view.tsx', { eager: true })
-import './terminal/cmd-view'
 
-registerBuiltins(store)
-registerShellActions()
-
-/** Started once per app run (StrictMode mounts twice): restores the saved layout, then saves it. */
+/** Started once per app run (StrictMode mounts twice): restores the saved sessions, then saves
+ *  them. The layout store is the session registry: every terminal the app runs, shown in the
+ *  drawer or not. */
 let workspace: Workspace | undefined
 
 export default function App() {
-  // The workbench says nothing about an empty worktree until the saved tabs are back, so a
-  // restored workspace does not flash an empty state first.
-  const [boot, setBoot] = useState<{ ready: boolean; notice: string | null }>({ ready: false, notice: null })
-
   useEffect(() => installKeys(), [])
   // A dev build keeps the webview's context menu, for Inspect.
   useEffect(() => installNotAPage(detectPlatform(), { keepMenu: import.meta.env.DEV }), [])
-  // What the mission sidebar ran while it was mounted: the snapshot poll, and Home's titles.
+  // The snapshot poll the ship reads, and the session titles it names captains by.
   useEffect(() => pollMission(), [])
   useEffect(() => reloadUnknownTitles(), [])
   useEffect(() => refreshGithubEvery(), [])
@@ -41,18 +34,12 @@ export default function App() {
       toast.error('Could not save the workspace layout', { id: 'workspace-save', description: why }),
     )
     let live = true
-    void workspace.ready.then(({ notice }) => live && setBoot({ ready: true, notice }))
+    // A restore that failed says so once: this run's sessions are not saved over the file.
+    void workspace.ready.then(({ notice }) => live && notice && toast.error('Could not restore the last workspace', { id: 'workspace-restore', description: notice }))
     return () => {
       live = false
     }
   }, [])
-  // The restore shows the worktree it saved; with none, the first repo's main checkout shows.
-  useEffect(() => (boot.ready ? showFirstWorktree() : undefined), [boot.ready])
 
-  return (
-    <>
-      <Shell ready={boot.ready} notice={boot.notice} onDismissNotice={() => setBoot({ ready: true, notice: null })} />
-      <Palette />
-    </>
-  )
+  return <Shell />
 }

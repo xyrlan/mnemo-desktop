@@ -7,25 +7,21 @@ import { insert, resolveTarget, withSeparator, type Sinks, type Where } from './
 const shell = (id: number, extra: Partial<Pane> = {}): Pane => ({ id, view: 'terminal', ...extra })
 const tab = (id: string, key: string | null): DrawerTab => ({ id, kind: 'captain', key, readOnly: key ? null : 'ended', label: id, sessionId: null, cwd: null })
 
-/** The Nexus open, its drawer showing tab `active` of `tabs`; `sessions` by key, PTY by session. */
+/** The drawer showing tab `active` of `tabs`; `sessions` by key, PTY by session. */
 function where(o: {
-  open?: boolean
   collapsed?: boolean
   tabs?: DrawerTab[]
   active?: string | null
   sessions?: Record<string, number | null>
   panes?: Pane[]
-  /** The workbench's active tab's focused pane. */
-  focused?: number
 }): Where {
   const sessions = Object.fromEntries(
     Object.entries(o.sessions ?? {}).map(([key, pty]): [string, HostedSession] => [key, { key, kind: key.startsWith('pane:') ? 'pane' : 'attach', pty, by: ['nexus-drawer'] }]),
   )
-  const focused = o.focused ?? 0
   return {
-    nexus: { open: o.open ?? true, collapsed: o.collapsed ?? false, tabs: o.tabs ?? [], activeTab: o.active ?? o.tabs?.[0]?.id ?? null },
+    nexus: { collapsed: o.collapsed ?? false, tabs: o.tabs ?? [], activeTab: o.active ?? o.tabs?.[0]?.id ?? null },
     sessions,
-    layout: { tabs: [{ id: 't1', root: { kind: 'leaf', pane: focused }, focused }], activeTab: 't1', panes: Object.fromEntries((o.panes ?? []).map((p) => [p.id, p])) },
+    layout: { panes: Object.fromEntries((o.panes ?? []).map((p) => [p.id, p])) },
   }
 }
 
@@ -91,28 +87,10 @@ describe('resolveTarget', () => {
     expect(resolveTarget(null, drawer({ panes: [shell(7, { error: 'spawn failed', offscreen: true })] }))).toBeNull()
   })
 
-  it('a palette field is for choosing: the drawer gets the text', () => {
-    const cmdk = put('<div data-palette><input id="cmdk"></div>').querySelector('input')!
-    expect(resolveTarget(cmdk, drawer())).toEqual({ kind: 'pty', pane: 7 })
-  })
-
-  it("never types into the workbench's pane while the Nexus is open", () => {
-    const pane = put(XTERM)
-    pane.className = 'pane'
-    pane.dataset.pane = '3'
-    const w = where({ panes: [shell(3)], focused: 3 })
-    expect(resolveTarget(pane.querySelector('textarea'), w)).toBeNull()
+  it('never types into a pane no drawer tab shows', () => {
+    const w = where({ panes: [shell(3)] })
+    expect(resolveTarget(put(XTERM).querySelector('textarea'), w)).toBeNull()
     expect(resolveTarget(null, w)).toBeNull()
-  })
-
-  it("the Nexus closed (until wave 2b): the workbench's focused terminal", () => {
-    const pane = put(XTERM)
-    pane.className = 'pane'
-    pane.dataset.pane = '3'
-    const w = drawer({ open: false, panes: [shell(3), shell(5)], focused: 5 })
-    expect(resolveTarget(pane.querySelector('textarea'), w)).toEqual({ kind: 'pty', pane: 3 })
-    expect(resolveTarget(null, w)).toEqual({ kind: 'pty', pane: 5 })
-    expect(resolveTarget(null, drawer({ open: false, panes: [{ id: -1, view: 'browser' }], focused: -1 }))).toBeNull()
   })
 })
 

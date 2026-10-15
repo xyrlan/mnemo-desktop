@@ -38,10 +38,10 @@ const diff: DiffClient = {
 }
 
 let root: Root
-function mount(over: { shown?: boolean; ship?: Ship } = {}) {
+function mount(over: { ship?: Ship } = {}) {
   const { host, log } = fakeHost()
   const drawer = createDrawer(host, nexusStore, {})
-  const owners = createStore<{ owners: Record<number, { name?: string } | undefined>; panes?: Record<number, { offscreen?: true } | undefined> }>(() => ({ owners: {} }))
+  const owners = createStore<{ owners: Record<number, { name?: string } | undefined> }>(() => ({ owners: {} }))
   const opened: string[] = []
   const repos: string[] = []
   const deps: DrawerDeps = {
@@ -62,8 +62,7 @@ function mount(over: { shown?: boolean; ship?: Ship } = {}) {
   }
   const el = document.body.appendChild(document.createElement('div'))
   root = createRoot(el)
-  const render = (shown = over.shown ?? true) =>
-    act(() => root.render(<NexusDrawer deps={deps} ship={ship} feed={null} repos={reposFixture} shown={shown} onOpen={(id) => void opened.push(id)} />))
+  const render = () => act(() => root.render(<NexusDrawer deps={deps} ship={ship} feed={null} repos={reposFixture} onOpen={(id) => void opened.push(id)} />))
   render()
   return { host, log, drawer, owners, open, render, opened, repos }
 }
@@ -77,7 +76,7 @@ beforeEach(() => {
   for (const k of Object.keys(views)) delete views[Number(k)]
   diffAsked.length = 0
   opened.length = 0
-  nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null, drawerWidth: 600 })
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false, focusId: null, drawerWidth: 600 })
   Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
   Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true })
 })
@@ -143,15 +142,6 @@ test('collapsed, the drawer is hidden, its terminals still mounted and held, beh
   act(() => $('[data-drawer-handle]')!.click())
   expect(nexusStore.getState().collapsed).toBe(false)
   expect(views[7]).toMatchObject({ mounts: 1, active: [true, false, true] })
-})
-
-test('the Nexus closed, the drawer stays mounted and hidden, with no handle', async () => {
-  const { open, render } = mount()
-  open('cap-1')
-  render(false)
-  expect(aside().style.display).toBe('none')
-  expect($('[data-drawer-handle]')).toBeNull()
-  expect(views[7]).toMatchObject({ mounts: 1, active: [true, false] })
 })
 
 test('× closes the tab and lets its session go', async () => {
@@ -276,8 +266,7 @@ test('a robot’s tab opens its full diff in the Changes window; a captain’s h
 })
 
 test('a session the Nexus started: named for what it runs until the ship knows it', async () => {
-  const { drawer, owners } = mount()
-  act(() => owners.setState({ panes: { 30: { offscreen: true } } }))
+  const { drawer } = mount()
   act(() => drawer.open({ id: 'session:30', kind: 'session', key: null, readOnly: null, label: 'shell · mnemo-desktop', sessionId: null, cwd: '/work/mnemo-desktop' }, { pane: 30 }))
   act(() => drawer.open({ id: 'new-1', kind: 'captain', key: null, readOnly: null, label: 'claude · mnemo-desktop', sessionId: 'new-1', cwd: '/work/mnemo-desktop' }, { pane: 31 }))
   expect([...document.querySelectorAll('[data-drawer-tab]')].map((t) => t.textContent)).toEqual(['shell · mnemo-desktop', 'claude · mnemo-desktop'])

@@ -26,3 +26,15 @@ export function provideSessions(client: SessionClient | null) {
 export function providedSessions(): SessionClient | null {
   return provided
 }
+
+/** `sessions` as the workspace restore should see them: without the terminals `held()` names (the
+ *  session host's attaches), which it would otherwise adopt as panes of their own. */
+export function hideFrom(sessions: SessionClient, held: () => PaneId[]): SessionClient {
+  return {
+    list: async () => {
+      const hidden = new Set(held())
+      return (await sessions.list()).filter((i) => !hidden.has(i.id))
+    },
+    attach: (id, onOutput) => sessions.attach(id, onOutput),
+  }
+}

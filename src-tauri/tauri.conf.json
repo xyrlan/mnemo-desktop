@@ -27,8 +27,8 @@
     "targets": "all",
     "category": "DeveloperTool",
     "copyright": "Copyright © 2026 xyrlan",
-    "shortDescription": "Terminal-first desktop shell for agentic development",
-    "longDescription": "Desktop shell for the mnemo agentic development environment: a terminal with tabs, splits and a command palette, enough to replace your daily terminal so the mission cockpit can live on screen.",
+    "shortDescription": "The Nexus: every Claude Code session and dispatched child, on one ship",
+    "longDescription": "Desktop app for the mnemo agentic development environment: the Nexus, a ship that shows every Claude Code session you run and every child you dispatch, with each session's live terminal in a drawer beside it.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

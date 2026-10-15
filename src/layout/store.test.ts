@@ -1527,7 +1527,7 @@ describe('terminals that outlived the page', () => {
     provideSessions(core.client)
     try {
       const s = createStore(fakePty({ first: 100 }), { workspace: () => null })
-      // As the setup pane waits on it (`src/setup/launch.ts`): the saved layout, alone.
+      // A wrapper of `restore`, as the setup pane once waited on it: the saved layout, alone.
       const restore = s.getState().restore
       s.setState({ restore: async (saved) => restore(saved) })
       const saved = await savedPair()
@@ -1976,10 +1976,24 @@ describe('offscreen panes: the sessions the Nexus starts', () => {
     }
   })
 
-  test('restored: when no one can say which sessions run, none is resumed', async () => {
-    const s = createStore(fakePty({ first: 100 }), { sessions: core([live(1, '/a')]).client, liveSessions: async () => Promise.reject(new Error('no')) })
-    await s.getState().restore(await savedFile())
-    expect(Object.values(s.getState().panes).filter((p) => p.offscreen)).toEqual([])
+  test('restored: when no one can say which sessions run, none is resumed, and each comes back on a new shell with its id (#460)', async () => {
+    vi.useFakeTimers()
+    try {
+      const pty = fakePty({ first: 100 })
+      const s = createStore(pty, { sessions: core([live(1, '/a')]).client, liveSessions: async () => Promise.reject(new Error('no')) })
+      await s.getState().restore(await savedFile())
+      vi.advanceTimersByTime(PROMPT_DELAY_MS * 2)
+      expect(Object.values(s.getState().panes).filter((p) => p.offscreen).map((p) => [p.sessionId, p.renewed])).toEqual([
+        ['sess-6', true],
+        ['sess-7', true],
+      ])
+      // Nothing typed: one of them may run elsewhere.
+      expect(pty.writes).toEqual([])
+      // And the next save keeps them, ids and all.
+      expect(s.getState().snapshotForSave().offscreen?.map((o) => o.sessionId)).toEqual(['sess-6', 'sess-7'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('restored: a list that cannot be read is left out, and a session id that is not one never typed', async () => {

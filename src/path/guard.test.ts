@@ -10,15 +10,7 @@ type Fs = {
 /** Files that still trim a trailing `/` themselves. None compares paths in the places #355 is
  *  about; each is its own area's to move onto `src/path/path.ts`. Do not add to this list: use
  *  `norm` (or `basename`, `within`, `samePath`) from there. */
-const TRIMS_ITS_OWN = new Set([
-  'src/chat-input/catalog.ts',
-  'src/diff/DiffPane.tsx',
-  'src/editor/client.ts',
-  'src/explorer/git.ts',
-  'src/home/repo-color.ts',
-  'src/home/types.ts',
-  'src/source-control/model.ts',
-])
+const TRIMS_ITS_OWN = new Set(['src/chat-input/catalog.ts', 'src/editor/client.ts', 'src/home/types.ts'])
 
 async function sources(): Promise<[string, string][]> {
   const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs

@@ -1,15 +1,5 @@
-import type { Store } from '../layout/store'
-import { leaves } from '../layout/tree'
 import type { LearnedClient, ReviewProject } from './client'
 import { parseDryRun, type DryRun } from './types'
-
-/** Shows the review pane: the one already open, wherever it is, or a new one in its own tab. */
-export function showLearned(store: Store) {
-  const s = store.getState()
-  const open = s.tabs.flatMap((t) => leaves(t.root)).find((p) => s.panes[p]?.view === 'learned')
-  if (open !== undefined) return s.goToPane(open)
-  s.openView('learned', {}, 'tab', 'what mnemo learned')
-}
 
 export type WatchDeps = {
   client: Pick<LearnedClient, 'project' | 'decided' | 'step'>

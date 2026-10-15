@@ -22,7 +22,7 @@ vi.mock('./drawer/app', async () => {
   const { createStore } = await import('zustand/vanilla')
   const { nexusStore } = await import('./store')
   const { host } = fakeHost()
-  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
+  const drawer = createDrawer(host, nexusStore, {})
   return {
     liveDrawer: {
       drawer,
@@ -90,7 +90,7 @@ async function open(first: Feed) {
 }
 
 beforeEach(() => {
-  nexusStore.setState({ open: true, feed: null, log: [], tabs: [] })
+  nexusStore.setState({ feed: null, log: [], tabs: [] })
   missionStore.setState({ snapshot: snapshot(pr()) })
 })
 afterEach(async () => {
