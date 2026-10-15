@@ -46,16 +46,14 @@ export type Shown = { sessionId: string | null; worktree: string | null }
 
 /** What `shownSession` reads of the Nexus store. */
 export type DrawerOnScreen = {
-  open: boolean
   collapsed: boolean
   activeTab: string | null
   tabs: readonly { id: string; kind: string; sessionId: string | null; cwd: string | null }[]
 }
 
-/** The session the drawer shows, or null when it shows none: the Nexus closed, the drawer
- *  collapsed or empty. */
+/** The session the drawer shows, or null when it shows none: the drawer collapsed or empty. */
 export function shownSession(nexus: DrawerOnScreen, repos: readonly RepoNode[]): Shown | null {
-  if (!nexus.open || nexus.collapsed) return null
+  if (nexus.collapsed) return null
   const tab = nexus.tabs.find((t) => t.id === nexus.activeTab)
   if (!tab) return null
   return { sessionId: tab.sessionId, worktree: tab.kind === 'robot' && tab.cwd ? (placeOf(tab.cwd, repos)?.path ?? null) : null }
@@ -138,11 +136,3 @@ export function onScreen(alert: Pick<Alert, 'sessionId' | 'worktree'>, at: { foc
   return alert.worktree !== null && at.shown.worktree !== null && norm(alert.worktree) === norm(at.shown.worktree)
 }
 
-/** The workbench's *looking*: the window has focus and shows the agent's worktree, or one of the
- *  shown worktree's tabs holds its pane. The notifier no longer asks it (`onScreen`); only
- *  `src/path/callers.test.ts` does, and wave 2b removes both. */
-export function looking(alert: Pick<Alert, 'worktree'>, at: { focused: boolean; shown: string | null; shownPanes: readonly number[]; pane: number | null }): boolean {
-  if (!at.focused) return false
-  if (alert.worktree !== null && at.shown !== null && norm(alert.worktree) === norm(at.shown)) return true
-  return at.pane !== null && at.shownPanes.includes(at.pane)
-}

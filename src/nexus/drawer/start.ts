@@ -34,7 +34,7 @@ export type Sessions = {
   openSession(spec: SessionSpec): Promise<void>
   paneOf(sessionId: string): PaneId | null
   endSession(pane: PaneId): Promise<void>
-  /** No drawer tab shows pane `pane` any more (`Workbench.letGo`): an offscreen pane ends unless a
+  /** No drawer tab shows pane `pane` any more (`Release.letGo`): an offscreen pane ends unless a
    *  Claude runs in it, whose captain opens it again. A shell or a saved command, ended or not, has
    *  nothing on the ship to come back from. */
   letGo(pane: PaneId): Promise<void>
@@ -66,10 +66,9 @@ export function createSessions(d: StartDeps): Sessions {
     return Object.values(panes()).find((p) => p.view === 'terminal' && p.id > 0 && p.exitCode === undefined && !p.error && p.sessionId === sessionId)?.id ?? null
   }
 
-  /** Shows pane `pane` in the drawer under `tab`, the Nexus open. */
+  /** Shows pane `pane` in the drawer under `tab`. */
   function show(tab: DrawerTab, pane: PaneId) {
     d.drawer.open(tab, { pane })
-    d.nexus.getState().setOpen(true)
   }
 
   return {

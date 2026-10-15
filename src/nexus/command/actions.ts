@@ -7,7 +7,6 @@ import { jobState, type Job } from '../../cockpit/store'
 import { ptySendPrompt } from '../../chat-input/pty'
 import { fleetStore } from '../../fleet/store'
 import { dispatchIssues, dispatchKey } from '../../github/actions'
-import { store as layout } from '../../layout/app-store'
 import { stopCmd } from '../../mission/account'
 import { answerQuestion, answerQuestionOther } from '../../mission/ask'
 import { tauriMission } from '../../mission/client'
@@ -94,12 +93,9 @@ export const appPaths: Paths = {
     return outcomeOf(await jobEnded(key))
   },
   async stop(root, children) {
-    // In a drawer tab while the Nexus is open (where the stop is asked from), never a workbench tab
-    // under it.
-    const nexus = nexusRoutes()
-    if (nexus) await nexus.terminal(root, stopLine(children), `stop · ${basename(root) || root}`)
-    else await layout.getState().openCommandTab(root, stopLine(children))
-    return { ok: true, why: nexus ? '(typed in a drawer tab)' : '(typed in a terminal tab)' }
+    // In a drawer tab, where the stop is asked from.
+    await nexusRoutes().terminal(root, stopLine(children), `stop · ${basename(root) || root}`)
+    return { ok: true, why: '(typed in a drawer tab)' }
   },
   reply: (id, text) => tauriMission.reply(id, text),
   paneOf(sessionId) {

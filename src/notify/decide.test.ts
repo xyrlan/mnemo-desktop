@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import type { AgentEvent } from '../agents/events'
 import { child, snapshot } from '../mission/fixtures'
-import { alertFor, cardKey, figureOf, inside, looking, onScreen, placeOf, quietPrompt, shownSession } from './decide'
+import { alertFor, cardKey, figureOf, inside, onScreen, placeOf, quietPrompt, shownSession } from './decide'
 import { REPOS } from './test-fleet'
 
 const ev = (kind: AgentEvent['kind'], cwd: string, message?: string, sessionId = 's-x'): AgentEvent => ({ sessionId, cwd, kind, at: 100, ...(message ? { message } : {}) })
@@ -24,14 +24,13 @@ test('placeOf picks the deepest worktree, across repos, or none', () => {
   expect(placeOf('/code/app/.claude/worktrees/feat/src', nestedFirst)?.name).toBe('feat')
 })
 
-test('shownSession is the drawer tab shown, expanded, the Nexus open; a robot tab also by its worktree', () => {
+test('shownSession is the drawer tab shown, expanded; a robot tab also by its worktree', () => {
   const feat = { id: 'r1', kind: 'robot', sessionId: 's-feat', cwd: '/code/app/.claude/worktrees/feat/src' }
   const cap = { id: 's-main', kind: 'captain', sessionId: 's-main', cwd: '/code/app' }
-  const nexus = { open: true, collapsed: false, activeTab: 'r1', tabs: [feat, cap] }
+  const nexus = { collapsed: false, activeTab: 'r1', tabs: [feat, cap] }
   expect(shownSession(nexus, REPOS)).toEqual({ sessionId: 's-feat', worktree: '/code/app/.claude/worktrees/feat' })
   // A captain's tab is its session only: other sessions run in its checkout too.
   expect(shownSession({ ...nexus, activeTab: 's-main' }, REPOS)).toEqual({ sessionId: 's-main', worktree: null })
-  expect(shownSession({ ...nexus, open: false }, REPOS)).toBeNull()
   expect(shownSession({ ...nexus, collapsed: true }, REPOS)).toBeNull()
   expect(shownSession({ ...nexus, activeTab: null }, REPOS)).toBeNull()
 })
@@ -86,14 +85,6 @@ test('onScreen: you are looking only with focus, at its session in the drawer or
   expect(onScreen({ sessionId: 's2', worktree: '/code/app' }, at)).toBe(false)
   expect(onScreen({ sessionId: 's2', worktree: '/code/app' }, { ...at, shown: { sessionId: null, worktree: null } })).toBe(false)
   expect(onScreen({ sessionId: 's1', worktree: null }, { ...at, shown: null })).toBe(false)
-})
-
-test('the workbench’s looking, kept until wave 2b: only with focus, at its worktree or a pane of the shown tabs', () => {
-  const at = { focused: true, shown: '/code/app', shownPanes: [3], pane: null }
-  expect(looking({ worktree: '/code/app' }, at)).toBe(true)
-  expect(looking({ worktree: '/code/app' }, { ...at, focused: false })).toBe(false)
-  expect(looking({ worktree: null }, { ...at, pane: 3 })).toBe(true)
-  expect(looking({ worktree: null }, at)).toBe(false)
 })
 
 test('quietPrompt is mnemo’s own turns, peer messages and a finished background task; not a person', () => {

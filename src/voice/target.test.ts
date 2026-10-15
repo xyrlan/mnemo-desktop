@@ -12,7 +12,7 @@ import { dictationTarget } from './target'
 
 beforeEach(() => {
   document.body.innerHTML = ''
-  nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false })
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false })
   sessionHost.setState({ sessions: {} })
 })
 

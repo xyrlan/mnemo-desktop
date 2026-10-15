@@ -5,7 +5,6 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
 import { answerPrompt, answerStore } from './approve'
 import { DETACH_KEY, keyFor, promptOnScreen, promptOptions } from './prompt'
 import type { AttachSession } from '../mission/as-me'
-import { store as appStore } from '../layout/app-store'
 import { child } from '../mission/fixtures'
 import { setNexusRoutes } from '../nexus/outside'
 
@@ -107,18 +106,17 @@ function fakeAttach(start: string[], next: (key: string) => string[] | null = ()
 
 const quick = { sleep: async () => {}, timeoutMs: 50, stepMs: 50, waitingFor: async () => 'permission prompt' }
 
-let typed: [string | undefined, string, string | undefined][]
+/** What opened in a drawer tab to answer by hand: where, what, and the tab's name. */
+let typed: [string | undefined, string, string][]
+let unsetRoutes: () => void
 
 beforeEach(() => {
   typed = []
   answerStore.setState({ answers: {} })
-  appStore.setState({
-    tabs: [],
-    activeTab: '',
-    panes: {},
-    openCommandTab: async (cwd, cmd, sessionId) => void typed.push([cwd, cmd, sessionId]),
-  })
+  unsetRoutes = setNexusRoutes({ terminal: async (cwd, cmd, label) => void typed.push([cwd, cmd, label]), page: async () => {}, pages: () => {} })
 })
+
+afterEach(() => unsetRoutes())
 
 test('Allow presses the prompt\'s key in a hidden attach, and leaves it once the prompt is gone: no terminal opens', async () => {
   const a = fakeAttach(PROMPT, (key) => (key === '1' ? AFTER : null))
@@ -139,29 +137,16 @@ test('Deny and "don\'t ask again" press their own options', async () => {
   expect(always.writes.slice(1, 2)).toEqual(['2'])
 })
 
-test('a prompt for another call than the card shows: nothing is pressed, and the attach opens in a terminal to answer by hand', async () => {
+test('a prompt for another call than the card shows: nothing is pressed, and the attach opens in a drawer tab to answer by hand', async () => {
   const a = fakeAttach(OTHER)
   const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
   expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])
   expect(answer.phase).toBe('error')
   expect(answer.error).toContain('not the one')
-  expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', '987fb657-a6c1']])
+  expect(typed).toEqual([['/Users/me/probe', 'claude attach 987fb657', 'attach · 987fb657']])
 })
 
-test('with the Nexus open, the attach to answer by hand opens in its drawer, not in a workbench tab under it', async () => {
-  const drawer: [string | undefined, string, string][] = []
-  const unset = setNexusRoutes({ terminal: async (cwd, cmd, label) => void drawer.push([cwd, cmd, label]), page: async () => {}, pages: () => {} }, () => true)
-  try {
-    const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => fakeAttach(OTHER).session })
-    expect(answer.phase).toBe('error')
-    expect(drawer).toEqual([['/Users/me/probe', 'claude attach 987fb657', 'attach · 987fb657']])
-    expect(typed).toEqual([])
-  } finally {
-    unset()
-  }
-})
-
-test('no prompt in time: nothing is pressed, and the attach opens in a terminal', async () => {
+test('no prompt in time: nothing is pressed, and the attach opens in a drawer tab', async () => {
   const a = fakeAttach(['Attaching…'])
   const answer = await answerPrompt(probe, 'yes', { ...quick, open: async () => a.session })
   expect(a.writes).toEqual(['exec claude attach 987fb657\r', DETACH_KEY])

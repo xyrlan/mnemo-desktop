@@ -13,7 +13,7 @@ function memory() {
 }
 
 beforeEach(() => {
-  nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null })
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false, focusId: null })
 })
 
 test('kept: each tab on a pane, with the tab shown; an attach or a read-only tab is not', () => {
@@ -50,7 +50,7 @@ test('read back as written; what cannot be read is left out', () => {
 
 test('after a restart each tab comes back on its pane, or on the pane that resumed its session; the rest are forgotten', () => {
   const { host } = fakeHost()
-  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {} })
+  const drawer = createDrawer(host, nexusStore, {})
   const panes: Record<number, Pane> = { 7: term(7, { sessionId: 'cap-1' }), 9: term(9, { offscreen: true }), 12: term(12, { offscreen: true, sessionId: 'sess-3' }), 13: term(13, { exitCode: 0 }) }
   reopenTabs(
     {

@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { store as layout } from '../layout/app-store'
 import { nexusRoutes } from '../nexus/outside'
 import type { Account, AccountsState, PlanUsage, Shared } from './types'
 
@@ -39,5 +38,5 @@ export const tauriAccounts: AccountsClient = {
   movePane: (pane, id) => invoke<void>('accounts_move_pane', { pane, id }),
   usage: (a, refresh) => invoke<PlanUsage>('plan_usage', { configDir: a.configDir, isDefault: a.isDefault, refresh }),
   onChanged: (cb) => listen<AccountsState>(CHANGED_EVENT, (e) => cb(e.payload)),
-  openTerminal: (cmd) => nexusRoutes()?.terminal(undefined, cmd, 'Sign in') ?? layout.getState().openCommandTab(undefined, cmd),
+  openTerminal: (cmd) => nexusRoutes().terminal(undefined, cmd, 'Sign in'),
 }

@@ -25,7 +25,7 @@ function world(over: { failSpawn?: boolean; skip?: boolean; runsClaude?: (pane: 
   const layout = createStore(pty)
   const { host } = fakeHost()
   let sessions: Sessions | null = null
-  const drawer = createDrawer(host, nexusStore, { goToPane: () => {}, attach: () => {}, closeNexus: () => {}, letGo: (pane) => void sessions?.letGo(pane) })
+  const drawer = createDrawer(host, nexusStore, { letGo: (pane) => void sessions?.letGo(pane) })
   // The app drops a closed pane's session from the host (`session/app-host.ts`).
   layout.subscribe((s, prev) => {
     for (const id of Object.keys(prev.panes)) if (!s.panes[Number(id)]) host.getState().paneGone(Number(id))
@@ -46,7 +46,7 @@ const tabs = () => nexusStore.getState().tabs.map((t) => ({ id: t.id, kind: t.ki
 const ID1 = '00000001-0000-4000-8000-000000000000'
 
 beforeEach(() => {
-  nexusStore.setState({ open: false, tabs: [], activeTab: null, collapsed: false, focusId: null })
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false, focusId: null })
 })
 
 test('claude starts in the repo as Launch agent types it, under an id of its own, in a pane no tab shows, its tab its captain’s', async () => {
@@ -58,7 +58,7 @@ test('claude starts in the repo as Launch agent types it, under an id of its own
     expect(w.layout.getState().panes[1]).toMatchObject({ offscreen: true, sessionId: ID1, cwd: '/work/mnemo-desktop' })
     expect(w.layout.getState().tabs).toEqual([])
     expect(tabs()).toEqual([{ id: ID1, kind: 'captain', key: 'pane:1', label: 'claude · mnemo-desktop' }])
-    expect(nexusStore.getState()).toMatchObject({ open: true, activeTab: ID1 })
+    expect(nexusStore.getState()).toMatchObject({ activeTab: ID1 })
     expect(w.host.getState().sessions['pane:1']).toMatchObject({ kind: 'pane', pty: 1 })
     vi.advanceTimersByTime(PROMPT_DELAY_MS)
     expect(w.writes).toEqual([[1, `claude --dangerously-skip-permissions --session-id ${ID1}\n`]])
@@ -128,7 +128,6 @@ test('a session that cannot start rejects with why, for its caller to say, and n
   await expect(w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })).rejects.toThrow('Could not start claude in /work/mnemo: no shell')
   await expect(w.sessions.openSession({ kind: 'shell', root: '/work/mnemo' })).rejects.toThrow('Could not open a terminal in /work/mnemo: no shell')
   expect(tabs()).toEqual([])
-  expect(nexusStore.getState().open).toBe(false)
 })
 
 test('paneOf: the live terminal running the session, offscreen or in a tab; null for one that exited or none', async () => {

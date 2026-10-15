@@ -16,7 +16,6 @@ export function listSessions(): McpSession[] {
     tabs: n.tabs,
     activeTab: n.activeTab,
     collapsed: n.collapsed,
-    open: n.open,
     hosted: sessionHost.getState().sessions,
     panes: layout.getState().panes,
   })

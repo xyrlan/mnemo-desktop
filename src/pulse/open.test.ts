@@ -19,22 +19,29 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
 
 import { openRule } from './open'
-import { store } from '../layout/app-store'
+import { setNexusRoutes } from '../nexus/outside'
 import { vault } from '../vault/app-store'
 
-test('opens the rule of the pulse project in a vault pane, in pages mode', async () => {
+let shown = 0
+let unset = () => {}
+beforeEach(() => {
+  shown = 0
+  unset = setNexusRoutes({ terminal: async () => {}, page: async () => {}, pages: () => void shown++ })
+})
+afterEach(() => unset())
+
+test("opens the rule of the pulse project in Memory's pages", async () => {
   vault.getState().setMode('graph')
   await openRule('run-tests', 'mnemo-desktop')
   expect(calls[0]).toEqual(['vault_tree', undefined])
   expect(vault.getState().selected).toBe('/v/bots/mnemo-desktop/run-tests.md')
   expect(vault.getState().mode).toBe('pages')
-  const panes = Object.values(store.getState().panes)
-  expect(panes.filter((p) => p.view === 'vault')).toHaveLength(1)
+  expect(shown).toBe(1)
 
-  // A second click reuses the pane; a rule elsewhere falls back to any agent's page.
+  // A second click shows the window again; a rule elsewhere falls back to any agent's page.
   await openRule('run-tests', 'mnemo')
   expect(vault.getState().selected).toBe('/v/shared/run-tests.md')
-  expect(Object.values(store.getState().panes).filter((p) => p.view === 'vault')).toHaveLength(1)
+  expect(shown).toBe(2)
   expect(calls.filter(([c]) => c === 'vault_tree')).toHaveLength(1)
 })
 

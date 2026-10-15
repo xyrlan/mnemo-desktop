@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type RefObject } from 'react'
-import { shortcutLabel } from '../actions/chords'
-import { run } from '../actions/registry'
 import { pollWhileShown } from '../shell/while-shown'
 import { Bridge } from './ship-scene/Bridge'
 import { SceneContext, type SceneCtx } from './ship-scene/context'
@@ -203,9 +201,6 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
               SYSTEMS ▾
             </button>
           </nav>
-          <button type="button" className="ship-exit" title={`Back to the workbench (${shortcutLabel('nexus.toggle') ?? ''})`} onClick={() => run('nexus.toggle')}>
-            WORKBENCH <kbd>{shortcutLabel('nexus.toggle')}</kbd>
-          </button>
         </header>
         <div ref={scroller} className="ship-space">
           {drawn && (

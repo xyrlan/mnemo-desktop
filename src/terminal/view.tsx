@@ -17,21 +17,20 @@ import { resizeRequest } from './reattach'
 import { loadFaces, onFaces, redraw, track } from './fonts'
 import { provideSessions } from './sessions'
 import { tauriSessions } from './tauri-sessions'
-import { registerPaneView, type PaneViewProps } from '../panes/registry'
+import type { PaneViewProps } from '../panes/registry'
 import { openUrl } from '../github/actions'
 import { openTerminalLink } from './links'
 import './shell-choice'
-import ConversationFace from '../conversation/Face'
 
 const platform = detectPlatform()
 
-/** One view of terminal `id`. Several may show the same terminal at once (#423): the pane's own,
- *  and the session host's presentations (a popup, the drawer). Each draws every byte; the one that
- *  owns the terminal sizes it and types into it, and the others are veiled, drawn at its size,
- *  until they take it back (`attachSink` in the layout store).
+/** One view of terminal `id`. Several may show the same terminal at once (#423): the session
+ *  host's presentations (the drawer's tabs). Each draws every byte; the one that owns the terminal
+ *  sizes it and types into it, and the others are veiled, drawn at its size, until they take it
+ *  back (`attachSink` in the layout store).
  *
- *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, the
- *  layout's focus is not its, and it draws the terminal whatever face the pane shows. `props.name`:
+ *  `props.present`: a presentation's view, not the pane's: it takes the terminal as it opens, and
+ *  the layout's focus is not its. `props.name`:
  *  what the presentation calls it, as `owners[id].name` says while it owns the terminal (a tab's
  *  indicator). `props.active`: takes the terminal each time it turns true (a drawer tab shown
  *  again), with no remount. `props.close`: what a key closes once the program has exited; the
@@ -228,8 +227,6 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
       tabIndex={exited || broken ? 0 : -1}
     >
       {!broken && <div ref={host} style={{ height: '100%' }} />}
-      {/* A presentation (the drawer, a popup) shows the terminal, never the pane's conversation face. */}
-      {!broken && !present && pane?.face === 'conversation' && <ConversationFace paneId={id} />}
       {pane?.renewed && !exited && (
         <div className="pane-notice" role="status">
           The shell that ran in this pane is no longer running. This is a new one, in the same folder.
@@ -255,6 +252,5 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
   )
 }
 
-registerPaneView('terminal', TerminalPane)
 // The workspace restore attaches each saved terminal to its shell when the shell kept running.
 provideSessions(tauriSessions)

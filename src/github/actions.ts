@@ -1,4 +1,3 @@
-import { store as layout } from '../layout/app-store'
 import { cockpitStore } from '../cockpit/app-store'
 import { runJob } from '../cockpit/job'
 import { saveSetting, settingsStore } from '../settings/app-store'
@@ -8,10 +7,8 @@ import { currentOs, installRoute } from '../setup/tools'
 import { SCOPE_FIX, type Issue } from './types'
 
 /** What a click does with GitHub: a dispatch runs headless with `runJob`, its output captured
- *  and shown in its job's drawer rather than typed into a fresh terminal tab; other commands
- *  still run in a terminal tab, and pages open in a browser pane. While the Nexus covers the
- *  workbench, a command runs in its drawer and a page opens in the system browser instead
- *  (`nexus/outside`). */
+ *  and shown in its job's log rather than typed into a fresh terminal; other commands run in a
+ *  drawer tab, and pages open in the system browser (`nexus/outside`). */
 
 type DispatchOpts = { model?: string; effort?: string; may?: string }
 
@@ -65,16 +62,17 @@ export function resumeChildren(root: string) {
   runDispatch(resumeKey(root), `resume · ${root}`, root, ['mnemo', 'resume'])
 }
 
-export function openUrl(url: string, title: string) {
-  const nexus = nexusRoutes()
-  if (nexus) void nexus.page(url).catch(() => {})
-  else layout.getState().openView('browser', { url }, 'auto', title)
+/** Opens `url` in the system browser. */
+export function openUrl(url: string) {
+  void nexusRoutes()
+    .page(url)
+    .catch(() => {})
 }
 
-/** Runs `cmd` in a terminal tab, or in the Nexus's drawer while it is open. */
-const inTerminal = (cmd: string, label: string) => void (nexusRoutes()?.terminal(undefined, cmd, label) ?? layout.getState().openCommandTab(undefined, cmd)).catch(() => {})
+/** Runs `cmd` in a drawer tab. */
+const inTerminal = (cmd: string, label: string) => void nexusRoutes().terminal(undefined, cmd, label).catch(() => {})
 
-export const openIssue = (i: Pick<Issue, 'number' | 'url'>) => openUrl(i.url, `#${i.number}`)
+export const openIssue = (i: Pick<Issue, 'url'>) => openUrl(i.url)
 
 export function ghLogin() {
   inTerminal('gh auth login --web', 'gh auth login')
@@ -86,7 +84,7 @@ export const ghInstall = () => installRoute('gh', currentOs())
 
 export const installGh = () => inTerminal(ghInstall().command, 'Install gh')
 
-export const refreshScope = () => void layout.getState().openCommandTab(undefined, SCOPE_FIX)
+export const refreshScope = () => inTerminal(SCOPE_FIX, 'gh auth refresh')
 
 export function setIssueLabels(root: string, labels: string[]) {
   const all = { ...settingsStore.getState().issueLabels }

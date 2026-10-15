@@ -1,94 +1,6 @@
 import { vi } from 'vitest'
-import { shortcutLabel } from '../actions/chords'
-import type { ActionDef } from '../actions/registry'
-import type { RepoNode, WorktreeNode } from '../fleet/types'
-import { registerShellActions } from './actions'
-import { createShellStore } from './store'
-import { firstWorktree, keepAWorktreeShown } from './first-worktree'
 import { HIDDEN_MS, PRS_EVERY, startMissionPoll, VISIBLE_MS } from './mission-poll'
 import { startTitleReload, TITLE_RELOAD_MS } from './title-reload'
-import { clampSidebarResizeWidth, getNextSidebarResizeWidth, getRenderedSidebarWidthCssValue } from './use-sidebar-resize'
-
-describe('actions', () => {
-  test('sidebar.toggle-left and sidebar.toggle-right open and close their sidebar', async () => {
-    const shell = createShellStore()
-    const actions: ActionDef[] = []
-    registerShellActions(shell, (a) => actions.push(a))
-    expect(actions.map((a) => [a.id, shortcutLabel(a.id, 'mac')])).toEqual([
-      ['sidebar.toggle-left', '⌘B'],
-      ['sidebar.toggle-right', '⌘L'],
-    ])
-    await actions[0].run()
-    expect([shell.getState().leftOpen, shell.getState().rightOpen]).toEqual([false, true])
-    await actions[1].run()
-    expect([shell.getState().leftOpen, shell.getState().rightOpen]).toEqual([false, false])
-  })
-})
-
-const wt = (path: string, kind: WorktreeNode['kind']): WorktreeNode => ({ path, name: path.split('/').pop()!, branch: 'main', kind, agents: [], pr: null, unread: false })
-const repo = (root: string, worktrees: WorktreeNode[] = []): RepoNode => ({ root, name: root.split('/').pop()!, worktrees })
-
-describe('the first worktree', () => {
-  test('is the first repo’s main checkout, else its root; none without a repo', () => {
-    expect(firstWorktree([repo('/r/a', [wt('/r/a-wt-x', 'workspace'), wt('/r/a', 'main')]), repo('/r/b', [wt('/r/b', 'main')])])).toBe('/r/a')
-    expect(firstWorktree([repo('/r/a', [wt('/r/a-wt-x', 'dispatched')])])).toBe('/r/a')
-    expect(firstWorktree([repo('/r/a')])).toBe('/r/a')
-    expect(firstWorktree([])).toBeNull()
-  })
-
-  function sources(init: { shown: string | null; repos: RepoNode[] }) {
-    const state = { ...init }
-    const listeners = new Set<() => void>()
-    const switched: string[] = []
-    const emit = () => listeners.forEach((l) => l())
-    return {
-      state,
-      switched,
-      emit,
-      listeners,
-      src: {
-        shown: () => state.shown,
-        repos: () => state.repos,
-        switchTo(path: string) {
-          switched.push(path)
-          state.shown = path
-          // The layout store tells its subscribers synchronously, from inside this call.
-          emit()
-        },
-        onChange(cb: () => void) {
-          listeners.add(cb)
-          return () => void listeners.delete(cb)
-        },
-      },
-    }
-  }
-
-  test('shows as soon as the fleet knows a repo, when nothing is shown', () => {
-    const s = sources({ shown: null, repos: [] })
-    keepAWorktreeShown(s.src)
-    expect(s.switched).toEqual([])
-    s.state.repos = [repo('/r/a', [wt('/r/a', 'main')])]
-    s.emit()
-    expect(s.switched).toEqual(['/r/a'])
-  })
-
-  test('leaves a chosen worktree alone', () => {
-    const s = sources({ shown: '/r/b-wt-1', repos: [repo('/r/a')] })
-    keepAWorktreeShown(s.src)
-    s.emit()
-    expect(s.switched).toEqual([])
-  })
-
-  test('shows it again when the last open worktree closes, and stops when told', () => {
-    const s = sources({ shown: '/r/b-wt-1', repos: [repo('/r/a')] })
-    const stop = keepAWorktreeShown(s.src)
-    s.state.shown = null
-    s.emit()
-    expect(s.switched).toEqual(['/r/a'])
-    stop()
-    expect(s.listeners.size).toBe(0)
-  })
-})
 
 describe('the mission poll', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -141,22 +53,6 @@ describe('the mission poll', () => {
     finish()
     await vi.advanceTimersByTimeAsync(VISIBLE_MS * 5)
     expect(refresh).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('sidebar resize geometry', () => {
-  test('a drag widens a left sidebar to the right and a right sidebar to the left, within bounds', () => {
-    const base = { startX: 300, startWidth: 280, minWidth: 220, maxWidth: 500 }
-    expect(getNextSidebarResizeWidth({ ...base, clientX: 340, deltaSign: 1 })).toBe(320)
-    expect(getNextSidebarResizeWidth({ ...base, clientX: 340, deltaSign: -1 })).toBe(240)
-    expect(getNextSidebarResizeWidth({ ...base, clientX: 0, deltaSign: 1 })).toBe(220)
-    expect(getNextSidebarResizeWidth({ ...base, clientX: 2000, deltaSign: 1 })).toBe(500)
-    expect(clampSidebarResizeWidth(100, 220, 500)).toBe(220)
-  })
-
-  test('a closed sidebar is drawn 0 wide whatever its width', () => {
-    expect(getRenderedSidebarWidthCssValue(true, 280)).toBe('280px')
-    expect(getRenderedSidebarWidthCssValue(false, 280)).toBe('0px')
   })
 })
 

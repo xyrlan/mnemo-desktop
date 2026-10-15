@@ -71,9 +71,10 @@ const unwatchTabs = nexusStore.subscribe((s, prev) => {
   writeTabs(kept, tabsToSave(s))
 })
 
-// An offscreen pane has no pane bar to learn which Claude session it runs: asked here, as often.
+// Which Claude session each terminal runs, shown in a tab or not: tabs follow it (`followPanes`),
+// and the restore resumes it.
 const stopLearning = pollWhileShown(
-  () => Promise.all(Object.values(layout.getState().panes).flatMap((p) => (p.offscreen ? [learnSession(p.id, tauriSession, layout)] : []))),
+  () => Promise.all(Object.values(layout.getState().panes).flatMap((p) => (p.view === 'terminal' ? [learnSession(p.id, tauriSession, layout)] : []))),
   SESSION_POLL_MS,
   { hiddenMs: SESSION_HIDDEN_MS, wait: true },
 )
