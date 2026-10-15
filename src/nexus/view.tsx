@@ -1,6 +1,5 @@
 import { register } from '../actions/registry'
 import { settingsStore } from '../settings/app-store'
-import { useLeftEdge } from '../shell/edges'
 import { mountInSlot } from '../shell/slots'
 import { tauriNexus } from './client'
 import { NexusView } from './NexusView'
@@ -12,8 +11,7 @@ import { nexusStore } from './store'
  *  sidebar's Nexus entry and ⌘K run it) and `nexus.triage` (the entry's needs-you count: the Nexus,
  *  on triage when a robot waits). The app opens on it. */
 function Nexus() {
-  const leftEdge = useLeftEdge()
-  return <NexusView client={tauriShip} usage={tauriNexus} leftEdge={leftEdge} />
+  return <NexusView client={tauriShip} usage={tauriNexus} />
 }
 
 register({ id: 'nexus.toggle', title: 'Nexus', run: () => nexusStore.getState().toggle() })

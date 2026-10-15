@@ -84,7 +84,7 @@ async function open(first: Feed) {
   const client: ShipClient = { feed: async () => first }
   host = document.body.appendChild(document.createElement('div'))
   root = createRoot(host)
-  await act(async () => root!.render(<NexusView client={client} usage={usage} leftEdge={0} />))
+  await act(async () => root!.render(<NexusView client={client} usage={usage} />))
   // The first feed has landed: from here the view logs milestones.
   await act(async () => {})
 }

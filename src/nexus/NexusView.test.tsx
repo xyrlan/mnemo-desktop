@@ -83,12 +83,14 @@ const fake = () => {
   return c satisfies ShipClient
 }
 const view = () => document.querySelector('[data-nexus-view]')
+/** The ship's box in the view: the room beside it is the drawer's. */
+const ship = () => document.querySelector<HTMLElement>('[data-nexus-ship]')!
 
 const roots: Root[] = []
 const render = async (client: ShipClient = fake()) => {
   const root = createRoot(document.body.appendChild(document.createElement('div')))
   roots.push(root)
-  await act(async () => root.render(<NexusView client={client} usage={usage} leftEdge={52} />))
+  await act(async () => root.render(<NexusView client={client} usage={usage} />))
 }
 const mount = () => render()
 
@@ -105,11 +107,10 @@ afterEach(async () => {
 const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
   act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })))
 
-test('open, it covers the workbench from the sidebar’s edge and reads the feed', async () => {
+test('open, it reads the feed and draws the ship', async () => {
   const client = fake()
   await render(client)
   expect(view()).not.toBeNull()
-  expect((view() as HTMLElement).style.left).toBe('52px')
   expect(client.asked).toBeGreaterThan(0)
   expect(document.querySelector('[data-ship-scene]')).not.toBeNull()
 })
@@ -126,12 +127,12 @@ test('an exception opens its robot in the drawer, and the ship shrinks beside it
   Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
   nexusStore.setState({ drawerWidth: 600 })
   await mount()
-  expect((view() as HTMLElement).style.right).toBe('0px')
+  expect(ship().style.marginRight).toBe('0px')
   press({ key: '1', code: 'Digit1', altKey: true })
   await act(async () => {})
   expect(nexusStore.getState()).toMatchObject({ activeTab: 'r-live', focusId: 'r-live' })
   expect(document.querySelector('[data-drawer-tab="r-live"]')).not.toBeNull()
-  expect((view() as HTMLElement).style.right).toBe('600px')
+  expect(ship().style.marginRight).toBe('600px')
 })
 
 test('Esc collapses the drawer, the ship grows back; Esc in a tab’s terminal is the terminal’s', async () => {
@@ -143,7 +144,7 @@ test('Esc collapses the drawer, the ship grows back; Esc in a tab’s terminal i
   expect(nexusStore.getState().collapsed).toBe(false)
   press({ key: 'Escape' })
   expect(nexusStore.getState()).toMatchObject({ collapsed: true, focusId: null })
-  expect((view() as HTMLElement).style.right).toBe('0px')
+  expect(ship().style.marginRight).toBe('0px')
   expect(document.querySelector('[data-drawer-handle]')).not.toBeNull()
 })
 

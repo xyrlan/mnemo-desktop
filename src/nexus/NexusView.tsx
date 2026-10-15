@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/ui'
-import { STATUS_BAR, TOP_CHROME } from '../shell/edges'
+import { claimAction } from '../actions/registry'
+import { STATUS_BAR } from '../shell/edges'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
 import { useMission } from '../mission/app-store'
@@ -194,17 +195,20 @@ export type NexusViewProps = {
   client: ShipClient
   /** For `startNexusUsage`'s rows. */
   usage: NexusClient
-  /** Where the left sidebar ends, in px: the Nexus covers the workbench from there. */
-  leftEdge: number
   /** The drawer's sessions, views and diff; the app's by default. */
   drawer?: DrawerDeps
 }
 
-/** The Nexus: a full-window view over the workbench, from the left sidebar's edge (v2 spec, "Where
- *  it sits in the app"). Nothing is read, polled or animated while it is closed. The drawer sits
- *  beside the ship, which shrinks while it is open; the drawer stays mounted, hidden, while the
- *  Nexus is closed, so its tabs keep their terminals. */
-export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: NexusViewProps) {
+/** ⌘1–9 go to a worktree (v2 spec, "Where it sits in the app"): from the Nexus too, which leaves
+ *  for the workbench to show it rather than switch it unseen underneath. */
+const WORKTREE_GO = /^worktree\.go\.[1-9]$/
+
+/** The Nexus: the whole window but the status bar, over the workbench and its sidebar, which stay
+ *  mounted under it with their panes running (v2 spec, "Where it sits in the app"). The window's
+ *  native title bar is above it, traffic lights and dragging included. Nothing is read, polled or
+ *  animated while it is closed. The drawer sits beside the ship, which shrinks while it is open; the
+ *  drawer stays mounted, hidden, while the Nexus is closed, so its tabs keep their terminals. */
+export function NexusView({ client, usage, drawer = liveDrawer }: NexusViewProps) {
   const open = useNexus((s) => s.open)
   const tabs = useNexus((s) => s.tabs.length)
   const collapsed = useNexus((s) => s.collapsed)
@@ -224,16 +228,30 @@ export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: Nexu
     },
     [drawer],
   )
+  const view = useRef<HTMLDivElement>(null)
+  // Opened, the keys are the Nexus's: a workbench terminal kept the focus would take what is typed,
+  // unseen, and the view's keys with it. A popup over the Nexus keeps its own.
+  useEffect(() => {
+    if (!open) return
+    const a = document.activeElement
+    if (a instanceof HTMLElement && a !== document.body && !view.current?.contains(a) && !a.closest('[data-nexus-drawer], [data-popout], [role="dialog"]')) a.blur()
+  }, [open])
+  useEffect(
+    () =>
+      claimAction((id) => {
+        if (WORKTREE_GO.test(id) && nexusStore.getState().open) nexusStore.getState().setOpen(false)
+        return false
+      }),
+    [],
+  )
   const beside = open && tabs > 0 && !collapsed ? width : 0
   return (
     <>
       {open && (
-        <div
-          data-nexus-view=""
-          className="fixed z-drawer flex flex-col overflow-hidden bg-worktree-sidebar"
-          style={{ left: leftEdge, right: beside, top: TOP_CHROME, bottom: STATUS_BAR }}
-        >
-          <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
+        <div ref={view} data-nexus-view="" className="fixed inset-x-0 top-0 z-drawer flex flex-col overflow-hidden bg-[#0c1326]" style={{ bottom: STATUS_BAR }}>
+          <div data-nexus-ship="" className="flex min-h-0 flex-1 flex-col" style={{ marginRight: beside }}>
+            <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
+          </div>
         </div>
       )}
       <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} repos={repos} shown={open} onOpen={onOpen} />
