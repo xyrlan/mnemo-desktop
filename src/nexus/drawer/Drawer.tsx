@@ -338,6 +338,12 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
               aria-hidden={face !== 'conversation'}
               style={{ visibility: face === 'conversation' ? 'visible' : 'hidden' }}
             >
+              {/* No terminal yet, so no foot: what it would answer waits for the attach. */}
+              {pty === null && !error && (
+                <p className="shrink-0 border-b border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground" data-drawer-attaching="">
+                  Attaching… the conversation answers once its terminal is up.
+                </p>
+              )}
               {sessionId && cwd ? (
                 <Conversation sessionId={sessionId} cwd={cwd} status={status} agent={agent} onOpenTerminal={openTerminal} />
               ) : (

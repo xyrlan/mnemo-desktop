@@ -361,6 +361,13 @@ test('⌘⇧C flips the tab shown while the drawer has the keyboard, and is left
   unclaim()
 })
 
+test('while the attach starts, the conversation says so and has nothing to type into', () => {
+  const { open } = mount()
+  open('r-live')
+  expect(panel('r-live').querySelector('[data-drawer-attaching]')).not.toBeNull()
+  expect(convs['s-live'].props.agent).toBeUndefined()
+})
+
 test('the conversation’s opener of the terminal shows it; a closed tab opens again on its conversation', async () => {
   const { open, drawer } = mount()
   open('cap-1')
