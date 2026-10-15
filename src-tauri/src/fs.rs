@@ -5,6 +5,7 @@
 //! folder, or a folder that holds the home directory widens nothing.
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -171,7 +172,34 @@ pub fn guard(path: &str, scope: &Scope) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// A file as the editor opened it: its text, and the stamp of the bytes that text came from.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct Loaded {
+    pub text: String,
+    pub stamp: String,
+}
+
+/// What a save did. A save that names the stamp its buffer was loaded (or last saved) with
+/// writes nothing when the file on disk has changed since, or is gone.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum Saved {
+    Written { stamp: String },
+    Changed,
+    Gone,
+}
+
+/// The SHA-256 of `bytes`, in hex. The content itself, not the size or mtime: a rewrite that
+/// keeps the size, or lands within the timestamp's resolution of the load, still changes it.
+fn stamp(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn read_in(path: &str, scope: &Scope) -> Result<String, String> {
+    load_in(path, scope).map(|l| l.text)
+}
+
+pub fn load_in(path: &str, scope: &Scope) -> Result<Loaded, String> {
     let p = guard(path, scope)?;
     let meta = std::fs::metadata(&p).map_err(|e| format!("{path}: {e}"))?;
     if meta.is_dir() {
@@ -181,7 +209,9 @@ pub fn read_in(path: &str, scope: &Scope) -> Result<String, String> {
         return Err(format!("{path} is too large to open ({} MB)", meta.len() / (1024 * 1024)));
     }
     let bytes = std::fs::read(&p).map_err(|e| format!("{path}: {e}"))?;
-    String::from_utf8(bytes).map_err(|_| format!("{path} is not a UTF-8 text file"))
+    let stamp = stamp(&bytes);
+    let text = String::from_utf8(bytes).map_err(|_| format!("{path} is not a UTF-8 text file"))?;
+    Ok(Loaded { text, stamp })
 }
 
 pub fn write_in(path: &str, contents: &str, scope: &Scope) -> Result<(), String> {
@@ -190,6 +220,33 @@ pub fn write_in(path: &str, contents: &str, scope: &Scope) -> Result<(), String>
         return Err(format!("{path} is a directory"));
     }
     std::fs::write(&p, contents).map_err(|e| format!("{path}: {e}"))
+}
+
+/// Writes `contents` unless `expected` names a stamp the file no longer has. A file that already
+/// holds exactly `contents` is written over either way: nothing on it is lost. `None` writes
+/// whatever is there. The check and the write are not atomic: a change landing between them,
+/// within this call, is still overwritten.
+pub fn save_in(path: &str, contents: &str, expected: Option<&str>, scope: &Scope) -> Result<Saved, String> {
+    if let Some(expected) = expected {
+        let p = match guard(path, scope) {
+            Ok(p) => p,
+            // Its folder is gone too: moved or deleted with it.
+            Err(_) if !Path::new(path).exists() && Path::new(path).parent().is_some_and(|d| !d.exists()) => return Ok(Saved::Gone),
+            Err(e) => return Err(e),
+        };
+        match std::fs::read(&p) {
+            Ok(bytes) => {
+                if stamp(&bytes) != expected && bytes != contents.as_bytes() {
+                    return Ok(Saved::Changed);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Saved::Gone),
+            // A directory now, or unreadable: `write_in` says which.
+            Err(_) => {}
+        }
+    }
+    write_in(path, contents, scope)?;
+    Ok(Saved::Written { stamp: stamp(contents.as_bytes()) })
 }
 
 /// Directories first, then files, each group sorted case-insensitively.
@@ -214,8 +271,13 @@ pub async fn fs_read(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn fs_write(path: String, contents: String) -> Result<(), String> {
-    write_in(&path, &contents, &Scope::current()?)
+pub async fn fs_load(path: String) -> Result<Loaded, String> {
+    load_in(&path, &Scope::current()?)
+}
+
+#[tauri::command]
+pub async fn fs_write(path: String, contents: String, expected: Option<String>) -> Result<Saved, String> {
+    save_in(&path, &contents, expected.as_deref(), &Scope::current()?)
 }
 
 #[tauri::command]
@@ -270,6 +332,64 @@ mod tests {
         assert_eq!(read_in(&f, &s.scope()).unwrap(), "hello\nworld");
         write_in(&f, "changed", &s.scope()).unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "changed");
+    }
+
+    #[test]
+    fn save_refuses_a_file_changed_since_it_was_loaded() {
+        let s = Sandbox::new("save-changed");
+        let f = s.in_home("a.ts");
+        std::fs::write(&f, "const a = 1\n").unwrap();
+        let loaded = load_in(&f, &s.scope()).unwrap();
+        // An agent's rewrite, right after the load and of the same size: mtime and length can't tell.
+        std::fs::write(&f, "const a = 9\n").unwrap();
+        let saved = save_in(&f, "const a = 1\n// mine\n", Some(&loaded.stamp), &s.scope()).unwrap();
+        assert_eq!(saved, Saved::Changed);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "const a = 9\n");
+        // Asked to, it writes over it.
+        assert!(matches!(save_in(&f, "mine", None, &s.scope()).unwrap(), Saved::Written { .. }));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "mine");
+    }
+
+    #[test]
+    fn save_over_an_untouched_file_writes_the_bytes_as_given() {
+        let s = Sandbox::new("save-same");
+        let f = s.in_home("a.ps1");
+        std::fs::write(&f, "\u{FEFF}one\r\n").unwrap();
+        let loaded = load_in(&f, &s.scope()).unwrap();
+        let saved = save_in(&f, "\u{FEFF}one\r\ntwo\r\n", Some(&loaded.stamp), &s.scope()).unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), "\u{FEFF}one\r\ntwo\r\n".as_bytes());
+        // The stamp it returns is the one the next load sees, so the next save is checked against it.
+        let again = load_in(&f, &s.scope()).unwrap();
+        assert_eq!(saved, Saved::Written { stamp: again.stamp.clone() });
+        assert!(matches!(save_in(&f, "three", Some(&again.stamp), &s.scope()).unwrap(), Saved::Written { .. }));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "three");
+    }
+
+    #[test]
+    fn save_over_a_file_that_already_holds_the_same_text_writes() {
+        let s = Sandbox::new("save-equal");
+        let f = s.in_home("a.ts");
+        std::fs::write(&f, "old").unwrap();
+        let loaded = load_in(&f, &s.scope()).unwrap();
+        std::fs::write(&f, "new").unwrap();
+        assert!(matches!(save_in(&f, "new", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Written { .. }));
+    }
+
+    #[test]
+    fn save_of_a_file_deleted_or_moved_since_it_was_loaded_writes_nothing() {
+        let s = Sandbox::new("save-gone");
+        let dir = s.home.join("src");
+        std::fs::create_dir(&dir).unwrap();
+        let f = dir.join("a.ts").to_string_lossy().into_owned();
+        std::fs::write(&f, "a").unwrap();
+        let loaded = load_in(&f, &s.scope()).unwrap();
+        std::fs::remove_file(&f).unwrap();
+        assert_eq!(save_in(&f, "mine", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Gone);
+        assert!(!Path::new(&f).exists());
+        // Its folder gone with it is the same thing, not an error.
+        std::fs::remove_dir(&dir).unwrap();
+        assert_eq!(save_in(&f, "mine", Some(&loaded.stamp), &s.scope()).unwrap(), Saved::Gone);
+        assert!(!dir.exists());
     }
 
     #[test]

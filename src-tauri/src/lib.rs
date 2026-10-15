@@ -241,6 +241,7 @@ pub fn run() {
 
             // -- editor commands --
             fs::fs_read,
+            fs::fs_load,
             fs::fs_write,
             fs::fs_list,
 

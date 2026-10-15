@@ -11,9 +11,12 @@ export type Session = {
   /** A file the user asked to open while the buffer was dirty. */
   pending?: string
   error?: string
+  /** The last save found the file changed on disk since the buffer was loaded or saved, or gone. */
+  conflict?: 'changed' | 'gone'
 }
 
-export type Buffer = { path: string; model: { dispose(): void }; savedVersion: number }
+/** `stamp` is the file's on disk when the buffer was loaded or last saved; `saving`, the save in flight. */
+export type Buffer = { path: string; model: { dispose(): void }; savedVersion: number; stamp: string; saving?: Promise<boolean> }
 
 export type SessionsState = {
   sessions: Record<number, Session>
@@ -26,6 +29,7 @@ export type SessionsState = {
   cancelPending(id: number): void
   setDirty(id: number, dirty: boolean): void
   setError(id: number, error?: string): void
+  setConflict(id: number, conflict?: 'changed' | 'gone'): void
   /** Forgets every pane not in `live` and disposes its buffer. */
   prune(live: Iterable<number>): void
 }
@@ -50,17 +54,18 @@ export function createSessions(): Sessions {
         const s = get().sessions[id]
         if (!s || s.path === path) return patch(id, { pending: undefined })
         if (s.dirty) patch(id, { pending: path })
-        else patch(id, { path, pending: undefined, error: undefined })
+        else patch(id, { path, pending: undefined, error: undefined, conflict: undefined })
       },
       discard(id) {
         const s = get().sessions[id]
-        if (s?.pending) patch(id, { path: s.pending, pending: undefined, dirty: false, error: undefined })
+        if (s?.pending) patch(id, { path: s.pending, pending: undefined, dirty: false, error: undefined, conflict: undefined })
       },
       cancelPending: (id) => patch(id, { pending: undefined }),
       setDirty(id, dirty) {
         if (get().sessions[id]?.dirty !== dirty) patch(id, { dirty })
       },
       setError: (id, error) => patch(id, { error }),
+      setConflict: (id, conflict) => patch(id, { conflict }),
       prune(live) {
         const keep = new Set(live)
         const dead = Object.keys(get().sessions).map(Number).filter((id) => !keep.has(id))
