@@ -3,21 +3,24 @@ import type { PaneId } from '../layout/tree'
 /** What a terminal pane has on screen and in scrollback, one logical line per entry. */
 export type BufferReader = () => string[]
 
-const readers = new Map<PaneId, BufferReader>()
+const readers = new Map<PaneId, BufferReader[]>()
 
 /** A mounted terminal pane offers its buffer to readers outside the view (the desktop MCP).
  *  Returns the unregister function; it only removes this reader, so a StrictMode remount
- *  that registered again first is left alone. */
+ *  that registered again first is left alone, and a pane's own view is read again once a popup
+ *  showing the same terminal goes. The newest reader is the one read. */
 export function registerBuffer(paneId: PaneId, read: BufferReader): () => void {
-  readers.set(paneId, read)
+  readers.set(paneId, [...(readers.get(paneId) ?? []), read])
   return () => {
-    if (readers.get(paneId) === read) readers.delete(paneId)
+    const left = (readers.get(paneId) ?? []).filter((r) => r !== read)
+    if (left.length) readers.set(paneId, left)
+    else readers.delete(paneId)
   }
 }
 
 /** The pane's lines, or undefined when no terminal view is mounted for it. */
 export function readBuffer(paneId: PaneId): string[] | undefined {
-  return readers.get(paneId)?.()
+  return readers.get(paneId)?.at(-1)?.()
 }
 
 /** The last `n` lines, not counting the blank rows below the cursor. */
