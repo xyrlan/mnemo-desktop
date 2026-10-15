@@ -1198,7 +1198,7 @@ mod tests {
         let (socket, srv, _) = daemon("keep");
         let first = app(&socket);
         let (id, rx) = sh(&first, "printf 'ready\\n'; while read x; do printf 'got:%s\\n' \"$x\"; done");
-        assert!(id >= 7_000, "the daemon's ids, not the app's: {id}");
+        assert!((7_000..8_000).contains(&id), "the daemon's ids, not the app's: {id}");
         assert!(until(&rx, "ready").contains("ready"));
         first.write(id, b"one\n").unwrap();
         assert!(until(&rx, "got:one").contains("got:one"));
@@ -1274,7 +1274,8 @@ mod tests {
         let socket = tmp("none").join(SOCKET);
         let m = app(&socket);
         let (id, rx) = sh(&m, "printf here");
-        assert!(id < 7_000);
+        // The first id of an in-process launch's block (`Host::default`), not a daemon's.
+        assert_eq!(id % 1_000, 1, "{id}");
         assert!(until(&rx, "here").contains("here"));
         // The same host keeps answering: no second attempt at a daemon.
         let (id2, _) = sh(&m, "true");

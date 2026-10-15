@@ -59,10 +59,22 @@ pub struct Host {
     sessions: Table,
 }
 
+/// The in-process host of one launch: its ids start in a block of their own (#406), as a
+/// daemon's do. The floating terminal remembers its shells' ids from one launch to the next, and
+/// one of them must not name a terminal a later launch started.
 impl Default for Host {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(launch_first_id(std::time::SystemTime::now()))
     }
+}
+
+/// The first id of a launch at `now`: 1,000 ids for each 100 ms. It is the daemon's timeline
+/// (`first_id` in `bin/mnemo-desktop-ptyd.rs`, 10,000 ids for each second) cut finer, so a launch
+/// never starts among the ids of an earlier one, held in-process or by a daemon, unless that one
+/// handed out ids faster than it lived or the 400,000 s the timeline spans have gone round.
+fn launch_first_id(now: std::time::SystemTime) -> PaneId {
+    let tenths = now.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() / 100).unwrap_or(0);
+    ((tenths % 4_000_000) as u32) * 1_000 + 1
 }
 
 impl Host {
@@ -457,6 +469,41 @@ mod tests {
         let (out, exit) = read_until(&rx, "never");
         assert!(out.contains("hi"), "{out:?}");
         assert_eq!(exit, Some(Some(0)));
+    }
+
+    #[test]
+    fn a_launch_starts_in_a_block_that_fits_a_pane_id_and_follows_the_last() {
+        use std::time::UNIX_EPOCH;
+        let at = |ms: u64| launch_first_id(UNIX_EPOCH + Duration::from_millis(ms));
+        assert_eq!(at(0), 1);
+        // The last block of the timeline, and one past it: it goes round to the first.
+        assert_eq!(at(399_999_999), 3_999_999_001);
+        assert!(at(399_999_999).checked_add(999).is_some());
+        assert_eq!(at(400_000_000), 1);
+        // Within a daemon's block of the same second, past it for the next.
+        assert_eq!(at(1_234_567), 12_345_001);
+        assert_eq!(at(1_234_000), 12_340_001);
+        assert_eq!(at(1_235_000), 12_350_001);
+    }
+
+    /// Two launches of the app, one after the other: a pane id the first one handed out, which the
+    /// floating terminal remembers across launches (#406), never names a terminal of the second.
+    #[test]
+    fn a_later_in_process_host_never_hands_out_an_id_an_earlier_one_did() {
+        let wait = os("read x", "set /p x=");
+        let first = Host::default();
+        let (a, _ra) = recorder(1);
+        let (b, _rb) = recorder(2);
+        let earlier = [start(&first, wait, a), start(&first, wait, b)];
+        first.kill_all();
+        // A quit and a relaunch take longer than this.
+        std::thread::sleep(Duration::from_millis(150));
+        let second = Host::default();
+        let (c, _rc) = recorder(3);
+        let later = start(&second, wait, c);
+        assert!(!earlier.contains(&later), "the second launch handed out {later}, which the first did ({earlier:?})");
+        second.kill_all();
+        wait_for("all gone", || first.running() == 0 && second.running() == 0);
     }
 
     #[test]
