@@ -4,7 +4,7 @@ import type { StoreApi } from 'zustand/vanilla'
 import { EyeOff, X } from 'lucide-react'
 import { STATUS_BAR, TOP_CHROME } from '../../dashboard/AgentDashboardDrawer'
 import type { ChangedFile, DiffClient } from '../../diff/client'
-import type { AgentState } from '../../fleet/types'
+import type { AgentState, RepoNode } from '../../fleet/types'
 import type { PaneViewProps } from '../../panes/registry'
 import type { SessionHost } from '../../session/host'
 import type { Feed, Ship } from '../ship-types'
@@ -37,6 +37,8 @@ export type DrawerDeps = {
   worktreeOf(cwd: string): string
   /** Shows repo `root` in the workbench. */
   goToRepo(root: string): void
+  /** The layout's terminal pane running session `sessionId`, if one does. */
+  paneOfSession(sessionId: string): number | null
 }
 
 export type NexusDrawerProps = {
@@ -44,6 +46,8 @@ export type NexusDrawerProps = {
   /** The ship last built, or null before the first. */
   ship: Ship | null
   feed: Feed | null
+  /** The fleet's repos: a robot's breadcrumbs name its own. */
+  repos: readonly RepoNode[]
   /** The Nexus is open. */
   shown: boolean
   /** Opens a figure in the drawer (a breadcrumb). */
@@ -53,11 +57,24 @@ export type NexusDrawerProps = {
 const DOT: Record<AgentState, string> = { working: 'bg-state-working', 'needs-you': 'bg-state-needs-you', done: 'bg-state-done', idle: 'bg-state-idle' }
 const TEXT: Record<AgentState, string> = { working: 'text-state-working', 'needs-you': 'text-state-needs-you', done: 'text-state-done', idle: 'text-state-idle' }
 
-export function NexusDrawer({ deps, ship, feed, shown, onOpen }: NexusDrawerProps) {
+/** The drawer's width as drawn: the one chosen, kept within the window as it is now. The chosen
+ *  one is kept, so a window made small and then large again gets it back. */
+export function useShownWidth(): number {
+  const chosen = useNexus((s) => s.drawerWidth)
+  const [vw, setVw] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const on = () => setVw(window.innerWidth)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return clampWidth(chosen, vw)
+}
+
+export function NexusDrawer({ deps, ship, feed, repos, shown, onOpen }: NexusDrawerProps) {
   const tabs = useNexus((s) => s.tabs)
   const activeTab = useNexus((s) => s.activeTab)
   const collapsed = useNexus((s) => s.collapsed)
-  const width = useNexus((s) => s.drawerWidth)
+  const width = useShownWidth()
   const [diff, setDiff] = useState<DiffAsk | null>(null)
   const closeDiff = useCallback(() => setDiff(null), [])
   const root = useRef<HTMLElement>(null)
@@ -116,6 +133,7 @@ export function NexusDrawer({ deps, ship, feed, shown, onOpen }: NexusDrawerProp
               deps={deps}
               ship={ship}
               feed={feed}
+              repos={repos}
               onOpen={onOpen}
               picked={diff?.file.path ?? null}
               onPick={(worktree, file, el) => {
@@ -142,36 +160,46 @@ export function NexusDrawer({ deps, ship, feed, shown, onOpen }: NexusDrawerProp
   )
 }
 
-/** The left edge: dragged, it resizes the drawer; the width is kept when the drag ends. */
+/** The left edge: dragged, it draws a guide where the edge will be, and the drawer takes that width
+ *  when the drag ends, and keeps it. Resizing as it moves would draw the whole ship again at each
+ *  move and resize the drawer's terminals, their programs with them. */
 function ResizeEdge({ width }: { width: number }) {
   const drag = useRef<{ pointerId: number; x: number; width: number } | null>(null)
+  const [preview, setPreview] = useState<number | null>(null)
   const move = (e: PointerEvent<HTMLDivElement>) => {
     const d = drag.current
     if (d?.pointerId !== e.pointerId) return
-    nexusStore.getState().setDrawerWidth(clampWidth(d.width + d.x - e.clientX))
+    setPreview(clampWidth(d.width + d.x - e.clientX))
   }
   const end = (e: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId !== e.pointerId) return
     drag.current = null
-    saveWidth(nexusStore.getState().drawerWidth)
+    if (preview !== null && e.type === 'pointerup') {
+      nexusStore.getState().setDrawerWidth(preview)
+      saveWidth(preview)
+    }
+    setPreview(null)
   }
   return (
-    <div
-      data-drawer-resize=""
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize the drawer"
-      className="absolute inset-y-0 -left-1.5 z-10 w-2.5 cursor-ew-resize"
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        e.preventDefault()
-        drag.current = { pointerId: e.pointerId, x: e.clientX, width }
-        e.currentTarget.setPointerCapture?.(e.pointerId)
-      }}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
-    />
+    <>
+      {preview !== null && <div data-drawer-resize-guide="" aria-hidden className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-ring" style={{ left: width - preview }} />}
+      <div
+        data-drawer-resize=""
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the drawer"
+        className="absolute inset-y-0 -left-1.5 z-10 w-2.5 cursor-ew-resize"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          drag.current = { pointerId: e.pointerId, x: e.clientX, width }
+          e.currentTarget.setPointerCapture?.(e.pointerId)
+        }}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerCancel={end}
+      />
+    </>
   )
 }
 
@@ -222,12 +250,13 @@ type PanelProps = {
   deps: DrawerDeps
   ship: Ship | null
   feed: Feed | null
+  repos: readonly RepoNode[]
   onOpen(id: string): void
   picked: string | null
   onPick(worktree: string, file: ChangedFile, el: HTMLElement): void
 }
 
-function TabPanel({ tab, active, shown, deps, ship, feed, onOpen, picked, onPick }: PanelProps) {
+function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked, onPick }: PanelProps) {
   const session = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key] : undefined))
   const pty = session?.pty ?? null
   const figure = findFigure(ship, tab.id)
@@ -250,7 +279,7 @@ function TabPanel({ tab, active, shown, deps, ship, feed, onOpen, picked, onPick
 
   return (
     <div ref={panel} role="tabpanel" data-drawer-panel={tab.id} className="min-h-0 min-w-0 flex-1 flex-col" style={{ display: active ? 'flex' : 'none' }}>
-      <Header tab={tab} figure={figure} ship={ship} feed={feed} deps={deps} onOpen={onOpen} />
+      <Header tab={tab} figure={figure} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} />
       {worktree && <Chips list={changes.list} error={changes.error} picked={picked} onPick={(f, el) => onPick(worktree, f, el)} />}
       <div className="relative min-h-0 flex-1 overflow-hidden border-t border-border bg-background">
         {tab.key === null ? (
@@ -276,7 +305,9 @@ function TabPanel({ tab, active, shown, deps, ship, feed, onOpen, picked, onPick
   )
 }
 
-function Header({ tab, figure, ship, feed, deps, onOpen }: { tab: DrawerTab; figure: Figure | null; ship: Ship | null; feed: Feed | null; deps: DrawerDeps; onOpen(id: string): void }) {
+type HeaderProps = { tab: DrawerTab; figure: Figure | null; ship: Ship | null; feed: Feed | null; repos: readonly RepoNode[]; deps: DrawerDeps; onOpen(id: string): void }
+
+function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
   const kind = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key]?.kind : undefined))
   if (!figure)
     return (
@@ -293,7 +324,7 @@ function Header({ tab, figure, ship, feed, deps, onOpen }: { tab: DrawerTab; fig
     <div className="shrink-0">
       <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
         <nav aria-label="Breadcrumbs" className="min-w-0 flex-1 truncate text-muted-foreground" data-drawer-crumbs="">
-          {crumbsOf(figure, ship).map((c, i) => (
+          {crumbsOf(figure, ship, repos).map((c, i) => (
             <span key={i}>
               {i > 0 && <span className="mx-1 opacity-60">▸</span>}
               {c.here ? (

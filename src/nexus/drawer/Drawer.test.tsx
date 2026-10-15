@@ -48,6 +48,7 @@ function mount(over: { shown?: boolean } = {}) {
     diff,
     worktreeOf: (cwd) => cwd,
     goToRepo: () => {},
+    paneOfSession: () => null,
   }
   const ship = shipFixture()
   const open = (id: string) => {
@@ -57,7 +58,7 @@ function mount(over: { shown?: boolean } = {}) {
   const el = document.body.appendChild(document.createElement('div'))
   root = createRoot(el)
   const render = (shown = over.shown ?? true) =>
-    act(() => root.render(<NexusDrawer deps={deps} ship={ship} feed={null} shown={shown} onOpen={(id) => void opened.push(id)} />))
+    act(() => root.render(<NexusDrawer deps={deps} ship={ship} feed={null} repos={reposFixture} shown={shown} onOpen={(id) => void opened.push(id)} />))
   render()
   return { host, log, drawer, owners, open, render, opened }
 }
@@ -72,6 +73,7 @@ beforeEach(() => {
   diffAsked.length = 0
   nexusStore.setState({ open: true, tabs: [], activeTab: null, collapsed: false, focusId: null, drawerWidth: 600 })
   Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
+  Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true })
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -193,20 +195,50 @@ test('a chip opens the quick diff; Esc closes it first, and only then does the d
   expect(nexusStore.getState().collapsed).toBe(false)
 })
 
-test('dragging the left edge resizes the drawer, and the width is kept', () => {
-  Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true })
+test('dragging the left edge draws a guide, and the drawer takes and keeps the width when the drag ends', () => {
   const { open } = mount()
   open('cap-1')
   const edge = $('[data-drawer-resize]')!
   const ptr = (type: string, x: number) => act(() => void edge.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, clientX: x, button: 0 }), { pointerId: 1 })))
+  const renders = views[7].active.length
   ptr('pointerdown', 800)
+  ptr('pointermove', 750)
   ptr('pointermove', 700)
-  expect(nexusStore.getState().drawerWidth).toBe(700)
+  // Nothing is resized while the edge moves: not the store (the whole ship), not the terminal.
+  expect(nexusStore.getState().drawerWidth).toBe(600)
+  expect(aside().style.width).toBe('600px')
+  expect($('[data-drawer-resize-guide]')?.style.left).toBe('-100px')
   ptr('pointerup', 700)
+  expect(nexusStore.getState().drawerWidth).toBe(700)
   expect(localStorage.getItem(WIDTH_KEY)).toBe('700')
   expect(aside().style.width).toBe('700px')
+  expect($('[data-drawer-resize-guide]')).toBeNull()
+  expect(views[7].active.length).toBe(renders)
   // Never so wide that the ship keeps less than its least.
   ptr('pointerdown', 700)
   ptr('pointermove', 0)
+  ptr('pointerup', 0)
   expect(nexusStore.getState().drawerWidth).toBe(1600 - 560)
+})
+
+test('a window made narrower keeps the drawer within it, and wider again gives the chosen width back', () => {
+  nexusStore.setState({ drawerWidth: 900 })
+  const { open } = mount()
+  open('cap-1')
+  expect(aside().style.width).toBe('900px')
+  const resize = (w: number) => act(() => {
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true })
+    window.dispatchEvent(new Event('resize'))
+  })
+  resize(1200)
+  expect(aside().style.width).toBe(`${1200 - 560}px`)
+  resize(1600)
+  expect(aside().style.width).toBe('900px')
+})
+
+test('a robot’s breadcrumbs name its own repo, not its captain’s deck', async () => {
+  const { open } = mount()
+  open('r-other')
+  await act(settle)
+  expect(panel('r-other').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo▸◆ nexus round▸#90')
 })

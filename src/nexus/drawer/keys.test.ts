@@ -7,6 +7,7 @@ import { createDrawer } from './sessions'
 
 const ran: string[] = []
 register({ id: 'pane.close', title: 'Close pane', run: () => void ran.push('pane.close') })
+register({ id: 'tab.close', title: 'Close tab', run: () => void ran.push('tab.close') })
 
 beforeEach(() => {
   ran.length = 0
@@ -29,24 +30,46 @@ function setup() {
   return { host, unclaim, inside, outside }
 }
 
-test('⌘W with the drawer focused closes its tab shown, not the workbench’s pane', () => {
-  const { host, unclaim, inside } = setup()
+test('⌘W and ⇧⌘W with the Nexus open close the drawer’s tab shown, wherever the focus is', () => {
+  const { host, unclaim, inside, outside } = setup()
   inside.focus()
   run('pane.close')
-  expect(ran).toEqual([])
   expect(nexusStore.getState().tabs.map((t) => t.id)).toEqual(['cap-1'])
   expect(host.getState().sessions['pane:9']).toBeUndefined()
+  // On the ship, the quick diff, or nowhere at all.
+  outside.focus()
+  run('tab.close')
+  expect(nexusStore.getState().tabs).toEqual([])
+  expect(ran).toEqual([])
   unclaim()
 })
 
-test('⌘W elsewhere, or with the drawer collapsed, closes the pane as ever', () => {
-  const { unclaim, inside, outside } = setup()
+test('with the Nexus open and the drawer collapsed or empty, they close nothing: never the pane or tab under it', () => {
+  const { unclaim, outside } = setup()
   outside.focus()
-  run('pane.close')
-  inside.focus()
   nexusStore.getState().setCollapsed(true)
   run('pane.close')
-  expect(ran).toEqual(['pane.close', 'pane.close'])
+  run('tab.close')
+  expect(nexusStore.getState().tabs).toHaveLength(2)
+  nexusStore.setState({ tabs: [], activeTab: null, collapsed: false })
+  run('pane.close')
+  expect(ran).toEqual([])
+  unclaim()
+})
+
+test('with the Nexus closed, or a popup focused over it, ⌘W is not the drawer’s', () => {
+  const { unclaim, outside } = setup()
+  const popup = document.body.appendChild(document.createElement('div'))
+  popup.dataset.popout = 'pane:3'
+  const inPopup = popup.appendChild(document.createElement('textarea'))
+  inPopup.focus()
+  run('pane.close')
+  expect(ran).toEqual(['pane.close'])
+  outside.focus()
+  nexusStore.getState().setOpen(false)
+  run('pane.close')
+  run('tab.close')
+  expect(ran).toEqual(['pane.close', 'pane.close', 'tab.close'])
   expect(nexusStore.getState().tabs).toHaveLength(2)
   unclaim()
 })

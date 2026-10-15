@@ -28,6 +28,8 @@ export const liveDrawer: DrawerDeps = {
   conversation: ConversationView,
   diff: tauriDiff,
   worktreeOf: (cwd) => deepestWorktree(cwd, [...fleetStore.getState().repos.flatMap((r) => r.worktrees.map((w) => w.path)), ...layout.getState().worktrees]),
+  paneOfSession: (sessionId) =>
+    Object.values(layout.getState().panes).find((p) => p.view === 'terminal' && p.id > 0 && p.exitCode === undefined && p.sessionId === sessionId)?.id ?? null,
   goToRepo: (root) => {
     nexusStore.getState().setOpen(false)
     void layout.getState().switchWorktree(root)

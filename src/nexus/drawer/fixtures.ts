@@ -49,12 +49,15 @@ export const captainOf = (over: Partial<Captain> = {}): Captain => ({
 })
 
 /** A ship of one deck, `mnemo-desktop`: captain `cap-1` (in pane 7), captain `cap-2` alive outside
- *  the app, captain `cap-3` ended; robot `r-live` (live, in no pane), `r-pane` (in pane 9) and
- *  `r-done` (ended). A dock `mnemo` holds the empty chair `orphan:/work/mnemo`. */
+ *  the app, captain `cap-3` ended; robots `r-live` (live, in no pane), `r-pane` (in pane 9),
+ *  `r-done` (ended) and `r-other` (dispatched by `cap-1` into `/work/mnemo`). A dock `mnemo` holds
+ *  the empty chair `orphan:/work/mnemo`. */
 export function shipFixture(): Ship {
   const live = robotOf({ child: child({ id: 'r-live', session_id: 's-live', cwd: '/work/mnemo-desktop-wt-682/src' }) })
   const inPane = robotOf({ child: child({ id: 'r-pane', session_id: 's-pane' }), label: '#404', twin: null })
   const done = robotOf({ child: child({ id: 'r-done', session_id: 's-done', live: false }), label: '#401', twin: null, state: 'done', zone: 'hangar' })
+  // Dispatched by `cap-1` into another repo than its deck's.
+  const other = robotOf({ child: child({ id: 'r-other', session_id: 's-other', cwd: '/work/mnemo-wt-90' }), label: '#90', twin: null })
   return {
     bridge: { exceptions: [{ kind: 'stranded', robotId: 'r-live', idleMs: 1 }], blocked: [] },
     decks: [
@@ -63,7 +66,7 @@ export function shipFixture(): Ship {
         name: 'mnemo-desktop',
         captains: [captainOf(), captainOf({ id: 'cap-2', parent: parent({ session_id: 'cap-2' }), name: 'triage', emblem: '●', pose: 'idle' })],
         quiet: [captainOf({ id: 'cap-3', parent: parent({ session_id: 'cap-3', status: 'ended' }), name: 'old round', emblem: '▲', pose: 'offline' })],
-        flight: [live, inPane],
+        flight: [live, inPane, other],
         hangar: [done],
         stranded: [],
         hangarReady: false,

@@ -1,5 +1,5 @@
 import type { AgentState, RepoNode } from '../../fleet/types'
-import { norm, within } from '../../path/path'
+import { basename, norm, within } from '../../path/path'
 import type { SessionRef } from '../../session/host'
 import type { SpriteSheet } from '../types'
 import type { Captain, Deck, Dock, Feed, Ship, ShipRobot } from '../ship-types'
@@ -33,7 +33,7 @@ export function findFigure(ship: Ship | null, id: string): Figure | null {
 }
 
 /** The pane of this app running session `sessionId`, as the fleet knows it. */
-export function paneOf(repos: readonly RepoNode[], sessionId: string | null): number | null {
+export function fleetPane(repos: readonly RepoNode[], sessionId: string | null): number | null {
   if (!sessionId) return null
   for (const r of repos) for (const w of r.worktrees) for (const a of w.agents) if (a.sessionId === sessionId && a.paneId !== null) return a.paneId
   return null
@@ -48,13 +48,21 @@ export const labelOf = (f: Figure) => (f.kind === 'robot' ? f.robot.label + (f.r
 
 /** How figure `id` opens: the tab, and the session to hold for it (none when it is shown
  *  read-only). Null for what has no session (the empty chair) or is not on the ship.
- *  - A session in a pane is held by its pane, robot or captain: never a second attach to it.
+ *  - A session in a pane is held by its pane, robot or captain: never a second attach to it. The
+ *    pane is the layout's (`inLayout`), else the fleet's: the fleet lags, and knows no pane in a
+ *    repo it does not list.
  *  - A live child in no pane is held by `claude attach` on its account.
  *  - A captain alive outside the app has no terminal to borrow, and an ended session none to
  *    show: their conversation, read-only. */
-export function openingOf(id: string, ship: Ship | null, repos: readonly RepoNode[]): { tab: DrawerTab; ref: SessionRef | null } | null {
+export function openingOf(
+  id: string,
+  ship: Ship | null,
+  repos: readonly RepoNode[],
+  inLayout: (sessionId: string) => number | null = () => null,
+): { tab: DrawerTab; ref: SessionRef | null } | null {
   const f = findFigure(ship, id)
   if (!f) return null
+  const paneOf = (repos: readonly RepoNode[], sessionId: string | null) => (sessionId ? (inLayout(sessionId) ?? fleetPane(repos, sessionId)) : null)
   const tab = (key: null, readOnly: string | null): DrawerTab => ({ id, kind: f.kind, key, readOnly, label: labelOf(f), sessionId: sessionIdOf(f), cwd: cwdOf(f) })
   if (f.kind === 'robot') {
     const { child } = f.robot
@@ -73,8 +81,32 @@ export function openingOf(id: string, ship: Ship | null, repos: readonly RepoNod
 /** A breadcrumb: `go` opens that figure in the drawer, `repo` shows that repo in the workbench. */
 export type Crumb = { text: string; go?: string; repo?: string; here?: true }
 
-export function crumbsOf(f: Figure, ship: Ship | null): Crumb[] {
-  const place = f.kind === 'robot' ? f.deck : f.place
+/** The repo a session's `cwd` is in: the fleet's repo holding it, else the `<repo>` a
+ *  `<repo>-wt-<name>` folder on its path folds into; null when neither says. */
+export function repoOf(cwd: string, repos: readonly RepoNode[]): { root: string; name: string } | null {
+  const c = norm(cwd)
+  let best: { root: string; name: string; depth: number } | null = null
+  for (const r of repos) {
+    for (const p of [r.root, ...r.worktrees.map((w) => w.path)]) {
+      const d = norm(p)
+      if (within(c, d) && (!best || d.length > best.depth)) best = { root: r.root, name: r.name, depth: d.length }
+    }
+  }
+  if (best) return { root: best.root, name: best.name }
+  const parts = c.split('/')
+  for (let i = parts.length - 1; i > 0; i--) {
+    const at = parts[i].indexOf('-wt-')
+    if (at <= 0) continue
+    const root = [...parts.slice(0, i), parts[i].slice(0, at)].join('/')
+    return { root, name: basename(root) }
+  }
+  return null
+}
+
+/** A robot's repo is its own (`child.cwd`): a captain may dispatch into another repo than its
+ *  deck's. */
+export function crumbsOf(f: Figure, ship: Ship | null, repos: readonly RepoNode[] = []): Crumb[] {
+  const place = f.kind === 'robot' ? (repoOf(f.robot.child.cwd, repos) ?? f.deck) : f.place
   const out: Crumb[] = place ? [{ text: place.name, repo: place.root }] : []
   if (f.kind === 'captain') return [...out, { text: `${f.captain.emblem} ${f.captain.name}`, here: true }]
   const captain = findFigure(ship, f.robot.captainId)

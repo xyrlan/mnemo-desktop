@@ -15,16 +15,20 @@ export function isToggleKey(e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 
 
 export const toggleLabel = (platform: Platform = detectPlatform()) => (platform === 'mac' ? '⌘\\' : 'Ctrl+Shift+\\')
 
-/** The drawer's root, which holds the keyboard when focus is inside it. */
-export const DRAWER_SELECTOR = '[data-nexus-drawer]'
+/** A session popup's root (`src/popout/Popouts.tsx`). */
+const POPUP_SELECTOR = '[data-popout]'
 
-/** ⌘W while the drawer has the keyboard closes its tab shown, never the workbench's pane. */
+/** ⌘W and ⇧⌘W while the Nexus is open close the drawer's tab shown, or nothing: never the
+ *  workbench's pane or tab hidden under the Nexus, whose shell they would kill. Wherever the focus
+ *  is (the ship, the quick diff, a read-only tab, nowhere WKWebView would focus). A popup over the
+ *  Nexus still closes itself on ⌘W (`src/popout/view.tsx`). */
 export function claimClose(drawer: Drawer, store: StoreApi<NexusState>): () => void {
   return claimAction((id) => {
-    if (id !== 'pane.close') return false
+    if (id !== 'pane.close' && id !== 'tab.close') return false
     const s = store.getState()
-    if (!s.open || s.collapsed || !s.activeTab || !document.activeElement?.closest(DRAWER_SELECTOR)) return false
-    void drawer.close(s.activeTab)
+    if (!s.open) return false
+    if (id === 'pane.close' && document.activeElement?.closest(POPUP_SELECTOR)) return false
+    if (!s.collapsed && s.activeTab) void drawer.close(s.activeTab)
     return true
   })
 }

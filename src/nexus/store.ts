@@ -1,7 +1,7 @@
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { SessionKey } from '../session/host'
-import type { LogEvent } from './ship-types'
+import type { Feed, LogEvent } from './ship-types'
 import { readWidth } from './drawer/width'
 
 /** How many milestones the ship's log keeps while the app runs (it is not persisted). */
@@ -25,6 +25,10 @@ export type NexusState = {
   /** The session the drawer shows; its figure is highlighted. */
   focusId: string | null
   setFocus(id: string | null): void
+  /** The last feed read, kept while the Nexus is closed: a ship built on reopen is drawn with it,
+   *  not as if no session had acted since. */
+  feed: Feed | null
+  setFeed(feed: Feed): void
   /** The drawer's tabs, in the order they were opened: one per session. The holds are the
    *  drawer's (`drawer/sessions.ts`); these only say what is shown. */
   tabs: DrawerTab[]
@@ -86,6 +90,8 @@ export const nexusStore: StoreApi<NexusState> = createStore<NexusState>((set) =>
     }),
   focusId: null,
   setFocus: (focusId) => set({ focusId }),
+  feed: null,
+  setFeed: (feed) => set({ feed }),
   tabs: [],
   activeTab: null,
   collapsed: false,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from '@/ui'
 import { STATUS_BAR, TOP_CHROME } from '../dashboard/AgentDashboardDrawer'
 import { useFleet } from '../fleet/store'
 import type { RepoNode } from '../fleet/types'
@@ -13,7 +14,7 @@ import { FleetPrompt } from './command/FleetPrompt'
 import { SelectionBar } from './command/SelectionBar'
 import { Triage } from './command/Triage'
 import { liveDrawer } from './drawer/app'
-import { NexusDrawer, type DrawerDeps } from './drawer/Drawer'
+import { NexusDrawer, useShownWidth, type DrawerDeps } from './drawer/Drawer'
 import { openingOf } from './drawer/model'
 import { useReducedMotion, useVisible } from './env'
 import { logEvents } from './log'
@@ -47,6 +48,12 @@ function sessionIds(snap: Snapshot): string[] {
   return ids
 }
 
+/** A refused action from the ship (an exception's button, an inline answer) says why; what went
+ *  through is in the log. */
+function sayFailure(r: ActionResult) {
+  if (!r.ok) toast.error(r.say || 'That did not go through.')
+}
+
 type BodyProps = {
   client: ShipClient
   usage: NexusClient
@@ -66,7 +73,10 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const focusId = useNexus((s) => s.focusId)
   const reducedMotion = useReducedMotion()
   const visible = useVisible()
-  const [feed, setFeed] = useState<Feed | null>(null)
+  // The last feed read, also by an earlier mount: reopened, the ship is drawn with it.
+  const feed = useNexus((s) => s.feed)
+  /** A feed was read since this mount: until then the ship may be older than the snapshot. */
+  const fed = useRef(false)
   const [now, setNow] = useState(() => Date.now())
 
   const asks = useMemo(() => asksFrom(snapshot), [snapshot])
@@ -76,7 +86,9 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
     let live = true
     const stop = pollWhileShown(async () => {
       const f = await client.feed(asksRef.current).catch(() => null)
-      if (live && f) setFeed(f)
+      if (!live || !f) return
+      fed.current = true
+      nexusStore.getState().setFeed(f)
     }, FEED_MS)
     return () => {
       live = false
@@ -97,8 +109,11 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   const shipRef = useRef(ship)
   shipRef.current = ship
   useEffect(() => onShip(ship, feed), [onShip, ship, feed])
+  // No milestone is logged from a ship built before this mount's first feed: a child deep in a CI
+  // watch would read as stranded, and the log would keep that for good.
   const prev = useRef<Ship | null>(null)
   useEffect(() => {
+    if (!fed.current) return
     nexusStore.getState().appendLog(logEvents(prev.current, ship, now))
     prev.current = ship
   }, [ship, now])
@@ -157,7 +172,7 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         selection={selection}
         onOpen={onOpen}
         onSelect={s.toggleSelect}
-        onAction={(a) => void run(a)}
+        onAction={(a) => void run(a).then(sayFailure, (e: unknown) => toast.error(String(e)))}
         onTriage={() => s.setTriage(true)}
         bridge={<FleetPrompt ship={ship} run={run} />}
         reducedMotion={reducedMotion}
@@ -187,7 +202,7 @@ export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: Nexu
   const open = useNexus((s) => s.open)
   const tabs = useNexus((s) => s.tabs.length)
   const collapsed = useNexus((s) => s.collapsed)
-  const width = useNexus((s) => s.drawerWidth)
+  const width = useShownWidth()
   const [built, setBuilt] = useState<{ ship: Ship; feed: Feed | null } | null>(null)
   const onShip = useCallback((ship: Ship, feed: Feed | null) => setBuilt({ ship, feed }), [])
   const repos = useFleet((f) => f.repos)
@@ -198,7 +213,7 @@ export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: Nexu
   // A click on a figure, an exception's open, ⌥1–9, a breadcrumb: its tab, held as it opens.
   const onOpen = useCallback(
     (id: string) => {
-      const o = openingOf(id, builtRef.current?.ship ?? null, reposRef.current)
+      const o = openingOf(id, builtRef.current?.ship ?? null, reposRef.current, drawer.paneOfSession)
       if (o) drawer.drawer.open(o.tab, o.ref)
     },
     [drawer],
@@ -215,7 +230,7 @@ export function NexusView({ client, usage, leftEdge, drawer = liveDrawer }: Nexu
           <ShipBody client={client} usage={usage} onOpen={onOpen} onShip={onShip} />
         </div>
       )}
-      <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} shown={open} onOpen={onOpen} />
+      <NexusDrawer deps={drawer} ship={built?.ship ?? null} feed={built?.feed ?? null} repos={repos} shown={open} onOpen={onOpen} />
     </>
   )
 }

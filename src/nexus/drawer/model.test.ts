@@ -1,5 +1,5 @@
 import { reposFixture, shipFixture } from './fixtures'
-import { crumbsOf, deepestWorktree, findFigure, labelOf, stateOf, tokens } from './model'
+import { crumbsOf, deepestWorktree, findFigure, labelOf, OUTSIDE, openingOf, repoOf, stateOf, tokens } from './model'
 
 test('a robot’s breadcrumbs: repo, its captain (opens it), itself with its twin suffix', () => {
   const ship = shipFixture()
@@ -36,4 +36,21 @@ test('a session’s worktree is the deepest one known holding its cwd', () => {
   expect(deepestWorktree('/work/mnemo-desktop-wt-682/src', known)).toBe('/work/mnemo-desktop-wt-682')
   expect(deepestWorktree('/work/mnemo-desktop/src/nexus', [...known, '/work/mnemo-desktop/src'])).toBe('/work/mnemo-desktop/src')
   expect(deepestWorktree('/elsewhere', known)).toBe('/elsewhere')
+})
+
+test('a session’s pane is the layout’s when the fleet does not know it yet: no false "runs outside the app"', () => {
+  const ship = shipFixture()
+  expect(openingOf('cap-2', ship, reposFixture)).toMatchObject({ ref: null, tab: { readOnly: OUTSIDE } })
+  const inLayout = (sid: string) => (sid === 'cap-2' ? 14 : sid === 's-live' ? 15 : null)
+  expect(openingOf('cap-2', ship, reposFixture, inLayout)).toMatchObject({ ref: { pane: 14 }, tab: { readOnly: null } })
+  expect(openingOf('r-live', ship, reposFixture, inLayout)?.ref).toEqual({ pane: 15 })
+  // The fleet still answers where the layout does not.
+  expect(openingOf('cap-1', ship, reposFixture, inLayout)?.ref).toEqual({ pane: 7 })
+})
+
+test('a session’s repo: the fleet’s repo holding its cwd, else the <repo> a -wt- folder folds into', () => {
+  const repos = [{ ...reposFixture[0], worktrees: [...reposFixture[0].worktrees, { ...reposFixture[0].worktrees[0], path: '/trees/feature-x', kind: 'dispatched' as const }] }]
+  expect(repoOf('/trees/feature-x/src', repos)).toEqual({ root: '/work/mnemo-desktop', name: 'mnemo-desktop' })
+  expect(repoOf('/work/mnemo-wt-90/src', repos)).toEqual({ root: '/work/mnemo', name: 'mnemo' })
+  expect(repoOf('/elsewhere/plain', repos)).toBeNull()
 })
