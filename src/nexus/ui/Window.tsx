@@ -1,4 +1,5 @@
 import { useEffect, useRef, type JSX, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { closeWindow, useOpenWindow, windowDef } from './windows'
 import './ui.css'
 
@@ -11,28 +12,38 @@ export type NexusWindowProps = {
   children: ReactNode
 }
 
-/** A window in the ship's look: over the ship, the ship dimmed behind it. Esc and a click on the
- *  backdrop close it; focus moves into it as it opens and back where it was as it closes. */
+/** Whether a key typed at `target` is the open window's: typed in it or on its backdrop, or with
+ *  the focus nowhere. One typed elsewhere (the drawer's terminal) belongs where it was typed. */
+export function typedInWindow(target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || target === document.body || target === document.documentElement) return true
+  return target.closest('[data-nx-backdrop]') !== null
+}
+
+/** A window in the ship's look: over the ship and the drawer, both dimmed behind it. It is drawn at
+ *  the end of `<body>`: inside the Nexus's layer, the drawer (the same layer, later) would paint over
+ *  it. Esc typed in it and a click on the backdrop close it; focus moves into it as it opens and
+ *  back where it was as it closes. */
 export function NexusWindow({ title, sub, width = 720, onClose, children }: NexusWindowProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null
     box.current?.focus()
+    // On `document`, as it bubbles: what it was typed in has it first (a note's draft, Monaco's find,
+    // a confirmation), and an Esc one of them took (stopped or prevented) leaves the window open.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || e.defaultPrevented || !typedInWindow(e.target)) return
       e.preventDefault()
-      e.stopPropagation()
       onClose()
     }
-    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('keydown', onKey)
       before?.focus?.()
     }
   }, [onClose])
-  return (
+  return createPortal(
     <div className="nx nx-backdrop" data-nx-backdrop="" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={box} className="nx-window" role="dialog" aria-label={title} tabIndex={-1} style={{ width }} data-nx-window="">
+      <div ref={box} className="nx-window" role="dialog" aria-label={title} tabIndex={-1} style={{ width }} data-state="open" data-nx-window="">
         <div className="nx-window-bar">
           <h2 className="nx-window-title">{title}</h2>
           {sub && <span className="nx-window-sub">{sub}</span>}
@@ -42,7 +53,8 @@ export function NexusWindow({ title, sub, width = 720, onClose, children }: Nexu
         </div>
         <div className="nx-window-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

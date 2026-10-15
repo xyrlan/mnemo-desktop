@@ -8,6 +8,8 @@ import type { Feed, Ship, ShipSceneProps } from './ship-types'
 import { nexusStore } from './store'
 import { liveDrawer } from './drawer/app'
 import { shipFixture } from './drawer/fixtures'
+import { confirm } from './ui/confirm'
+import { closeWindow, openWindow, registerWindow, windowStore } from './ui/windows'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -229,4 +231,152 @@ test('⌥N opens a waiting captain’s row in the drawer', async () => {
   press({ key: '1', code: 'Digit1', altKey: true })
   await act(async () => {})
   expect(nexusStore.getState()).toMatchObject({ activeTab: LEAD })
+})
+
+// ---------- #451: windows, confirmations and menus with the drawer open ----------
+
+// What paints over what for these fixed layers, as the browser decides it: each element's stacking
+// context at the top of the page (its outermost ancestor with a z-index), then document order
+// between equals. Each z-index is read from the sheet that sets it. vitest hands a `?raw` sheet over
+// empty: read from disk. The app has no Node types, so the one fs call is typed here.
+type Fs = { readFileSync(p: string, e: 'utf8'): string }
+const fs = (await import(/* @vite-ignore */ `node:${'fs'}`)) as Fs
+const cwd = (globalThis as unknown as { process: { cwd(): string } }).process.cwd()
+const Z: Record<string, number> = {}
+for (const m of fs.readFileSync(`${cwd}/src/theme.css`, 'utf8').matchAll(/--z-index-([\w-]+):\s*(\d+)/g)) Z[`z-${m[1]}`] = Number(m[2])
+for (const sheet of ['src/nexus/ui/ui.css', 'src/nexus/accounts/accounts.css'])
+  for (const m of fs.readFileSync(`${cwd}/${sheet}`, 'utf8').matchAll(/\.([\w-]+)\s*\{[^}]*?z-index:\s*(\d+)/g)) Z[m[1]] = Number(m[2])
+const zOf = (el: Element): number | null => {
+  const z = [...el.classList].map((c) => Z[c]).filter((n) => n !== undefined)
+  return z.length ? Math.max(...z) : null
+}
+/** The layer `el` is painted in at the top of the page, and its z-index. */
+function layerOf(el: Element): { el: Element; z: number } {
+  let top: { el: Element; z: number } = { el, z: 0 }
+  for (let a: Element | null = el; a && a !== document.body; a = a.parentElement) {
+    const z = zOf(a)
+    if (z !== null) top = { el: a, z }
+  }
+  return top
+}
+/** `a` is painted over `b`. */
+function paintsOver(a: Element, b: Element): boolean {
+  const la = layerOf(a)
+  const lb = layerOf(b)
+  if (la.el === lb.el) return false
+  if (la.z !== lb.z) return la.z > lb.z
+  return !!(lb.el.compareDocumentPosition(la.el) & Node.DOCUMENT_POSITION_FOLLOWING)
+}
+
+const mac = () => Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
+/** Opens r-live in the drawer, the drawer open beside the ship. */
+async function withDrawer(): Promise<HTMLElement> {
+  mac()
+  press({ key: '1', code: 'Digit1', altKey: true })
+  await act(async () => {})
+  const aside = document.querySelector<HTMLElement>('[data-nexus-drawer]')!
+  expect(aside.style.display).toBe('flex')
+  return aside
+}
+let unregister = () => {}
+const openTestWindow = async () => {
+  unregister = registerWindow({
+    id: 'zz-test',
+    title: 'Test',
+    render: () => (
+      <div>
+        <button type="button" data-zz-go="">
+          go
+        </button>
+        <input data-zz-find="" onKeyDown={(e) => e.key === 'Escape' && e.stopPropagation()} />
+      </div>
+    ),
+  })
+  await act(async () => openWindow('zz-test'))
+  return document.querySelector<HTMLElement>('[data-zz-go]')!
+}
+afterEach(() => {
+  act(() => closeWindow())
+  unregister()
+})
+
+test('a window, a confirmation and a menu are drawn over the open drawer, not under it', async () => {
+  await mount()
+  const aside = await withDrawer()
+
+  await openTestWindow()
+  const backdrop = document.querySelector('[data-nx-backdrop]')!
+  expect(paintsOver(backdrop, aside)).toBe(true)
+  expect(view()!.contains(backdrop)).toBe(false)
+
+  let asked: Promise<boolean> = Promise.resolve(false)
+  act(() => void (asked = confirm({ title: 'Close it?', confirm: 'Close', danger: true })))
+  const question = document.querySelector('[data-nx-confirm]')!
+  expect(paintsOver(question, aside)).toBe(true)
+  expect(paintsOver(question, backdrop)).toBe(true)
+  // The account switcher's list, in its layer at the end of `<body>`, stays under the question.
+  const layer = document.body.appendChild(document.createElement('div'))
+  const pop = layer.appendChild(document.createElement('div'))
+  pop.className = 'nx nx-pop'
+  expect(paintsOver(question, pop)).toBe(true)
+  await act(async () => void document.querySelector<HTMLButtonElement>('[data-nx-confirm] [data-tone]')!.click())
+  expect(await asked).toBe(true)
+  act(() => closeWindow())
+
+  const scene = seen.scene as ShipSceneProps
+  act(() => scene.onMenu?.({ kind: 'robot', id: 'r-live' }, 1500, 200))
+  const menu = document.querySelector('[data-nx-menu]')!
+  expect(paintsOver(menu, aside)).toBe(true)
+})
+
+/** The fixture ship with r-live blocked on a question: Tab has something to triage. */
+const blockedShip = (): Ship => {
+  const s = shipFixture()
+  const r = { ...s.decks[0].flight[0], state: 'need' as const, zone: 'bridge' as const, need: { kind: 'question' as const, text: 'which one?', options: ['a', 'b'] } }
+  return { ...s, bridge: { exceptions: [{ kind: 'need', robotId: r.id, need: r.need }], blocked: [r] }, counts: { ...s.counts, need: 1 } }
+}
+
+test('with a window or a confirmation open, Tab, `/` and ⌥1–9 are not the ship’s', async () => {
+  mac()
+  seen.ship = blockedShip
+  await mount()
+  const go = await openTestWindow()
+  go.focus()
+  press({ key: 'Tab' }, go)
+  expect(nexusStore.getState().triage).toBe(false)
+  press({ key: '/' }, go)
+  expect(document.activeElement).toBe(go)
+  press({ key: '1', code: 'Digit1', altKey: true }, go)
+  expect(nexusStore.getState().tabs).toEqual([])
+  act(() => closeWindow())
+
+  act(() => void confirm({ title: 'Stop it?', confirm: 'Stop' }))
+  press({ key: 'Tab' })
+  expect(nexusStore.getState().triage).toBe(false)
+  await act(async () => void document.querySelector<HTMLButtonElement>('[data-nx-confirm] .nx-btn')!.click())
+
+  // With nothing over the ship, they are its again.
+  press({ key: 'Tab' })
+  expect(nexusStore.getState().triage).toBe(true)
+})
+
+test('with a window open, Esc typed in the drawer’s terminal is the terminal’s; typed in the window, it closes the window', async () => {
+  await mount()
+  await withDrawer()
+  const terminal = document.querySelector<HTMLTextAreaElement>('[data-stub-terminal] textarea')!
+  let heard = 0
+  terminal.addEventListener('keydown', (e) => e.key === 'Escape' && heard++)
+  const go = await openTestWindow()
+
+  press({ key: 'Escape' }, terminal)
+  expect(heard).toBe(1)
+  expect(windowStore.getState().open?.id).toBe('zz-test')
+  // An Esc something in the window takes for itself (Monaco's find closing) leaves the window.
+  press({ key: 'Escape' }, document.querySelector('[data-zz-find]')!)
+  expect(windowStore.getState().open?.id).toBe('zz-test')
+
+  press({ key: 'Escape' }, go)
+  expect(windowStore.getState().open).toBeNull()
+  // The view's own Esc did not also collapse the drawer.
+  expect(nexusStore.getState().collapsed).toBe(false)
 })

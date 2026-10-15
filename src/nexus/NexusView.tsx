@@ -44,6 +44,10 @@ function menuHead(t: MenuTarget, ship: Ship): string | undefined {
   return t.kind === 'robot' ? robots.find((r) => r.id === t.id)?.label : captains.find((c) => c.id === t.id)?.name
 }
 
+/** What is open over the ship and keeps its keys: Triage, a window, the accounts' list (dialogs, open),
+ *  a confirmation, a menu. */
+const OVER_THE_SHIP = '[role="dialog"][data-state="open"], [role="alertdialog"], [role="menu"][data-nx-menu]'
+
 /** How often the feed is read while the Nexus is shown. */
 export const FEED_MS = 3_000
 /** How often idle times move on when nothing else changed. */
@@ -160,14 +164,14 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
 
   // The view's keys, while it is open and nothing typed into has focus: Tab triages, ⌥1–9 opens the
   // bridge's Nth exception (⌘1–9 are the worktrees'), `/` focuses the fleet prompt, Esc drops the
-  // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). The
-  // app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
+  // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). With
+  // anything open over the ship (`OVER_THE_SHIP`) they are that's. The app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
   // on its quick diff) next.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return
+      if (e.defaultPrevented || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return
+      if (document.querySelector(OVER_THE_SHIP)) return
       const st = nexusStore.getState()
       const digit = /^Digit([1-9])$/.exec(e.code)
       if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && shipRef.current.counts.need > 0) st.setTriage(true)

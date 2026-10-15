@@ -191,7 +191,8 @@ export function Triage({ ship, open, onClose, onOpen, run }: TriageProps): JSX.E
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // A window or a confirmation drawn over it has the keys: no digit or y/n answers a card unseen.
+      if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector('[data-nx-window], [data-nx-confirm]')) return
       const { card, keys, answer, move } = state.current
       if (e.key === 'Escape') onClose()
       else if (typing(e.target)) return

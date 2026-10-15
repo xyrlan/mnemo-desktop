@@ -316,3 +316,15 @@ test('a neighbour says how it stands to the centre', () => {
   expect(relation('a', 'b', [{ id: '1', source: 'b', target: 'a', kind: 'link', label: '' }])).toBe('links here')
   expect(relation('a', 'b', [])).toBe('nearby')
 })
+
+test('Esc typed outside the window (the drawer’s terminal) closes nothing inside it', async () => {
+  await open()
+  await tab('Pages')
+  await act(async () => vault.setState({ query: 'run-git' }))
+  const terminal = document.body.appendChild(document.createElement('textarea'))
+  await key('Escape', terminal)
+  expect(vault.getState().query).toBe('run-git')
+  expect(windowStore.getState().open?.id).toBe('memory')
+  await key('Escape')
+  expect(vault.getState().query).toBe('')
+})

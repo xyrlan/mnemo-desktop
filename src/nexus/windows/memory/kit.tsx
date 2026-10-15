@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { parseBlocks, type Inline } from '../../../vault/md'
 import type { Tone } from '../../../vault/rules'
 import type { RepoNode } from '../../../fleet/store'
+import { typedInWindow } from '../../ui/Window'
 import { chooseRepo } from './repo'
 
 /** `/Users/you/x` → `~/x`. */
@@ -25,13 +26,14 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /** Esc for what is open inside a window, before the window's own Esc closes it: `handle` returns
- *  true when it closed something. A pending confirmation keeps its Esc. */
+ *  true when it closed something. A pending confirmation keeps its Esc, and one typed outside the
+ *  window (the drawer's terminal) is where it was typed. */
 export function useInnerEscape(handle: () => boolean): void {
   const ref = useRef(handle)
   ref.current = handle
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || document.querySelector('[data-nx-confirm]')) return
+      if (e.key !== 'Escape' || document.querySelector('[data-nx-confirm]') || !typedInWindow(e.target)) return
       if (!ref.current()) return
       e.preventDefault()
       e.stopPropagation()

@@ -189,3 +189,19 @@ test('T opens a captain’s card in the drawer; its question shows when the feed
   await key('t')
   expect([closed, opened]).toEqual([1, [MAIN]])
 })
+
+test('with a window or a confirmation over it, its keys answer nothing and Esc leaves it open', async () => {
+  await draw()
+  for (const mark of ['data-nx-window', 'data-nx-confirm']) {
+    const over = document.body.appendChild(document.createElement('div'))
+    over.setAttribute(mark, '')
+    await key('1')
+    await key('y')
+    await key('Escape')
+    over.remove()
+  }
+  expect(ran).toEqual([])
+  expect(closed).toBe(0)
+  await key('1')
+  expect(ran).toHaveLength(1)
+})
