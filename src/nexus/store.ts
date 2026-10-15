@@ -43,8 +43,12 @@ export type NexusState = {
   activeTab: string | null
   /** Collapsed to a handle on the right edge: every tab is still held. */
   collapsed: boolean
-  /** The drawer's width in px, remembered per machine (`drawer/width.ts`). */
-  drawerWidth: number
+  /** The drawer's width in px as dragged, remembered per machine (`drawer/width.ts`); null until
+   *  one is: the default, 42% of the window as it is now. */
+  drawerWidth: number | null
+  /** How each tab shows its live session, by tab id: its conversation (the default, so a tab not
+   *  listed shows that), or its terminal. A tab's entry goes with it. */
+  faces: Record<string, DrawerFace>
   /** Adds `tab` (or replaces the one of its id) and shows it, expanding the drawer. */
   putTab(tab: DrawerTab): void
   /** Shows tab `id`, expanding the drawer. */
@@ -54,7 +58,17 @@ export type NexusState = {
   /** Collapses or expands the drawer; it never collapses with no tab. */
   setCollapsed(collapsed: boolean): void
   setDrawerWidth(width: number): void
+  /** Shows tab `id`'s session as `face`. */
+  setFace(id: string, face: DrawerFace): void
+  /** Flips tab `id` between its conversation and its terminal. */
+  toggleFace(id: string): void
 }
+
+/** A tab's live session, as its conversation (with a composer that types into its terminal) or
+ *  as that terminal. */
+export type DrawerFace = 'conversation' | 'terminal'
+
+export const faceOf = (s: Pick<NexusState, 'faces'>, id: string): DrawerFace => s.faces[id] ?? 'conversation'
 
 /** A session open in the drawer. `id`: the figure's (a robot's, a captain's). `key`: the session
  *  host's key while the tab shows its live terminal; null when it shows the conversation read-only,
@@ -118,10 +132,15 @@ export const nexusStore: StoreApi<NexusState> = createStore<NexusState>((set) =>
       if (!s.tabs.some((t) => t.id === id)) return {}
       const tabs = s.tabs.filter((t) => t.id !== id)
       const active = s.activeTab === id ? (tabs.at(-1)?.id ?? null) : s.activeTab
-      return { tabs, ...focused(active, s.collapsed && tabs.length > 0) }
+      const faces = { ...s.faces }
+      delete faces[id]
+      return { tabs, faces, ...focused(active, s.collapsed && tabs.length > 0) }
     }),
   setCollapsed: (collapsed) => set((s) => focused(s.activeTab, collapsed && s.tabs.length > 0)),
   setDrawerWidth: (drawerWidth) => set({ drawerWidth }),
+  faces: {},
+  setFace: (id, face) => set((s) => (faceOf(s, id) === face ? {} : { faces: { ...s.faces, [id]: face } })),
+  toggleFace: (id) => set((s) => ({ faces: { ...s.faces, [id]: faceOf(s, id) === 'conversation' ? 'terminal' : 'conversation' } })),
 }))
 
 export const useNexus = <T,>(sel: (s: NexusState) => T): T => useStore(nexusStore, sel)
