@@ -1,0 +1,58 @@
+/* The MISSIONS window (`MissionsWindow.tsx`), in the ship's look (`src/nexus/ui/ui.css`). Colour
+   means state only: a robot working, waiting on you, done; a PR's checks. */
+
+.nx-mis { display: flex; flex-direction: column; gap: 8px; min-height: 360px; }
+.nx-mis-bar { position: sticky; top: -10px; z-index: 2; display: flex; align-items: center; gap: 8px; margin: -10px -12px 0; padding: 8px 12px; border-bottom: 1px solid var(--nx-edge); background: var(--nx-hull); }
+.nx-mis-bar select { max-width: 240px; }
+.nx-mis-filter { flex: 1; min-width: 0; }
+.nx-mis-list { display: flex; flex-direction: column; gap: 14px; }
+.nx-mis-empty { padding: 40px 0; color: var(--nx-dim); text-align: center; }
+.nx-mis-why { color: var(--nx-danger); }
+.nx-mis-notice { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--nx-edge-hi); color: var(--nx-pale); }
+.nx-mis-notice .nx-mis-link { margin-left: auto; }
+
+/* ---------- a repo ---------- */
+.nx-mis-head { display: flex; align-items: center; gap: 10px; padding: 0 0 4px; border-bottom: 2px solid var(--nx-edge); }
+.nx-mis-name { font-weight: 700; color: var(--nx-pale); letter-spacing: 1px; text-transform: uppercase; }
+.nx-mis-head .nx-btn { margin-left: auto; }
+.nx-mis-sub { margin: 8px 0 3px; font-size: 10px; letter-spacing: 1px; color: var(--nx-dim); text-transform: uppercase; }
+.nx-mis-row[data-picked] { border-left-color: var(--nx-edge-hi); background: #1d2750; }
+.nx-mis-box { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: 2px solid var(--nx-edge); border-radius: 2px; background: #000; color: var(--nx-edge-hi); font-size: 9px; line-height: 1; }
+span.nx-mis-box[aria-hidden] { visibility: hidden; }
+.nx-mis-file span.nx-mis-box[aria-hidden] { visibility: visible; }
+.nx-mis-title { display: flex; flex: 1; gap: 8px; min-width: 0; padding: 0; border: 0; background: none; text-align: left; }
+.nx-mis-title:hover .nx-mis-text { color: #fff; text-decoration: underline; }
+.nx-mis-num { flex: none; color: var(--nx-dim); }
+.nx-mis-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-mis-tag { flex: none; padding: 0 5px; border: 1px solid var(--nx-faint); border-radius: 2px; color: var(--nx-dim); font-size: 10px; }
+.nx-mis-act { flex: none; }
+.nx-mis-link { flex: none; padding: 0 4px; border: 0; background: none; color: var(--nx-edge-hi); }
+.nx-mis-link:hover { color: #fff; text-decoration: underline; }
+
+/* What works on an issue in flight, and a dispatch's job: a dot in its state's colour. */
+.nx-mis-flight { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--nx-dim); }
+.nx-mis-dot { width: 6px; height: 6px; flex: none; background: var(--nx-faint); }
+[data-tone='work'] > .nx-mis-dot, [data-tone='run'] > .nx-mis-dot { background: var(--state-working, #60a5fa); }
+[data-tone='need'] > .nx-mis-dot, [data-tone='fail'] > .nx-mis-dot { background: var(--nx-danger); }
+[data-tone='ok'] > .nx-mis-dot { background: var(--nx-ok); }
+.nx-mis-checks { flex: none; color: var(--nx-dim); }
+.nx-mis-checks[data-tone='pass'] { color: var(--nx-ok); }
+.nx-mis-checks[data-tone='fail'] { color: var(--nx-danger); }
+.nx-mis-checks[data-tone='pending'] { color: var(--state-working, #60a5fa); }
+
+/* ---------- dispatching ---------- */
+.nx-mis-flags { display: inline-flex; align-items: center; gap: 8px; }
+.nx-mis-flag { display: inline-flex; align-items: center; gap: 4px; }
+.nx-mis-flag select { padding: 1px 4px; }
+.nx-mis-batch { position: sticky; bottom: -10px; z-index: 2; display: flex; align-items: center; gap: 10px; margin: auto -12px -10px; padding: 8px 12px; border-top: 2px solid var(--nx-edge-hi); background: var(--nx-hull-2); }
+.nx-mis-batch > .nx-mis-text { flex: 1; }
+.nx-mis-contract { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; padding: 8px; border: 2px solid var(--nx-edge); background: #0b0d22; }
+.nx-mis-files { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; }
+.nx-mis-file { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border: 0; background: none; text-align: left; }
+.nx-mis-file[aria-checked='true'] { background: #1d2750; color: #fff; }
+.nx-mis-path { display: flex; align-items: center; gap: 8px; }
+.nx-mis-path .nx-input { flex: 1; }
+.nx-mis-go { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.nx-mis-jobs { display: flex; flex-direction: column; gap: 2px; }
+.nx-mis-job { display: flex; align-items: center; gap: 8px; padding: 2px 6px; border-left: 3px solid var(--nx-edge); }
+.nx-mis-jobname { flex: none; color: var(--nx-pale); }
