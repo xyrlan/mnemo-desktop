@@ -1,0 +1,22 @@
+/* SYSTEMS › Settings in the ship's look, on `src/nexus/ui/`'s `.nx` tokens. */
+
+.nx-sets { display: flex; flex-direction: column; gap: 8px; }
+.nx-sets p { margin: 0; }
+.nx-sets .nx-section { margin-top: 6px; }
+.nx-set { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 16px; padding: 6px 8px; border-left: 3px solid var(--nx-edge); background: #0b0d22cc; }
+.nx-set-text { flex: 1 1 260px; min-width: 0; }
+.nx-set-name { font-weight: 700; color: #fff; }
+.nx-set-text code { color: var(--nx-pale); overflow-wrap: anywhere; }
+.nx-set-pick { display: flex; flex: 0 1 auto; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
+.nx-set[data-setting='cloneBase'] .nx-set-pick, .nx-set[data-setting='repoSetup'] .nx-set-pick { flex: 1 1 100%; }
+.nx-set-err { color: var(--nx-danger); overflow-wrap: anywhere; }
+.nx-set-banner { padding: 4px 6px; border: 1px solid #7f1d1d; }
+.nx-seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.nx-seg .nx-btn[aria-pressed='true'] { border-color: var(--nx-edge-hi); background: #2a3570; color: #fff; }
+.nx-seg .nx-btn[aria-pressed='false'] { color: var(--nx-dim); }
+.nx-set-form { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; }
+.nx-set-form .nx-input { flex: 1; min-width: 0; }
+.nx-set-form select.nx-input { flex: 0 1 180px; }
+.nx-set-repos { margin: 0; padding: 0; list-style: none; }
+.nx-set-repos:empty { display: none; }
+.nx-set-repo { flex: 0 0 140px; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
