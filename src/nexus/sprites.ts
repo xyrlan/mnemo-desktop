@@ -38,17 +38,29 @@ export type CaptainSprite = 'busy' | 'idle' | 'alert' | 'offline'
 /** v2's art (set 2, same palette and licence): a parent is a captain robot at its console, 96×96 per
  *  pose; a child with no recorded parent stands by an empty command chair (64); a finished child's
  *  shuttle, docked (64×64) and launching (64×96, the flame below); the teleport pad a newborn child
- *  beams in on (64×96). */
+ *  beams in on (64×96). Set 3 (same palette and licence): the deck's archive tower and the props a
+ *  robot holds to show what it does (24×24). */
 export type ShipSpriteManifest = {
   captain: Record<CaptainSprite, SpriteSheet>
   chair: SpriteSheet
   shuttle: { docked: SpriteSheet; launch: SpriteSheet }
   teleport: SpriteSheet
+  /** The deck's archive, its repo's memory vault: a 24×24 tower beside the deck's name. */
+  archive: SpriteSheet
+  /** What a robot holds to show what it is doing, 24×24, one for every class (`PropKind`). */
+  props: Record<PropKind, SpriteSheet>
 }
+
+/** A robot's held prop: reading, editing, testing, shipping, a long command (and CI running),
+ *  waiting for you, CI green and CI red. */
+export type PropKind = 'read' | 'edit' | 'test' | 'ship' | 'run' | 'need' | 'green' | 'red'
+const PROPS: PropKind[] = ['read', 'edit', 'test', 'ship', 'run', 'need', 'green', 'red']
 
 export const SHIP_SPRITES: ShipSpriteManifest = {
   captain: { busy: still('captain-busy', 96), idle: still('captain-idle', 96), alert: still('captain-alert', 96), offline: still('captain-offline', 96) },
   chair: still('chair', 64),
   shuttle: { docked: still('ship-docked', 64), launch: still('ship-launch', 64, 96) },
   teleport: still('teleport', 64, 96),
+  archive: still('archive', 24),
+  props: Object.fromEntries(PROPS.map((k) => [k, still(`prop-${k}`, 24)])) as Record<PropKind, SpriteSheet>,
 }

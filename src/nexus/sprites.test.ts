@@ -19,6 +19,12 @@ test('v2: a captain per pose at 96 px, the empty chair, the shuttle docked and l
   for (const s of [SHIP_SPRITES.chair, SHIP_SPRITES.teleport, SHIP_SPRITES.shuttle.docked, SHIP_SPRITES.shuttle.launch]) expect(s.src).toBeTruthy()
 })
 
+test('the archive tower and every held prop, at 24 px', () => {
+  expect(SHIP_SPRITES.archive).toMatchObject({ w: 24, h: 24 })
+  expect(Object.keys(SHIP_SPRITES.props).sort()).toEqual(['edit', 'green', 'need', 'read', 'red', 'run', 'ship', 'test'])
+  for (const s of Object.values(SHIP_SPRITES.props)) expect(s).toMatchObject({ w: 24, h: 24 })
+})
+
 test('every image in sprites/ is drawn: none is left over', () => {
   const files = Object.values(import.meta.glob<string>('./sprites/*.png', { eager: true, query: '?url', import: 'default' }))
   const sheets = (x: unknown): SpriteSheet[] =>
