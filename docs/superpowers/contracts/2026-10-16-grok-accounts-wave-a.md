@@ -17,9 +17,12 @@ do not move it.
 
 Before your first push, run `git fetch && git rebase origin/main`. A piece that changes what is
 on screen shows it, and the PR says what was seen (memories
-`see-the-app-through-an-isolated-dev-instance`, `drive-the-preview-harness-interactively`). A
-free xAI account is logged in on the maintainer's machine. Never print or copy its token. Test
-against a fake `auth.json` in a throwaway home.
+`see-the-app-through-an-isolated-dev-instance`, `drive-the-preview-harness-interactively`).
+Unit tests use a fake `auth.json` in a throwaway home. `grok` 1.0.60 is on PATH and `~/.grok` is logged in to a free xAI account (only model:
+`grok-4.7`). Grok fires every hook in `~/.claude/settings.json`, mnemo's and the app's
+included, so a live probe runs with `HOME` set to a throwaway dir and `GROK_HOME=~/.grok`, or
+with `GROK_CLAUDE_HOOKS_ENABLED=0`, and never writes into the maintainer's vault. Never print
+or copy `auth.json`, and stop any leader you started.
 
 ## accounts-kind
 

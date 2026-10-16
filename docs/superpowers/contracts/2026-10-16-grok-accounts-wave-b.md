@@ -19,7 +19,12 @@ Rules for all four pieces:
 - **Every Grok behaviour you rely on is measured or read from the source**, and the PR says which:
   the real `grok` (a free account is logged in, never print its token) or
   `github.com/xai-org/grok-build`. Vitest and cargo tests use fixtures.
-- **No piece calls another piece's internals.** Only the signatures below cross.
+- **Live probes stay out of the vault.** `grok` 1.0.60 is on PATH and `~/.grok` is logged in to a free xAI account (only model:
+  `grok-4.7`). Grok fires every hook in `~/.claude/settings.json`, mnemo's and the app's
+  included, so a live probe runs with `HOME` set to a throwaway dir and `GROK_HOME=~/.grok`, or
+  with `GROK_CLAUDE_HOOKS_ENABLED=0`, and never writes into the maintainer's vault. Never print
+  or copy `auth.json`, and stop any leader you started.
+  - **No piece calls another piece's internals.** Only the signatures below cross.
 - Before your first push, run `git fetch && git rebase origin/main`. A piece that changes the
   screen shows it, and the PR says what was seen.
 
