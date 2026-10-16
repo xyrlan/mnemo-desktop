@@ -444,36 +444,20 @@
 .ship-body img { position: absolute; inset: 0; width: 64px; height: 64px; }
 .ship-robot[data-left] .ship-body { scale: -1 1; }
 .ship-halo { position: absolute; top: 50px; left: -4px; width: 72px; height: 18px; border-radius: 50%; }
-.ship-robot[data-state='working'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-working) 60%, transparent), transparent 70%); }
-.ship-robot[data-state='need'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-need) 80%, transparent), transparent 70%); }
-.ship-robot[data-state='done'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-done) 45%, transparent), transparent 70%); }
-.ship-robot[data-state='stopped'] .ship-body { filter: grayscale(1) brightness(0.7); }
-.ship-ab {
-  position: absolute;
-  top: -4px;
-  left: 48px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 3px;
-  border: 2px solid var(--ship-idle);
-  border-radius: 3px;
-  background: #0b1020;
-  box-shadow: 1px 1px 0 #000;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-}
-.ship-robot[data-state='working'] .ship-ab { border-color: var(--ship-working); }
-.ship-robot[data-state='need'] .ship-ab { border-color: var(--ship-need); background: #4c0519; }
-.ship-robot[data-state='done'] .ship-ab { border-color: var(--ship-done); color: var(--ship-done); }
-.ship-robot[data-ci='red'] .ship-ab { border-color: var(--ship-need); background: #2a0a17; color: var(--ship-need); }
-.ship-robot[data-ci='run'] .ship-ab,
-.ship-robot[data-ci='wait'] .ship-ab { border-color: var(--ship-working); color: var(--ship-working); }
+.ship-robot[data-halo='working'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-working) 60%, transparent), transparent 70%); }
+.ship-robot[data-halo='need'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-need) 80%, transparent), transparent 70%); }
+.ship-robot[data-halo='done'] .ship-halo { background: radial-gradient(color-mix(in oklab, var(--ship-done) 45%, transparent), transparent 70%); }
+/* Stopped: grey and powered down. */
+.ship-robot[data-state='stopped'] .ship-body { filter: grayscale(1) brightness(0.45); }
+/* What it holds (#473): a 64×64 box over the body, turned with it; the prop's grip sits on the
+   hand point, and its motion turns about the grip. */
+.ship-held { position: absolute; top: 0; left: 0; z-index: 3; width: 64px; height: 64px; pointer-events: none; }
+.ship-robot[data-left] .ship-held { scale: -1 1; }
+.ship-prop,
+.ship-grip { position: absolute; width: 0; height: 0; }
+.ship-grip { top: 0; left: 0; transform-origin: 0 0; }
+.ship-grip img { position: absolute; width: 24px; height: 24px; max-width: none; }
+.ship-grip img[data-flip] { scale: -1 1; }
 .ship-tag {
   position: absolute;
   top: 66px;
@@ -522,21 +506,26 @@
 .ship-captain[data-focus]::before { top: -24px; }
 .ship-chip-captain[data-focus] { border-color: var(--ship-focus); }
 
-/* Particles: what a working robot is doing, round its body. */
-.ship-fx { position: absolute; top: 0; left: 0; z-index: 2; width: 64px; height: 64px; pointer-events: none; }
+/* Particles: what a robot is doing, off the prop it holds (0 0 is where they leave it); zZ round
+   a stranded robot's head. */
+.ship-fx { position: absolute; top: 0; left: 0; z-index: 2; width: 0; height: 0; pointer-events: none; }
+.ship-fx[data-fx='zz'] { width: 64px; height: 64px; }
 .ship-fx::before,
 .ship-fx::after { content: ''; position: absolute; opacity: 0; }
-.ship-fx[data-fx='sparks']::before { top: 30px; left: 50px; width: 2px; height: 2px; background: #fff; box-shadow: 3px -3px #f9a8d4, -2px -4px #fff, 5px 1px #f472b6, 1px -6px #fbcfe8, -4px 0 #f0abfc; }
-.ship-fx[data-fx='sparks']::after { top: 33px; left: 47px; width: 2px; height: 2px; background: #f9a8d4; box-shadow: -3px 2px #fff, 4px 3px #f472b6; }
+.ship-fx[data-fx='sparks']::before { top: 0; left: 0; width: 2px; height: 2px; background: #fff; box-shadow: 3px -3px #f9a8d4, -2px -4px #fff, 5px 1px #f472b6, 1px -6px #fbcfe8, -4px 0 #f0abfc; }
+.ship-fx[data-fx='sparks']::after { top: 3px; left: -3px; width: 2px; height: 2px; background: #f9a8d4; box-shadow: -3px 2px #fff, 4px 3px #f472b6; }
 .ship-fx[data-fx='bubbles']::before,
-.ship-fx[data-fx='bubbles']::after { top: 26px; left: 46px; width: 5px; height: 5px; border: 1px solid #a5f3fc; border-radius: 50%; background: #22d3ee33; }
-.ship-fx[data-fx='bubbles']::after { left: 14px; width: 4px; height: 4px; }
+.ship-fx[data-fx='bubbles']::after { top: -3px; left: -3px; box-sizing: border-box; width: 5px; height: 5px; border: 1px solid #a5f3fc; border-radius: 50%; background: #22d3ee33; }
+.ship-fx[data-fx='bubbles']::after { top: -3px; left: 1px; width: 4px; height: 4px; }
 .ship-fx[data-fx='pages']::before,
-.ship-fx[data-fx='pages']::after { content: '▤'; top: 6px; left: 44px; color: #e0e7ff; font-size: 10px; }
-.ship-fx[data-fx='pages']::after { top: 12px; left: 8px; font-size: 9px; color: var(--ship-pale); }
+.ship-fx[data-fx='pages']::after { content: '▤'; top: -3px; left: -3px; color: #e0e7ff; font-size: 10px; line-height: 1; }
+.ship-fx[data-fx='pages']::after { top: 2px; left: -8px; font-size: 9px; color: var(--ship-pale); }
 .ship-fx[data-fx='zz']::before { content: 'z'; top: 2px; left: 44px; color: var(--ship-pale); font-size: 10px; }
 .ship-fx[data-fx='zz']::after { content: 'Z'; top: -4px; left: 50px; color: var(--ship-lilac); font-size: 13px; }
-.ship-fx[data-fx='radar']::before { top: 16px; left: 22px; width: 20px; height: 20px; border: 2px solid #67e8f9; border-radius: 50%; }
+.ship-fx[data-fx='radar']::before { top: -10px; left: -10px; box-sizing: border-box; width: 20px; height: 20px; border: 2px solid #67e8f9; border-radius: 50%; }
+.ship-fx[data-fx='smoke']::before,
+.ship-fx[data-fx='smoke']::after { top: -3px; left: -3px; width: 6px; height: 6px; border-radius: 50%; background: #2d2a86; }
+.ship-fx[data-fx='smoke']::after { top: -4px; left: -1px; background: #5153bc; }
 
 /* The hangar's stack: the rest of the ready PRs, folded. */
 .ship-stack { position: absolute; top: 0; left: 0; z-index: 4; width: 140px; height: 88px; }
@@ -674,11 +663,12 @@
 /* ---------- motion: never with reduced motion ---------- */
 .ship-scene:not([data-reduced]) .ship-robot[data-placed]:not([data-still]) { transition: transform 1.4s ease-in-out; }
 .ship-scene:not([data-reduced]) .ship-robot[data-walking] .ship-body { animation: ship-walk 0.35s steps(2) infinite; }
-.ship-scene:not([data-reduced]) .ship-robot[data-state='working']:not([data-walking]) .ship-body { animation: ship-bob 0.9s steps(2) infinite; }
-.ship-scene:not([data-reduced]) .ship-robot[data-state='idle']:not([data-walking]) .ship-body { animation: ship-breathe 3.2s ease-in-out infinite; }
-.ship-scene:not([data-reduced]) .ship-robot[data-state='working'] .ship-halo { animation: ship-pulse 1.6s infinite; }
-.ship-scene:not([data-reduced]) .ship-robot[data-state='need'] .ship-halo,
-.ship-scene:not([data-reduced]) .ship-robot[data-state='need'] .ship-ab,
+.ship-scene:not([data-reduced]) .ship-robot[data-body='bob']:not([data-walking]) .ship-body { animation: ship-bob 0.9s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-body='breathe']:not([data-walking]) .ship-body { animation: ship-breathe 3.2s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-body='breath']:not([data-walking]) .ship-body { animation: ship-breath 4.2s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-body='breath-slow']:not([data-walking]) .ship-body { animation: ship-breath 6s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-halo='working'] .ship-halo { animation: ship-pulse 1.6s infinite; }
+.ship-scene:not([data-reduced]) .ship-robot[data-halo='need'] .ship-halo,
 .ship-scene:not([data-reduced]) .ship-attend { animation: ship-pulse 0.8s infinite; }
 .ship-scene:not([data-reduced]) .ship-captain[data-pose='busy'] .ship-console img { animation: ship-type 0.5s steps(2) infinite; }
 .ship-scene:not([data-reduced]) .ship-captain[data-pose='busy'] .ship-floor { animation: ship-pulse 2.4s ease-in-out infinite; }
@@ -702,6 +692,18 @@
 .ship-scene:not([data-reduced]) .ship-fx[data-fx='pages']::after,
 .ship-scene:not([data-reduced]) .ship-fx[data-fx='zz']::after { animation: ship-float 2.4s 1.2s ease-out infinite; }
 .ship-scene:not([data-reduced]) .ship-fx[data-fx='radar']::before { animation: ship-ping 1.5s ease-out infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='smoke']::before { animation: ship-smoke 1.8s ease-out infinite; }
+.ship-scene:not([data-reduced]) .ship-fx[data-fx='smoke']::after { animation: ship-smoke 1.8s 0.9s ease-out infinite; }
+/* A held prop's motion, about its grip. */
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='scan'] { animation: ship-scan 1.8s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='weld'] { animation: ship-weld 0.24s steps(1) infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='swirl'] { animation: ship-swirl 0.9s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='lift'] { animation: ship-lift 1.6s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='flip'] { animation: ship-flip 2.4s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='flip-slow'] { animation: ship-flip 4.8s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='wave'] { animation: ship-wave 0.7s ease-in-out infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='flag'] { animation: ship-flutter 0.6s steps(2) infinite; }
+.ship-scene:not([data-reduced]) .ship-grip[data-motion='smoke'] { animation: ship-jitter 0.36s steps(1) infinite; }
 
 /* One-shots: a beam in, a flash, a launch, a walk off, a fresh log line. */
 .ship-scene:not([data-reduced]) .ship-robot[data-arriving] .ship-figure { animation: ship-beam 1.2s ease-out both; }
@@ -725,6 +727,8 @@
 @keyframes ship-walk { 50% { translate: 0 -3px; rotate: -3deg; } }
 @keyframes ship-bob { 50% { translate: 0 -2px; } }
 @keyframes ship-breathe { 50% { translate: 0 1px; } }
+/* A transform, so it composes with the body's `scale: -1 1` when it faces left. */
+@keyframes ship-breath { 50% { transform: scale(1, 1.035); } }
 @keyframes ship-type { 50% { translate: 0 1px; } }
 @keyframes ship-pulse { 50% { opacity: 0.55; } }
 @keyframes ship-blink { 50% { opacity: 0.3; } }
@@ -736,6 +740,15 @@
 @keyframes ship-rise { 0% { translate: 0 0; opacity: 0; } 15% { opacity: 1; } 100% { translate: 0 -44px; opacity: 0; } }
 @keyframes ship-float { 0% { translate: 0 0; opacity: 0; } 20% { opacity: 0.9; } 100% { translate: 6px -34px; opacity: 0; } }
 @keyframes ship-ping { 0% { scale: 0.3; opacity: 1; } 100% { scale: 2.6; opacity: 0; } }
+@keyframes ship-smoke { 0% { translate: 0 0; scale: 0.6; opacity: 0; } 20% { opacity: 0.95; } 100% { translate: 5px -22px; scale: 1.7; opacity: 0; } }
+@keyframes ship-scan { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(9deg) translate(1px, 0); } }
+@keyframes ship-weld { 0% { transform: translate(0, 0); } 50% { transform: translate(1px, -1px); } }
+@keyframes ship-swirl { 0%, 100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
+@keyframes ship-lift { 0%, 100% { transform: translate(0, 0); } 45%, 60% { transform: translate(0, -8px); } }
+@keyframes ship-flip { 0%, 62% { transform: rotate(0deg); } 82%, 100% { transform: rotate(180deg); } }
+@keyframes ship-wave { 0%, 100% { transform: rotate(-16deg); } 50% { transform: rotate(10deg); } }
+@keyframes ship-flutter { 0% { transform: skewY(0deg); } 50% { transform: skewY(-7deg); } }
+@keyframes ship-jitter { 0% { transform: translate(0, 0); } 33% { transform: translate(-1px, 0); } 66% { transform: translate(1px, 0); } }
 @keyframes ship-beam { 0% { translate: 0 -40px; scale: 1 1.6; opacity: 0; filter: brightness(3); } 60% { opacity: 1; filter: brightness(1.6); } 100% { translate: 0 0; scale: 1 1; opacity: 1; filter: none; } }
 @keyframes ship-tele { 0% { scale: 1 0.2; opacity: 0; } 25% { scale: 1 1.15; opacity: 1; } 100% { scale: 1 1; opacity: 0; } }
 @keyframes ship-rule { 0% { scale: 0.6; opacity: 0; } 20% { scale: 1.3; opacity: 1; } 70% { opacity: 1; } 100% { translate: 0 -10px; opacity: 0; } }
