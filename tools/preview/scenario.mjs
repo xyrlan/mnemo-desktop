@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
 /** @typedef {{ event: string; payload: unknown; afterMs?: number }} ScenarioEvent */
-/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[] }} ScenarioSetup */
+/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[]; storage?: Record<string, string> }} ScenarioSetup */
 
 /** @type {Map<string, ScenarioSetup>} */
 const registry = new Map()
@@ -34,8 +34,11 @@ export function scenario(name, setup) {
       throw new Error(`scenario ${name}: afterMs must be a non-negative number (${e.event})`)
     }
   }
+  for (const [k, v] of Object.entries(setup.storage ?? {})) {
+    if (typeof v !== 'string') throw new Error(`scenario ${name}: storage values are strings, as localStorage keeps them (${k})`)
+  }
   if (registry.has(name)) throw new Error(`scenario ${name} is registered twice`)
-  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [] })
+  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [], storage: setup.storage ?? {} })
 }
 
 /** @returns {ScenarioSetup | undefined} */

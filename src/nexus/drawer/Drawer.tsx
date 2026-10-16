@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
 import { EyeOff, X } from 'lucide-react'
@@ -9,12 +9,15 @@ import type { PaneViewProps } from '../../panes/registry'
 import type { SessionHost } from '../../session/host'
 import type { Feed, Ship } from '../ship-types'
 import { nexusStore, useNexus, type DrawerTab } from '../store'
+import { NexusMenu } from '../ui/Menu'
 import { openWindow } from '../ui/windows'
 import { Chips, QuickDiff, useChanges, type DiffAsk } from './changes'
 import { isToggleKey, toggleLabel } from './keys'
-import { contextOf, crumbsOf, findFigure, labelOf, lineOf, spriteOf, stateOf, tokens, type Figure } from './model'
+import { contextOf, crumbsOf, findFigure, labelOf, lineOf, stateOf, tokens, type Figure } from './model'
+import { fitPills, pillOf } from './pills'
 import { viewName, type Drawer } from './sessions'
 import { clampWidth, saveWidth, shownWidth } from './width'
+import './drawer.css'
 
 /** The Nexus drawer (v2 spec, "Acting from it"): a right-hand panel beside the ship with one tab per
  *  session opened from it. Each tab shows the session's live terminal, through the session host
@@ -55,7 +58,6 @@ export type NexusDrawerProps = {
 }
 
 const DOT: Record<AgentState, string> = { working: 'bg-state-working', 'needs-you': 'bg-state-needs-you', done: 'bg-state-done', idle: 'bg-state-idle' }
-const TEXT: Record<AgentState, string> = { working: 'text-state-working', 'needs-you': 'text-state-needs-you', done: 'text-state-done', idle: 'text-state-idle' }
 
 /** The drawer's width as drawn: the one dragged, else the default, kept within the window as it
  *  is now. The dragged one is kept, so a window made small and then large again gets it back. */
@@ -78,6 +80,8 @@ export function NexusDrawer({ deps, ship, feed, repos, onOpen }: NexusDrawerProp
   const [diff, setDiff] = useState<DiffAsk | null>(null)
   const closeDiff = useCallback(() => setDiff(null), [])
   const root = useRef<HTMLElement>(null)
+  /** The tab a pill's ←/→ showed: its panel leaves the keyboard on the pills. */
+  const keyed = useRef<string | null>(null)
   const open = tabs.length > 0 && !collapsed
   const active = tabs.find((t) => t.id === activeTab) ?? null
   const activeSession = useStore(deps.host, (h) => (active?.key ? h.sessions[active.key] : undefined))
@@ -118,13 +122,7 @@ export function NexusDrawer({ deps, ship, feed, repos, onOpen }: NexusDrawerProp
         style={{ display: open ? 'flex' : 'none', top: 0, bottom: 0, width }}
       >
         <ResizeEdge width={width} />
-        {/* As tall as the ship's bar beside it (`.ship-top`, 44 px): the Nexus takes the whole window
-            from the top (#440), and the two bars read as one. */}
-        <div role="tablist" className="flex h-11 shrink-0 overflow-x-auto border-b border-border bg-background" data-drawer-tabs="">
-          {tabs.map((t) => (
-            <TabButton key={t.id} tab={t} active={t.id === activeTab} figure={findFigure(ship, t.id)} deps={deps} />
-          ))}
-        </div>
+        <DrawerHead tabs={tabs} activeTab={activeTab} active={active} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} keyed={keyed} />
         <div className="flex min-h-0 flex-1">
           {tabs.map((t) => (
             <TabPanel
@@ -134,9 +132,7 @@ export function NexusDrawer({ deps, ship, feed, repos, onOpen }: NexusDrawerProp
               shown={open}
               deps={deps}
               ship={ship}
-              feed={feed}
-              repos={repos}
-              onOpen={onOpen}
+              keyed={keyed}
               picked={diff?.file.path ?? null}
               onPick={(worktree, file, el) => {
                 const r = el.getBoundingClientRect()
@@ -205,45 +201,6 @@ function ResizeEdge({ width }: { width: number }) {
   )
 }
 
-function TabButton({ tab, active, figure, deps }: { tab: DrawerTab; active: boolean; figure: Figure | null; deps: DrawerDeps }) {
-  const pty = useStore(deps.host, (h) => (tab.key ? (h.sessions[tab.key]?.pty ?? null) : null))
-  const owner = useStore(deps.owners, (s) => (pty === null ? undefined : s.owners[pty]?.name))
-  const elsewhere = pty !== null && owner !== viewName(tab.id)
-  const state = figure ? stateOf(figure) : null
-  const label = figure ? labelOf(figure) : tab.label
-  const sprite = figure ? spriteOf(figure) : null
-  return (
-    <div
-      role="tab"
-      aria-selected={active}
-      data-drawer-tab={tab.id}
-      tabIndex={active ? 0 : -1}
-      className={`flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-border py-0.5 pr-1 pl-1.5 text-xs font-semibold whitespace-nowrap ${active ? 'bg-card text-foreground shadow-[inset_0_-2px_0_var(--ring)]' : 'text-muted-foreground hover:text-foreground'}`}
-      onClick={() => nexusStore.getState().activateTab(tab.id)}
-    >
-      <span className={`size-2 shrink-0 rounded-full ${state ? DOT[state.tone] : 'bg-state-idle'}`} role="img" aria-label={state?.text ?? 'gone from the ship'} />
-      {sprite && <img src={sprite.src} alt="" width={24} height={24} className="shrink-0 [image-rendering:pixelated]" />}
-      <span>{label}</span>
-      {elsewhere && (
-        <span data-drawer-elsewhere="" title="Shown in another view, which types into it: open the tab's terminal to take it back">
-          <EyeOff className="size-3 text-muted-foreground" aria-label="Shown in another view" />
-        </span>
-      )}
-      <button
-        type="button"
-        aria-label={`Close ${label}`}
-        className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        onClick={(e) => {
-          e.stopPropagation()
-          void deps.drawer.close(tab.id)
-        }}
-      >
-        <X className="size-3" />
-      </button>
-    </div>
-  )
-}
-
 type PanelProps = {
   tab: DrawerTab
   active: boolean
@@ -251,14 +208,12 @@ type PanelProps = {
   shown: boolean
   deps: DrawerDeps
   ship: Ship | null
-  feed: Feed | null
-  repos: readonly RepoNode[]
-  onOpen(id: string): void
+  keyed: { current: string | null }
   picked: string | null
   onPick(worktree: string, file: ChangedFile, el: HTMLElement): void
 }
 
-function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked, onPick }: PanelProps) {
+function TabPanel({ tab, active, shown, deps, ship, keyed, picked, onPick }: PanelProps) {
   const session = useStore(deps.host, (h) => (tab.key ? h.sessions[tab.key] : undefined))
   const pty = session?.pty ?? null
   const figure = findFigure(ship, tab.id)
@@ -272,17 +227,18 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
   // A presentation's view under the tab's own name; shown again, it takes the session back.
   const props = useMemo(() => ({ present: true, name: viewName(tab.id), close, active: active && shown }), [tab.id, close, active, shown])
 
-  // Shown, it takes the keyboard: its terminal.
+  // Shown, it takes the keyboard: its terminal. Shown by a pill's ←/→, it leaves it on the pills.
   useEffect(() => {
-    if (!active || !shown || pty === null) return
+    if (!active || !shown) return
+    if (keyed.current === tab.id) return void (keyed.current = null)
+    if (pty === null) return
     const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>('[data-drawer-terminal] textarea')?.focus())
     return () => cancelAnimationFrame(frame)
-  }, [active, shown, pty])
+  }, [active, shown, pty, keyed, tab.id])
 
   return (
     // Focusable, so a click anywhere in it gives the drawer the keyboard.
     <div ref={panel} role="tabpanel" tabIndex={-1} data-drawer-panel={tab.id} className="min-h-0 min-w-0 flex-1 flex-col outline-none" style={{ display: active ? 'flex' : 'none' }}>
-      <Header tab={tab} figure={figure} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} />
       {worktree && <Chips list={changes.list} error={changes.error} picked={picked} onPick={(f, el) => onPick(worktree, f, el)} />}
       <div className="relative min-h-0 flex-1 overflow-hidden border-t border-border bg-background">
         {tab.key === null ? (
@@ -310,7 +266,225 @@ function TabPanel({ tab, active, shown, deps, ship, feed, repos, onOpen, picked,
   )
 }
 
-type HeaderProps = {
+type HeadProps = {
+  tabs: DrawerTab[]
+  activeTab: string | null
+  active: DrawerTab | null
+  ship: Ship | null
+  feed: Feed | null
+  repos: readonly RepoNode[]
+  deps: DrawerDeps
+  onOpen(id: string): void
+  keyed: { current: string | null }
+}
+
+type Fit = { order: string[]; shown: number }
+const sameFit = (a: Fit | null, b: Fit) => !!a && a.shown === b.shown && a.order.join('\n') === b.order.join('\n')
+
+/** The drawer's one header (#467): a pill per tab, wrapping to two rows at most, then `+N` for the
+ *  rest (a menu); under them the shown session's line. The pills are tabs: click or ←/→ shows one,
+ *  a middle click or × closes it. */
+function DrawerHead({ tabs, activeTab, active, ship, feed, repos, deps, onOpen, keyed }: HeadProps) {
+  const strip = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState<Fit | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  // The menu closes on the mousedown of the click that would open it again.
+  const closedAt = useRef(0)
+  const [, setTick] = useState(0)
+  const ids = tabs.map((t) => t.id)
+  // A fit for other tabs than these is stale: all of them are drawn until the next one.
+  const valid = fit && fit.order.length === ids.length && ids.every((id) => fit.order.includes(id)) ? fit : null
+  const order = valid ? valid.order : ids
+  const shown = valid ? valid.shown : ids.length
+  const byId = new Map(tabs.map((t) => [t.id, t]))
+  const hidden = order.slice(shown)
+
+  // What fits is worked out from the pills' own widths, as `flex-wrap` lays them: a pill past two
+  // rows is out of the flow but measured still. The strip's width changes with the drawer's.
+  useLayoutEffect(() => {
+    const el = strip.current
+    if (!el) return
+    const css = getComputedStyle(el)
+    const room = el.clientWidth - parseFloat(css.paddingLeft || '0') - parseFloat(css.paddingRight || '0')
+    const gap = parseFloat(css.columnGap) || 0
+    if (!(room > 0)) return
+    const widths = new Map([...el.querySelectorAll<HTMLElement>('[data-drawer-tab]')].map((p) => [p.dataset.drawerTab!, p.getBoundingClientRect().width]))
+    const moreEl = el.querySelector<HTMLElement>('[data-drawer-more]')
+    const moreW = moreEl?.getBoundingClientRect().width ?? 0
+    const digits = String(Math.max(1, hidden.length)).length
+    const more = (n: number) => (moreW || 26) + 7 * Math.max(0, String(n).length - digits)
+    const next = fitPills(ids, (id) => widths.get(id) ?? 0, more, room, gap, activeTab)
+    if (!sameFit(fit, next)) setFit(next)
+  })
+  // Measured again when the strip or a pill changes size: the drawer resized, the font loaded, a
+  // name changed. Each is observed once, as it comes.
+  const watch = useRef<{ ro: ResizeObserver; seen: WeakSet<Element> } | null>(null)
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const w = (watch.current = { ro: new ResizeObserver(() => setTick((t) => t + 1)), seen: new WeakSet() })
+    return () => {
+      w.ro.disconnect()
+      watch.current = null
+    }
+  }, [])
+  useEffect(() => {
+    const w = watch.current
+    const el = strip.current
+    if (!w || !el) return
+    for (const e of [el, ...el.querySelectorAll('[data-drawer-tab], [data-drawer-more]')]) {
+      if (w.seen.has(e)) continue
+      w.seen.add(e)
+      w.ro.observe(e)
+    }
+  })
+  // The menu lists the pills not drawn: none, it closes.
+  useEffect(() => {
+    if (!hidden.length) setMenu(null)
+  }, [hidden.length])
+
+  // ←/→ keep the keyboard on the pills: the pill shown takes it.
+  const focusTo = useRef<string | null>(null)
+  useEffect(() => {
+    const id = focusTo.current
+    if (id === null || id !== activeTab) return
+    focusTo.current = null
+    ;[...(strip.current?.querySelectorAll<HTMLElement>('[data-drawer-tab]') ?? [])].find((p) => p.dataset.drawerTab === id)?.focus()
+  })
+  const step = (id: string, key: string) => {
+    const i = order.indexOf(id)
+    const to = key === 'Home' ? 0 : key === 'End' ? order.length - 1 : (i + (key === 'ArrowRight' ? 1 : -1) + order.length) % order.length
+    const next = order[to]
+    if (next === undefined || next === id) return
+    keyed.current = next
+    focusTo.current = next
+    nexusStore.getState().activateTab(next)
+  }
+
+  return (
+    <header className="nx dw-head" data-drawer-head="">
+      <div ref={strip} className="dw-pills">
+        <div role="tablist" aria-label="Sessions open" className="dw-tabs" data-drawer-tabs="">
+          {order.map((id, i) => {
+            const t = byId.get(id)!
+            return <Pill key={id} tab={t} active={id === activeTab} figure={findFigure(ship, id)} repos={repos} deps={deps} overflow={i >= shown} keyed={keyed} onStep={step} />
+          })}
+        </div>
+        <button
+          type="button"
+          className="dw-pill dw-more"
+          data-drawer-more=""
+          data-overflow={hidden.length ? undefined : ''}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          tabIndex={hidden.length ? 0 : -1}
+          title={`${hidden.length} more ${hidden.length === 1 ? 'session' : 'sessions'}`}
+          onClick={(e) => {
+            if (performance.now() - closedAt.current < 300) return
+            const r = e.currentTarget.getBoundingClientRect()
+            setMenu({ x: r.left, y: r.bottom + 4 })
+          }}
+        >
+          +{Math.max(1, hidden.length)}
+        </button>
+      </div>
+      {active && <SessionLine tab={active} figure={findFigure(ship, active.id)} ship={ship} feed={feed} repos={repos} deps={deps} onOpen={onOpen} />}
+      {menu && hidden.length > 0 && (
+        <NexusMenu
+          x={menu.x}
+          y={menu.y}
+          head={`${hidden.length} more ${hidden.length === 1 ? 'session' : 'sessions'}`}
+          items={hidden.map((id) => {
+            const t = byId.get(id)!
+            const f = findFigure(ship, id)
+            return { id, label: pillOf(t, f, repos).full, hint: f ? stateOf(f).text : undefined, run: () => nexusStore.getState().activateTab(id) }
+          })}
+          onClose={() => {
+            closedAt.current = performance.now()
+            setMenu(null)
+          }}
+        />
+      )}
+    </header>
+  )
+}
+
+type PillProps = {
+  tab: DrawerTab
+  active: boolean
+  figure: Figure | null
+  repos: readonly RepoNode[]
+  deps: DrawerDeps
+  /** Past two rows: not drawn, in the `+N` menu. */
+  overflow: boolean
+  keyed: { current: string | null }
+  onStep(id: string, key: string): void
+}
+
+/** A session's pill: its state dot (× in its place on hover), what it is in a word or two, and an
+ *  eye when another view shows its terminal. Its whole name is on hover. */
+function Pill({ tab, active, figure, repos, deps, overflow, keyed, onStep }: PillProps) {
+  const pty = useStore(deps.host, (h) => (tab.key ? (h.sessions[tab.key]?.pty ?? null) : null))
+  const owner = useStore(deps.owners, (s) => (pty === null ? undefined : s.owners[pty]?.name))
+  const elsewhere = pty !== null && owner !== viewName(tab.id)
+  const state = figure ? stateOf(figure) : null
+  const label = figure ? labelOf(figure) : tab.label
+  const { text, full } = pillOf(tab, figure, repos)
+  // A shell is never on the ship: where it runs says what it is.
+  const status = state?.text ?? (tab.kind === 'session' ? (tab.cwd ?? 'a terminal') : tab.key === null ? 'no longer on the ship' : 'not on the ship yet')
+  const close = () => void deps.drawer.close(tab.id)
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      data-drawer-tab={tab.id}
+      data-tone={state?.tone ?? 'gone'}
+      data-overflow={overflow ? '' : undefined}
+      tabIndex={active ? 0 : -1}
+      className="dw-pill"
+      title={`${full} · ${status}`}
+      onClick={() => {
+        keyed.current = null
+        nexusStore.getState().activateTab(tab.id)
+      }}
+      // A middle click closes it, as a browser's tab; its mousedown would start the autoscroll.
+      onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+      onAuxClick={(e) => {
+        if (e.button !== 1) return
+        e.preventDefault()
+        close()
+      }}
+      onKeyDown={(e) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) || e.target !== e.currentTarget) return
+        e.preventDefault()
+        onStep(tab.id, e.key)
+      }}
+    >
+      <span className="dw-mark">
+        <span className={`dw-dot ${state ? DOT[state.tone] : 'bg-state-idle'}`} role="img" aria-label={state?.text ?? (tab.kind === 'session' ? 'a terminal' : 'gone from the ship')} />
+        <button
+          type="button"
+          className="dw-x"
+          tabIndex={-1}
+          aria-label={`Close ${label}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            close()
+          }}
+        >
+          <X className="size-2.5" strokeWidth={3} />
+        </button>
+      </span>
+      <span data-drawer-tab-label="">{text}</span>
+      {elsewhere && (
+        <span className="dw-eye" data-drawer-elsewhere="" title="Shown in another view, which types into it: open the tab's terminal to take it back">
+          <EyeOff className="size-3" aria-label="Shown in another view" />
+        </span>
+      )}
+    </div>
+  )
+}
+
+type LineProps = {
   tab: DrawerTab
   figure: Figure | null
   ship: Ship | null
@@ -320,43 +494,48 @@ type HeaderProps = {
   onOpen(id: string): void
 }
 
-const SMALL = 'shrink-0 rounded-sm border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground'
-
 /** A robot's *Changes*: the full diff of its worktree, in the ship's Changes window. */
 function ChangesButton({ id, worktree, label }: { id: string; worktree: string; label: string }) {
   return (
-    <button type="button" data-drawer-full-diff="" className={SMALL} title="The full diff of its worktree" onClick={() => openWindow('changes', { robotId: id, worktree, label })}>
+    <button type="button" data-drawer-full-diff="" className="dw-small" title="The full diff of its worktree" onClick={() => openWindow('changes', { robotId: id, worktree, label })}>
       Changes
     </button>
   )
 }
 
-function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
+/** The shown session, said once, under the pills: repo ▸ … ▸ its whole name, its context, its
+ *  state and *Changes*; then what it is doing. */
+function SessionLine({ tab, figure, ship, feed, repos, deps, onOpen }: LineProps) {
   if (!figure)
     return (
-      <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs">
-        <b className="min-w-0 flex-1 truncate">{tab.label}</b>
-        <span className="truncate text-muted-foreground">{tab.key === null ? 'no longer on the ship' : tab.kind === 'session' ? (tab.cwd ?? '') : 'not on the ship yet'}</span>
-        {tab.kind === 'robot' && tab.cwd && <ChangesButton id={tab.id} worktree={tab.cwd} label={tab.label} />}
+      <div className="dw-line" data-drawer-line={tab.id}>
+        <div className="dw-line-row">
+          <b className="dw-crumbs" data-drawer-name="" title={tab.label}>
+            {tab.label}
+          </b>
+          <span className="dw-where">{tab.key === null ? 'no longer on the ship' : tab.kind === 'session' ? (tab.cwd ?? '') : 'not on the ship yet'}</span>
+          {tab.kind === 'robot' && tab.cwd && <ChangesButton id={tab.id} worktree={tab.cwd} label={tab.label} />}
+        </div>
       </div>
     )
   const state = stateOf(figure)
   const context = contextOf(figure, feed)
   const line = lineOf(figure)
   const child = figure.kind === 'robot' ? figure.robot.child : null
+  const crumbs = crumbsOf(figure, ship, repos)
   return (
-    <div className="shrink-0">
-      <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
-        <nav aria-label="Breadcrumbs" className="min-w-0 flex-1 truncate text-muted-foreground" data-drawer-crumbs="">
-          {crumbsOf(figure, ship, repos).map((c, i) => (
+    <div className="dw-line" data-drawer-line={tab.id}>
+      <div className="dw-line-row">
+        <nav aria-label="Breadcrumbs" className="dw-crumbs" data-drawer-crumbs="" title={crumbs.map((c) => c.text).join(' ▸ ')}>
+          {crumbs.map((c, i) => (
             <span key={i}>
-              {i > 0 && <span className="mx-1 opacity-60">▸</span>}
+              {i > 0 && <span className="dw-sep">▸</span>}
               {c.here ? (
-                <b className="text-foreground">{c.text}</b>
+                <b data-drawer-name="">{c.text}</b>
               ) : c.go || c.repo ? (
                 <button
                   type="button"
-                  className="text-foreground/80 hover:underline"
+                  className="dw-crumb"
                   title={c.go ? `Open ${c.text} in the drawer` : `Open a terminal in ${c.text}`}
                   onClick={() => (c.go ? onOpen(c.go) : deps.goToRepo(c.repo!))}
                 >
@@ -368,13 +547,17 @@ function Header({ tab, figure, ship, feed, repos, deps, onOpen }: HeaderProps) {
             </span>
           ))}
         </nav>
-        {context !== null && <span className="shrink-0 text-muted-foreground">context {tokens(context)}</span>}
-        <span className={`shrink-0 rounded-sm border border-current px-1.5 text-[11px] font-semibold ${TEXT[state.tone]}`} data-drawer-state="">
+        {context !== null && <span className="dw-aside">context {tokens(context)}</span>}
+        <span className="dw-state" data-tone={state.tone} data-drawer-state="">
           {state.text}
         </span>
         {child && <ChangesButton id={figure.kind === 'robot' ? figure.robot.id : tab.id} worktree={child.cwd} label={labelOf(figure)} />}
       </div>
-      {line && <div className="truncate px-3 pb-1 text-[11px] text-muted-foreground" title={line}>{line}</div>}
+      {line && (
+        <div className="dw-topic" title={line}>
+          {line}
+        </div>
+      )}
     </div>
   )
 }

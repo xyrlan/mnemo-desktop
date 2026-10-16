@@ -70,6 +70,9 @@ function mount(over: { ship?: Ship } = {}) {
 const $ = <T extends Element = HTMLElement>(sel: string) => document.querySelector<T>(sel)
 const panel = (id: string) => $(`[data-drawer-panel="${id}"]`)!
 const aside = () => $('[data-nexus-drawer]')!
+/** The drawer's one header: the pills, then the shown session's line. */
+const head = () => $('[data-drawer-head]')!
+const pills = () => [...document.querySelectorAll<HTMLElement>('[data-drawer-tab]')]
 const key = (init: KeyboardEventInit, target: EventTarget = document.body) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })))
 
 beforeEach(() => {
@@ -85,25 +88,30 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-test('with no tab nothing is drawn; a tab per session opened, with its state dot, sprite and label', async () => {
+test('with no tab nothing is drawn; a pill per session opened, with its state dot and a short name', async () => {
   const { open } = mount()
   expect(aside()).toBeNull()
   open('r-live')
   open('cap-1')
   open('r-live')
   await act(settle)
-  const tabs = [...document.querySelectorAll('[data-drawer-tab]')]
-  expect(tabs.map((t) => t.textContent)).toEqual(['#682·a', 'nexus round'])
+  const tabs = pills()
+  expect(tabs.map((t) => t.textContent)).toEqual(['#682·a', '◆ nexus round'])
+  expect(tabs.map((t) => t.getAttribute('role'))).toEqual(['tab', 'tab'])
   expect(tabs[0].querySelector('[role="img"]')?.className).toContain('bg-state-working')
-  expect(tabs[0].querySelector('img')).not.toBeNull()
+  expect(tabs[0].dataset.tone).toBe('working')
+  expect(tabs[1].title).toBe('◆ nexus round · working')
+  expect(tabs.map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false'])
   expect(aside().style.width).toBe('600px')
 })
 
-test('the header: breadcrumbs that open the captain, the state, the context size', async () => {
+test('the header: breadcrumbs that open the captain, the state, the context size, said once above the panel', async () => {
   const { open, opened } = mount()
   open('r-live')
   await act(settle)
-  const p = panel('r-live')
+  expect(document.querySelectorAll('[data-drawer-line]')).toHaveLength(1)
+  expect(panel('r-live').querySelector('[data-drawer-line], [data-drawer-crumbs], [data-drawer-state]')).toBeNull()
+  const p = head()
   expect(p.querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo-desktop▸◆ nexus round▸#682·a')
   expect(p.querySelector('[data-drawer-state]')?.textContent).toBe('working')
   expect(p.textContent).toContain('context 182k')
@@ -151,7 +159,41 @@ test('× closes the tab and lets its session go', async () => {
   await act(settle)
   await act(async () => $<HTMLButtonElement>('[aria-label="Close nexus round"]')!.click())
   expect(host.getState().sessions['pane:7']).toBeUndefined()
-  expect([...document.querySelectorAll('[data-drawer-tab]')].map((t) => t.textContent)).toEqual(['#682·a'])
+  expect(pills().map((t) => t.textContent)).toEqual(['#682·a'])
+})
+
+test('a middle click on a pill closes it; a left click shows it', async () => {
+  const { open, host } = mount()
+  open('r-live')
+  open('cap-1')
+  await act(settle)
+  act(() => void pills()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })))
+  expect(nexusStore.getState().activeTab).toBe('r-live')
+  await act(async () => void pills()[1].dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })))
+  expect(host.getState().sessions['pane:7']).toBeUndefined()
+  expect(pills().map((t) => t.dataset.drawerTab)).toEqual(['r-live'])
+})
+
+test('← and → move between pills, the keyboard staying on them, not on the terminal', async () => {
+  const { open } = mount()
+  open('r-live')
+  open('cap-1')
+  await act(settle)
+  const pill = (id: string) => $(`[data-drawer-tab="${id}"]`)!
+  act(() => pill('cap-1').focus())
+  key({ key: 'ArrowRight' }, pill('cap-1'))
+  expect(nexusStore.getState().activeTab).toBe('r-live')
+  await act(() => new Promise((r) => requestAnimationFrame(r)))
+  expect(document.activeElement).toBe(pill('r-live'))
+  expect(pill('r-live').tabIndex).toBe(0)
+  key({ key: 'ArrowLeft' }, pill('r-live'))
+  expect(nexusStore.getState().activeTab).toBe('cap-1')
+  await act(() => new Promise((r) => requestAnimationFrame(r)))
+  expect(document.activeElement).toBe(pill('cap-1'))
+  // A click still gives the terminal the keyboard.
+  act(() => pill('r-live').click())
+  await act(() => new Promise((r) => requestAnimationFrame(r)))
+  expect(document.activeElement?.closest('[data-stub-terminal]')).not.toBeNull()
 })
 
 test('a captain alive outside the app shows its conversation read-only and says why; nothing is spawned', async () => {
@@ -236,7 +278,7 @@ test('a robot’s breadcrumbs name its own repo, not its captain’s deck', asyn
   const { open } = mount()
   open('r-other')
   await act(settle)
-  expect(panel('r-other').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo▸◆ nexus round▸#90')
+  expect(head().querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo▸◆ nexus round▸#90')
 })
 
 test('a live tab shows its terminal only: no conversation over it, no switch, and the terminal has the keyboard', async () => {
@@ -260,8 +302,9 @@ test('a robot’s tab opens its full diff in the Changes window; a captain’s h
   open('r-live')
   open('cap-1')
   await act(settle)
-  expect(panel('cap-1').querySelector('[data-drawer-full-diff]')).toBeNull()
-  act(() => panel('r-live').querySelector<HTMLButtonElement>('[data-drawer-full-diff]')!.click())
+  expect($('[data-drawer-full-diff]')).toBeNull()
+  act(() => nexusStore.getState().activateTab('r-live'))
+  act(() => head().querySelector<HTMLButtonElement>('[data-drawer-full-diff]')!.click())
   expect(opened).toEqual([{ id: 'changes', params: { robotId: 'r-live', worktree: '/work/mnemo-desktop-wt-682/src', label: '#682·a' } }])
 })
 
@@ -269,9 +312,11 @@ test('a session the Nexus started: named for what it runs until the ship knows i
   const { drawer } = mount()
   act(() => drawer.open({ id: 'session:30', kind: 'session', key: null, readOnly: null, label: 'shell · mnemo-desktop', sessionId: null, cwd: '/work/mnemo-desktop' }, { pane: 30 }))
   act(() => drawer.open({ id: 'new-1', kind: 'captain', key: null, readOnly: null, label: 'claude · mnemo-desktop', sessionId: 'new-1', cwd: '/work/mnemo-desktop' }, { pane: 31 }))
-  expect([...document.querySelectorAll('[data-drawer-tab]')].map((t) => t.textContent)).toEqual(['shell · mnemo-desktop', 'claude · mnemo-desktop'])
-  expect(panel('session:30').textContent).toContain('/work/mnemo-desktop')
-  expect(panel('new-1').textContent).toContain('not on the ship yet')
+  expect(pills().map((t) => t.textContent)).toEqual(['$ mnemo-desktop', 'claude'])
+  expect(pills().map((t) => t.title)).toEqual(['shell · mnemo-desktop · /work/mnemo-desktop', 'claude · mnemo-desktop · not on the ship yet'])
+  expect(head().querySelector('[data-drawer-line]')?.textContent).toContain('not on the ship yet')
+  act(() => nexusStore.getState().activateTab('session:30'))
+  expect(head().querySelector('[data-drawer-line]')?.textContent).toContain('/work/mnemo-desktop')
   expect(panel('session:30').querySelector('[data-stub-terminal="30"]')).not.toBeNull()
 })
 
@@ -281,8 +326,9 @@ test('nothing in a tab leads to the workbench: no open as tab, and the repo brea
   open('r-live')
   await act(settle)
   for (const id of ['cap-1', 'r-live']) expect(panel(id).querySelector('[data-open-as-tab]')).toBeNull()
-  expect(panel('cap-1').querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo-desktop▸◆ nexus round')
-  const crumb = panel('cap-1').querySelector<HTMLButtonElement>('[data-drawer-crumbs] button')!
+  act(() => nexusStore.getState().activateTab('cap-1'))
+  expect(head().querySelector('[data-drawer-crumbs]')?.textContent).toBe('mnemo-desktop▸◆ nexus round')
+  const crumb = head().querySelector<HTMLButtonElement>('[data-drawer-crumbs] button')!
   expect(crumb.title).toBe('Open a terminal in mnemo-desktop')
   act(() => crumb.click())
   expect(repos).toEqual(['/work/mnemo-desktop'])

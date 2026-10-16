@@ -1,0 +1,112 @@
+/* The drawer's one header (#467): a row of session pills as tall as the ship's bar beside it
+   (`.ship-top`, 44 px), so the two read as one line, then the shown session's line. In the ship's
+   look (`.nx`, `ship.css`): pills, badges, state colour on the border, magenta for the session the
+   drawer shows. Every rule is under `.nx .dw-…`, so it beats the kit's `.nx button`. */
+
+.dw-head {
+  --dw-focus: #e879f9;
+  flex: none;
+  background: #0c1326;
+}
+.dw-head [data-tone='working'] { --dw-tone: var(--state-working); }
+.dw-head [data-tone='needs-you'] { --dw-tone: var(--state-needs-you); }
+.dw-head [data-tone='done'] { --dw-tone: var(--state-done); }
+.dw-head [data-tone='idle'],
+.dw-head [data-tone='gone'] { --dw-tone: var(--state-idle); }
+
+/* At most two rows of 18 px pills, 3 apart; one row sits in the middle. */
+.nx .dw-pills {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  gap: 3px 5px;
+  height: 44px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: 2px solid var(--nx-edge);
+}
+.nx .dw-tabs { display: contents; }
+
+.nx .dw-pill {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px 0 4px;
+  border: 2px solid color-mix(in srgb, var(--dw-tone) 45%, var(--nx-edge));
+  border-radius: 2px;
+  background: #0008;
+  color: var(--nx-dim);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: 0;
+}
+.nx .dw-pill:hover { border-color: var(--dw-tone); color: var(--nx-ink); }
+.nx .dw-pill:focus-visible { outline: 2px solid var(--nx-edge-hi); outline-offset: 1px; }
+.nx .dw-pill[aria-selected='true'] {
+  border-color: var(--dw-focus);
+  background: #2a1038;
+  color: #fff;
+  box-shadow: 0 0 8px #c026d3aa, inset 0 0 6px #e879f944;
+}
+/* Past two rows: out of the flow, still measured (`fitPills`), in the `+N` menu. */
+.nx .dw-pill[data-overflow] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.nx .dw-more { padding: 0 6px; --dw-tone: var(--nx-edge-hi); color: var(--nx-pale); }
+
+/* The state dot, and × in its place on hover. */
+.nx .dw-mark { display: grid; flex: none; place-items: center; width: 10px; height: 10px; }
+.nx .dw-mark > * { grid-area: 1 / 1; }
+.nx .dw-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 4px var(--dw-tone); }
+.nx .dw-x {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--nx-pale);
+  visibility: hidden;
+}
+.nx .dw-x:hover { background: #ffffff22; color: #fff; }
+.nx .dw-pill:hover .dw-x { visibility: visible; }
+.nx .dw-pill:hover .dw-dot { visibility: hidden; }
+.nx .dw-eye { display: inline-flex; color: var(--nx-dim); }
+
+/* The shown session, said once: where it is and what it is, its context, state and Changes. */
+.nx .dw-line { border-bottom: 1px solid var(--nx-edge); background: var(--nx-hull); font-size: 11px; }
+.nx .dw-line-row { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 2px 10px; }
+.nx .dw-crumbs { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
+.nx .dw-crumbs b { color: var(--nx-ink); }
+.nx .dw-crumb { padding: 0; border: 0; background: none; color: var(--nx-pale); }
+.nx .dw-crumb:hover { color: #fff; text-decoration: underline; }
+.nx .dw-sep { margin: 0 5px; color: var(--nx-faint); }
+.nx .dw-aside { flex: none; color: var(--nx-dim); white-space: nowrap; }
+.nx .dw-where { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
+.nx .dw-state {
+  flex: none;
+  padding: 0 5px;
+  border: 2px solid var(--dw-tone);
+  border-radius: 2px;
+  color: var(--dw-tone);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.nx .dw-small { flex: none; padding: 0 6px; border: 2px solid var(--nx-edge); border-radius: 2px; background: #18213f; color: var(--nx-pale); font-weight: 700; }
+.nx .dw-small:hover { border-color: var(--nx-edge-hi); color: #fff; }
+.nx .dw-topic { overflow: hidden; padding: 0 10px 3px; color: var(--nx-dim); text-overflow: ellipsis; white-space: nowrap; }
