@@ -42,3 +42,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## whisper.cpp and whisper-rs-sys (vendored)
+
+`src-tauri/vendor/whisper-rs-sys/` is crates.io's `whisper-rs-sys` 0.15.0 (Unlicense) carrying
+whisper.cpp at tag `v1.9.5` (MIT, `src-tauri/vendor/whisper-rs-sys/whisper.cpp/LICENSE`), in
+place of the 1.8.3 the crate ships. Its `README.md` says what was taken, what was changed and how
+to update it.

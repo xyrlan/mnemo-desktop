@@ -106,3 +106,8 @@ whisper-rs = { version = "0.16", features = ["log_backend", "metal"] }
 [dev-dependencies]
 # Reads the voice test fixture.
 hound = "3.5"
+
+# whisper.cpp 1.9.5 under whisper-rs 0.16, whose own whisper-rs-sys 0.15 bundles 1.8.3: the same
+# note transcribes ~1.6x faster on Metal. See vendor/whisper-rs-sys/README.md.
+[patch.crates-io]
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
