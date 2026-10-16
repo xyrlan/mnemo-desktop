@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+mod grok;
+
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const BETA: &str = "oauth-2025-04-20";
 /// A kept reading younger than this answers `refresh: false`, and no account is fetched more often.
@@ -308,10 +310,15 @@ pub struct Sources<'a> {
 }
 
 pub fn answer(src: &Sources, config_dir: &str, is_default: bool, refresh: bool) -> Result<PlanUsage, String> {
-    let now = src.now;
-    let slot = src.attempts.of(config_dir);
+    answer_with(src.store, src.attempts, src.now, config_dir, refresh, || fetch_once(src, config_dir, is_default))
+}
+
+/// The keeping, the one-a-minute gap and the stale answer, whatever reads the account: `fetch` is
+/// called at most once, and only when a fetch is due.
+fn answer_with(store: &Path, attempts: &Attempts, now: u64, config_dir: &str, refresh: bool, fetch: impl FnOnce() -> Result<PlanUsage, String>) -> Result<PlanUsage, String> {
+    let slot = attempts.of(config_dir);
     let mut attempt = slot.lock().unwrap_or_else(|e| e.into_inner());
-    let kept = load(src.store, config_dir);
+    let kept = load(store, config_dir);
     let young = |at: u64| now.saturating_sub(at) < MIN_GAP_MS;
 
     let fresh_kept = kept.as_ref().is_some_and(|k| young(k.fetched_at));
@@ -327,11 +334,11 @@ pub fn answer(src: &Sources, config_dir: &str, is_default: bool, refresh: bool) 
     }
 
     attempt.at = Some(now);
-    let got = fetch_once(src, config_dir, is_default);
+    let got = fetch();
     match got {
         Ok(usage) => {
             attempt.error = None;
-            if let Err(e) = save(src.store, config_dir, &usage) {
+            if let Err(e) = save(store, config_dir, &usage) {
                 log::warn!("plan usage: could not keep the reading of {config_dir}: {e}");
             }
             Ok(settle(usage, now))
@@ -363,9 +370,13 @@ fn attempts() -> &'static Attempts {
 }
 
 #[tauri::command]
-pub async fn plan_usage(config_dir: String, is_default: bool, refresh: bool) -> Result<PlanUsage, String> {
+pub async fn plan_usage(config_dir: String, is_default: bool, kind: Option<String>, refresh: bool) -> Result<PlanUsage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = crate::app_dir::app_dir().join("plan-usage");
+        // `kind` absent is Claude, so a caller that predates Grok accounts is unchanged.
+        if kind.as_deref() == Some("grok") {
+            return grok::answer(&store, attempts(), &grok::mnemo_billing, now_ms(), &config_dir, refresh);
+        }
         let src = Sources { store: &store, attempts: attempts(), credentials: &SystemStore, fetch: &fetch_endpoint, now: now_ms() };
         answer(&src, &config_dir, is_default, refresh)
     })

@@ -126,3 +126,24 @@ test('nothing is drawn while the accounts are not known and nothing failed', asy
   await render(f)
   expect(document.querySelector('.ship-accounts')!.childElementCount).toBe(0)
 })
+
+test('a Grok account shows its credit usage where Claude shows plan limits, named as Grok', async () => {
+  const f = fakeClient({
+    state: { active: 'g', accounts: [account('g', { label: 'Side', kind: 'grok', configDir: '/Users/me/.grok-side' })] },
+    usage: { g: reading([limit('credits', 66, { resetsAt: '2026-10-23T11:55:37.040+00:00' })]) },
+  })
+  await render(f)
+  expect(switcher().getAttribute('aria-label')).toBe('Grok accounts: Side')
+  expect(switcher().textContent).toContain('66%')
+  expect(switcher().title).toContain('Grok account: Side')
+  expect(switcher().title).toContain('Credits 66%')
+})
+
+test('a Grok account whose credits cannot be read says why on the switcher', async () => {
+  const f = fakeClient({
+    state: { active: 'g', accounts: [account('g', { kind: 'grok' })] },
+    usage: { g: 'Grok home has no login' },
+  })
+  await render(f)
+  expect(switcher().querySelector('.nx-bar, [role="progressbar"], [role="img"]')).toBeNull()
+})
