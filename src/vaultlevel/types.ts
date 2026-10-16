@@ -15,3 +15,20 @@ export type VaultLevel = {
   inbox: number
   error: string | null
 }
+
+/** Mirrors `ProjectLevel` in `src-tauri/src/vault.rs`: `VaultLevel`'s xp numbers over one project. */
+export type ProjectLevel = {
+  /** The repo agent's own live pages; `shared` ones are no project's. */
+  pages: number
+  /** Its own and `shared` pages that fired at least once in this project. */
+  rules_fired: number
+  /** Every fire of those pages in this project on record. */
+  fires: number
+}
+
+/** Mirrors `ProjectLevels`, returned by `vault_project_levels`: every project by name. */
+export type ProjectLevels = {
+  root: string | null
+  projects: Record<string, ProjectLevel>
+  error: string | null
+}

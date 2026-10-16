@@ -265,6 +265,8 @@ pub fn run() {
             // -- vaultlevel commands --
             vault::vault_level,
             vault::vault_level_best,
+            vault::vault_project_levels,
+            vault::vault_project_levels_best,
 
             // -- home commands --
             home_commands::home_snapshot,

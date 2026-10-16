@@ -431,6 +431,9 @@ pub struct Fire {
 /// Rule key (a slug, or the page name an MCP read asked for) → its fires.
 pub type Fires = HashMap<String, Fire>;
 
+/// A log row's `project` → the fires of the rows that name it. A row with no project is in none.
+pub type ProjectFires = HashMap<String, Fires>;
+
 /// Where the reflex hook and the MCP server log, under the vault root. The reflex log
 /// rotates once into `.1`.
 const REFLEX_LOGS: &[&str] = &[".mnemo/reflex-log.jsonl.1", ".mnemo/reflex-log.jsonl"];
@@ -446,6 +449,7 @@ pub fn rule_slug(id: &str) -> &str {
 struct ReflexRow {
     emitted: Option<Vec<String>>,
     ts: Option<String>,
+    project: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -453,6 +457,7 @@ struct AccessRow {
     tool: Option<String>,
     hit_slugs: Option<Vec<String>>,
     timestamp: Option<String>,
+    project: Option<String>,
 }
 
 fn bump(fires: &mut Fires, key: &str, ts: Option<&str>) {
@@ -466,28 +471,45 @@ fn bump(fires: &mut Fires, key: &str, ts: Option<&str>) {
 /// Fires from the reflex log (each `emitted` id) and the MCP access log (each
 /// `read_mnemo_rule` hit). Lines that are not JSON rows are skipped.
 pub fn count_fires(reflex: &[&str], access: &str) -> Fires {
+    count_fires_by_project(reflex, access).0
+}
+
+/// `count_fires`, and in the same pass each fire again under its row's `project` (an empty one
+/// is none): every project's fires from one read of the logs.
+pub fn count_fires_by_project(reflex: &[&str], access: &str) -> (Fires, ProjectFires) {
     let mut fires = Fires::new();
+    let mut by_project = ProjectFires::new();
+    let mut fired = |key: &str, ts: Option<&str>, project: Option<&str>| {
+        bump(&mut fires, key, ts);
+        if let Some(p) = project.filter(|p| !p.is_empty()) {
+            bump(by_project.entry(p.to_string()).or_default(), key, ts);
+        }
+    };
     for line in reflex.iter().flat_map(|t| t.lines()) {
         let Ok(row) = serde_json::from_str::<ReflexRow>(line) else { continue };
         for id in row.emitted.unwrap_or_default() {
-            bump(&mut fires, rule_slug(&id), row.ts.as_deref());
+            fired(rule_slug(&id), row.ts.as_deref(), row.project.as_deref());
         }
     }
     for line in access.lines() {
         let Ok(row) = serde_json::from_str::<AccessRow>(line) else { continue };
         if row.tool.as_deref() == Some("read_mnemo_rule") {
             for hit in row.hit_slugs.unwrap_or_default() {
-                bump(&mut fires, rule_slug(&hit), row.timestamp.as_deref());
+                fired(rule_slug(&hit), row.timestamp.as_deref(), row.project.as_deref());
             }
         }
     }
-    fires
+    (fires, by_project)
 }
 
 pub fn read_fires(root: &Path) -> Fires {
+    read_fires_by_project(root).0
+}
+
+pub fn read_fires_by_project(root: &Path) -> (Fires, ProjectFires) {
     let read = |rel: &str| std::fs::read_to_string(root.join(rel)).unwrap_or_default();
     let reflex: Vec<String> = REFLEX_LOGS.iter().map(|r| read(r)).collect();
-    count_fires(&reflex.iter().map(String::as_str).collect::<Vec<_>>(), &read(ACCESS_LOG))
+    count_fires_by_project(&reflex.iter().map(String::as_str).collect::<Vec<_>>(), &read(ACCESS_LOG))
 }
 
 /// A page's fires, by slug and, when an MCP read named it that way, by name.
@@ -1155,6 +1177,85 @@ pub fn record_best(path: &Path, xp: u64) -> u64 {
     xp
 }
 
+/// What one project's level counts (issue #478): `VaultLevel`'s xp numbers over one project.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct ProjectLevel {
+    /// The repo agent's own live pages; `shared` ones are no project's.
+    pub pages: usize,
+    /// Its own and `shared` pages that fired at least once in this project.
+    pub rules_fired: usize,
+    /// Every fire of those pages in this project on record.
+    pub fires: usize,
+}
+
+/// Every project's level numbers, what each deck's `LV` reads.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct ProjectLevels {
+    pub root: Option<String>,
+    pub projects: std::collections::BTreeMap<String, ProjectLevel>,
+    pub error: Option<String>,
+}
+
+/// The level numbers of every project, by name: each repo agent of `pages`, and each project the
+/// fire logs name that is not noise (`is_noise`, so a worktree-named row, `<repo>-wt-365`, counts
+/// toward no project). A fire counts in the project its row names, on that project's pages and
+/// the `shared` ones; another repo's page fired there counts for neither.
+pub fn project_levels(pages: &[LivePage], by_project: &ProjectFires) -> std::collections::BTreeMap<String, ProjectLevel> {
+    let mut out: std::collections::BTreeMap<String, ProjectLevel> = std::collections::BTreeMap::new();
+    for p in pages.iter().filter(|p| p.agent != "shared") {
+        out.entry(p.agent.clone()).or_default().pages += 1;
+    }
+    for name in by_project.keys().filter(|n| n.as_str() != "shared" && !is_noise(n)) {
+        out.entry(name.clone()).or_default();
+    }
+    for (name, level) in out.iter_mut() {
+        let Some(fires) = by_project.get(name) else { continue };
+        for p in pages.iter().filter(|p| p.agent == "shared" || &p.agent == name) {
+            let n = fire_of(fires, &p.page.info).count as usize;
+            if n > 0 {
+                level.rules_fired += 1;
+                level.fires += n;
+            }
+        }
+    }
+    out
+}
+
+fn project_best_path() -> PathBuf {
+    crate::app_dir::app_dir().join("project-levels.json")
+}
+
+/// Held while the file at `project_best_path` is read and written, so two offers cannot lose one.
+static PROJECT_BEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `record_best` per project: the file at `path` keeps the highest xp each project ever offered
+/// (`{"best_xp": {"<project>": xp}}`), written only when one of `xp` beats its own. Returns every
+/// project's best, those not offered this time too, so a level never falls when its project leaves
+/// the logs. An unreadable file counts as empty.
+pub fn record_best_projects(path: &Path, xp: &HashMap<String, u64>) -> std::collections::BTreeMap<String, u64> {
+    let _held = PROJECT_BEST.lock();
+    let mut best: std::collections::BTreeMap<String, u64> = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| serde_json::from_value(v.get("best_xp")?.clone()).ok())
+        .unwrap_or_default();
+    let mut beat = false;
+    for (name, &x) in xp {
+        let b = best.entry(name.clone()).or_default();
+        if x > *b {
+            *b = x;
+            beat = true;
+        }
+    }
+    if beat {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, serde_json::json!({ "best_xp": best }).to_string());
+    }
+    best
+}
+
 // ------------------------------------------------------------ allowlist --
 
 /// The subcommands the pane may run, and nothing else.
@@ -1443,12 +1544,14 @@ pub async fn vault_run(action: String, args: Vec<String>, cwd: String) -> RunRes
 
 /// What the table and the ego graph read, kept `PAGES_TTL` so typing in the filter or clicking
 /// through neighbours does not re-read a few thousand files each time.
+#[derive(Clone)]
 struct PagesCache {
     root: PathBuf,
     at: std::time::Instant,
     pages: std::sync::Arc<Vec<LivePage>>,
     rewrites: std::sync::Arc<HashSet<String>>,
     fires: std::sync::Arc<Fires>,
+    by_project: std::sync::Arc<ProjectFires>,
 }
 
 const PAGES_TTL: std::time::Duration = std::time::Duration::from_secs(10);
@@ -1459,23 +1562,30 @@ type Snapshot = (std::sync::Arc<Vec<LivePage>>, std::sync::Arc<HashSet<String>>,
 
 /// The live pages, rewrite targets and fires of the vault at `root`, from the cache when fresh.
 fn snapshot(root: &Path) -> Snapshot {
+    let c = cached(root);
+    (c.pages, c.rewrites, c.fires)
+}
+
+/// The cache's parts for `root`, read again (one pass over the logs for every project) when stale.
+fn cached(root: &Path) -> PagesCache {
     if let Ok(guard) = PAGES.lock() {
         if let Some(c) = guard.as_ref().filter(|c| c.root == root && c.at.elapsed() < PAGES_TTL) {
-            return (c.pages.clone(), c.rewrites.clone(), c.fires.clone());
+            return c.clone();
         }
     }
+    let (fires, by_project) = read_fires_by_project(root);
     let fresh = PagesCache {
         root: root.to_path_buf(),
         at: std::time::Instant::now(),
         pages: std::sync::Arc::new(live_pages(root)),
         rewrites: std::sync::Arc::new(rewrite_targets(root)),
-        fires: std::sync::Arc::new(read_fires(root)),
+        fires: std::sync::Arc::new(fires),
+        by_project: std::sync::Arc::new(by_project),
     };
-    let out = (fresh.pages.clone(), fresh.rewrites.clone(), fresh.fires.clone());
     if let Ok(mut guard) = PAGES.lock() {
-        *guard = Some(fresh);
+        *guard = Some(fresh.clone());
     }
-    out
+    fresh
 }
 
 fn now_ms() -> u64 {
@@ -1574,6 +1684,30 @@ pub async fn vault_level() -> VaultLevel {
 #[tauri::command]
 pub async fn vault_level_best(xp: u64) -> u64 {
     tauri::async_runtime::spawn_blocking(move || record_best(&level_best_path(), xp)).await.unwrap_or(xp)
+}
+
+/// Each project's level numbers (issue #478), from the same cached walk and logs as `vault_level`.
+#[tauri::command]
+pub async fn vault_project_levels() -> ProjectLevels {
+    tauri::async_runtime::spawn_blocking(|| match vault_root() {
+        Some(root) => {
+            let c = cached(&root);
+            ProjectLevels { root: Some(root.to_string_lossy().replace('\\', "/")), projects: project_levels(&c.pages, &c.by_project), error: None }
+        }
+        None => ProjectLevels { error: Some(NO_VAULT.into()), ..Default::default() },
+    })
+    .await
+    .unwrap_or_else(|e| ProjectLevels { error: Some(e.to_string()), ..Default::default() })
+}
+
+/// Offers each project's `xp`; returns every project's highest ever seen, which each deck's level
+/// reads, so it never falls.
+#[tauri::command]
+pub async fn vault_project_levels_best(xp: HashMap<String, u64>) -> std::collections::BTreeMap<String, u64> {
+    let offered = xp.clone();
+    tauri::async_runtime::spawn_blocking(move || record_best_projects(&project_best_path(), &xp))
+        .await
+        .unwrap_or_else(|_| offered.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -2364,6 +2498,129 @@ mod tests {
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(record_best(&path, 5), 5);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- each project's level (#478)
+
+    fn live(agent: &str, slug: &str) -> LivePage {
+        LivePage { agent: agent.into(), page: Page { info: PageInfo { slug: slug.into(), name: slug.into(), ..Default::default() }, ..Default::default() } }
+    }
+
+    /// A synthetic vault: `alpha` with two pages, `beta` with one, two `shared` ones, a worktree
+    /// agent's page left out as noise by `live_pages`; and logs in which `alpha` fires its own page
+    /// and one shared page, `beta` fires the other shared page and an `alpha` page, `gamma` (no
+    /// agent) reads a shared page, a `<repo>-wt-365` row and a row with no project fire too.
+    fn synthetic() -> (Vec<LivePage>, ProjectFires) {
+        let pages = vec![live("shared", "s-one"), live("shared", "s-two"), live("alpha", "a-one"), live("alpha", "a-two"), live("beta", "b-one")];
+        let reflex = [
+            r#"{"project":"alpha","ts":"2026-10-01T10:00:00Z","emitted":["alpha__a-one","s-one"]}"#,
+            r#"{"project":"alpha","ts":"2026-10-02T10:00:00Z","emitted":["alpha__a-one"]}"#,
+            r#"{"project":"beta","ts":"2026-10-02T10:00:00Z","emitted":["s-two","alpha__a-two"]}"#,
+            r#"{"project":"alpha-wt-365","ts":"2026-10-03T10:00:00Z","emitted":["a-two"]}"#,
+            r#"{"ts":"2026-10-03T10:00:00Z","emitted":["b-one"]}"#,
+            r#"{"project":"","ts":"2026-10-03T10:00:00Z","emitted":["b-one"]}"#,
+            "not json",
+        ]
+        .join("\n");
+        let access = [
+            r#"{"project":"gamma","tool":"read_mnemo_rule","hit_slugs":["s-one"],"timestamp":"2026-10-04T10:00:00Z"}"#,
+            r#"{"project":"beta","tool":"list_rules_by_topic","hit_slugs":["b-one"],"timestamp":"2026-10-04T10:00:00Z"}"#,
+            r#"{"tool":"read_mnemo_rule","hit_slugs":["a-two"],"timestamp":"2026-10-04T10:00:00Z"}"#,
+        ]
+        .join("\n");
+        (pages, count_fires_by_project(&[&reflex], &access).1)
+    }
+
+    fn lv(pages: usize, rules_fired: usize, fires: usize) -> ProjectLevel {
+        ProjectLevel { pages, rules_fired, fires }
+    }
+
+    #[test]
+    fn fires_split_by_the_project_their_row_names_in_the_same_pass() {
+        let reflex = r#"{"project":"alpha","ts":"2026-10-01T10:00:00Z","emitted":["alpha__a-one","s-one"]}
+{"project":"beta","ts":"2026-10-02T10:00:00Z","emitted":["s-one"]}
+{"ts":"2026-10-02T10:00:00Z","emitted":["s-one"]}"#;
+        let access = r#"{"project":"beta","tool":"read_mnemo_rule","hit_slugs":["s-one"],"timestamp":"2026-10-03T10:00:00Z"}"#;
+        let (all, by) = count_fires_by_project(&[reflex], access);
+        // The vault's count is every row's, as before.
+        assert_eq!(all, count_fires(&[reflex], access));
+        assert_eq!(all["s-one"].count, 4);
+        assert_eq!(by["alpha"]["s-one"].count, 1);
+        assert_eq!(by["alpha"]["a-one"].count, 1);
+        assert_eq!(by["beta"]["s-one"].count, 2);
+        assert_eq!(by["beta"].get("a-one"), None);
+        // The row with no project is in no project's fires.
+        assert_eq!(by.values().map(|f| f["s-one"].count).sum::<u32>(), 3);
+        assert_eq!(by.len(), 2);
+    }
+
+    #[test]
+    fn each_project_counts_its_pages_and_where_its_own_and_shared_pages_fired() {
+        let (pages, by) = synthetic();
+        let l = project_levels(&pages, &by);
+        // alpha: its two pages; a-one fired twice there and s-one once.
+        assert_eq!(l["alpha"], lv(2, 2, 3));
+        // beta: its one page, which never fired in beta (the projectless rows don't count); s-two
+        // fired there. alpha's page fired in beta counts for neither.
+        assert_eq!(l["beta"], lv(1, 1, 1));
+        // gamma has no agent: no pages, the shared page it read.
+        assert_eq!(l["gamma"], lv(0, 1, 1));
+        // Shared is no project, and the worktree-named rows count toward none.
+        assert_eq!(l.keys().collect::<Vec<_>>(), ["alpha", "beta", "gamma"]);
+        // A project in neither is absent (the deck reads LV0).
+        assert_eq!(l.get("delta"), None);
+        println!("synthetic per-project levels: {l:?}");
+    }
+
+    #[test]
+    fn a_project_without_fires_has_its_pages_and_nothing_fired() {
+        let pages = vec![live("shared", "s-one"), live("alpha", "a-one")];
+        assert_eq!(project_levels(&pages, &ProjectFires::new())["alpha"], lv(1, 0, 0));
+    }
+
+    #[test]
+    fn the_best_xp_only_climbs_per_project() {
+        let dir = crate::testutil::temp_dir("project-level");
+        let path = dir.join("nested").join("project-levels.json");
+        let offer = |xs: &[(&str, u64)]| record_best_projects(&path, &xs.iter().map(|(k, v)| (k.to_string(), *v)).collect());
+        let best = |xs: &[(&str, u64)]| xs.iter().map(|(k, v)| (k.to_string(), *v)).collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(offer(&[("alpha", 120), ("beta", 40)]), best(&[("alpha", 120), ("beta", 40)]));
+        // alpha falls, beta climbs: each keeps its own best.
+        assert_eq!(offer(&[("alpha", 90), ("beta", 70)]), best(&[("alpha", 120), ("beta", 70)]));
+        // A project not offered keeps its best.
+        assert_eq!(offer(&[("gamma", 5)]), best(&[("alpha", 120), ("beta", 70), ("gamma", 5)]));
+        // The vault's own file is another file, untouched.
+        assert!(!dir.join("nested").join("vault-level.json").exists());
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(offer(&[("alpha", 3)]), best(&[("alpha", 3)]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_fixture_vault_has_a_level_per_project() {
+        let root = Path::new(FIXTURE);
+        let (_, by) = read_fires_by_project(root);
+        let l = project_levels(&live_pages(root), &by);
+        // mnemo-desktop: its two pages, both fired there, and the shared rule its sessions got
+        // twice. mnemo: no pages, a shared rule read by its name and another emitted.
+        assert_eq!(l.get("mnemo-desktop"), Some(&lv(2, 3, 5)));
+        assert_eq!(l.get("mnemo"), Some(&lv(0, 2, 2)));
+        // The noise agent's page is in no project.
+        assert_eq!(l.len(), 2, "{l:?}");
+    }
+
+    /// Each project's numbers on the real vault, and how long they take:
+    /// `cargo test --lib project_levels_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn project_levels_live() {
+        let root = vault_root().expect("a mnemo vault");
+        let t = std::time::Instant::now();
+        let c = cached(&root);
+        let read = t.elapsed();
+        let t = std::time::Instant::now();
+        let l = project_levels(&c.pages, &c.by_project);
+        println!("{} projects; read {read:?}, counted {:?}", l.len(), t.elapsed());
     }
 
     #[test]

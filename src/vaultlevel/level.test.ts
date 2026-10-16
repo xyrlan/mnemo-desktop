@@ -88,12 +88,19 @@ test('tone and fire follow their thresholds', () => {
   expect(onFire(HEALTH_GREEN - 0.01, 1000)).toBe(false)
 })
 
-test('the client calls the two commands and floors the xp it offers', async () => {
+test('the client calls the four commands and floors the xp it offers', async () => {
   const invoke = vi.fn().mockResolvedValue(7)
   const c = makeLevelClient(invoke as never)
   await c.level()
   await c.best(12.8)
-  expect(invoke.mock.calls).toEqual([['vault_level'], ['vault_level_best', { xp: 12 }]])
+  await c.projects()
+  await c.projectsBest({ alpha: 12.8, beta: -3 })
+  expect(invoke.mock.calls).toEqual([
+    ['vault_level'],
+    ['vault_level_best', { xp: 12 }],
+    ['vault_project_levels'],
+    ['vault_project_levels_best', { xp: { alpha: 12, beta: 0 } }],
+  ])
 })
 
 test('every command the client invokes is registered in the vaultlevel block of lib.rs', async () => {
@@ -101,7 +108,7 @@ test('every command the client invokes is registered in the vaultlevel block of 
   const registered = [...block.matchAll(/vault::(\w+)/g)].map((m) => m[1])
   const invoked: string[] = []
   const c = makeLevelClient(async <T,>(cmd: string) => (invoked.push(cmd), undefined as T))
-  await Promise.all([c.level(), c.best(1)])
+  await Promise.all([c.level(), c.best(1), c.projects(), c.projectsBest({})])
   expect(registered.sort()).toEqual(invoked.sort())
   for (const cmd of invoked) expect(vaultRs).toContain(`pub async fn ${cmd}(`)
 })
