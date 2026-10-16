@@ -8,7 +8,7 @@ import type { ErrorSource } from '../mission/errors'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
 import type { Pulse } from '../pulse/store'
-import type { Progress } from '../vaultlevel/level'
+import type { Levels } from './ship-scene/Memory'
 import type { MenuTarget } from './ui/menus'
 
 // ------------------------------------------------------------------ the feed --
@@ -257,8 +257,9 @@ export type ShipSceneProps = {
   /** mnemo's events as the app received them (`pulseStore`): each new one flies as a packet
    *  between its deck's archive and its session's figure. */
   pulses?: readonly Pulse[]
-  /** The vault's level, beside each archive: null until read, `'none'` with no vault. */
-  level?: Progress | 'none' | null
+  /** Each project's level by name, beside its deck's archive (#478): null until read, `'none'`
+   *  with no vault. */
+  levels?: Levels
 }
 
 export type FleetPromptProps = {

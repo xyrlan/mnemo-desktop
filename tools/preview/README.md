@@ -69,9 +69,10 @@ drawer, where the pills wrap to two rows and the rest are behind `+N`. `nexus-co
 (#469). `nexus-states` is one robot in each state a snapshot can make, across the four classes:
 each holds its state's prop (or none), with no badge (#473); `stopped`, which no snapshot makes, is
 in the unit tests. `nexus-memory` is the `nexus` ship with mnemo's memory at work (#472): the
-archive tower and the vault's `LV` beside the deck's name and in the dock pod, and one
+archive tower and its project's `LV` beside the deck's name and in the dock pod (#478), and one
 `mnemo://pulse` of each kind fired once the ship is drawn, so packets are in the air at the shot (a
-reflex twice to one child, joined as `×2`).
+reflex twice to one child, joined as `×2`). `nexus-levels` is two decks at different levels, each
+its own project's (`LV2`, `LV7`), and a docked repo with nothing on record at `LV0` (#478).
 
 ## Tests
 
@@ -79,9 +80,10 @@ reflex twice to one child, joined as `×2`).
 pnpm --dir tools/preview test
 ```
 
-The last of them shoot `nexus`, `nexus-quiet`, `nexus-drawer`, `nexus-command`, `nexus-states`, `nexus-memory`, `empty-workspace` and `terminal-pane` through the
+The last of them shoot `nexus`, `nexus-quiet`, `nexus-drawer`, `nexus-command`, `nexus-states`, `nexus-memory`, `nexus-levels`, `empty-workspace` and `terminal-pane` through the
 real vite and look at the page they drew (no workbench element, the drawer's tabs, no quiet
 captain's chip over a captain, the drawer's one header with every pill readable and apart, no
 input on the bridge, the command line open with its verbs, every robot's prop and no badge, every
-kind's packet flown and the deck's label row no taller than before the archive), so they need the
+kind's packet flown and the deck's label row no taller than before the archive, each deck's own
+level), so they need the
 repo's deps too.

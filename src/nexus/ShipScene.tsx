@@ -95,7 +95,7 @@ const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.d
  *  PROJECTS, MISSIONS and SYSTEMS, the bridge with what waits for you, a deck per repo with live
  *  children, the docks, and the ship's log; over the bridge's top edge, the command line while open. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
  *  and while the window is hidden all of it pauses. */
-export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onCommand, onMenu, command, reducedMotion, visible, pulses = NO_PULSES, level = null }: ShipSceneProps): JSX.Element {
+export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onCommand, onMenu, command, reducedMotion, visible, pulses = NO_PULSES, levels = null }: ShipSceneProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const box = useWidth(scroller)
@@ -115,7 +115,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
   const merged = useMemo(() => new Set(log.flatMap((e) => (e.kind === 'merged' && e.robotId ? [e.robotId] : []))), [log])
   const { decks, settled } = useDecks(ship.decks, reducedMotion)
   const sessions = useMemo(() => sessionsOf(ship, robots), [ship, robots])
-  const { memory, layer } = useMemory({ pulses, sessions, stage, reducedMotion, visible, level })
+  const { memory, layer } = useMemory({ pulses, sessions, stage, reducedMotion, visible, levels })
 
   const [hover, setHover] = useState<Hover | null>(null)
   const dark = useDarkLayer()

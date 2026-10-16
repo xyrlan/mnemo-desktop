@@ -19,6 +19,9 @@ export const BASE = {
   mcp_socket_path: () => ({ socket: `${HOME}/.mnemo-desktop/mcp.sock`, unavailable: null }),
   pulse_start: () => null,
   vault_level_best: ({ xp }) => xp,
+  // Each project's level (#478): none on record, every deck LV0; the best offered is the best.
+  vault_project_levels: () => ({ root: `${HOME}/mnemo`, projects: {}, error: null }),
+  vault_project_levels_best: ({ xp }) => xp,
   vault_level: () => ({
     root: `${HOME}/mnemo`,
     pages: 0,
