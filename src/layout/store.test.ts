@@ -2005,6 +2005,56 @@ describe('offscreen panes: the sessions the Nexus starts', () => {
     expect(Object.values(s.getState().panes).filter((p) => p.offscreen)).toHaveLength(1)
   })
 
+  test('a Grok session’s pane keeps its account, saved and restored: resumed on its own home whatever runs it, never asked of claude', async () => {
+    vi.useFakeTimers()
+    try {
+      const grok = { kind: 'grok' as const, config_dir: '/Users/me/.grok-work' }
+      const first = createStore(fakePty({ first: 5 }))
+      await first.getState().openOffscreen('/repo', undefined, 'sess-5', grok)
+      await first.getState().openOffscreen('/repo', undefined, 'sess-6', { kind: 'grok', config_dir: null })
+      await first.getState().openOffscreen('/repo', undefined, 'sess-7')
+      const saved = JSON.parse(JSON.stringify(first.getState().snapshotForSave()))
+      expect(saved.offscreen).toEqual([
+        { pane: 5, cwd: '/repo', sessionId: 'sess-5', agent: grok },
+        { pane: 6, cwd: '/repo', sessionId: 'sess-6', agent: { kind: 'grok', config_dir: null } },
+        { pane: 7, cwd: '/repo', sessionId: 'sess-7' },
+      ])
+      const asked: string[][] = []
+      const pty = fakePty({ first: 100 })
+      // Every claude runs its sessions: only the Claude one is asked about, and the Grok ones resume.
+      const s = createStore(pty, { sessions: core([]).client, liveSessions: async (ids) => (asked.push(ids), ids) })
+      await s.getState().restore(saved)
+      expect(asked).toEqual([['sess-7']])
+      expect(s.getState().panes[100]).toMatchObject({ offscreen: true, sessionId: 'sess-5', agent: grok, renewed: true })
+      vi.advanceTimersByTime(PROMPT_DELAY_MS)
+      expect(pty.writes).toEqual([
+        [100, 'env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r sess-5\n'],
+        [101, 'env -u GROK_HOME MNEMO_AGENT=grok grok --leader -r sess-6\n'],
+      ])
+      // Another session in the pane is not known to be on that account.
+      s.getState().setSessionId(100, 'sess-5')
+      expect(s.getState().panes[100].agent).toEqual(grok)
+      s.getState().setSessionId(100, 'other')
+      expect(s.getState().panes[100].agent).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('restored: a saved account that is not a Grok home with a rooted path is left out', async () => {
+    const c = core([live(5, '/repo'), live(6, '/repo'), live(7, '/repo')])
+    const s = createStore(fakePty({ first: 100 }), { sessions: c.client })
+    const offscreen = [
+      { pane: 5, sessionId: 's5', agent: { kind: 'grok', config_dir: 'relative/.grok' } },
+      { pane: 6, sessionId: 's6', agent: { kind: 'claude', config_dir: '/Users/me/.claude-work' } },
+      { pane: 7, sessionId: 's7', agent: { kind: 'grok', config_dir: 'C:\\Users\\me\\.grok-work' } },
+    ]
+    await s.getState().restore({ version: 3, activeWorktree: null, worktrees: [], offscreen })
+    expect(s.getState().panes[5].agent).toBeUndefined()
+    expect(s.getState().panes[6].agent).toBeUndefined()
+    expect(s.getState().panes[7].agent).toEqual({ kind: 'grok', config_dir: 'C:\\Users\\me\\.grok-work' })
+  })
+
   test('restored is said even when the file cannot be read', async () => {
     const s = createStore(fakePty(), { sessions: core([]).client })
     await expect(s.getState().restore('not a workspace')).rejects.toThrow()

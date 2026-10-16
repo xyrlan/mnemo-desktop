@@ -1,3 +1,4 @@
+import type { Agent } from '../agent/active'
 import { createHomeStore } from './store'
 import type { HomeClient } from './client'
 import type { LensClient } from './store'
@@ -13,7 +14,7 @@ const snap: HomeSnapshot = {
   protected: 0,
 }
 
-function mk(over: Partial<LensClient> = {}) {
+function mk(over: Partial<LensClient> = {}, agent?: () => Agent) {
   const calls: string[] = []
   const client: LensClient = {
     // Like the Rust side: listed roots history does not know come back as (empty) repos.
@@ -41,7 +42,7 @@ function mk(over: Partial<LensClient> = {}) {
     newTab: async (cwd?: string) => { layout.commands.push(`${cwd}:shell`) },
     focusPane: (id: number) => { layout.focused.push(id) },
   }
-  const store = createHomeStore(client, () => settings, setSetting, layout)
+  const store = createHomeStore(client, () => settings, setSetting, layout, ...(agent ? [agent] : []))
   return { store, calls, layout, settings }
 }
 
@@ -80,6 +81,15 @@ test('openSession resumes a dead session in the repo root; newSession and shell 
   store.getState().newSession('/gh/b')
   store.getState().shell('/gh/b')
   expect(layout.commands).toEqual(['/gh/a:claude --resume s1', '/gh/b:claude', '/gh/b:shell'])
+})
+
+test('newSession starts the active account’s CLI: grok in leader mode on a Grok account, claude on the default one', () => {
+  let agent: Agent = { kind: 'grok', config_dir: '/Users/me/.grok-work' }
+  const { store, layout } = mk({}, () => agent)
+  store.getState().newSession('/gh/b')
+  agent = { kind: 'claude', config_dir: null }
+  store.getState().newSession('/gh/b')
+  expect(layout.commands).toEqual(['/gh/b:grok --leader', '/gh/b:claude'])
 })
 
 test('openSession with a live-here session focuses its pane; elsewhere only notices', async () => {

@@ -8,6 +8,11 @@
 //!
 //! One job per id: a second `job_run` while the first is alive is refused, never queued — a
 //! double-fired merge is the thing the front's armed confirmation exists to prevent.
+//!
+//! A job runs on the active account, as a pane spawned now does (`pty.rs`, `on_account`): its
+//! kind's variable (`CLAUDE_CONFIG_DIR` or `GROK_HOME`) set or unset, the other kind's removed,
+//! and `MNEMO_AGENT` (spec `2026-10-16-grok-accounts-design.md`, decision 3). So `mnemo dispatch`
+//! and `mnemo resume` reach the account the user chose, not whichever one the app was started on.
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
@@ -17,6 +22,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::accounts::PaneAccount;
+use crate::mission::account_dirs::AccountEnv;
 use crate::mission::login_path;
 
 pub const LINE_EVENT: &str = "job-line";
@@ -70,10 +77,24 @@ fn pump(id: String, stream: &'static str, from: impl Read, sink: Arc<dyn Fn(JobE
 /// exit, from background threads. Refused: an empty `argv`, an id already running, and a
 /// program that cannot be started (the error says which) — those emit nothing.
 pub fn run(id: &str, cwd: &str, argv: &[String], sink: Arc<dyn Fn(JobEvent) + Send + Sync>) -> Result<(), String> {
+    run_on(id, cwd, argv, None, sink)
+}
+
+/// [`run`] on `account`'s environment (`on_account`); `None` leaves the app's own.
+pub fn run_on(id: &str, cwd: &str, argv: &[String], account: Option<&PaneAccount>, sink: Arc<dyn Fn(JobEvent) + Send + Sync>) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("job: empty argv")?;
     let mut command = crate::proc::tool(program, &login_path());
     command.args(args);
+    if let Some(account) = account {
+        on_account(&mut command, account);
+    }
     start(id, cwd, program, command, sink)
+}
+
+/// Gives `command` `account`'s environment, as `pty.rs` gives a pane its own: the default account
+/// with `CLAUDE_CONFIG_DIR` unset, even when the app was started with it set.
+fn on_account(command: &mut Command, account: &PaneAccount) {
+    AccountEnv { config_dir: account.config_dir.as_ref().map(|d| d.to_string_lossy().into_owned()), kind: account.kind }.apply(command);
 }
 
 /// [`run`] for a command its caller built, `program` naming it in an error: a worktree's setup
@@ -122,13 +143,16 @@ pub fn start(id: &str, cwd: &str, program: &str, mut command: Command, sink: Arc
     Ok(())
 }
 
-/// Runs `argv` in `cwd` headless and streams it as `job-line` / `job-exit` events for `id`.
+/// Runs `argv` in `cwd` headless, on the active account, and streams it as `job-line` /
+/// `job-exit` events for `id`.
 #[tauri::command]
 pub fn job_run(app: AppHandle, id: String, cwd: String, argv: Vec<String>) -> Result<(), String> {
-    run(
+    let account = crate::accounts::Place::real().for_new_pane();
+    run_on(
         &id,
         &cwd,
         &argv,
+        Some(&account),
         Arc::new(move |e| {
             let _ = match e {
                 JobEvent::Line(l) => app.emit(LINE_EVENT, l),
@@ -208,6 +232,43 @@ mod tests {
         assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
         run("t-live", "/", &argv(&["true"]), sink).unwrap();
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    }
+
+    /// What a job sees of the account variables: `MNEMO_AGENT`, `CLAUDE_CONFIG_DIR`, `GROK_HOME`,
+    /// `-` for one unset.
+    fn seen(id: &str, account: &PaneAccount) -> String {
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let script = r#"printf '%s %s %s' "${MNEMO_AGENT--}" "${CLAUDE_CONFIG_DIR--}" "${GROK_HOME--}""#;
+        run_on(id, "/", &argv(&["sh", "-c", script]), Some(account), Arc::new(move |e| tx.lock().unwrap().send(e).unwrap())).unwrap();
+        let mut out = Vec::new();
+        loop {
+            match rx.recv_timeout(Duration::from_secs(10)).expect("the job ends") {
+                JobEvent::Line(l) => out.push(l.line),
+                JobEvent::Exit(_) => return out.join("\n"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_job_runs_on_the_account_it_is_given_with_its_kinds_variable_alone() {
+        use crate::agent_kind::AgentKind;
+        use std::path::PathBuf;
+        let account = |kind, dir: Option<&str>| PaneAccount { id: "a".into(), kind, config_dir: dir.map(PathBuf::from) };
+        // The default account: CLAUDE_CONFIG_DIR unset whatever the app was started with, as a
+        // pane's. Before accounts reached jobs, a job inherited the app's own.
+        assert_eq!(seen("t-acct-default", &account(AgentKind::Claude, None)), "claude - -");
+        assert_eq!(seen("t-acct-work", &account(AgentKind::Claude, Some("/Users/x/.claude-work"))), "claude /Users/x/.claude-work -");
+        assert_eq!(seen("t-acct-grok", &account(AgentKind::Grok, None)), "grok - -");
+        assert_eq!(seen("t-acct-grok-2", &account(AgentKind::Grok, Some("/Users/x/.grok-2"))), "grok - /Users/x/.grok-2");
+    }
+
+    #[test]
+    fn job_run_runs_on_the_active_account() {
+        let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/job.rs")).unwrap();
+        let body = &src[src.find("pub fn job_run(").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("Place::real().for_new_pane()") && body.contains("Some(&account)"), "job_run must give a job the active account");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import type { Issue } from '../github/types'
-import { attachCmd, onAccount, stopCmd as stopOn, type AccountEnv } from '../mission/account'
+import { sessionCommand } from '../agent/command'
+import { attachCmd, kindOfRow, onAccount, stopCmd as stopOn, type AccountEnv } from '../mission/account'
 
 /** Mirrors `src-tauri/src/home.rs`. */
 export type Live = 'here' | 'bg' | 'elsewhere'
@@ -62,7 +63,7 @@ export const ELSEWHERE = 'open in another terminal'
 export const NO_TRANSCRIPT = 'transcript not found'
 
 /** Never fork: a live session is focused or attached, only a dead one is resumed. Attach and
- *  resume run on the session's own account. */
+ *  resume run on the session's own account, in its own CLI (`sessionCommand`). */
 export function whatClickDoes(s: HomeSession, panes: Record<number, PaneLike>): Click {
   if (s.live === 'here') {
     const pane = paneForSession(panes, s.id)
@@ -71,7 +72,7 @@ export function whatClickDoes(s: HomeSession, panes: Record<number, PaneLike>): 
   if (s.live === 'bg') return { kind: 'command', cmd: attachCmd(s), sessionId: s.id }
   if (s.live === 'elsewhere') return { kind: 'nothing', why: ELSEWHERE }
   if (!s.transcript) return { kind: 'nothing', why: NO_TRANSCRIPT }
-  return { kind: 'command', cmd: onAccount(`claude --resume ${s.id}`, s), sessionId: s.id }
+  return { kind: 'command', cmd: onAccount(sessionCommand(kindOfRow(s), { resume: s.id }), s), sessionId: s.id }
 }
 
 /** An unresolved repo the list folds away (see `HomeSnapshot.protected`). */

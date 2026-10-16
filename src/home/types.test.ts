@@ -144,3 +144,20 @@ test("attach, resume and stop run on the session's own account", () => {
   expect(takeOver(sess({ id: 'b', live: 'bg', ...work }), {}).label).toBe('Take over')
   expect(takeOver(sess({ id: 'd', ...home }), {}).label).toBe('Resume')
 })
+
+test("a Grok session resumes in grok's leader on its own home; attach and stop are wave A's", () => {
+  const grok = { account: 'grok-work', account_env: { config_dir: '/Users/me/.grok-work', kind: 'grok' as const } }
+  expect(whatClickDoes(sess({ id: 'g', ...grok }), {})).toEqual({ kind: 'command', cmd: 'env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r g', sessionId: 'g' })
+  expect(whatClickDoes(sess({ id: 'g', account: 'grok', account_env: { config_dir: null, kind: 'grok' } }), {})).toEqual({
+    kind: 'command',
+    cmd: 'env -u GROK_HOME MNEMO_AGENT=grok grok --leader -r g',
+    sessionId: 'g',
+  })
+  expect(whatClickDoes(sess({ id: 'b', live: 'bg', ...grok }), {})).toEqual({ kind: 'command', cmd: 'env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r b', sessionId: 'b' })
+  // A Claude row that says its kind is typed with MNEMO_AGENT, as wave A types it.
+  expect(whatClickDoes(sess({ id: 'd', account: 'default', account_env: { config_dir: null, kind: 'claude' } }), {})).toEqual({
+    kind: 'command',
+    cmd: 'env -u CLAUDE_CONFIG_DIR MNEMO_AGENT=claude claude --resume d',
+    sessionId: 'd',
+  })
+})
