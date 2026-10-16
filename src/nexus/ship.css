@@ -297,8 +297,9 @@
 .ship-dlabel { position: absolute; top: 4px; right: 8px; left: 8px; display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--ship-pale); }
 .ship-dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Quiet chips start at the y the deck's layout gives them (`quietY`), below the captains: hung from
-   the deck's floor, a row more than the layout counted would push them up over the captains. */
-.ship-quiet { position: absolute; right: 6px; left: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+   the deck's floor, a row more than the layout counted would push them up over the captains.
+   Columns of at least 120 px share the width, so a chip alone on its row fills it. */
+.ship-quiet { position: absolute; right: 6px; left: 6px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr)); gap: 4px; }
 .ship-room {
   position: absolute;
   top: 0;
@@ -407,7 +408,6 @@
 /* A chip keeps to its column; its name gets two lines, then an ellipsis. */
 .ship-scene .ship-chip-captain {
   display: flex;
-  flex: 0 1 120px;
   align-items: center;
   min-width: 0;
   max-width: 100%;
