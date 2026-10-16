@@ -265,7 +265,8 @@ mod tests {
 
     #[test]
     fn job_run_runs_on_the_active_account() {
-        let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/job.rs")).unwrap();
+        // A Windows checkout has CRLF line ends: read the source as LF so the body's end is found.
+        let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/job.rs")).unwrap().replace("\r\n", "\n");
         let body = &src[src.find("pub fn job_run(").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
         assert!(body.contains("Place::real().for_new_pane()") && body.contains("Some(&account)"), "job_run must give a job the active account");
