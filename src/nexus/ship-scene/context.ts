@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { ShipAction, ShipRobot } from '../ship-types'
 import type { Hover } from './figures'
+import type { MemoryCtx } from './Memory'
 
 /** What every part of the drawn ship reads: the props it shares, and the scene's own state. */
 export type SceneCtx = {
@@ -25,6 +26,8 @@ export type SceneCtx = {
   onTriage(): void
   /** Opens the fleet's command line. */
   onCommand(): void
+  /** mnemo's memory: each figure's rules, who shakes, which archive glows, the vault's level. */
+  memory: MemoryCtx
 }
 
 export const SceneContext = createContext<SceneCtx | null>(null)

@@ -1,6 +1,8 @@
 import type { AnimationEvent, CSSProperties, MouseEvent, ReactNode } from 'react'
 import { SHIP_SPRITES, SPRITES, type CaptainSprite, type PropKind } from '../sprites'
 import type { Captain, CaptainPose, RobotClass, RobotPose, ShipRobot } from '../ship-types'
+import { useScene } from './context'
+import { RuleCount } from './Memory'
 import { useNewRule, useWalk, type Exit, type Leaver } from './motion'
 import { captainHover, captainTopic, doingOf, lookOf, robotName, type Look } from './words'
 
@@ -106,6 +108,7 @@ export function RobotFigure({ robot: r, emblem, pos, still = false, selected, fo
     if (e.target === e.currentTarget) onArrived(r.id)
   }
   const hover = { kind: 'robot', id: r.id } as const
+  const shaking = useScene().memory.shaking(r.sessionId)
   return (
     <div
       className="ship-robot"
@@ -124,6 +127,7 @@ export function RobotFigure({ robot: r, emblem, pos, still = false, selected, fo
       data-arriving={on(arriving)}
       data-placed={on(!!pos)}
       data-still={on(still)}
+      data-shake={on(shaking)}
       style={pos ? at(pos.x, pos.y) : undefined}
       onTransitionEnd={onTransitionEnd}
     >
@@ -152,6 +156,7 @@ export function RobotFigure({ robot: r, emblem, pos, still = false, selected, fo
             ◈
           </span>
         )}
+        <RuleCount sessionId={r.sessionId} />
         <span className="ship-tag">
           <Tag robot={r} emblem={emblem} />
         </span>
@@ -203,6 +208,8 @@ export function CaptainFigure({
 }: Omit<Picks, 'onSelect'> & { captain: Captain; pos: { x: number; y: number }; big: boolean; focused: boolean; lit: boolean }) {
   const topic = captainTopic(c)
   const hover = { kind: 'captain', id: c.id } as const
+  const sid = c.parent?.session_id ?? null
+  const shaking = useScene().memory.shaking(sid)
   return (
     <button
       type="button"
@@ -212,6 +219,7 @@ export function CaptainFigure({
       data-big={on(big)}
       data-focus={on(focused)}
       data-hl={on(lit)}
+      data-shake={on(shaking)}
       style={at(pos.x, pos.y)}
       title={captainHover(c)}
       aria-label={`${c.name}: ${c.pose === 'empty' ? 'no parent' : c.pose}`}
@@ -224,6 +232,7 @@ export function CaptainFigure({
       <span className="ship-floor" aria-hidden />
       <span className="ship-console">
         <img className="ship-px" data-sprite={c.pose === 'empty' ? 'chair' : c.pose} src={captainSrc(c.pose)} alt="" draggable={false} />
+        <RuleCount sessionId={sid} />
       </span>
       {c.notices > 0 && (
         <span className="ship-mail" title="notices from its children waiting for its next prompt">
@@ -241,9 +250,12 @@ export function CaptainFigure({
 
 /** A captain in a dock: its whole console at 64 px, its name under it in up to two lines. */
 export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
+  const sid = c.parent?.session_id ?? null
+  const shaking = useScene().memory.shaking(sid)
   return (
-    <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
+    <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} data-shake={on(shaking)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
       <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
+      <RuleCount sessionId={sid} />
       <span>
         <span className="ship-em">{c.emblem}</span> {c.name}
       </span>
@@ -254,8 +266,9 @@ export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captai
 /** A captain as a small chip: a quiet parent on a deck. Its console seen through a window, still
  *  at 1×; its name beside it in up to two lines. */
 export function CaptainChip({ captain: c, focused, onOpen }: { captain: Captain; focused: boolean; onOpen(id: string): void }) {
+  const shaking = useScene().memory.shaking(c.parent?.session_id ?? null)
   return (
-    <button type="button" className="ship-chip-captain" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
+    <button type="button" className="ship-chip-captain" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} data-shake={on(shaking)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
       <span className="ship-window" aria-hidden>
         <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
       </span>

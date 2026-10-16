@@ -4,6 +4,7 @@ import type { Deck as DeckT, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
 import { CaptainChip, CaptainFigure, LeaverFigure, px, RobotFigure, Tag } from './figures'
 import { bubblesOf, deckLayout, G, type Bubble, type DeckLayout, type Point } from './geometry'
+import { Archive } from './Memory'
 import { useLeavers, type Drawn } from './motion'
 import { pickVoices, type Voice } from './voices'
 import { doingOf, relation, robotLine, robotMore } from './words'
@@ -92,7 +93,10 @@ export function Deck({ deck, width, alive, ghost = false, onSettled }: { deck: D
   return (
     <section className="ship-deck" data-deck={deck.root} data-ghost={ghost ? '' : undefined} aria-label={deck.name} style={{ height: px(layout.height) }}>
       <div className="ship-cmd" style={{ width: px(layout.cmdW) }}>
-        <h3 className="ship-dlabel">{deck.name}</h3>
+        <h3 className="ship-dlabel">
+          <span className="ship-dname">{deck.name}</span>
+          <Archive root={deck.root} name={deck.name} />
+        </h3>
         {deck.quiet.length > 0 && (
           <div className="ship-quiet" style={{ top: px(layout.quietY) }}>
             {deck.quiet.map((c) => (
