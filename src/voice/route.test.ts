@@ -55,7 +55,7 @@ describe('resolveTarget', () => {
     expect(resolveTarget(aside.querySelector('textarea'), drawer())).toEqual({ kind: 'pty', pane: 7 })
   })
 
-  it("types into the bridge's prompt when it has focus, the drawer open or not", () => {
+  it("types into the fleet's command line when it has focus, the drawer open or not", () => {
     const prompt = put('<div data-fleet-prompt=""><form><input aria-label="Orders for the fleet"></form></div>').querySelector('input')!
     expect(resolveTarget(prompt, drawer())).toEqual({ kind: 'field', el: prompt })
     expect(resolveTarget(prompt, where({}))).toEqual({ kind: 'field', el: prompt })

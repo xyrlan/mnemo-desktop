@@ -223,7 +223,7 @@ export type ShipAction =
 /** What happened, for the bridge's output line, and what to append to the log. */
 export type ActionResult = { ok: boolean; say: string; log: LogEvent[] }
 
-/** A line typed at the fleet prompt. `confirm`: a batch verb waiting for `/yes`. */
+/** A line typed at the fleet's command line. `confirm`: a batch verb waiting for `/yes`. */
 export type Parsed = { action: ShipAction } | { confirm: ShipAction; prompt: string } | { yes: true } | { error: string }
 
 // ------------------------------------------------------------- component props --
@@ -245,8 +245,11 @@ export type ShipSceneProps = {
   /** A right-click on a captain, a robot, a deck or a dock, or the bar's SYSTEMS button: the view
    *  opens the menu at (x, y), in viewport px. */
   onMenu(target: MenuTarget, x: number, y: number): void
-  /** The fleet prompt, drawn inside the bridge. */
-  bridge: ReactNode
+  /** The fleet's command line while it is open (`/`, the bridge's `/ commands`): it floats over
+   *  the bridge's top edge. Null while closed: the bridge holds no input. */
+  command: ReactNode
+  /** The bridge's `/ commands` hint: opens the command line. */
+  onCommand(): void
   reducedMotion: boolean
   visible: boolean
 }
@@ -255,8 +258,12 @@ export type FleetPromptProps = {
   ship: Ship
   /** Every repo `/new` takes besides the ship's (`useKnownRepos`). */
   repos?: readonly { root: string; name: string }[]
-  /** Runs an action and returns what to print under the prompt. */
+  /** Runs an action and returns what to print under the line. */
   run(action: ShipAction): Promise<ActionResult>
+  /** Whether the line is shown. Closed, it keeps what it holds: a batch waiting for `/yes`. */
+  open: boolean
+  /** Esc, a click outside it. */
+  onClose(): void
 }
 
 export type TriageProps = {

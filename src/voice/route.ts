@@ -8,7 +8,7 @@ import type { DrawerTab } from '../nexus/store'
 export type DictationTarget =
   /** A live terminal: the drawer's active tab's, by its PTY. */
   | { kind: 'pty'; pane: PaneId }
-  /** A focused text field: the bridge's prompt, or any other the user is typing in. */
+  /** A focused text field: the fleet's command line, or any other the user is typing in. */
   | { kind: 'field'; el: HTMLInputElement | HTMLTextAreaElement }
   | { kind: 'editable'; el: HTMLElement }
 
@@ -50,7 +50,7 @@ function drawerTerminal(w: Where): DictationTarget | null {
   return live(w.sessions[tab.key]?.pty, w.layout.panes)
 }
 
-/** Where dictation types (Q12). DOM focus first: a text field (the bridge's prompt,
+/** Where dictation types (Q12). DOM focus first: a text field (the fleet's command line,
  *  `[data-fleet-prompt] input`, among them) or a contenteditable is itself. A focused terminal,
  *  and nothing typeable focused, are the drawer's active terminal: only the active tab's is on
  *  screen. With none, null: dictation says so and records nothing. */
@@ -65,7 +65,7 @@ export function resolveTarget(active: Element | null, w: Where): DictationTarget
 }
 
 /** What the indicator says when dictation has nowhere to type. */
-export const NOWHERE = 'Nowhere to dictate: open a session in the drawer, or click the prompt'
+export const NOWHERE = 'Nowhere to dictate: open a session in the drawer, or the command line (/)'
 
 /** A space between the text before the caret and the transcript, unless one side already
  *  has it or the transcript opens with punctuation. */

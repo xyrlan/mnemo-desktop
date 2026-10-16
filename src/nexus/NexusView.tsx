@@ -156,8 +156,15 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
   )
   const s = nexusStore.getState()
 
+  // The fleet's command line: `/` or the bridge's `/ commands` opens it, Esc or a click outside it
+  // closes it. Triage takes its place.
+  const [command, setCommand] = useState(false)
+  useEffect(() => {
+    if (triage) setCommand(false)
+  }, [triage])
+
   // The view's keys, while nothing typed into has focus: Tab triages, ⌥1–9 opens the bridge's Nth
-  // exception, `/` focuses the fleet prompt, Esc drops the
+  // exception, `/` opens the command line, Esc drops the
   // selection, or else collapses the drawer (a tab's terminal has focus: Esc is its program's). With
   // anything open over the ship (`OVER_THE_SHIP`) they are that's. The app's chords (`actions/keys.ts`) run first, in the capture phase, and the drawer's (⌘\, Esc
   // on its quick diff) next.
@@ -174,11 +181,8 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         const id = !x ? null : x.kind === 'captain' ? x.captainId : 'robotId' in x ? x.robotId : null
         if (!id) return
         onOpen(id)
-      } else if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
-        const input = document.querySelector<HTMLInputElement>('[data-fleet-prompt] input')
-        if (!input) return
-        input.focus()
-      } else if (e.key === 'Escape' && st.selection.size) st.clearSelection()
+      } else if (e.key === '/' && !e.metaKey && !e.ctrlKey) setCommand(true)
+      else if (e.key === 'Escape' && st.selection.size) st.clearSelection()
       else if (e.key === 'Escape' && st.tabs.length && !st.collapsed) st.setCollapsed(true)
       else return
       e.preventDefault()
@@ -201,7 +205,8 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         onSelect={s.toggleSelect}
         onAction={(a) => void run(a).then(sayFailure, (e: unknown) => toast.error(String(e)))}
         onTriage={() => s.setTriage(true)}
-        bridge={<FleetPrompt ship={ship} repos={known} run={run} />}
+        onCommand={() => setCommand(true)}
+        command={<FleetPrompt ship={ship} repos={known} run={run} open={command} onClose={() => setCommand(false)} />}
         reducedMotion={reducedMotion}
         visible={visible}
       />

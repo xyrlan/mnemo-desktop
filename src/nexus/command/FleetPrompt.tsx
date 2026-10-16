@@ -1,21 +1,30 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react'
 import type { FleetPromptProps, ShipAction } from '../ship-types'
 import { openSession } from '../drawer/open'
-import { CONFIRM_MS, HINT, parseCommand, parseNew } from './parse'
+import { CONFIRM_MS, parseCommand, parseNew, suggest, type Verb } from './parse'
+import './command.css'
 
 type Out = { text: string; err: boolean }
 type Pending = { action: ShipAction; until: number }
 
-/** The bridge's prompt (`/` focuses it): orders for the whole fleet (spec "Fleet prompt"). Its
- *  input sits in `[data-fleet-prompt]`; under it, the hint and the last result. A batch verb waits
- *  for `/yes` for 20 s, then lapses. */
-export function FleetPrompt({ ship, repos, run }: FleetPromptProps): JSX.Element | null {
+/** The keys the line acts on itself. */
+const OWN = new Set(['Escape', 'Tab', 'ArrowUp', 'ArrowDown'])
+
+/** The fleet's command line (`/` opens it, issue #469): orders for the whole fleet, floating over
+ *  the bridge's top edge while open, nowhere while closed. Its input sits in `[data-fleet-prompt]`;
+ *  under it, the verbs that fit what is typed (↑/↓ pick, Tab completes) and the last result. Esc
+ *  or a click outside closes it. A batch verb waits for `/yes` for 20 s, then lapses; closed and
+ *  reopened within them, the line still takes it. */
+export function FleetPrompt({ ship, repos, run, open, onClose }: FleetPromptProps): JSX.Element | null {
   const [line, setLine] = useState('')
   const [out, setOut] = useState<Out | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pick, setPick] = useState(0)
   const pending = useRef<Pending | null>(null)
   const lapse = useRef<number | undefined>(undefined)
   const live = useRef(true)
+  const box = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
     live.current = true
     return () => {
@@ -23,6 +32,66 @@ export function FleetPrompt({ ship, repos, run }: FleetPromptProps): JSX.Element
       window.clearTimeout(lapse.current)
     }
   }, [])
+
+  const waiting = () => !!pending.current && Date.now() <= pending.current.until
+  const verbs = suggest(line).filter((v) => v.fill !== '/yes' || waiting())
+  const picked = verbs.length ? Math.min(pick, verbs.length - 1) : -1
+  const complete = (v: Verb | undefined) => {
+    // Only forward: a verb whose arguments are being typed keeps them.
+    if (!v || !v.fill.startsWith(line.trimStart().toLowerCase())) return
+    setLine(v.fill)
+    setPick(0)
+  }
+
+  // Opened, it has `/` typed and drops a result nothing waits on any more, in the very render that
+  // opens it: a key typed right after `/` lands after the `/`.
+  const [shown, setShown] = useState(false)
+  if (open !== shown) {
+    setShown(open)
+    if (open) {
+      if (!pending.current && !busy) setOut(null)
+      setLine((l) => l || '/')
+      setPick(0)
+    }
+  }
+  // …and takes the focus, its caret at the end.
+  useLayoutEffect(() => {
+    const el = input.current
+    if (!open || !el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [open])
+
+  // A key typed in it is its own: stopped ahead of every other listener (the drawer's and Triage's
+  // are in the capture phase too), so none reaches the ship, the drawer or Triage. What it types
+  // and Enter's submit are the keys' defaults, which still happen. A chord (⌘, ⌃, ⌥) is the app's.
+  // A click anywhere else closes it.
+  const state = useRef({ verbs, picked, complete, onClose })
+  state.current = { verbs, picked, complete, onClose }
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (!(e.target instanceof Node) || !box.current?.contains(e.target)) return
+      e.stopPropagation()
+      if (!OWN.has(e.key) || e.isComposing) return
+      const { verbs, picked, complete, onClose } = state.current
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'Tab') complete(verbs[Math.max(picked, 0)])
+      else if (verbs.length) setPick((picked + (e.key === 'ArrowDown' ? 1 : verbs.length - 1)) % verbs.length)
+      e.preventDefault()
+    }
+    const onDown = (e: MouseEvent) => {
+      if (e.target instanceof Node && box.current?.contains(e.target)) return
+      state.current.onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onDown, true)
+    }
+  }, [open])
 
   const say = (text: string, err: boolean) => live.current && setOut({ text, err })
 
@@ -90,35 +159,64 @@ export function FleetPrompt({ ship, repos, run }: FleetPromptProps): JSX.Element
     void go(p.action)
   }
 
+  if (!open) return null
+  const option = (k: number) => `fleet-verb-${k}`
   return (
-    <div data-fleet-prompt="" className="flex min-w-0 flex-col gap-0.5 font-mono text-[11px]">
+    <div ref={box} data-fleet-prompt="" className="ship-line">
       <form
-        className="flex items-center gap-2 rounded-sm border-2 border-indigo-700 bg-[#0b0d22] px-2 py-1 focus-within:border-indigo-300"
+        className="ship-line-row"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
         }}
       >
-        <span aria-hidden className="font-bold text-indigo-300">
+        <span aria-hidden className="ship-line-mark">
           ›
         </span>
         <input
+          ref={input}
           aria-label="Orders for the fleet"
-          className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-indigo-300/50"
-          placeholder="orders for the fleet (key /)…   /dispatch mnemo #123   ·   /msg #682 text   ·   /msg all text"
+          role="combobox"
+          aria-expanded={verbs.length > 0}
+          aria-controls="fleet-verbs"
+          aria-activedescendant={picked >= 0 ? option(picked) : undefined}
+          aria-autocomplete="list"
+          placeholder="orders for the fleet…"
           spellCheck={false}
           autoComplete="off"
           value={line}
-          onChange={(e) => setLine(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') e.currentTarget.blur()
+          onChange={(e) => {
+            setLine(e.target.value)
+            setPick(0)
           }}
         />
+        <kbd className="ship-line-esc" aria-hidden>
+          esc
+        </kbd>
       </form>
-      <div data-fleet-hint="" className="truncate text-[10.5px] text-indigo-300/70">
-        {HINT} · shift+click selects several
-      </div>
-      <div data-fleet-out="" role="status" aria-live="polite" className={`min-h-[14px] break-words ${out?.err ? 'text-rose-300' : 'text-green-300'}`}>
+      {verbs.length > 0 && (
+        <ul id="fleet-verbs" role="listbox" aria-label="commands" className="ship-line-verbs" data-fleet-verbs="">
+          {verbs.map((v, k) => (
+            <li
+              key={v.syntax}
+              id={option(k)}
+              role="option"
+              aria-selected={k === picked}
+              data-verb={v.fill.trim()}
+              // A click completes it, the focus staying in the input.
+              onMouseDown={(e) => {
+                e.preventDefault()
+                complete(v)
+              }}
+            >
+              <code>{v.syntax}</code>
+              <span>{v.does}</span>
+              {k === picked && v.fill.startsWith(line.trimStart().toLowerCase()) && <kbd aria-hidden>tab</kbd>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div data-fleet-out="" role="status" aria-live="polite" className="ship-line-out" data-err={out?.err ? '' : undefined}>
         {out?.text ?? ''}
       </div>
     </div>

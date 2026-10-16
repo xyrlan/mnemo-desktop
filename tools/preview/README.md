@@ -53,6 +53,9 @@ scenario('job-running', {
 - Events the page itself emits reach its own listeners and never reach `ipc`.
 - **`storage`** (optional) is what the app kept in `localStorage` from a last run, set before its
   code runs: `{ 'mnemo.nexus-drawer.v1': JSON.stringify(…) }`. Values are strings.
+- **`drive`** (optional) is what a user did before the shot: `async (page) => {…}`, given the
+  Playwright page once the app is up and settled (`page.keyboard.press('/')`). The shot waits
+  `--settle` again after it.
 
 `fixtures/app.mjs` is the launch state with nothing going on. `empty-workspace` is the app as a
 fresh boot opens it: the Nexus, empty. `terminal-pane` restores a saved tab through
@@ -61,7 +64,9 @@ updating that fixture. `nexus-quiet` is a crowded COMMAND column with the drawer
 captains with two-line names over eight quiet captains' chips (#465). `nexus-drawer` is the
 drawer open on seven sessions kept from a last run (three children, two captains with long titles,
 two shells): one header of session pills (#467); shoot it at `--size 940x760` for the narrowest
-drawer, where the pills wrap to two rows and the rest are behind `+N`.
+drawer, where the pills wrap to two rows and the rest are behind `+N`. `nexus-command` is the
+`nexus` ship with `/` pressed: the fleet's command line over the bridge, every verb suggested
+(#469).
 
 ## Tests
 
@@ -69,7 +74,7 @@ drawer, where the pills wrap to two rows and the rest are behind `+N`.
 pnpm --dir tools/preview test
 ```
 
-The last of them shoot `nexus`, `nexus-quiet`, `nexus-drawer`, `empty-workspace` and `terminal-pane` through the
+The last of them shoot `nexus`, `nexus-quiet`, `nexus-drawer`, `nexus-command`, `empty-workspace` and `terminal-pane` through the
 real vite and look at the page they drew (no workbench element, the drawer's tabs, no quiet
-captain's chip over a captain, the drawer's one header with every pill readable and apart), so
-they need the repo's deps too.
+captain's chip over a captain, the drawer's one header with every pill readable and apart, no
+input on the bridge, the command line open with its verbs), so they need the repo's deps too.

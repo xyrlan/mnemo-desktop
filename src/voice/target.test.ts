@@ -25,7 +25,7 @@ it("reads the app's drawer and session host: the active tab's terminal, else now
   expect(dictationTarget()).toBeNull()
 })
 
-it("reads the page's focus: the bridge's prompt", () => {
+it("reads the page's focus: the fleet's command line", () => {
   document.body.innerHTML = '<div data-fleet-prompt=""><input></div>'
   const prompt = document.querySelector('input')!
   prompt.focus()

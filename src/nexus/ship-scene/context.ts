@@ -23,6 +23,8 @@ export type SceneCtx = {
   onSelect(id: string): void
   onAction(action: ShipAction): void
   onTriage(): void
+  /** Opens the fleet's command line. */
+  onCommand(): void
 }
 
 export const SceneContext = createContext<SceneCtx | null>(null)

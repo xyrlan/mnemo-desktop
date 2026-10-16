@@ -5,8 +5,32 @@ import { captainsOf, isGreen, isRunning, reposOf, robotsOf } from './find'
 /** How long a batch verb waits for `/yes`. */
 export const CONFIRM_MS = 20_000
 
-/** What the prompt says it takes, under it. */
-export const HINT = '/new <repo> · /dispatch <repo> #<issue> · /msg <#issue | captain | all> <text> · /merge green · /stop all · /land <feature>'
+/** A verb the command line takes: `fill` is what Tab completes it to, `syntax` how it is
+ *  written, `does` what it does. */
+export type Verb = { fill: string; syntax: string; does: string }
+
+/** Every verb, as the command line suggests them. `/msg all` first: nothing else on the ship
+ *  says one thing to every child. */
+export const VERBS: readonly Verb[] = [
+  { fill: '/msg all ', syntax: '/msg all <text>', does: 'say it to every running child' },
+  { fill: '/msg ', syntax: '/msg <#issue | captain> <text>', does: 'say it to one child or captain' },
+  { fill: '/dispatch ', syntax: '/dispatch <repo> #<issue>', does: 'a child per issue' },
+  { fill: '/new ', syntax: '/new <repo>', does: 'start claude in a repo, in the drawer' },
+  { fill: '/merge green', syntax: '/merge green', does: 'merge every green PR in the hangar' },
+  { fill: '/stop all', syntax: '/stop all', does: 'stop every running child' },
+  { fill: '/land ', syntax: '/land <feature>', does: 'land a mission' },
+  { fill: '/yes', syntax: '/yes', does: 'confirm the batch asked about' },
+]
+
+/** The verbs to suggest for what is typed: the ones it is the start of, and, once a verb's
+ *  arguments are being typed, that verb (the longest whose `fill` it starts with). Nothing for a
+ *  line that does not start with `/`. */
+export function suggest(typed: string): Verb[] {
+  const t = typed.trimStart().toLowerCase()
+  if (!t.startsWith('/')) return []
+  const inside = VERBS.filter((v) => t.startsWith(v.fill)).sort((a, b) => b.fill.length - a.fill.length)[0]
+  return VERBS.filter((v) => v === inside || v.fill.startsWith(t))
+}
 
 const START = 'start with / — e.g. /dispatch mnemo #123 · /msg #682 text · /msg all text. To talk to one session, click it.'
 const UNKNOWN = (verb: string) => `unknown /${verb} — use /new, /dispatch, /msg, /merge green, /stop all or /land`
@@ -111,7 +135,7 @@ function land(rest: string, ship: Ship): Parsed {
   return { action }
 }
 
-/** A line typed at the fleet prompt, read against the ship (spec "Acting from it", contract
+/** A line typed at the fleet's command line, read against the ship (spec "Acting from it", contract
  *  `command`). The batch verbs (`/merge green`, `/stop all`, `/msg all`) come back as `confirm`,
  *  for `/yes`; anything that is not a verb is a hint, never an action. */
 export function parseCommand(line: string, ship: Ship): Parsed {
@@ -121,7 +145,7 @@ export function parseCommand(line: string, ship: Ship): Parsed {
   const rest = m[2].trim()
   switch (verb) {
     case 'yes':
-      return rest ? { error: 'usage: /yes — confirms the batch the prompt asked about' } : { yes: true }
+      return rest ? { error: 'usage: /yes — confirms the batch the command line asked about' } : { yes: true }
     case 'dispatch':
       return dispatch(rest, ship)
     case 'msg':
