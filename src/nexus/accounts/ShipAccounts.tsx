@@ -89,8 +89,9 @@ export function ShipAccounts({ portal }: { portal: HTMLElement | null }): JSX.El
   const percent = limit ? percentNow(limit, now) : null
   const resets = limit ? resetsWhen(limit.resetsAt, now) : null
   const warn = account?.problem ?? error
+  const cli = account?.kind === 'grok' ? 'Grok' : 'Claude'
   const title = [
-    `Claude account: ${label}${account?.email ? ` (${account.email})` : ''}`,
+    `${cli} account: ${label}${account?.email ? ` (${account.email})` : ''}`,
     limit && `${limitName(limit)} ${percent}%${resets && resets !== 'reset' ? `, resets ${resets}` : ''}`,
     usage?.usage?.stale && `Old reading: ${usage.usage.stale}`,
     account?.problem,
@@ -109,7 +110,7 @@ export function ShipAccounts({ portal }: { portal: HTMLElement | null }): JSX.El
           ref={button}
           type="button"
           className="nx-switch"
-          aria-label={`Claude accounts: ${label}`}
+          aria-label={`${cli} accounts: ${label}`}
           aria-haspopup="dialog"
           aria-expanded={open}
           title={title}
