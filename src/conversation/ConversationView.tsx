@@ -4,7 +4,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState, type Rea
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, GitPullRequest, LoaderCircle, MessageSquare, SquareTerminal, TriangleAlert } from 'lucide-react'
 import { tauriConversation, type ConversationClient } from './client'
-import type { Conversation, ImageRef, SessionStatus, StatusMarker, TranscriptRecord } from './types'
+import type { Conversation, FollowSource, ImageRef, SessionStatus, StatusMarker, TranscriptRecord } from './types'
 import { deriveConversation } from './parse'
 import { clockText, firstIndex, lastPromptAt, pendingCard, SOLO_TOOLS, streamItems, workingSince, type Item, type ToolCard } from './stream'
 import { describeCall } from './run'
@@ -29,6 +29,9 @@ export type ConversationViewProps = {
   sessionId: string | null
   /** Where the session runs; the transcript lives under this cwd's project dir. */
   cwd: string
+  /** Which CLI the session runs on, and its account's home: a Grok session's history is in its
+   *  Grok home. Absent, a Claude transcript. */
+  source?: FollowSource
   /** From `claude agents` / the mission snapshot: drives the working line and the pending card
    *  (a tool call with no result while `waiting` is set). */
   status?: SessionStatus
@@ -224,8 +227,8 @@ function useOutbox(agent: ChatAgent | undefined, conversations: Conversation[]) 
 /** A Claude Code session's transcript as Orca's native chat: followed live from the last `TAIL`
  *  lines, earlier ones read on scroll-up, in a virtualised list that stays at the bottom while
  *  you are there; the foot answers it when there is an `agent` to answer through. */
-export function ConversationView({ sessionId, cwd, status, markers = NO_MARKERS, footer, onOpenTerminal, agent, client = tauriConversation }: ConversationViewProps) {
-  const { segments, loadEarlier } = useFollow(client, sessionId, cwd)
+export function ConversationView({ sessionId, cwd, source, status, markers = NO_MARKERS, footer, onOpenTerminal, agent, client = tauriConversation }: ConversationViewProps) {
+  const { segments, loadEarlier } = useFollow(client, sessionId, cwd, source)
   const conversations = useMemo(() => segments.map((s) => derive(s.records)), [segments])
   const { shown, sender } = useOutbox(agent, conversations)
   const stream = useMemo(() => streamItems(segments, conversations, markers, status), [segments, conversations, markers, status])

@@ -1,5 +1,6 @@
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
+import type { FollowSource } from '../conversation/types'
 import type { SessionKey } from '../session/host'
 import type { Feed, LogEvent } from './ship-types'
 import { readWidth } from './drawer/width'
@@ -53,7 +54,9 @@ export type NexusState = {
  *  saved command the drawer started (`session`), one of its own. `key`: the session host's key while
  *  the tab shows its live terminal; null when it shows the conversation read-only, and `readOnly`
  *  says why. `label`, `sessionId`, `cwd`: what the tab knew of it as it opened, for when the ship
- *  no longer lists the figure (a merged robot leaves) or does not yet (a session just started). */
+ *  no longer lists the figure (a merged robot leaves) or does not yet (a session just started).
+ *  `source`: the CLI and home of a Grok session, whose conversation is read from its Grok home;
+ *  absent for a Claude one. */
 export type DrawerTab = {
   id: string
   kind: 'robot' | 'captain' | 'session'
@@ -62,6 +65,7 @@ export type DrawerTab = {
   label: string
   sessionId: string | null
   cwd: string | null
+  source?: FollowSource
 }
 
 /** The highlight follows the tab shown, and is cleared while the drawer is collapsed. */

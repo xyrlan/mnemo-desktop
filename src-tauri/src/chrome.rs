@@ -305,17 +305,36 @@ fn claude_running_now(pane_pid: u32) -> Result<bool, String> {
     claude_running(pane_pid, cached, now, crate::procs::parents(), fresh, children_of)
 }
 
-/// Whether a terminal pane runs Claude Code this moment: the gate before keys are typed into it.
-/// A shell at its prompt has no Claude in its terminal, which needs no `claude agents` (it may be
-/// failing, or `claude` missing: #460). Else a pid from the cached `claude agents` answer is
-/// checked live, so this is cheap and still refuses the moment Claude exits (`claude_running`). An
-/// error when the app cannot tell, which the person is told as that and not as "Claude is no
-/// longer running".
+/// `said`, what `claude agents` says of a pane, unless that is not a yes and Grok's TUI runs under
+/// the pane (`grok`): then yes. Whatever `claude agents` says or fails to (on a machine with only
+/// Grok accounts `claude` may be missing), a Grok TUI found is the agent CLI the pane runs. It is
+/// looked for only with a Grok account (`grok_accounts`), so a machine with only Claude accounts
+/// reads no command line, and only after a no, so a Claude found costs nothing more.
+pub fn or_grok(said: Result<bool, String>, grok_accounts: impl FnOnce() -> bool, grok: impl FnOnce() -> bool) -> Result<bool, String> {
+    if said == Ok(true) || !grok_accounts() {
+        return said;
+    }
+    if grok() {
+        Ok(true)
+    } else {
+        said
+    }
+}
+
+/// Whether a terminal pane runs an agent CLI this moment, Claude Code or Grok Build's TUI
+/// (`or_grok`): the gate before keys are typed into it. A shell at its prompt has none in its
+/// terminal, which needs no `claude agents` (it may be failing, or `claude` missing: #460). Else a
+/// pid from the cached `claude agents` answer is checked live, so this is cheap and still refuses
+/// the moment Claude exits (`claude_running`). An error when the app cannot tell, which the person
+/// is told as that and not as "Claude is no longer running".
 #[tauri::command]
 pub async fn chrome_claude_running(pane_pid: u32) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let shell = crate::procs::table().map(|t| shell_of(pane_pid, |p| t.children(p), crate::procs::image_of, crate::procs::groups));
-        claude_gate(shell, || claude_running_now(pane_pid))
+        claude_gate(shell, || {
+            let grok = || children_of().is_ok_and(|walk| grok_below(pane_pid, walk, process_args).is_some());
+            or_grok(claude_running_now(pane_pid), grok_accounts, grok)
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -444,14 +463,7 @@ pub async fn chrome_pane_runs(pane_pid: u32) -> Result<PaneRuns, String> {
                 None => Err(AGENTS_CANNOT_SAY.to_string()),
                 Some(agents) => Ok(!agents.is_empty() && session_below(pane_pid, &agents, |pids| table.children(pids)).is_some()),
             };
-            if said == Ok(true) || !grok_accounts() {
-                return said;
-            }
-            if grok_below(pane_pid, |pids| table.children(pids), process_args).is_some() {
-                Ok(true)
-            } else {
-                said
-            }
+            or_grok(said, grok_accounts, || grok_below(pane_pid, |pids| table.children(pids), process_args).is_some())
         };
         Ok(pane_runs(shell_of(pane_pid, |p| table.children(p), crate::procs::image_of, crate::procs::groups), claude))
     })
@@ -1106,6 +1118,26 @@ mod tests {
         assert_eq!(claude_gate(Ok(Shell::Bare), || -> Result<bool, String> { panic!("claude agents asked for a shell at its prompt") }), Ok(false));
         assert_eq!(claude_gate(Ok(Shell::Background), failing), Ok(false));
         assert_eq!(claude_gate(Ok(Shell::Busy), || Ok(true)), Ok(true));
+    }
+
+    #[test]
+    fn the_gate_lets_keys_into_a_pane_running_grok_s_tui_and_asks_nothing_more_for_claude() {
+        let unasked = || -> bool { panic!("grok looked for") };
+        let no_accounts = || -> bool { panic!("accounts read") };
+        // A Claude found: nothing about Grok is read.
+        assert_eq!(or_grok(Ok(true), no_accounts, unasked), Ok(true));
+        // Only Claude accounts: what `claude agents` said, byte for byte, its errors too.
+        assert_eq!(or_grok(Ok(false), || false, unasked), Ok(false));
+        assert_eq!(or_grok(Err(AGENTS_CANNOT_SAY.into()), || false, unasked), Err(AGENTS_CANNOT_SAY.to_string()));
+        // With a Grok account, its TUI under the pane passes, `claude` missing or not.
+        assert_eq!(or_grok(Ok(false), || true, || true), Ok(true));
+        assert_eq!(or_grok(Err(AGENTS_CANNOT_SAY.into()), || true, || true), Ok(true));
+        // None there: what `claude agents` said.
+        assert_eq!(or_grok(Ok(false), || true, || false), Ok(false));
+        assert_eq!(or_grok(Err(AGENTS_CANNOT_SAY.into()), || true, || false), Err(AGENTS_CANNOT_SAY.to_string()));
+        // Behind the gate: a shell at its prompt still runs nothing, Grok's TUI or not.
+        assert_eq!(claude_gate(Ok(Shell::Background), || or_grok(Ok(false), || true, || true)), Ok(false));
+        assert_eq!(claude_gate(Ok(Shell::Busy), || or_grok(Ok(false), || true, || true)), Ok(true));
     }
 
     #[test]

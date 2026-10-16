@@ -110,6 +110,21 @@ describe('a captain', () => {
     expect(c.sessions).toEqual([{ kind: 'claude', root: ROOT, resume: GONE }])
   })
 
+  test('ended: Resume runs on the account Home lists the session on, and names its own CLI', async () => {
+    const grok = { kind: 'grok' as const, config_dir: '/Users/you/.grok-work' }
+    const { c, menu } = setup({ agentOf: (id) => (id === GONE ? grok : null) })
+    const resume = item(menu({ kind: 'captain', id: GONE }), 'resume')
+    expect(resume.hint).toBe('grok -r')
+    await resume.run()
+    expect(c.sessions).toEqual([{ kind: 'claude', root: ROOT, resume: GONE, agent: grok }])
+    // A session no row lists: as before.
+    const plain = setup({ agentOf: () => null })
+    const again = item(plain.menu({ kind: 'captain', id: GONE }), 'resume')
+    expect(again.hint).toBe('claude --resume')
+    await again.run()
+    expect(plain.c.sessions).toEqual([{ kind: 'claude', root: ROOT, resume: GONE }])
+  })
+
   test('on a dock: Copy id copies its session id', async () => {
     const { c, menu } = setup()
     await item(menu({ kind: 'captain', id: DOCKED }), 'copy-id').run()

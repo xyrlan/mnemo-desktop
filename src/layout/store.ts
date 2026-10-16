@@ -783,6 +783,11 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
                 // Kept on the pane even when not resumed, so the saved layout keeps it too.
                 get().setSessionId(id, p.sessionId)
                 const resumable = !back && running !== 'unknown' && !running.has(p.sessionId)
+                // Always a Claude session: a tab is in a file only as the workbench saved it,
+                // before #460 removed it, and the app learned a Grok pane's session (`chrome.rs`,
+                // #494) only after. No tab has been saved since (`pocketTabs` empties them at
+                // launch, and nothing opens one), so a Grok session's pane is an offscreen one,
+                // which keeps its account (`Pane.agent`).
                 if (id > 0 && resumable) typeCommand(id, `claude --resume ${p.sessionId}`)
               }
             } else {

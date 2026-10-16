@@ -152,9 +152,13 @@ export function createSessions(d: StartDeps): Sessions {
     async openSession(spec) {
       if (spec.kind === 'claude') {
         const active = (d.agent ?? activeAgent)()
-        // The session's own account: the Grok one a pane of the app ran it on (`Pane.agent`), so
-        // it resumes on its own home whatever is active now (decision 6); else the active one.
-        const own = (spec.resume && Object.values(panes()).find((p) => p.sessionId === spec.resume && p.agent)?.agent) || active
+        // The session's own account, so it resumes on its own CLI and home whatever is active now
+        // (decision 6): the row's (`spec.agent`), else the Grok one a pane of the app ran it on
+        // (`Pane.agent`), else the active one. A Claude row's resumes on the active account while
+        // that is a Claude one, as it always did: switching Claude accounts moves its sessions
+        // (decision 7).
+        const row = spec.resume && spec.agent && (spec.agent.kind === 'grok' || spec.agent.kind !== active.kind) ? spec.agent : undefined
+        const own = row || (spec.resume && Object.values(panes()).find((p) => p.sessionId === spec.resume && p.agent)?.agent) || active
         const label = labelFor(spec, own.kind)
         const id = spec.resume ?? d.newId()
         const tab: DrawerTab = { id, kind: 'captain', key: null, readOnly: null, label, sessionId: id, cwd: spec.root }

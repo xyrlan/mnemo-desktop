@@ -1,11 +1,15 @@
+import type { Agent } from '../../agent/active'
 import type { PaneId } from '../../layout/tree'
 import { liveSessions } from './app'
 
 /** A session the drawer starts (spec `2026-10-15-nexus-app-design.md`, Q1, Q4): `claude` in a repo,
  *  or `claude --resume <id>`; a plain shell; a saved command. Each runs in a pane with no view on
- *  screen (the layout store stays the session registry) and opens in a drawer tab. */
+ *  screen (the layout store stays the session registry) and opens in a drawer tab. `claude` is the
+ *  agent CLI, whichever kind: `agent`, given with `resume`, is the account the session itself runs
+ *  on, so it resumes there (spec `2026-10-16-grok-accounts-design.md`, decision 6); without it, the
+ *  account a pane of the app ran it on, else the active one. */
 export type SessionSpec =
-  | { kind: 'claude'; root: string; resume?: string }
+  | { kind: 'claude'; root: string; resume?: string; agent?: Agent }
   | { kind: 'shell'; root: string }
   | { kind: 'command'; root: string; command: string; label: string }
 

@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from '@/ui'
+import { homeStore } from '../../home/app-store'
+import { sessionAgent } from '../../home/types'
 import { commandsFor } from '../../quick-commands/commands'
 import { settingsStore } from '../../settings/app-store'
 import { runAction } from '../command/actions'
@@ -18,6 +20,8 @@ const savedCommands = (root: string) => commandsFor(settingsStore.getState().qui
 export const appMenuDeps: MenuDeps = {
   openSession,
   paneOf,
+  // Home lists every session of every account, Grok's with their home.
+  agentOf: (id) => sessionAgent(homeStore.getState().snapshot, id),
   endSession,
   confirm,
   runAction,

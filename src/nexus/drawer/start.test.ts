@@ -139,6 +139,38 @@ test('a Grok session resumes on its own account and CLI whatever is active now; 
   }
 })
 
+test('a resume names the row’s own account: a Grok row’s runs on it whatever is active; a Claude row’s on the active Claude account as before, on its own while Grok is active', async () => {
+  vi.useFakeTimers()
+  try {
+    let active: Agent = { kind: 'claude', config_dir: '/Users/me/.claude-work' }
+    const w = world({ skip: false, agent: () => active })
+    const G = '0199aaaa-0000-7000-8000-000000000001'
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: G, agent: GROK_WORK })
+    expect(tabs()).toEqual([{ id: G, kind: 'captain', key: 'pane:1', label: 'grok · mnemo' }])
+    expect(w.layout.getState().panes[1]).toMatchObject({ sessionId: G, agent: GROK_WORK })
+    // A Claude row with a Claude account active: typed exactly as before, the row's account aside.
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'claude-1', agent: { kind: 'claude', config_dir: null } })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'claude-2' })
+    // A Claude row while a Grok account is active: its own CLI, on its own account.
+    active = GROK_WORK
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'claude-3', agent: { kind: 'claude', config_dir: null } })
+    // The default Grok account (`~/.grok`, GROK_HOME unset) while another Grok account is active.
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: G.replace('1', '2'), agent: { kind: 'grok', config_dir: null } })
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(w.writes).toEqual([
+      [1, `env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r ${G}\n`],
+      [2, 'claude --resume claude-1\n'],
+      [3, 'claude --resume claude-2\n'],
+      [4, 'env -u CLAUDE_CONFIG_DIR MNEMO_AGENT=claude claude --resume claude-3\n'],
+      [5, `env -u GROK_HOME MNEMO_AGENT=grok grok --leader -r ${G.replace('1', '2')}\n`],
+    ])
+    expect(tabs().map((t) => t.label)).toEqual(['grok · mnemo', 'claude · mnemo', 'claude · mnemo', 'claude · mnemo', 'grok · mnemo'])
+    expect([2, 3, 4].map((p) => w.layout.getState().panes[p].agent)).toEqual([undefined, undefined, undefined])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('a resume of a session a pane of the app runs already shows that pane: nothing is started', async () => {
   const w = world({ runs: running([2]) })
   await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo-desktop', resume: 'ended-1' })

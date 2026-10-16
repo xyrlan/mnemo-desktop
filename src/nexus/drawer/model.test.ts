@@ -1,5 +1,5 @@
-import { captainOf, reposFixture, shipFixture } from './fixtures'
-import { crumbsOf, deepestWorktree, findFigure, labelOf, OUTSIDE, openingOf, repoOf, stateOf, tokens } from './model'
+import { captainOf, child, parent, reposFixture, robotOf, shipFixture } from './fixtures'
+import { CHILD_ENDED, crumbsOf, deepestWorktree, ENDED, findFigure, labelOf, OUTSIDE, openingOf, repoOf, stateOf, tokens } from './model'
 
 test('a robot’s breadcrumbs: repo, its captain (opens it), itself with its twin suffix', () => {
   const ship = shipFixture()
@@ -54,4 +54,28 @@ test('a session’s repo: the fleet’s repo holding its cwd, else the <repo> a 
   expect(repoOf('/trees/feature-x/src', repos)).toEqual({ root: '/work/mnemo-desktop', name: 'mnemo-desktop' })
   expect(repoOf('/work/mnemo-wt-90/src', repos)).toEqual({ root: '/work/mnemo', name: 'mnemo' })
   expect(repoOf('/elsewhere/plain', repos)).toBeNull()
+})
+
+test('a Grok row’s read-only tab reads its conversation from its own Grok home; a Claude row’s tab is as it was', () => {
+  const claude = shipFixture()
+  const before = ['cap-2', 'cap-3', 'r-done'].map((id) => openingOf(id, claude, reposFixture)!.tab)
+  expect(before.map((t) => t.readOnly)).toEqual([OUTSIDE, ENDED, CHILD_ENDED])
+  for (const t of before) expect(Object.keys(t).sort()).toEqual(['cwd', 'id', 'key', 'kind', 'label', 'readOnly', 'sessionId'])
+  // A Claude row that names its account (more than one account) is a Claude transcript still.
+  const named = shipFixture()
+  named.decks[0].captains[1] = captainOf({ id: 'cap-2', parent: parent({ session_id: 'cap-2', account_env: { config_dir: '/Users/you/.claude-work', kind: 'claude' } }), pose: 'idle' })
+  expect(openingOf('cap-2', named, reposFixture)!.tab).not.toHaveProperty('source')
+
+  const ship = shipFixture()
+  ship.decks[0].captains[1] = captainOf({ id: 'cap-2', parent: parent({ session_id: 'cap-2', account: 'gw', account_env: { config_dir: '/Users/you/.grok-work', kind: 'grok' } }), pose: 'idle' })
+  ship.decks[0].hangar[0] = robotOf({
+    child: child({ id: 'r-done', session_id: 's-done', live: false, account: 'grok', account_env: { config_dir: null, kind: 'grok' } }),
+    label: '#401',
+    twin: null,
+    state: 'done',
+    zone: 'hangar',
+  })
+  expect(openingOf('cap-2', ship, reposFixture)).toMatchObject({ ref: null, tab: { readOnly: OUTSIDE, sessionId: 'cap-2', source: { kind: 'grok', home: '/Users/you/.grok-work' } } })
+  // `~/.grok`'s account runs with GROK_HOME unset: every Grok home is searched.
+  expect(openingOf('r-done', ship, reposFixture)).toMatchObject({ ref: null, tab: { readOnly: CHILD_ENDED, sessionId: 's-done', source: { kind: 'grok', home: null } } })
 })

@@ -468,3 +468,14 @@ test('nexus-docks: the docks at full strength, a parent idle over an hour asleep
 test('an unknown scenario names the ones there are', async () => {
   await assert.rejects(shoot({ scenario: 'nope', out: path.join(dir, 'x.png') }), /no scenario named nope \(have: .*empty-workspace/)
 })
+
+test('nexus-grok-conversation: a Grok captain outside the app opens on its conversation, read from its own Grok home (#492)', async () => {
+  const out = path.join(dir, 'grok-conversation.png')
+  const { unanswered, pageErrors, inspected } = await shoot({ scenario: 'nexus-grok-conversation', out, settleMs: 1200, log: () => {}, inspect: look })
+  assert.deepEqual(unanswered, [])
+  assert.deepEqual(pageErrors, [])
+  assert.equal(inspected.drawer, true)
+  assert.match(inspected.text, /Tidy docs\/RELEASE\.md: one line per change/)
+  assert.match(inspected.text, /DONE/)
+  assert.doesNotMatch(inspected.text, /waiting for the transcript/)
+})

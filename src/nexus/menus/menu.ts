@@ -1,3 +1,4 @@
+import type { Agent } from '../../agent/active'
 import type { PaneId } from '../../layout/tree'
 import { captainById, isGreen, isRunning, otherRepo, repoRootOf, robotById } from '../command/find'
 import type { SessionSpec } from '../drawer/open'
@@ -10,6 +11,9 @@ export type MenuDeps = {
   openSession(spec: SessionSpec): Promise<void>
   /** The pane the app runs Claude session `sessionId` in, else null. */
   paneOf(sessionId: string): PaneId | null
+  /** The account session `sessionId` runs on, as a row that lists it says (Home's), else null:
+   *  a resume runs on it, its own CLI and home. */
+  agentOf?(sessionId: string): Agent | null
   endSession(pane: PaneId): Promise<void>
   confirm(opts: ConfirmOptions): Promise<boolean>
   runAction(action: ShipAction, ship: Ship): Promise<ActionResult>
@@ -70,11 +74,13 @@ export function makeShipMenu(d: MenuDeps): MenuProvider {
     const parent = c.parent
     if (!parent) {
       const root = rootOfCaptain(ship, c.id)
+      const agent = d.agentOf?.(c.id) ?? null
+      const hint = agent?.kind === 'grok' ? 'grok -r' : 'claude --resume'
       return [
         { id: 'open', label: 'Open', hint: 'its session ended', disabled: true, run: () => {} },
         root === null
           ? { id: 'resume', label: 'Resume', hint: 'no repo to resume it in', disabled: true, run: () => {} }
-          : { id: 'resume', label: 'Resume', hint: 'claude --resume', run: guarded(() => d.openSession({ kind: 'claude', root, resume: c.id })) },
+          : { id: 'resume', label: 'Resume', hint, run: guarded(() => d.openSession({ kind: 'claude', root, resume: c.id, ...(agent ? { agent } : {}) })) },
         copy(c.id),
       ]
     }
