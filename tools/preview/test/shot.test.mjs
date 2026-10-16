@@ -107,6 +107,101 @@ for (const [scenario, size] of [
   })
 }
 
+/** The drawer's header as drawn (#467): its pills (each with its label's box and whether it
+ *  overflows it), the `+N` pill, the shown session's line, and any name line inside the panel. */
+const header = (page) =>
+  page.evaluate(() => {
+    const box = (e) => {
+      const r = e.getBoundingClientRect()
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+    }
+    const drawn = (e) => e && !e.hasAttribute('data-overflow') && getComputedStyle(e).visibility !== 'hidden'
+    const strip = document.querySelector('[data-drawer-head] .dw-pills')
+    const pills = [...document.querySelectorAll('[data-drawer-tab]')].map((p) => {
+      const label = p.querySelector('[data-drawer-tab-label]')
+      return { id: p.getAttribute('data-drawer-tab'), text: p.textContent, drawn: drawn(p), active: p.getAttribute('aria-selected') === 'true', box: box(p), label: box(label), clipped: label.scrollWidth > label.clientWidth }
+    })
+    const more = document.querySelector('[data-drawer-more]')
+    const panel = [...document.querySelectorAll('[data-drawer-panel]')].find((p) => getComputedStyle(p).display !== 'none')
+    return {
+      heads: document.querySelectorAll('[data-drawer-head]').length,
+      lines: [...document.querySelectorAll('[data-drawer-line]')].map(box),
+      strip: box(strip),
+      pills,
+      more: drawn(more) ? { text: more.textContent, box: box(more) } : null,
+      panel: panel ? box(panel) : null,
+      inPanel: panel ? panel.querySelectorAll('[data-drawer-line], [data-drawer-crumbs], [data-drawer-name], [data-drawer-state]').length : -1,
+    }
+  })
+
+const overlap = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5
+
+/** The guard of #467: one header above the panel, every pill drawn readable and apart, two rows at most. */
+function assertOneHeader(h) {
+  assert.equal(h.heads, 1)
+  assert.equal(h.lines.length, 1, 'the shown session is said once')
+  assert.ok(h.panel, 'a panel is shown')
+  assert.ok(h.lines[0].bottom <= h.panel.top + 0.5, 'the session line is above the panel')
+  assert.equal(h.inPanel, 0, 'no second name line inside the panel')
+  const drawn = h.pills.filter((p) => p.drawn)
+  const boxes = [...drawn.map((p) => [p.text, p.box]), ...(h.more ? [[h.more.text, h.more.box]] : [])]
+  for (const p of drawn) {
+    assert.ok(!p.clipped, `${p.text}: its label is cut short`)
+    assert.ok(p.label.left >= p.box.left - 0.5 && p.label.right <= p.box.right + 0.5, `${p.text}: its label is wider than its pill`)
+  }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!overlap(boxes[i][1], boxes[j][1]), `${boxes[i][0]} overlaps ${boxes[j][0]}`)
+  for (const [text, b] of boxes) assert.ok(b.top >= h.strip.top - 0.5 && b.bottom <= h.strip.bottom + 0.5 && b.right <= h.strip.right + 0.5, `${text} is outside the header`)
+  assert.ok(new Set(boxes.map(([, b]) => Math.round(b.top))).size <= 2, 'two rows at most')
+  assert.ok(drawn.some((p) => p.active), 'the shown session’s pill is drawn')
+}
+
+for (const [size, drawer] of [
+  [{ width: 1440, height: 900 }, 'wide'],
+  [{ width: 1000, height: 760 }, '420 px'],
+]) {
+  test(`nexus-drawer at ${size.width}x${size.height} (drawer ${drawer}): one header, all seven pills readable (#467)`, async () => {
+    const out = path.join(dir, `nexus-drawer-${size.width}.png`)
+    const { pageErrors, inspected: h } = await shoot({ scenario: 'nexus-drawer', out, size, log: () => {}, inspect: header })
+    assert.deepEqual(pageErrors, [])
+    assertOneHeader(h)
+    assert.deepEqual(
+      h.pills.filter((p) => p.drawn).map((p) => p.text),
+      ['#465', '◆ Subscriber', '#471', '$ mnemo-desktop', '● Windows build', '#482', '$ mnemo'],
+    )
+    assert.equal(h.more, null)
+  })
+}
+
+test('nexus-drawer at the narrowest drawer (380 px): two rows, then +N, whose menu shows the rest (#467)', async () => {
+  const out = path.join(dir, 'nexus-drawer-940.png')
+  const { pageErrors, inspected } = await shoot({
+    scenario: 'nexus-drawer',
+    out,
+    size: { width: 940, height: 760 },
+    log: () => {},
+    inspect: async (page) => {
+      const before = await header(page)
+      await page.click('[data-drawer-more]')
+      const items = await page.$$eval('[data-nx-menu] [role="menuitem"]', (els) => els.map((e) => e.textContent))
+      await page.click('[data-nx-menu] [role="menuitem"]')
+      return { before, items, after: await header(page) }
+    },
+  })
+  assert.deepEqual(pageErrors, [])
+  const { before, items, after } = inspected
+  assertOneHeader(before)
+  const hidden = before.pills.filter((p) => !p.drawn)
+  assert.ok(hidden.length > 0, 'some pills are behind +N')
+  assert.equal(before.more?.text, `+${hidden.length}`)
+  assert.equal(new Set(before.pills.filter((p) => p.drawn).map((p) => Math.round(p.box.top))).size, 2, 'the pills wrap to two rows')
+  assert.equal(items.length, hidden.length)
+  // Picked from the menu, a session is shown, and its pill drawn.
+  assertOneHeader(after)
+  const picked = after.pills.find((p) => p.active)
+  assert.equal(picked.id, hidden[0].id)
+  assert.ok(picked.drawn)
+})
+
 test('an unknown scenario names the ones there are', async () => {
   await assert.rejects(shoot({ scenario: 'nope', out: path.join(dir, 'x.png') }), /no scenario named nope \(have: .*empty-workspace/)
 })

@@ -97,8 +97,9 @@ async function startVite() {
 }
 
 /**
- * Wires a page to a scenario before it navigates: the Tauri stand-in as an init script, and
- * `window.__previewIpc` calling the scenario's `ipc` in Node. Commands the scenario answers
+ * Wires a page to a scenario before it navigates: the Tauri stand-in as an init script, the
+ * scenario's `storage` in `localStorage`, and `window.__previewIpc` calling the scenario's `ipc`
+ * in Node. Commands the scenario answers
  * `undefined` to are added to `unanswered`.
  */
 export async function preparePage(page, setup, { trace = false, log = () => {}, unanswered = new Set() } = {}) {
@@ -116,6 +117,12 @@ export async function preparePage(page, setup, { trace = false, log = () => {}, 
     }
   })
   await page.addInitScript(installTauriMock, { events: setup.events ?? [] })
+  // What the app kept from a last run (the drawer's tabs, its width), there before its code runs.
+  if (Object.keys(setup.storage ?? {}).length) {
+    await page.addInitScript((storage) => {
+      for (const [k, v] of Object.entries(storage)) localStorage.setItem(k, v)
+    }, setup.storage)
+  }
   return unanswered
 }
 

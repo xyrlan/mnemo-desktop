@@ -12,6 +12,7 @@ test('scenario() keeps ipc and events, defaulting events to none', () => {
   scenario('reg-a', { ipc })
   assert.equal(getScenario('reg-a').ipc, ipc)
   assert.deepEqual(getScenario('reg-a').events, [])
+  assert.deepEqual(getScenario('reg-a').storage, {})
 })
 
 test('scenario() refuses a bad name, a missing ipc, a bad event and a second registration', () => {
@@ -19,6 +20,7 @@ test('scenario() refuses a bad name, a missing ipc, a bad event and a second reg
   assert.throws(() => scenario('reg-b', {}), /ipc must be a function/)
   assert.throws(() => scenario('reg-c', { ipc: () => {}, events: [{ payload: 1 }] }), /event/)
   assert.throws(() => scenario('reg-d', { ipc: () => {}, events: [{ event: 'e', payload: 1, afterMs: -1 }] }), /afterMs/)
+  assert.throws(() => scenario('reg-f', { ipc: () => {}, storage: { k: 1 } }), /storage values are strings/)
   scenario('reg-e', { ipc: () => {} })
   assert.throws(() => scenario('reg-e', { ipc: () => {} }), /twice/)
 })
