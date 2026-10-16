@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
+import { AGENT_KINDS, KIND_LABEL, kindOf, type AgentKind } from '../../agent/kind'
 import { age, limitName, percentNow, resetsWhen, tone } from '../../accounts/format'
 import { useAccounts, useAccountsStore, type Usage } from '../../accounts/store'
 import type { Account, PlanLimit } from '../../accounts/types'
 import { pollWhileShown } from '../../shell/while-shown'
 import { confirm } from '../ui/confirm'
 import { inTerminal } from '../windows/setup/terminal'
+import { envOfAccount } from '../../mission/account'
 import { signInCommand } from './sign-in'
 import './accounts.css'
 
@@ -82,10 +84,12 @@ function Limit({ limit, now }: { limit: PlanLimit; now: number }) {
   )
 }
 
-/** What an account's usage reads: every limit, or why there is none, and how old an old reading is. */
-function AccountUsage({ entry, now }: { entry: Usage | undefined; now: number }) {
+/** What an account's usage reads: every limit, or why there is none, and how old an old reading is.
+ *  A Grok account's is its credit usage, and says so when it cannot be read. */
+function AccountUsage({ entry, now, kind }: { entry: Usage | undefined; now: number; kind: AgentKind }) {
   const usage = entry?.usage
-  if (!usage) return <p className="nx-acct-line nx-muted">{entry?.error ? `No usage: ${entry.error}` : 'Reading usage…'}</p>
+  const what = kind === 'grok' ? 'credit usage' : 'usage'
+  if (!usage) return <p className="nx-acct-line nx-muted">{entry?.error ? `No ${what}: ${entry.error}` : `Reading ${what}…`}</p>
   return (
     <>
       {usage.limits.length ? (
@@ -117,9 +121,11 @@ type Props = {
   onTerminal(): void
 }
 
-function AccountCard({ account, active, entry, now, renaming, setRenaming, onTerminal, fail }: Props & {
+function AccountCard({ account, active, entry, now, renaming, setRenaming, onTerminal, fail, mixed }: Props & {
   account: Account
   active: boolean
+  /** The list holds more than one kind: each account says its own. */
+  mixed: boolean
   entry: Usage | undefined
   renaming: boolean
   setRenaming(on: boolean): void
@@ -128,6 +134,7 @@ function AccountCard({ account, active, entry, now, renaming, setRenaming, onTer
   const store = useAccountsStore()
   const [sharing, setSharing] = useState(false)
   const plan = entry?.usage?.plan
+  const kind = kindOf(account.kind)
   const remove = async () => {
     const ok = await confirm({
       title: `Remove ${account.label}?`,
@@ -166,6 +173,11 @@ function AccountCard({ account, active, entry, now, renaming, setRenaming, onTer
             <span className="nx-acct-who">
               <span className="nx-acct-name">
                 {account.label}
+                {mixed && (
+                  <span className="nx-acct-plan" data-kind={kind}>
+                    {KIND_LABEL[kind]}
+                  </span>
+                )}
                 {plan && <span className="nx-acct-plan">{plan}</span>}
               </span>
               <span className="nx-acct-email nx-muted">{account.email ?? 'no email yet'}</span>
@@ -179,7 +191,11 @@ function AccountCard({ account, active, entry, now, renaming, setRenaming, onTer
               type="button"
               className="nx-btn"
               aria-label={`Sign in to ${account.label}`}
-              title={`Opens a terminal running claude on ${account.label}: it asks to log in, or type /login there`}
+              title={
+                kind === 'grok'
+                  ? `Opens a terminal running grok login on ${account.label}`
+                  : `Opens a terminal running claude on ${account.label}: it asks to log in, or type /login there`
+              }
               onClick={() => void signIn()}
             >
               Sign in
@@ -212,15 +228,28 @@ function AccountCard({ account, active, entry, now, renaming, setRenaming, onTer
           {sharing ? 'Sharing…' : 'Share with the default account'}
         </button>
       )}
-      <AccountUsage entry={entry} now={now} />
+      <AccountUsage entry={entry} now={now} kind={kind} />
     </li>
   )
 }
 
-/** Every Claude account with its plan usage, in the ship's look: the active one is marked and a
- *  click on another switches. Accounts are added (a terminal opens on the new one to log in),
- *  renamed, signed in to again and removed (after a confirmation) here. Draws nothing until the
- *  accounts are known. */
+/** The CLI a new account runs: Claude Code or Grok Build, chosen as it is added. */
+function KindPicker({ kind, onPick }: { kind: AgentKind; onPick(kind: AgentKind): void }) {
+  return (
+    <div className="nx-acct-form" role="group" aria-label="New account's CLI">
+      {AGENT_KINDS.map((k) => (
+        <button key={k} type="button" className="nx-btn" aria-pressed={k === kind} data-tone={k === kind ? 'go' : undefined} onClick={() => onPick(k)}>
+          {KIND_LABEL[k]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Every Claude Code and Grok Build account with its usage, in the ship's look: the active one is
+ *  marked and a click on another switches; new sessions run on its CLI. Accounts are added (of the
+ *  kind chosen; a terminal opens on the new one to log in), renamed, signed in to again and removed
+ *  (after a confirmation) here. Draws nothing until the accounts are known. */
 export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
   const store = useAccountsStore()
   const state = useAccounts((s) => s.state)
@@ -229,8 +258,12 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
   const note = useAccounts((s) => s.note)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [adding, setAdding] = useState<'no' | 'asking' | 'busy'>('no')
+  const [kind, setKind] = useState<AgentKind>('claude')
   const [failed, setFailed] = useState<string | null>(null)
   if (!state) return null
+  const mixed = new Set(state.accounts.map((a) => kindOf(a.kind))).size > 1
+  // Where a new Grok account goes (`Place::add`): `~/.grok` while no account is there.
+  const grokHomeTaken = state.accounts.some((a) => envOfAccount(a).kind === 'grok' && envOfAccount(a).config_dir === null)
   return (
     <div className="nx-accts" data-accounts-panel="">
       <p className="nx-acct-line nx-muted">New sessions run on the marked account.</p>
@@ -246,6 +279,7 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
             setRenaming={(on) => setRenaming(on ? a.id : null)}
             onTerminal={onTerminal}
             fail={setFailed}
+            mixed={mixed}
           />
         ))}
       </ul>
@@ -265,13 +299,21 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
           ),
       )}
       {adding === 'no' ? (
-        <button type="button" className="nx-btn nx-acct-add" onClick={() => setAdding('asking')}>
+        <button
+          type="button"
+          className="nx-btn nx-acct-add"
+          onClick={() => {
+            setKind('claude')
+            setAdding('asking')
+          }}
+        >
           + Add account
         </button>
       ) : adding === 'busy' ? (
         <p className="nx-acct-line nx-muted">Adding…</p>
       ) : (
-        <div>
+        <div className="nx-accts">
+          <KindPicker kind={kind} onPick={setKind} />
           <NameInput
             initial=""
             placeholder="New account's name"
@@ -279,13 +321,17 @@ export function AccountsList({ now, onTerminal }: Props): JSX.Element | null {
             onCancel={() => setAdding('no')}
             onSave={async (label) => {
               setAdding('busy')
-              const account = await store.getState().add(label)
+              const account = await store.getState().add(label, kind)
               setAdding(account ? 'no' : 'asking')
               // Its login terminal opened in a drawer tab, as Sign in's does: the list gives way to it.
               if (account) onTerminal()
             }}
           />
-          <p className="nx-acct-line nx-muted">A terminal opens on it for you to log in. The account you are on stays active.</p>
+          <p className="nx-acct-line nx-muted">
+            {kind === 'grok'
+              ? `A terminal opens on it running grok login. ${grokHomeTaken ? 'It gets a folder of its own, ~/.grok-<name>.' : 'It is ~/.grok, with the login grok has there already.'} The account you are on stays active.`
+              : 'A terminal opens on it for you to log in. The account you are on stays active.'}
+          </p>
         </div>
       )}
     </div>

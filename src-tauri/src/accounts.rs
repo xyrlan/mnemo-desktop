@@ -1,14 +1,21 @@
-//! Claude Code accounts: which config dir the panes opened from now on run in
-//! (`docs/superpowers/specs/2026-10-07-claude-accounts-design.md`, decisions 1 to 4).
+//! Claude Code and Grok Build accounts: which config dir the panes opened from now on run in, and
+//! on which CLI (`docs/superpowers/specs/2026-10-07-claude-accounts-design.md`, decisions 1 to 4;
+//! `2026-10-16-grok-accounts-design.md`, decisions 1 and 2).
 //!
-//! An account is a Claude Code config dir. The default one is `~/.claude`, run with
+//! A Claude account is a Claude Code config dir. The default one is `~/.claude`, run with
 //! `CLAUDE_CONFIG_DIR` unset; every other one is `~/.claude-<slug>`, its own login, with the
 //! user's content and history linked to `~/.claude`'s (`SHARED`). Its `.claude.json` stays its own
 //! (the login is in it), but its user-scope `mcpServers` follow the default account's.
 //!
+//! A Grok account is a Grok home: `~/.grok`, run with `GROK_HOME` unset, or `~/.grok-<slug>`, run
+//! with it set. Its login is its `auth.json`. Nothing is linked into it and nothing is brought in
+//! step: Grok reads the user's Claude hooks, `CLAUDE.md`, skills and MCP servers from `~/.claude`
+//! itself. The default account is always the Claude one.
+//!
 //! The list is `accounts.json` in the app dir, written here and read directly by others. No file
 //! means one account, the default, active.
 
+use crate::agent_kind::AgentKind;
 use crate::commands::PtyState;
 use crate::pty::PaneId;
 use serde::{Deserialize, Serialize};
@@ -33,6 +40,14 @@ pub const PANES_FILE: &str = "account-panes.json";
 /// In an account's dir: what `share` moved out of a shared entry's place and could not put in
 /// `~/.claude`'s, under the time of the move. Not Claude Code's, and never linked.
 const ASIDE: &str = "unshared";
+/// In a Grok home: its login (grok 1.0.60, `xai-grok-login/src/storage.rs`). A map from scope to
+/// one credential, each with its `key` and, for a sign-in, the account's `email`.
+const GROK_AUTH: &str = "auth.json";
+/// The leader's socket in a Grok home: `<home>/leader.sock` (spec: Facts).
+const LEADER_SOCK: &str = "leader.sock";
+/// The longest Unix socket path the platform takes: `sun_path` is 104 bytes on macOS and 108 on
+/// Linux, the NUL included. A Grok home whose leader socket is longer cannot run a leader.
+const SOCKET_PATH_MAX: usize = if cfg!(target_os = "macos") { 103 } else { 107 };
 
 /// What a non-default account shares with `~/.claude`, as links: the user's content and history
 /// (decision 3). Everything else there — the login, `.claude.json`, the daemon and its jobs,
@@ -64,7 +79,8 @@ enum Kind {
     File,
 }
 
-/// One account as `accounts.json` keeps it.
+/// One account as `accounts.json` keeps it. An entry without `kind` is a Claude one: every file
+/// written before Grok accounts reads as it did.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Entry {
@@ -73,6 +89,19 @@ struct Entry {
     config_dir: PathBuf,
     #[serde(default)]
     is_default: bool,
+    #[serde(default)]
+    kind: AgentKind,
+}
+
+impl Entry {
+    /// Whether its CLI runs it with the kind's variable unset: the default account, and the Grok
+    /// account at `~/.grok` (`add` makes no other dir of that name).
+    fn runs_unset(&self) -> bool {
+        match self.kind {
+            AgentKind::Claude => self.is_default,
+            AgentKind::Grok => self.config_dir.file_name().is_some_and(|n| n == AgentKind::Grok.default_dir_name()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +117,7 @@ pub struct Account {
     pub label: String,
     pub config_dir: String,
     pub is_default: bool,
+    pub kind: AgentKind,
     pub email: Option<String>,
     pub problem: Option<String>,
     /// The shared entries that are the account's own and not the link: `Place::share` puts them
@@ -109,11 +139,13 @@ pub struct AccountsState {
     pub accounts: Vec<Account>,
 }
 
-/// The account a pane spawned now runs on: its id, and the `CLAUDE_CONFIG_DIR` it gets (`None`:
-/// unset, the default account).
+/// The account a pane spawned now runs on: its id, its kind, and the dir it gets in the kind's
+/// variable, `CLAUDE_CONFIG_DIR` or `GROK_HOME` (`None`: unset, the default account or the Grok
+/// account at `~/.grok`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneAccount {
     pub id: String,
+    pub kind: AgentKind,
     pub config_dir: Option<PathBuf>,
 }
 
@@ -199,7 +231,7 @@ impl Place {
     }
 
     fn default_entry(&self) -> Entry {
-        Entry { id: DEFAULT_ID.into(), label: "Default".into(), config_dir: self.default_dir(), is_default: true }
+        Entry { id: DEFAULT_ID.into(), label: "Default".into(), config_dir: self.default_dir(), is_default: true, kind: AgentKind::Claude }
     }
 
     /// The account's `.claude.json`: `~/.claude.json` for the default account (decision 1).
@@ -218,9 +250,9 @@ impl Place {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => List { active: DEFAULT_ID.into(), accounts: vec![] },
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
-        // The default account is always there, first, and always `~/.claude`.
+        // The default account is always there, first, always `~/.claude`, and always Claude's.
         let default_dir = self.default_dir();
-        match list.accounts.iter().position(|e| e.is_default) {
+        match list.accounts.iter().position(|e| e.is_default && e.kind == AgentKind::Claude) {
             Some(i) => {
                 let mut d = list.accounts.remove(i);
                 d.config_dir = default_dir;
@@ -249,6 +281,9 @@ impl Place {
     }
 
     fn account(&self, e: &Entry, default_servers: &Map<String, Value>) -> Account {
+        if e.kind == AgentKind::Grok {
+            return grok_account(e);
+        }
         let config = read_json(&self.claude_json(e));
         let email = config.pointer("/oauthAccount/emailAddress").and_then(Value::as_str).map(String::from);
         let mut problems = vec![];
@@ -289,6 +324,7 @@ impl Place {
             label: e.label.clone(),
             config_dir: e.config_dir.display().to_string(),
             is_default: e.is_default,
+            kind: e.kind,
             email,
             problem: (!problems.is_empty()).then(|| problems.join(" ")),
             unshared,
@@ -333,11 +369,16 @@ impl Place {
         Ok(self.state_of(&list))
     }
 
-    /// A new account in `~/.claude-<slug>`, made active so the terminal opened next logs in to
-    /// it. Never logs in. A dir already there (an account removed earlier) is taken as it is.
-    /// Refused, and undone, when a shared entry cannot be linked: the account would log in and
-    /// work with nothing of the default account's, hooks included (#311).
-    pub fn add(&self, label: &str) -> Result<Account, String> {
+    /// A new account of `kind`, made active so the terminal opened next logs in to it. Never logs
+    /// in. A dir already there (an account removed earlier, or the user's own `~/.grok`) is taken
+    /// as it is.
+    /// - Claude: `~/.claude-<slug>`. Refused, and undone, when a shared entry cannot be linked:
+    ///   the account would log in and work with nothing of the default account's, hooks included
+    ///   (#311).
+    /// - Grok: `~/.grok` while no account in the list is there, so the login `grok` already has
+    ///   is the first Grok account; `~/.grok-<slug>` after that. Nothing is linked into it.
+    ///   Refused when its leader socket would be too long for the platform (spec: Facts).
+    pub fn add(&self, label: &str, kind: AgentKind) -> Result<Account, String> {
         let label = label.trim();
         if label.is_empty() {
             return Err("an account needs a name".into());
@@ -349,7 +390,27 @@ impl Place {
             .map(|n| if n == 1 { base.clone() } else { format!("{base}-{n}") })
             .find(|id| id != DEFAULT_ID && !list.accounts.iter().any(|e| &e.id == id))
             .expect("some suffix is free");
-        let entry = Entry { id: id.clone(), label: label.to_string(), config_dir: self.home.join(format!(".claude-{id}")), is_default: false };
+        let grok_default = self.home.join(AgentKind::Grok.default_dir_name());
+        let config_dir = match kind {
+            AgentKind::Grok if !list.accounts.iter().any(|e| e.config_dir == grok_default) => grok_default,
+            _ => self.home.join(format!("{}{id}", kind.account_dir_prefix())),
+        };
+        let entry = Entry { id: id.clone(), label: label.to_string(), config_dir, is_default: false, kind };
+        if kind == AgentKind::Grok {
+            let sock = entry.config_dir.join(LEADER_SOCK);
+            let len = sock.as_os_str().len();
+            if len > SOCKET_PATH_MAX {
+                return Err(format!(
+                    "{label} was not added: Grok could not run its leader in {}, because the socket path there would be {len} bytes and this system takes at most {SOCKET_PATH_MAX}. Give it a shorter name.",
+                    entry.config_dir.display()
+                ));
+            }
+            std::fs::create_dir_all(&entry.config_dir).map_err(|e| format!("{}: {e}", entry.config_dir.display()))?;
+            list.accounts.push(entry.clone());
+            list.active = id;
+            self.save(&list)?;
+            return Ok(grok_account(&entry));
+        }
         let was_there = entry.config_dir.exists();
         std::fs::create_dir_all(&entry.config_dir).map_err(|e| format!("{}: {e}", entry.config_dir.display()))?;
         let linked = self.link_shared(&entry);
@@ -420,6 +481,9 @@ impl Place {
             if e.is_default {
                 return Err("the default account is what the others share".into());
             }
+            if e.kind == AgentKind::Grok {
+                return Err(format!("{} is a Grok account: it shares nothing with the default account.", e.label));
+            }
             *sharing() = Some(e.config_dir.clone());
             (e, Sharing)
         };
@@ -471,7 +535,7 @@ impl Place {
         let _m = moving();
         let _g = lock();
         let list = self.load()?;
-        for e in list.accounts.iter().filter(|e| !e.is_default) {
+        for e in list.accounts.iter().filter(|e| !e.is_default && e.kind == AgentKind::Claude) {
             if e.config_dir.is_dir() {
                 self.bring_in_step(e);
             }
@@ -582,21 +646,59 @@ impl Place {
             List { active: DEFAULT_ID.into(), accounts: vec![self.default_entry()] }
         });
         let e = list.accounts.iter().find(|e| e.id == list.active).unwrap_or(&list.accounts[0]);
-        PaneAccount { id: e.id.clone(), config_dir: (!e.is_default).then(|| e.config_dir.clone()) }
+        PaneAccount { id: e.id.clone(), kind: e.kind, config_dir: (!e.runs_unset()).then(|| e.config_dir.clone()) }
     }
+}
+
+/// A Grok account as the list shows it: the email of its login, and `problem` when it has none.
+/// Nothing of the default account's is its concern, so `unshared` is always empty.
+fn grok_account(e: &Entry) -> Account {
+    let (email, problem) = match grok_login(&e.config_dir.join(GROK_AUTH)) {
+        Login::None => (None, Some("Not logged in yet.".to_string())),
+        Login::Empty => (None, Some(format!("Not logged in yet: its {GROK_AUTH} holds no login."))),
+        Login::In(email) => (email, None),
+    };
+    Account { id: e.id.clone(), label: e.label.clone(), config_dir: e.config_dir.display().to_string(), is_default: false, kind: e.kind, email, problem, unshared: vec![] }
+}
+
+enum Login {
+    /// No `auth.json`, or one that does not read.
+    None,
+    /// An `auth.json` with no credential in it.
+    Empty,
+    /// Signed in, as this email when the credential names one (an API key names none).
+    In(Option<String>),
+}
+
+/// What a Grok home's `auth.json` says of its login. Read for the email only: no token leaves it.
+fn grok_login(path: &Path) -> Login {
+    let Some(scopes) = read_json(path).as_object().cloned() else {
+        // Grok reads an empty file as no login too (`read_auth_json_as`).
+        return if std::fs::read_to_string(path).is_ok_and(|t| t.trim().is_empty()) { Login::Empty } else { Login::None };
+    };
+    let signed: Vec<&Value> = scopes.values().filter(|c| c.get("key").and_then(Value::as_str).is_some_and(|k| !k.is_empty())).collect();
+    if signed.is_empty() {
+        return Login::Empty;
+    }
+    Login::In(signed.iter().find_map(|c| c.get("email").and_then(Value::as_str).filter(|m| !m.is_empty()).map(String::from)))
 }
 
 /// The servers `have` should hold, and what was written of them: per server, the default's
 /// (`wanted`) where `have` still reads as last written (`written`), `have`'s own otherwise.
-/// Decision 10: an account whose login another account also holds says which ones, since
-/// switching between them changes nothing.
+/// Decision 10: an account whose login another account of its kind also holds says which ones,
+/// since switching between them changes nothing. A Claude and a Grok login with one email are two
+/// accounts.
 fn same_login(accounts: &mut [Account]) {
     let notes: Vec<Option<String>> = accounts
         .iter()
         .map(|a| {
             let email = a.email.as_deref()?;
-            let others: Vec<&str> = accounts.iter().filter(|o| o.id != a.id && o.email.as_deref() == Some(email)).map(|o| o.label.as_str()).collect();
-            (!others.is_empty()).then(|| format!("Logged in as {email}, the same Claude account as {}.", others.join(", ")))
+            let others: Vec<&str> = accounts.iter().filter(|o| o.id != a.id && o.kind == a.kind && o.email.as_deref() == Some(email)).map(|o| o.label.as_str()).collect();
+            let whose = match a.kind {
+                AgentKind::Claude => "Claude",
+                AgentKind::Grok => "xAI",
+            };
+            (!others.is_empty()).then(|| format!("Logged in as {email}, the same {whose} account as {}.", others.join(", ")))
         })
         .collect();
     for (a, note) in accounts.iter_mut().zip(notes) {
@@ -891,10 +993,11 @@ pub fn accounts_switch<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Acco
     Ok(state)
 }
 
+/// `kind` absent adds a Claude account, as before Grok accounts.
 #[tauri::command]
-pub fn accounts_add<R: Runtime>(app: AppHandle<R>, label: String) -> Result<Account, String> {
+pub fn accounts_add<R: Runtime>(app: AppHandle<R>, label: String, kind: Option<AgentKind>) -> Result<Account, String> {
     let place = Place::real();
-    let account = place.add(&label)?;
+    let account = place.add(&label, kind.unwrap_or_default())?;
     if let Ok(state) = place.state() {
         changed(&app, &state);
     }
@@ -971,6 +1074,7 @@ mod tests {
                 label: "Default".into(),
                 config_dir: p.home.join(".claude").display().to_string(),
                 is_default: true,
+                kind: AgentKind::Claude,
                 email: Some("me@x.io".into()),
                 problem: None,
                 unshared: vec![],
@@ -985,7 +1089,7 @@ mod tests {
         let v = serde_json::to_value(p.state().unwrap()).unwrap();
         let a = &v["accounts"][0];
         assert_eq!(v["active"], "default");
-        for key in ["id", "label", "configDir", "isDefault", "email", "problem", "unshared"] {
+        for key in ["id", "label", "configDir", "isDefault", "kind", "email", "problem", "unshared"] {
             assert!(a.get(key).is_some(), "missing {key} in {a}");
         }
         assert_eq!(a["problem"], "Not logged in yet.");
@@ -997,7 +1101,7 @@ mod tests {
         logged_in(&p, "me@x.io");
         std::fs::write(p.home.join(".claude/history.jsonl"), "{}\n").unwrap();
         std::fs::create_dir_all(p.home.join(".claude/projects/-r")).unwrap();
-        let a = p.add("  Work Stuff! ").unwrap();
+        let a = p.add("  Work Stuff! ", AgentKind::Claude).unwrap();
         assert_eq!(a.id, "work-stuff");
         assert_eq!(a.label, "Work Stuff!");
         let dir = p.home.join(".claude-work-stuff");
@@ -1025,17 +1129,17 @@ mod tests {
     #[test]
     fn ids_never_meet() {
         let p = place("ids");
-        assert_eq!(p.add("Work").unwrap().id, "work");
-        assert_eq!(p.add("work").unwrap().id, "work-2");
-        assert_eq!(p.add("Default").unwrap().id, "default-2");
-        assert_eq!(p.add("☃").unwrap().id, "account");
-        assert!(p.add("   ").is_err());
+        assert_eq!(p.add("Work", AgentKind::Claude).unwrap().id, "work");
+        assert_eq!(p.add("work", AgentKind::Claude).unwrap().id, "work-2");
+        assert_eq!(p.add("Default", AgentKind::Claude).unwrap().id, "default-2");
+        assert_eq!(p.add("☃", AgentKind::Claude).unwrap().id, "account");
+        assert!(p.add("   ", AgentKind::Claude).is_err());
     }
 
     #[test]
     fn switching_renaming_and_removing() {
         let p = place("switch");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         assert_eq!(p.switch("default").unwrap().active, "default");
         assert!(p.switch("nope").is_err());
         let s = p.switch("work").unwrap();
@@ -1058,9 +1162,9 @@ mod tests {
     #[test]
     fn a_new_pane_runs_on_the_active_account() {
         let p = place("pane");
-        assert_eq!(p.for_new_pane(), PaneAccount { id: "default".into(), config_dir: None });
-        p.add("Work").unwrap();
-        assert_eq!(p.for_new_pane(), PaneAccount { id: "work".into(), config_dir: Some(p.home.join(".claude-work")) });
+        assert_eq!(p.for_new_pane(), PaneAccount { id: "default".into(), kind: AgentKind::Claude, config_dir: None });
+        p.add("Work", AgentKind::Claude).unwrap();
+        assert_eq!(p.for_new_pane(), PaneAccount { id: "work".into(), kind: AgentKind::Claude, config_dir: Some(p.home.join(".claude-work")) });
         std::fs::write(p.app.join(FILE), "not json").unwrap();
         assert_eq!(p.for_new_pane().config_dir, None, "an unreadable list runs it on the default account");
         assert!(p.state().is_err(), "and says so to the list");
@@ -1070,7 +1174,7 @@ mod tests {
     fn the_email_is_the_accounts_own() {
         let p = place("email");
         logged_in(&p, "me@x.io");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         write(&p.home.join(".claude-work/.claude.json"), json!({ "oauthAccount": { "emailAddress": "w@x.io" }, "mcpServers": {} }));
         let s = p.state().unwrap();
         assert_eq!(s.accounts[0].email.as_deref(), Some("me@x.io"));
@@ -1082,7 +1186,7 @@ mod tests {
     fn a_link_replaced_by_a_copy_is_reported_and_left_alone() {
         let p = place("drift");
         std::fs::write(p.home.join(".claude/settings.json"), "{\"a\":1}").unwrap();
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         let dir = p.home.join(".claude-work");
         write(&dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": "w@x.io" }, "mcpServers": {} }));
         // Claude Code's atomic write onto the link.
@@ -1111,7 +1215,7 @@ mod tests {
         logged_in(&p, "me@x.io");
         std::fs::write(p.home.join(".claude/settings.json"), "{\"hooks\":{}}").unwrap();
         std::fs::write(p.home.join(".claude/history.jsonl"), "{}\n").unwrap();
-        let err = p.add("Work").unwrap_err();
+        let err = p.add("Work", AgentKind::Claude).unwrap_err();
         assert!(
             err.starts_with("Work was not added: history.jsonl, settings.json could not be linked to the default account's, so they are not shared with it (a required privilege is not held)."),
             "{err}"
@@ -1125,18 +1229,18 @@ mod tests {
         // A folder that was there (an account removed earlier) keeps what it had and gets no link.
         let dir = p.home.join(".claude-old");
         std::fs::create_dir_all(dir.join("jobs")).unwrap();
-        assert!(p.add("Old").is_err());
+        assert!(p.add("Old", AgentKind::Claude).is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>(), ["jobs"]);
 
         // With nothing to link as a file, the dirs are enough.
         let q = place("refused-dirs").linking(only_dirs);
-        assert_eq!(q.add("Work").unwrap().problem.as_deref(), Some("Not logged in yet."));
+        assert_eq!(q.add("Work", AgentKind::Claude).unwrap().problem.as_deref(), Some("Not logged in yet."));
     }
 
     #[test]
     fn a_link_startup_cannot_make_is_the_accounts_problem_until_it_can() {
         let p = place("late");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         let dir = p.home.join(".claude-work");
         write(&dir.join(".claude.json"), json!({ "oauthAccount": { "emailAddress": "w@x.io" }, "mcpServers": {} }));
         std::fs::write(p.home.join(".claude/settings.json"), "{}").unwrap();
@@ -1304,7 +1408,7 @@ mod tests {
 
         let q = p.clone();
         let pane = promptly(move || q.for_new_pane()).expect("a new pane waited for the share");
-        assert_eq!(pane, PaneAccount { id: "default".into(), config_dir: None });
+        assert_eq!(pane, PaneAccount { id: "default".into(), kind: AgentKind::Claude, config_dir: None });
         let q = p.clone();
         let s = promptly(move || q.state()).expect("the list waited for the share").unwrap();
         assert_eq!(s.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["default", "work"]);
@@ -1312,7 +1416,7 @@ mod tests {
         assert_eq!(promptly(move || q.switch("work")).expect("switching waited for the share").unwrap().active, "work");
         let q = p.clone();
         let pane = promptly(move || q.for_new_pane()).expect("a new pane waited for the share");
-        assert_eq!(pane, PaneAccount { id: "work".into(), config_dir: Some(dir.clone()) }, "the switch holds for the next pane");
+        assert_eq!(pane, PaneAccount { id: "work".into(), kind: AgentKind::Claude, config_dir: Some(dir.clone()) }, "the switch holds for the next pane");
 
         HELD.open();
         let shared = sharing.join().unwrap().unwrap();
@@ -1423,7 +1527,7 @@ mod tests {
     #[test]
     fn startup_links_what_the_default_account_has_since() {
         let p = place("relink");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         let dir = p.home.join(".claude-work");
         assert!(std::fs::symlink_metadata(dir.join("CLAUDE.md")).is_err());
         std::fs::write(p.home.join(".claude/CLAUDE.md"), "be kind").unwrap();
@@ -1437,7 +1541,7 @@ mod tests {
         let desktop = json!({ "type": "stdio", "command": "/a/desktop" });
         let mnemo = json!({ "type": "stdio", "command": "mnemo" });
         write(&p.home.join(".claude.json"), json!({ "mcpServers": { "desktop": desktop, "mnemo": mnemo } }));
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         let path = p.home.join(".claude-work/.claude.json");
         assert_eq!(read_json(&path), json!({ "mcpServers": { "desktop": desktop, "mnemo": mnemo } }));
 
@@ -1519,7 +1623,7 @@ mod tests {
     #[test]
     fn a_moved_pane_is_reported_on_its_new_account() {
         let p = place("moved");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         let file = p.app.join(PANES_FILE);
         let panes = PaneAccounts::new(p.clone(), Some(file.clone()));
         panes.spawned(1, "default".into());
@@ -1534,7 +1638,7 @@ mod tests {
     #[test]
     fn a_moved_pane_whose_record_cannot_be_written_says_so() {
         let p = place("moved-unwritable");
-        p.add("Work").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
         // The file's folder is a file: no platform can write under it.
         let blocker = p.app.join("blocker");
         std::fs::create_dir_all(&p.app).unwrap();
@@ -1550,8 +1654,8 @@ mod tests {
     fn accounts_holding_the_same_login_say_so() {
         let p = place("same");
         logged_in(&p, "me@x.io");
-        p.add("Work").unwrap();
-        p.add("Spare").unwrap();
+        p.add("Work", AgentKind::Claude).unwrap();
+        p.add("Spare", AgentKind::Claude).unwrap();
         let config = |slug: &str, email: &str| {
             let mut c = read_json(&p.home.join(format!(".claude-{slug}/.claude.json")));
             c["oauthAccount"] = json!({ "emailAddress": email });
@@ -1566,6 +1670,100 @@ mod tests {
         config("spare", "me@x.io");
         let s = p.state().unwrap();
         assert_eq!(s.accounts[0].problem.as_deref(), Some("Logged in as me@x.io, the same Claude account as Work, Spare."));
+    }
+
+    /// A fake Grok login in `home`: one sign-in credential, as `xai-grok-login`'s `GrokAuth`
+    /// writes it. Never a real token.
+    fn grok_logged_in(home: &Path, email: Option<&str>) {
+        write(&home.join(GROK_AUTH), json!({ "https://accounts.x.ai/sign-in": { "key": "fake-token", "auth_mode": "WebLogin", "user_id": "u1", "email": email } }));
+    }
+
+    #[test]
+    fn the_first_grok_account_is_dot_grok_and_the_next_its_own_home_with_nothing_linked() {
+        let p = place("grok-add");
+        logged_in(&p, "me@x.io");
+        std::fs::write(p.home.join(".claude/history.jsonl"), "{}\n").unwrap();
+        let g = p.add("Grok", AgentKind::Grok).unwrap();
+        assert_eq!((g.id.as_str(), g.kind, g.is_default), ("grok", AgentKind::Grok, false));
+        assert_eq!(g.config_dir, p.home.join(".grok").display().to_string());
+        assert_eq!(g.problem.as_deref(), Some("Not logged in yet."));
+        assert!(g.unshared.is_empty());
+        assert_eq!(p.for_new_pane(), PaneAccount { id: "grok".into(), kind: AgentKind::Grok, config_dir: None }, "~/.grok runs with GROK_HOME unset");
+
+        let side = p.add("Side", AgentKind::Grok).unwrap();
+        let dir = p.home.join(".grok-side");
+        assert_eq!(side.config_dir, dir.display().to_string());
+        assert!(dir.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "nothing of ~/.claude's is linked into a Grok home");
+        assert!(!dir.join(".claude.json").exists(), "and no MCP servers are brought in step");
+        assert_eq!(p.for_new_pane(), PaneAccount { id: "side".into(), kind: AgentKind::Grok, config_dir: Some(dir.clone()) });
+
+        let s = p.state().unwrap();
+        assert_eq!(s.accounts.iter().map(|a| (a.id.as_str(), a.kind)).collect::<Vec<_>>(), [("default", AgentKind::Claude), ("grok", AgentKind::Grok), ("side", AgentKind::Grok)]);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["accounts"][0]["kind"], "claude");
+        assert_eq!(v["accounts"][2]["kind"], "grok");
+
+        p.remove("grok").unwrap();
+        let again = p.add("Again", AgentKind::Grok).unwrap();
+        assert_eq!(again.config_dir, p.home.join(".grok").display().to_string(), "~/.grok is free again once its account left");
+        assert!(p.share("side").is_err(), "a Grok account shares nothing");
+        p.sync().unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "nor does startup link anything into it");
+    }
+
+    #[test]
+    fn a_file_from_before_kinds_reads_as_claude_and_the_default_is_never_grok() {
+        let p = place("grok-old");
+        std::fs::create_dir_all(&p.app).unwrap();
+        std::fs::write(
+            p.app.join(FILE),
+            r#"{"active":"work","accounts":[{"id":"g","label":"G","configDir":"/x","isDefault":true,"kind":"grok"},{"id":"work","label":"Work","configDir":"/y"}]}"#,
+        )
+        .unwrap();
+        let s = p.state().unwrap();
+        let of = |id: &str| s.accounts.iter().find(|a| a.id == id).map(|a| (a.kind, a.is_default)).unwrap();
+        assert_eq!(of("work"), (AgentKind::Claude, false), "an entry without a kind is Claude's");
+        assert_eq!(of("g"), (AgentKind::Grok, false), "a Grok entry is never the default account");
+        let d = &s.accounts[0];
+        assert_eq!((d.id.as_str(), d.kind, d.is_default, d.config_dir.clone()), (DEFAULT_ID, AgentKind::Claude, true, p.home.join(".claude").display().to_string()));
+    }
+
+    #[test]
+    fn a_grok_accounts_email_and_problem_come_from_its_auth_json() {
+        let p = place("grok-login");
+        p.add("Grok", AgentKind::Grok).unwrap();
+        p.add("Side", AgentKind::Grok).unwrap();
+        let (main, side) = (p.home.join(".grok"), p.home.join(".grok-side"));
+        let of = |id: &str| p.state().unwrap().accounts.into_iter().find(|a| a.id == id).unwrap();
+
+        grok_logged_in(&main, Some("me@x.ai"));
+        assert_eq!((of("grok").email.as_deref(), of("grok").problem), (Some("me@x.ai"), None));
+
+        std::fs::write(side.join(GROK_AUTH), "").unwrap();
+        assert_eq!(of("side").problem.as_deref(), Some("Not logged in yet: its auth.json holds no login."), "an empty file, as a crash leaves it");
+        write(&side.join(GROK_AUTH), json!({ "https://accounts.x.ai/sign-in": { "key": "", "email": "old@x.ai" } }));
+        assert_eq!((of("side").email, of("side").problem.is_some()), (None, true), "a credential with no key is no login");
+        write(&side.join(GROK_AUTH), json!({ "xai::api_key": { "key": "fake-key", "auth_mode": "ApiKey", "email": null } }));
+        assert_eq!((of("side").email, of("side").problem), (None, None), "an API key logs in and names no email");
+
+        grok_logged_in(&side, Some("me@x.ai"));
+        logged_in(&p, "me@x.ai");
+        let s = p.state().unwrap();
+        assert_eq!(s.accounts[0].problem, None, "a Claude login with the same email is another account");
+        assert_eq!(s.accounts[1].problem.as_deref(), Some("Logged in as me@x.ai, the same xAI account as Side."));
+    }
+
+    #[test]
+    fn a_grok_home_whose_leader_socket_would_be_too_long_is_refused() {
+        let p = place("grok-long");
+        p.add("Grok", AgentKind::Grok).unwrap();
+        let label = "a".repeat(SOCKET_PATH_MAX);
+        let err = p.add(&label, AgentKind::Grok).unwrap_err();
+        assert!(err.contains("Give it a shorter name"), "{err}");
+        assert!(!p.home.join(format!(".grok-{label}")).exists());
+        assert_eq!(p.state().unwrap().accounts.len(), 2, "nothing was added");
+        assert!(p.add(&label, AgentKind::Claude).is_ok(), "a Claude account runs no leader");
     }
 
     #[test]
