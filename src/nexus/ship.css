@@ -69,13 +69,15 @@
   border-bottom: 2px solid var(--ship-edge);
   background: #0c1326;
 }
+/* The mnemo mark, the bar's only brand: pixel art, drawn crisp at its height. */
 .ship-brand {
+  display: block;
+  flex: none;
+  height: 28px;
+  width: auto;
   margin-right: 8px;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  color: var(--ship-lilac);
-  text-shadow: 2px 2px 0 #1e1b4b;
+  image-rendering: pixelated;
+  filter: drop-shadow(2px 2px 0 #1e1b4b);
 }
 .ship-scene .ship-chip {
   padding: 2px 7px;
