@@ -84,7 +84,7 @@ test('a list with both kinds says each account’s CLI', async () => {
 
 test('a Grok account whose usage cannot be read says its credit usage is unavailable', async () => {
   await render(kinded([claude('default'), side]).client)
-  expect(card('side').textContent).toContain('No credit usage: No credit reading yet.')
+  expect(card('side').textContent).toContain('Credit usage unavailable: No credit reading yet.')
 })
 
 test('Sign in on a Grok account opens grok login on its own home', async () => {

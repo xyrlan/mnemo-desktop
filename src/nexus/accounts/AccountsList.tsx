@@ -88,8 +88,11 @@ function Limit({ limit, now }: { limit: PlanLimit; now: number }) {
  *  A Grok account's is its credit usage, and says so when it cannot be read. */
 function AccountUsage({ entry, now, kind }: { entry: Usage | undefined; now: number; kind: AgentKind }) {
   const usage = entry?.usage
-  const what = kind === 'grok' ? 'credit usage' : 'usage'
-  if (!usage) return <p className="nx-acct-line nx-muted">{entry?.error ? `No ${what}: ${entry.error}` : `Reading ${what}…`}</p>
+  if (!usage) {
+    const grok = kind === 'grok'
+    const said = entry?.error ? `${grok ? 'Credit usage unavailable' : 'No usage'}: ${entry.error}` : `Reading ${grok ? 'credit usage' : 'usage'}…`
+    return <p className="nx-acct-line nx-muted">{said}</p>
+  }
   return (
     <>
       {usage.limits.length ? (
