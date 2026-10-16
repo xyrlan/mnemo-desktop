@@ -788,6 +788,19 @@ pub fn voice_set_language(app: AppHandle, language: String) -> Result<(), String
     Ok(())
 }
 
+/// Dictation's model for a test: `$MNEMO_WHISPER_MODEL`, else downloaded once into the system
+/// temp dir (not `$HOME`, which other tests repoint). One download at a time: two tests fetching
+/// into the same `.part` at once, on a runner that has none, rename it from under each other.
+#[cfg(test)]
+pub(crate) fn test_model() -> PathBuf {
+    static ONE: Mutex<()> = Mutex::new(());
+    let _one = lock(&ONE);
+    match std::env::var_os(MODEL_ENV) {
+        Some(p) => PathBuf::from(p),
+        None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1193,10 +1206,7 @@ mod tests {
     #[ignore]
     fn bench() {
         let dir = PathBuf::from(std::env::var_os("MNEMO_VOICE_BENCH").expect("MNEMO_VOICE_BENCH"));
-        let path = match std::env::var_os(MODEL_ENV) {
-            Some(p) => PathBuf::from(p),
-            None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
-        };
+        let path = test_model();
         let t = std::time::Instant::now();
         let ctx = load_context(&path).expect("load");
         let loaded = t.elapsed().as_secs_f32();
@@ -1236,10 +1246,7 @@ mod tests {
     /// which other tests repoint.
     #[test]
     fn transcribes_the_fixtures() {
-        let path = match std::env::var_os(MODEL_ENV) {
-            Some(p) => PathBuf::from(p),
-            None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
-        };
+        let path = test_model();
         let ctx = load_context(&path).expect("load");
         warm_up(&ctx).expect("warm up");
         let cases = [

@@ -542,11 +542,7 @@ mod tests {
     /// `voice::tests::transcribes_the_fixtures`: the decode feeds whisper what it understands.
     #[test]
     fn the_opus_fixture_is_heard_by_dictations_model() {
-        let path = match std::env::var_os("MNEMO_WHISPER_MODEL") {
-            Some(p) => PathBuf::from(p),
-            None => voice::ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
-        };
-        let ctx = voice::load_context(&path).expect("load");
+        let ctx = voice::load_context(&voice::test_model()).expect("load");
         let audio = decode_file(&fixture_path("ola.opus")).unwrap();
         let text = voice::transcribe(&ctx, &audio, Language::Pt).unwrap().to_lowercase();
         assert!(text.contains("bom dia") && text.contains("você"), "{text:?}");
