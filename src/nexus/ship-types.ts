@@ -67,7 +67,7 @@ export const ACCESSORIES = 6
 /** Where a robot stands: the room says whether you are needed, never what it is doing. */
 export type Zone = 'flight' | 'hangar' | 'stranded' | 'bridge'
 export type RobotState = 'working' | 'idle' | 'need' | 'done' | 'stopped'
-/** A working robot's action badge: ⌕ read · ✎ edit · ⚗ test · ⇪ ship · ⧗ a long command running. */
+/** What a working robot does, shown by the prop it holds: read · edit · test · ship · run (a long command). */
 export type ActionKind = 'read' | 'edit' | 'test' | 'ship' | 'run'
 /** CI on a finished robot's PR at this moment: queued, running, green, red; null without checks. */
 export type Ci = 'wait' | 'run' | 'green' | 'red' | null

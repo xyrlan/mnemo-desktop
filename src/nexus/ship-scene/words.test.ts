@@ -1,5 +1,5 @@
 import { captain, mission, pr, robot, ship } from './fixtures'
-import { ago, captainHover, bridgeStatus, exceptionRow, glyph, logTone, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
+import { ago, captainHover, bridgeStatus, doingOf, exceptionRow, logTone, lookOf, particlesOf, poseOf, rateChip, relation, robotLine, robotMore, robotName, SLEEP_MS, tokensWord, toneOf } from './words'
 
 test('ago reads like the prototype', () => {
   expect(ago(40_000)).toBe('40s')
@@ -30,25 +30,41 @@ test('what a robot says: its line and act; a finished one its PR and CI; a stopp
   expect(robotLine(robot('1', { state: 'stopped' })).say).toMatch(/^■ stopped/)
 })
 
-test('the action badge, the particles and the pose follow state and action', () => {
-  expect(glyph(robot('1', { action: 'read' }))).toBe('⌕')
-  expect(glyph(robot('1', { action: 'test' }))).toBe('⚗')
-  expect(glyph(robot('1', { action: 'run' }))).toBe('⧗')
-  expect(glyph(robot('1', { state: 'need' }))).toBe('!')
-  expect(glyph(robot('1', { state: 'done', ci: 'red' }))).toBe('✗')
-  expect(glyph(robot('1', { state: 'done', ci: 'run' }))).toBe('⧗')
-  expect(glyph(robot('1', { state: 'done', ci: 'green' }))).toBe('✓')
-  expect(glyph(robot('1', { state: 'idle', zone: 'stranded' }))).toBe('⏸')
-  expect(glyph(robot('1', { state: 'stopped' }))).toBe('■')
-  expect(particlesOf(robot('1', { action: 'edit' }))).toBe('sparks')
-  expect(particlesOf(robot('1', { action: 'test' }))).toBe('bubbles')
-  expect(particlesOf(robot('1', { action: 'read' }))).toBe('pages')
-  expect(particlesOf(robot('1', { action: 'ship' }))).toBe('radar')
-  expect(particlesOf(robot('1', { state: 'idle', zone: 'stranded' }))).toBe('zz')
-  expect(particlesOf(robot('1', { state: 'done' }))).toBeNull()
-  expect(poseOf(robot('1', { state: 'idle', idleMs: SLEEP_MS + 1 }))).toBe('sleeping')
-  expect(poseOf(robot('1', { state: 'need' }))).toBe('waiting')
-  expect(poseOf(robot('1', { state: 'done' }))).toBe('idle')
+/** The issue's table (#473): every state, its pose, prop, prop motion, particles and halo, its
+ *  body's motion, and the words its name and hover say instead of the old badge. */
+const STATES: [string, Partial<Parameters<typeof robot>[1]>, ReturnType<typeof lookOf>, string][] = [
+  ['working · read', { action: 'read' }, { pose: 'working', prop: 'read', motion: 'scan', particles: 'pages', halo: 'working', body: 'bob' }, 'reading'],
+  ['working · edit', { action: 'edit' }, { pose: 'working', prop: 'edit', motion: 'weld', particles: 'sparks', halo: 'working', body: 'bob' }, 'editing'],
+  ['working · test', { action: 'test' }, { pose: 'working', prop: 'test', motion: 'swirl', particles: 'bubbles', halo: 'working', body: 'bob' }, 'testing'],
+  ['working · ship', { action: 'ship' }, { pose: 'working', prop: 'ship', motion: 'lift', particles: 'radar', halo: 'working', body: 'bob' }, 'shipping'],
+  ['working · run', { action: 'run' }, { pose: 'working', prop: 'run', motion: 'flip', particles: 'radar', halo: 'working', body: 'bob' }, 'running a long command'],
+  ['need', { state: 'need', zone: 'bridge', action: null }, { pose: 'waiting', prop: 'need', motion: 'wave', particles: null, halo: 'need', body: null }, 'waits for you'],
+  ['stopped', { state: 'stopped', action: null }, { pose: 'sleeping', prop: null, motion: null, particles: null, halo: null, body: null }, 'stopped'],
+  ['done · CI green', { state: 'done', zone: 'hangar', action: null, ci: 'green' }, { pose: 'idle', prop: 'green', motion: 'flag', particles: null, halo: 'done', body: 'breathe' }, 'finished, CI green'],
+  ['done · CI red', { state: 'done', zone: 'hangar', action: null, ci: 'red' }, { pose: 'idle', prop: 'red', motion: 'smoke', particles: 'smoke', halo: 'need', body: 'breathe' }, 'finished, CI red'],
+  ['done · CI running', { state: 'done', zone: 'hangar', action: null, ci: 'run' }, { pose: 'idle', prop: 'run', motion: 'flip-slow', particles: null, halo: 'working', body: 'breathe' }, 'finished, CI running'],
+  ['idle', { state: 'idle', action: null, idleMs: 60_000 }, { pose: 'idle', prop: null, motion: null, particles: null, halo: null, body: 'breath' }, 'idle'],
+  ['stranded', { state: 'idle', zone: 'stranded', action: null, idleMs: 20 * 60_000 }, { pose: 'sleeping', prop: null, motion: null, particles: 'zz', halo: null, body: 'breath-slow' }, 'stranded'],
+]
+
+test.each(STATES)('%s: its pose, prop, motion, particles and halo (#473)', (_, over, look, doing) => {
+  const r = robot('1', over)
+  expect(lookOf(r)).toEqual(look)
+  expect(poseOf(r)).toBe(look.pose)
+  expect(particlesOf(r)).toBe(look.particles)
+  expect(doingOf(r)).toBe(doing)
+})
+
+test('the rest of the states fall where their nearest row does', () => {
+  // CI queued reads as CI running; a finished robot with no CI as CI green.
+  expect(lookOf(robot('1', { state: 'done', action: null, ci: 'wait' }))).toMatchObject({ prop: 'run', motion: 'flip-slow', halo: 'working' })
+  expect(doingOf(robot('1', { state: 'done', action: null, ci: 'wait' }))).toBe('finished, CI queued')
+  expect(lookOf(robot('1', { state: 'done', action: null, ci: null }))).toMatchObject({ prop: 'green', halo: 'done' })
+  expect(doingOf(robot('1', { state: 'done', action: null, ci: null }))).toBe('finished')
+  // Working with no action known reads.
+  expect(lookOf(robot('1', { action: null }))).toMatchObject({ prop: 'read', motion: 'scan', particles: 'pages' })
+  // Ten minutes idle and it sleeps, still with no prop.
+  expect(lookOf(robot('1', { state: 'idle', action: null, idleMs: SLEEP_MS + 1 }))).toMatchObject({ pose: 'sleeping', prop: null, body: 'breath' })
 })
 
 test('the hover lists title, model and context, contract, twin and rules', () => {

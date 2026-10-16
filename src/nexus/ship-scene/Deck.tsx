@@ -6,7 +6,7 @@ import { CaptainChip, CaptainFigure, LeaverFigure, px, RobotFigure, Tag } from '
 import { bubblesOf, deckLayout, G, type Bubble, type DeckLayout, type Point } from './geometry'
 import { useLeavers, type Drawn } from './motion'
 import { pickVoices, type Voice } from './voices'
-import { relation, robotLine, robotMore } from './words'
+import { doingOf, relation, robotLine, robotMore } from './words'
 
 /** A voice whose turn is this close to over at a tick takes its turn: ticks and draws do not
  *  land on the same ms. */
@@ -229,7 +229,7 @@ function HoverCard({ robot: d, emblem }: { robot: Drawn; emblem: string }) {
     <div className="ship-bubble ship-hover" data-hover={r.id} data-state={r.state} style={{ transform: `translate(${px(Math.max(8, d.x - 100))}, ${px(d.y - 8)}) translateY(-100%)` }}>
       <div className="ship-say">
         <b>
-          <Tag robot={r} emblem={emblem} />
+          <Tag robot={r} emblem={emblem} />, {doingOf(r)}
         </b>{' '}
         {line.say}
       </div>
