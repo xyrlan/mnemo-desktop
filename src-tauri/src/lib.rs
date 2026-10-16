@@ -13,6 +13,9 @@ pub mod procs;
 // -- accounts (src/accounts.rs) --
 pub mod accounts;
 
+// -- agent kind (src/agent_kind.rs) --
+pub mod agent_kind;
+
 // -- files (src/fs.rs) --
 pub mod fs;
 
