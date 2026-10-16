@@ -134,8 +134,8 @@ const READ_THREADS: usize = 8;
 
 /// Everything the feed reads from outside, so tests can answer for it.
 pub struct Deps {
-    /// `(cwd, session id)` → the transcript's path, on any account.
-    pub transcript: Box<dyn Fn(&str, &str) -> Option<PathBuf> + Send + Sync>,
+    /// An ask → its session's transcript (a Grok session's `chat_history.jsonl`), on any account.
+    pub transcript: Box<dyn Fn(&FeedAsk) -> Option<PathBuf> + Send + Sync>,
     /// `(account id, job id)` → that job's `state.json`.
     pub job_state: Box<dyn Fn(&str, &str) -> Option<String> + Send + Sync>,
     /// A PR url → `gh pr view --json prs::VIEW_FIELDS`.
@@ -184,7 +184,7 @@ impl State {
             if counted.insert(path.clone()) {
                 let r = rate.get_or_insert((0.0, 0.0, 0.0, 0.0));
                 for c in reader.recent(now) {
-                    r.0 += 1.0;
+                    r.0 += c.calls as f64;
                     r.1 += c.output as f64;
                     r.2 += (c.input + c.cache_read + c.cache_creation) as f64;
                     r.3 += c.cache_read as f64;
@@ -249,7 +249,7 @@ impl State {
             None => f.looked != 0 && now < f.looked + MISS_EVERY_MS,
         };
         if !fresh {
-            f.path = (deps.transcript)(&ask.cwd, &ask.session_id);
+            f.path = (deps.transcript)(ask);
             f.looked = now.max(1);
         }
         f.path.clone()
@@ -297,7 +297,7 @@ impl State {
 
 fn live_deps() -> Deps {
     Deps {
-        transcript: Box::new(crate::mission::transcript_path),
+        transcript: Box::new(|ask| transcript_of(ask, &crate::mission::account_dirs::accounts())),
         job_state: Box::new(|account, job| {
             let accounts = crate::mission::account_dirs::accounts();
             let read = |a: &crate::mission::account_dirs::Account| std::fs::read_to_string(a.jobs_dir().join(job).join("state.json")).ok();
@@ -306,6 +306,18 @@ fn live_deps() -> Deps {
         gh: Arc::new(|url| crate::checks::run("gh", &["pr", "view", url, "--json", prs::VIEW_FIELDS], &std::env::temp_dir())),
         gh_wait: Duration::from_millis(1500),
         home: crate::app_dir::home().to_string_lossy().into_owned(),
+    }
+}
+
+/// Where an ask's session writes: in its account's Grok home when the account is a Grok one, else
+/// a Claude transcript on any account, else (an account this app no longer lists) any Grok home.
+fn transcript_of(ask: &FeedAsk, accounts: &crate::mission::account_dirs::Accounts) -> Option<PathBuf> {
+    use crate::agent_kind::AgentKind;
+    use crate::conversation::grok;
+    match accounts.get(&ask.account) {
+        Some(a) if a.kind == AgentKind::Grok => grok::grok_history_path(&a.config_dir, &ask.session_id),
+        Some(_) => crate::mission::transcript_path(&ask.cwd, &ask.session_id),
+        None => crate::mission::transcript_path(&ask.cwd, &ask.session_id).or_else(|| grok::find_history(None, &ask.session_id)),
     }
 }
 
@@ -402,7 +414,8 @@ mod tests {
             let (dir, jobs, calls, looks) = (self.dir.clone(), self.dir.join("jobs"), self.gh_calls.clone(), self.transcript_calls.clone());
             let answers = Arc::new(Mutex::new(answers.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<HashMap<_, _>>()));
             Deps {
-                transcript: Box::new(move |_cwd, sid| {
+                transcript: Box::new(move |ask| {
+                    let sid = ask.session_id.as_str();
                     looks.fetch_add(1, Ordering::SeqCst);
                     Some(dir.join(format!("{sid}.jsonl"))).filter(|p| p.is_file())
                 }),
@@ -556,5 +569,20 @@ mod tests {
         assert_eq!(s.readers.len(), 1);
         s.feed(&[], NOW + FORGET_MS, &deps);
         assert!(s.readers.is_empty() && s.found.is_empty());
+    }
+
+    #[test]
+    fn a_grok_account_s_ask_reads_its_history_in_that_account_s_home() {
+        let user = crate::testutil::temp_dir("nexus-feed-grok-home");
+        let side = user.join(".grok-side");
+        let sid = "01a1451e-2815-7532-b1a2-9c82363c4949";
+        let dir = side.join("sessions").join("%2Fr").join(sid);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("chat_history.jsonl"), "{\"type\":\"system\",\"content\":\"\"}\n").unwrap();
+        let file = json!({ "accounts": [{ "id": "side", "configDir": side.to_string_lossy(), "kind": "grok" }] });
+        let accounts = crate::mission::account_dirs::Accounts::parse(&file.to_string(), &user);
+        let ask = FeedAsk { account: "side".into(), ..parent(sid) };
+        assert_eq!(transcript_of(&ask, &accounts), Some(dir.join("chat_history.jsonl")));
+        assert_eq!(transcript_of(&FeedAsk { session_id: "01a1451e-0000-7000-8000-000000000000".into(), ..ask }, &accounts), None);
     }
 }

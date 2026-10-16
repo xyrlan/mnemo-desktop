@@ -1,7 +1,9 @@
 //! The conversation face's tailer (round 20): streams a Claude Code transcript
 //! (`~/.claude/projects/<escaped cwd>/<session>.jsonl`, found with `mission::transcript_path`) to the
 //! front-end as raw lines. It never parses a record: the shape belongs to `src/conversation/parse.ts`,
-//! so a Claude Code format change is fixed in one TypeScript module.
+//! so a Claude Code format change is fixed in one TypeScript module. A Grok Build session's
+//! `chat_history.jsonl` (`grok::grok_history_path`) is tailed the same way, and parsed by
+//! `src/conversation/parse-grok.ts`.
 //!
 //! Each follow is one thread, kept in a static registry here (no `.manage`): it sends the tail, then
 //! wakes on a `notify` watch of the transcript's directory or a 1 s fallback poll and sends the
@@ -20,6 +22,11 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tauri::ipc::Channel;
+
+use crate::agent_kind::AgentKind;
+
+pub mod grok;
+pub use grok::grok_history_path;
 
 /// One message on a follow's Channel; mirrors `FollowEvent` in `src/conversation/types.ts`.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -57,6 +64,10 @@ const HEAD: u64 = 4 << 10;
 /// Starts following `session_id`'s transcript: the last `tail` complete lines first, then each
 /// line appended. Returns the follow's id for `conversation_unfollow`.
 ///
+/// `kind` is the CLI the session runs on; absent, it is Claude and `home` is not read. A Grok
+/// session's history is looked for in `home`, its account's Grok home, or in every Grok home when
+/// that is absent too.
+///
 /// The first `Lines` holds at most ~4 MB, so it can hold fewer than `tail` lines (inline images);
 /// its `start` says where `conversation_earlier` picks up. After a `Reset` lines restart at 0. A
 /// transcript that goes away sends `Reset` then `Missing`, and the follow looks for it again.
@@ -71,9 +82,12 @@ pub fn conversation_follow(
     cwd: String,
     tail: usize,
     on_event: Channel<FollowEvent>,
+    kind: Option<AgentKind>,
+    home: Option<String>,
 ) -> Result<u32, String> {
     check_session_id(&session_id)?;
-    start(webview.label(), move || crate::mission::transcript_path(&cwd, &session_id), tail, move |e| on_event.send(e).is_ok())
+    let source = Source::new(cwd, kind, home)?;
+    start(webview.label(), move || source.find(&session_id), tail, move |e| on_event.send(e).is_ok())
 }
 
 /// Stops a follow; an unknown id is ignored.
@@ -83,16 +97,56 @@ pub fn conversation_unfollow(id: u32) {
     drop(stop(id));
 }
 
-/// The `count` complete lines that end right before byte `before`.
+/// The `count` complete lines that end right before byte `before`, in the file
+/// `conversation_follow` with the same `session_id`, `cwd`, `kind` and `home` follows.
 ///
 /// `before` is a line boundary the front-end got from a `Lines` or a `Chunk`; one that is not is
 /// taken back to the boundary under it. Holds at most ~4 MB (always at least one line), so it can
 /// hold fewer than `count`: `start == 0` alone means the top of the file.
 #[tauri::command(async)]
-pub fn conversation_earlier(session_id: String, cwd: String, before: u64, count: usize) -> Result<Chunk, String> {
+pub fn conversation_earlier(
+    session_id: String,
+    cwd: String,
+    before: u64,
+    count: usize,
+    kind: Option<AgentKind>,
+    home: Option<String>,
+) -> Result<Chunk, String> {
     check_session_id(&session_id)?;
-    let path = crate::mission::transcript_path(&cwd, &session_id).ok_or_else(|| format!("conversation: no transcript for session {session_id}"))?;
+    let path = Source::new(cwd, kind, home)?.find(&session_id).ok_or_else(|| format!("conversation: no transcript for session {session_id}"))?;
     earlier(&path, before, count).map_err(|e| format!("conversation: {}: {e}", path.display()))
+}
+
+/// Where a session's file is: a Claude transcript, found by its cwd's project dir on any account,
+/// or a Grok history under a Grok home.
+#[derive(Debug, PartialEq)]
+enum Source {
+    Claude { cwd: String },
+    /// `home` None: every Grok home is searched.
+    Grok { home: Option<PathBuf> },
+}
+
+impl Source {
+    fn new(cwd: String, kind: Option<AgentKind>, home: Option<String>) -> Result<Source, String> {
+        match kind.unwrap_or_default() {
+            AgentKind::Claude => Ok(Source::Claude { cwd }),
+            AgentKind::Grok => {
+                let home = home.filter(|h| !h.is_empty()).map(PathBuf::from);
+                // `has_root`, as `Accounts::parse` checks an account's dir on every OS.
+                if let Some(h) = home.as_ref().filter(|h| !h.has_root()) {
+                    return Err(format!("conversation: not a Grok home: {}", h.display()));
+                }
+                Ok(Source::Grok { home })
+            }
+        }
+    }
+
+    fn find(&self, session_id: &str) -> Option<PathBuf> {
+        match self {
+            Source::Claude { cwd } => crate::mission::transcript_path(cwd, session_id),
+            Source::Grok { home } => grok::find_history(home.as_deref(), session_id),
+        }
+    }
 }
 
 /// A session id names a file under `~/.claude/projects`; one that could climb out of it is refused.
@@ -991,7 +1045,39 @@ mod tests {
         for bad in ["", "../x", "a/b", "a\\b", "..", "a b"] {
             assert!(check_session_id(bad).is_err(), "{bad:?} was accepted");
         }
-        assert!(conversation_earlier("../../etc/passwd".into(), "/".into(), 0, 1).is_err());
+        assert!(conversation_earlier("../../etc/passwd".into(), "/".into(), 0, 1, None, None).is_err());
+        assert!(conversation_earlier("../../etc/passwd".into(), "/".into(), 0, 1, Some(AgentKind::Grok), None).is_err());
+    }
+
+    #[test]
+    fn no_kind_is_claude_and_its_home_is_not_read() {
+        let claude = Source::Claude { cwd: "/w".into() };
+        assert_eq!(Source::new("/w".into(), None, None), Ok(Source::Claude { cwd: "/w".into() }));
+        assert_eq!(Source::new("/w".into(), None, Some("relative".into())), Ok(Source::Claude { cwd: "/w".into() }));
+        assert_eq!(Source::new("/w".into(), Some(AgentKind::Claude), Some("/elsewhere".into())), Ok(claude));
+    }
+
+    #[test]
+    fn a_grok_session_is_found_in_its_home_and_a_relative_home_is_refused() {
+        let home = temp_dir("conv-grok-home");
+        let id = "01a1451e-2815-7532-b1a2-9c82363c4949";
+        let dir = home.join("sessions").join("%2Fw").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(grok::CHAT_HISTORY), "{\"type\":\"system\",\"content\":\"\"}\n{\"type\":\"user\",\"content\":[]}\n").unwrap();
+        let named = Some(home.to_string_lossy().into_owned());
+        let source = Source::new("/w".into(), Some(AgentKind::Grok), named.clone()).unwrap();
+        assert_eq!(source.find(id), Some(dir.join(grok::CHAT_HISTORY)));
+        assert_eq!(Source::new("/w".into(), Some(AgentKind::Grok), Some(String::new())), Ok(Source::Grok { home: None }));
+        assert!(Source::new("/w".into(), Some(AgentKind::Grok), Some("rel/home".into())).is_err());
+        // "Load earlier" reads the same file.
+        let c = conversation_earlier(id.into(), "/w".into(), 1 << 20, 1, Some(AgentKind::Grok), named).unwrap();
+        assert_eq!(c.lines, ["{\"type\":\"user\",\"content\":[]}"]);
+    }
+
+    #[test]
+    fn the_kind_is_read_off_the_wire_as_the_front_end_sends_it() {
+        assert_eq!(serde_json::from_value::<Option<AgentKind>>(serde_json::json!("grok")).unwrap(), Some(AgentKind::Grok));
+        assert_eq!(serde_json::from_value::<Option<AgentKind>>(serde_json::Value::Null).unwrap(), None);
     }
 
     /// Follows the newest real transcript (or `CONVERSATION_TRANSCRIPT`) for 2 s and prints what
