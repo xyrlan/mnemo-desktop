@@ -105,7 +105,7 @@ test('an account runs with its variable unset when it is the default or the Grok
 })
 
 test('a row that does not say its kind is a Claude one', () => {
-  expect(kindOfRow({ id: 'x' })).toBe('claude')
+  expect(kindOfRow({})).toBe('claude')
   expect(kindOfRow(work)).toBe('claude')
   expect(kindOfRow(grokSide)).toBe('grok')
 })
