@@ -200,3 +200,24 @@ test('what an attach prints once let go of (its detach) goes nowhere', async () 
   f.outputs[50](new TextEncoder().encode(' detaching'))
   expect(fed[50]).toBe('live')
 })
+
+test("a Grok child is held as its TUI on its own home, and let go of by ending its PTY alone", async () => {
+  const f = fakePty()
+  const { s } = make(f.pty)
+  const id = '01a1451f-bfc0-7481-afec-c2286636bc5d'
+  const key = s().hold({ child: { id, account_env: { config_dir: '/Users/me/.grok-work', kind: 'grok' } } }, 'popout')
+  await settle()
+  expect(f.log).toEqual(['spawn 50', `write 50 ${JSON.stringify(`exec env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r ${id}\r`)}`])
+  await s().release(key, 'popout')
+  // No Ctrl+Z: it is no detach key of Grok's TUI. Nor is the session closed.
+  expect([...f.log.slice(2)].sort()).toEqual(['kill 50', 'unlisten 50'])
+  expect(f.log.join('\n')).not.toMatch(/grok close/)
+})
+
+test('the default Grok home runs its TUI with GROK_HOME unset', async () => {
+  const f = fakePty()
+  const { s } = make(f.pty)
+  s().hold({ child: { id: 'g1', account_env: { config_dir: null, kind: 'grok' } } }, 'popout')
+  await settle()
+  expect(f.log[1]).toBe(`write 50 ${JSON.stringify('exec env -u GROK_HOME MNEMO_AGENT=grok grok --leader -r g1\r')}`)
+})

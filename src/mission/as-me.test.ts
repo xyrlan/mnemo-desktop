@@ -2,7 +2,7 @@ import { vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
 
-import { boxShows, inputBox, pasteOf, typeAsMe, type AttachSession } from './as-me'
+import { attached, boxShows, inputBox, pasteOf, typeAsMe, type AttachSession } from './as-me'
 import { DETACH_KEY } from '../cockpit/prompt'
 
 /** The bottom of `claude attach 5a824ae5` on an idle child, as xterm reads it back (captured
@@ -194,4 +194,34 @@ test('typeAsMe refuses a reply starting with !, which would put the input in she
   const open = vi.fn()
   await expect(typeAsMe('5a824ae5', '  !git push', { ...quick, open })).rejects.toThrow('shell command')
   expect(open).not.toHaveBeenCalled()
+})
+
+const GROK = { id: '01a1451f-bfc0-7481-afec-c2286636bc5d', account: 'gw', account_env: { config_dir: '/Users/me/.grok-work', kind: 'grok' as const } }
+
+test("typeAsMe sends a Grok session's turn through its leader, as written, and attaches nothing", async () => {
+  const sent: [string, string][] = []
+  const open = async (): Promise<AttachSession> => {
+    throw new Error('attached to a Grok session')
+  }
+  const waitingFor = async (): Promise<string | null> => {
+    throw new Error('asked claude agents about a Grok session')
+  }
+  // A leading `!` is no shell mode there: nothing is typed into a terminal.
+  await typeAsMe(GROK, '!sim, pode fazer push\nlinha 2', { ...quick, waitingFor, open, send: async (id, text) => void sent.push([id, text]) })
+  expect(sent).toEqual([[GROK.id, '!sim, pode fazer push\nlinha 2']])
+  await expect(typeAsMe(GROK, '  ', { ...quick, open, send: async () => {} })).rejects.toThrow('nothing to type')
+})
+
+test('a hidden attach refuses a Grok session, whose screen it cannot read', async () => {
+  const a = fakeAttach()
+  const deps = { ...quick, shell: 'posix' as const, open: async () => a.session, send: async () => {} }
+  await expect(attached(GROK, deps, async () => 'typed')).rejects.toThrow('Grok session')
+  expect(a.writes).toEqual([])
+})
+
+test('a Claude child with a kind is attached exactly as one without', async () => {
+  const a = fakeAttach()
+  const work = { id: 'b0b0b0b0', account: 'work', account_env: { config_dir: '/Users/me/.claude-work', kind: 'claude' as const } }
+  await typeAsMe(work, 'go', { ...quick, open: async () => a.session, send: async () => void expect.unreachable() })
+  expect(a.writes[0]).toBe('exec env MNEMO_AGENT=claude CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude attach b0b0b0b0\r')
 })

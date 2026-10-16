@@ -9,9 +9,13 @@
 //! dispatch worktree implies (`<repo>-wt-288` → `fix/issue-288`, `<repo>-wt-c-parser` →
 //! `feat/<feature>/parser`), the same derivation `mnemo`'s `delivery.py` falls back to. The
 //! open-PR list already carries each head branch, so that fallback costs no `gh` call.
+//!
+//! A Grok child has no job dir: it is the line mnemo wrote for it at dispatch in
+//! `child-agents.jsonl` (`mission::grok`), with no record of a PR, so only its worktree's branch
+//! names one. Its `short` is its full session id, the id its fleet row goes by.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -19,6 +23,7 @@ use serde::Serialize;
 use crate::github::{parse_issues, Issue};
 use crate::home::worktree_sibling;
 use crate::mission::account_dirs::{accounts, Accounts, DEFAULT_ID};
+use crate::mission::grok;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Pr {
@@ -152,8 +157,31 @@ pub fn read_jobs(dir: &Path) -> Vec<Job> {
 }
 
 /// Every account's jobs, each tagged with its account; a short id is kept once, by the first
-/// account that holds it.
+/// account that holds it. Then each Grok child mnemo recorded (`grok_jobs`).
 pub fn read_all_jobs(accounts: &Accounts) -> Vec<Job> {
+    let mut out = claude_jobs(accounts);
+    if grok::accounts_of(accounts).next().is_some() {
+        out.extend(grok_jobs(accounts, &grok::read_child_agents()));
+    }
+    out
+}
+
+/// The Grok children of `ledger` as jobs: no PR recorded, the time their session was made.
+pub fn grok_jobs(accounts: &Accounts, ledger: &HashMap<String, grok::ChildAgent>) -> Vec<Job> {
+    grok::ledger_children(ledger)
+        .into_iter()
+        .map(|c| Job {
+            short: c.session_id.clone(),
+            cwd: c.cwd.clone(),
+            prs: vec![],
+            updated_at: grok::uuid7_ms(&c.session_id).map(grok::iso_of_ms).unwrap_or_default(),
+            session_id: Some(c.session_id.clone()),
+            account: grok::env_at(accounts, &grok::home_of_line(c)).0,
+        })
+        .collect()
+}
+
+fn claude_jobs(accounts: &Accounts) -> Vec<Job> {
     let mut out: Vec<Job> = Vec::new();
     for a in accounts.iter() {
         for mut j in read_jobs(&a.jobs_dir()) {
@@ -390,6 +418,18 @@ mod tests {
         let prs = resolved();
         assert_eq!(child_of(&prs, 121), Some("bbbb2222"), "desk-wt-102 → fix/issue-102");
         assert_eq!(child_of(&prs, 122), Some("cccc3333"), "desk-wt-c-parser → feat/round9/parser");
+    }
+
+    #[test]
+    fn a_grok_child_owns_the_pr_its_worktrees_branch_names() {
+        let id = "01a1451f-0000-7000-8000-00000000c41d";
+        let line = serde_json::json!({ "short_id": grok::short_id(id), "agent": "grok", "session_id": id, "home": "/Users/you/.grok-w", "cwd": "/gh/desk-wt-c-lexer" });
+        let accounts = Accounts::parse(&serde_json::json!({ "accounts": [{ "id": "gw", "configDir": "/Users/you/.grok-w", "kind": "grok" }] }).to_string(), Path::new("/Users/you"));
+        let jobs = grok_jobs(&accounts, &grok::parse_child_agents(&line.to_string()));
+        assert_eq!((jobs[0].short.as_str(), jobs[0].account.as_str(), jobs[0].session_id.as_deref()), (id, "gw", Some(id)));
+        let mut prs = parse_prs(r#"[{"number":130,"title":"lexer","state":"OPEN","isDraft":false,"url":"u130","headRefName":"feat/round9/lexer"}]"#).unwrap();
+        resolve_children(&mut prs, ROOT, &jobs);
+        assert_eq!(prs[0].child.as_deref(), Some(id), "the id its fleet row goes by");
     }
 
     #[test]

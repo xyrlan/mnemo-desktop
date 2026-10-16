@@ -1,7 +1,8 @@
 //! Home screen data: repositories and past Claude Code sessions, from
 //! `~/.claude/history.jsonl` (every account's, through links) joined with each account's
 //! `claude agents --json --all`, plus each repo's open issues and PRs as the last
-//! `refresh_github` left them (`lens`).
+//! `refresh_github` left them (`lens`). A Grok account's sessions are listed beside them: each
+//! one its home keeps (`mission::grok::summaries`), live when its leader's roster says so.
 
 pub mod lens;
 
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::github::Issue;
 use crate::mission::account_dirs::{self, AccountEnv, Accounts};
+use crate::mission::grok;
 pub use lens::Pr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -353,10 +355,47 @@ pub fn join_accounts(repos: &mut [HomeRepo], live: &HashMap<String, LiveRow>, jo
     }
 }
 
+/// The sessions running in a Grok account's leader, as `LiveRow`s on that account.
+pub fn grok_live(rows: &[grok::RosterRow], account: &str) -> HashMap<String, LiveRow> {
+    rows.iter()
+        .filter(|r| grok::is_live(r))
+        .map(|r| (r.session_id.clone(), LiveRow { kind: "interactive".into(), name: r.title.clone(), cwd: r.cwd.clone(), account: account.to_string() }))
+        .collect()
+}
+
+/// Every Grok account's sessions as history knows Claude's, and each one's account by id.
+pub fn grok_known(accounts: &Accounts) -> (Vec<KnownSession>, HashMap<String, String>) {
+    let mut known = Vec::new();
+    let mut owner = HashMap::new();
+    for a in grok::accounts_of(accounts) {
+        for s in grok::summaries(&a.config_dir) {
+            if owner.insert(s.id.clone(), a.id.clone()).is_none() {
+                known.push(KnownSession { id: s.id, cwd: s.cwd, title: cut(&s.title, TITLE_MAX), first_at: s.first_at, last_at: s.last_at });
+            }
+        }
+    }
+    (known, owner)
+}
+
 /// Every account's live sessions, each row tagged with its account; a session id is kept once.
+/// A Grok account's are its leader's roster, asked beside `claude agents`.
 fn live_of(accounts: &Accounts, errors: &mut Vec<String>) -> HashMap<String, LiveRow> {
     let mut live = HashMap::new();
-    for (a, got) in crate::mission::agents_of(accounts) {
+    let (claude, rosters) = std::thread::scope(|s| {
+        let rosters = s.spawn(|| grok::rosters(accounts));
+        (crate::mission::agents_of(accounts), rosters.join().unwrap_or_default())
+    });
+    for (a, got) in rosters {
+        match got {
+            Ok(rows) => {
+                for (id, row) in grok_live(&rows, &a.id) {
+                    live.entry(id).or_insert(row);
+                }
+            }
+            Err(e) => errors.push(crate::mission::on_account_error(a, e)),
+        }
+    }
+    for (a, got) in claude {
         match got.and_then(|j| parse_live(&j)) {
             Ok(rows) => {
                 for (id, row) in rows {
@@ -398,14 +437,15 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
         String::new()
     });
     let sessions = sessions_from_history(&parse_history(&text));
+    let accounts = account_dirs::accounts();
+    let (grok_sessions, grok_owner) = grok_known(&accounts);
     let mut repos = group_repos(
-        sessions.into_values().collect(),
+        sessions.into_values().filter(|s| !grok_owner.contains_key(&s.id)).chain(grok_sessions).collect(),
         &crate::mission::repo_root,
         &crate::mission::may_probe,
         pinned,
         hidden,
     );
-    let accounts = account_dirs::accounts();
     repos.retain(|r| !is_internal_root(&r.root, &accounts));
     for root in extra_roots {
         if !repos.iter().any(|r| &r.root == root) {
@@ -425,10 +465,12 @@ pub fn collect_home(here: &[String], pinned: &[String], hidden: &[String], extra
     }
     sort_repos(&mut repos);
     let live = live_of(&accounts, &mut errors);
-    join_live(&mut repos, &live, here, &|cwd, id| crate::mission::transcript_path(cwd, id).is_some());
-    // A finished child is found by its jobs dir only when there is another account to tell apart.
+    // A Grok session listed at all has its history: `summaries` lists none without one.
+    join_live(&mut repos, &live, here, &|cwd, id| grok_owner.contains_key(id) || crate::mission::transcript_path(cwd, id).is_some());
+    // A finished child is found by its jobs dir only when there is another account to tell apart;
+    // a Grok session by the home that keeps it.
     let jobs: HashMap<String, String> = if accounts.0.len() > 1 {
-        lens::read_all_jobs(&accounts).into_iter().filter_map(|j| Some((j.session_id?, j.account))).collect()
+        lens::read_all_jobs(&accounts).into_iter().filter_map(|j| Some((j.session_id?, j.account))).chain(grok_owner).collect()
     } else {
         HashMap::new()
     };
@@ -780,6 +822,46 @@ mod tests {
         let live = parse_live(r#"[{"id":"n","cwd":"/gh/r","kind":"interactive","sessionId":"n","name":"r-f1"}]"#).unwrap();
         join_live(&mut repos, &live, &[], &|_, _| true);
         assert_eq!((repos[0].sessions[0].title.as_str(), repos[0].sessions[0].agent.as_deref()), ("r-f1", None));
+    }
+
+    #[test]
+    fn a_grok_accounts_sessions_are_listed_on_it_and_live_by_its_roster() {
+        let home = crate::testutil::temp_dir("home-grok");
+        let grok_home = home.join(".grok-work");
+        let summary = |id: &str, cwd: &str, kind: &str| {
+            let dir = grok_home.join("sessions").join(cwd.replace('/', "%2F")).join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("chat_history.jsonl"), "").unwrap();
+            let json = serde_json::json!({ "info": { "id": id, "cwd": cwd }, "created_at": "2026-10-16T14:31:11.072851Z",
+                "last_active_at": "2026-10-16T14:40:00.000000Z", "generated_title": format!("title of {id}"), "session_kind": kind });
+            std::fs::write(dir.join("summary.json"), json.to_string()).unwrap();
+        };
+        summary("g-live", "/gh/r", "interactive");
+        summary("g-old", "/gh/r-wt-12", "interactive");
+        summary("g-print", "/gh/r", "headless");
+        let text = serde_json::json!({ "accounts": [{ "id": "gw", "configDir": grok_home, "kind": "grok" }] }).to_string();
+        let accounts = Accounts::parse(&text, &home);
+        let (known, owner) = grok_known(&accounts);
+        let mut ids: Vec<&str> = known.iter().map(|k| k.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["g-live", "g-old"], "a headless `-p` session is no one's conversation");
+
+        let mut repos = group_repos(known, &|p| Some(if p.starts_with("/gh/r") { "/gh/r".into() } else { p.into() }), &quiet, &[], &[]);
+        let rows = grok::parse_roster(r#"[{"session_id":"g-live","cwd":"/gh/r","activity":"working","resident":true,"title":"t"},
+            {"session_id":"g-old","cwd":"/gh/r-wt-12","activity":"dormant","resident":false}]"#)
+        .unwrap();
+        let live = grok_live(&rows, "gw");
+        join_live(&mut repos, &live, &[], &|_, id| owner.contains_key(id));
+        join_accounts(&mut repos, &live, &owner, &accounts);
+        let r = &repos[0];
+        let (s, c) = (&r.sessions[0], &r.children[0]);
+        assert_eq!((s.id.as_str(), s.live, s.transcript, s.title.as_str()), ("g-live", Some(Live::Elsewhere), true, "title of g-live"));
+        assert_eq!((c.id.as_str(), c.live), ("g-old", None), "a dormant session is not running");
+        for x in [s, c] {
+            assert_eq!(x.account.as_deref(), Some("gw"));
+            assert_eq!(x.account_env, Some(AccountEnv { config_dir: Some(grok_home.to_string_lossy().to_string()), kind: crate::agent_kind::AgentKind::Grok }));
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// Dogfood: `cargo test home::tests::dump_real_home -- --ignored --nocapture`.

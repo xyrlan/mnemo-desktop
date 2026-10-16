@@ -24,14 +24,29 @@ pub fn live_among<'a>(answers: impl IntoIterator<Item = &'a str>, ids: &[String]
     ids.iter().filter(|id| live.contains(*id)).cloned().collect()
 }
 
+/// The saved sessions that are Grok sessions: those whose history one of the Grok accounts keeps.
+/// Resuming one is never a copy: `grok --leader -r` makes the pane one more client of the session
+/// its leader holds (spec decision 4), so no Grok session is ever held back, and none needs
+/// `claude agents` to vouch for it. None without a Grok account.
+pub fn grok_among(accounts: &crate::mission::account_dirs::Accounts, ids: &[String]) -> std::collections::HashSet<String> {
+    let homes: Vec<_> = crate::mission::grok::accounts_of(accounts).map(|a| a.config_dir.clone()).collect();
+    ids.iter().filter(|id| homes.iter().any(|h| crate::mission::grok::history_path(h, id).is_some())).cloned().collect()
+}
+
 /// The saved sessions the restore must not resume. An error when any account's `claude agents`
-/// cannot say: the restore then resumes nothing rather than risk a copy.
+/// cannot say: the restore then resumes nothing rather than risk a copy. A Grok session is never
+/// held back (`grok_among`), and when the saved ones are all Grok's, `claude` is not asked.
 #[tauri::command]
 pub async fn workspace_live_sessions(ids: Vec<String>) -> Result<Vec<String>, String> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
     tauri::async_runtime::spawn_blocking(move || {
+        let grok = grok_among(&crate::mission::account_dirs::accounts(), &ids);
+        let ids: Vec<String> = ids.into_iter().filter(|id| !grok.contains(id)).collect();
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
         // Asked after the restore began: a session resumed a moment ago must be seen.
         let answers = crate::chrome::ask_agents(std::time::Instant::now()).into_iter().collect::<Result<Vec<_>, _>>()?;
         Ok(live_among(answers.iter().map(String::as_str), &ids))
@@ -48,6 +63,21 @@ pub fn workspace_write(value: serde_json::Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_grok_session_is_told_by_the_home_that_keeps_it() {
+        let home = crate::testutil::temp_dir("ws-grok");
+        let g = home.join(".grok");
+        let dir = g.join("sessions").join("%2Fr").join("01a1451f-bfc0-7481-afec-c2286636bc5d");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("chat_history.jsonl"), "").unwrap();
+        let ids = ["01a1451f-bfc0-7481-afec-c2286636bc5d", "a43d3832-e7a9-49b7-9496-2d86aeac8aad"].map(String::from);
+        let text = serde_json::json!({ "accounts": [{ "id": "g", "configDir": g, "kind": "grok" }] }).to_string();
+        let with = crate::mission::account_dirs::Accounts::parse(&text, &home);
+        assert_eq!(grok_among(&with, &ids), std::collections::HashSet::from([ids[0].clone()]));
+        assert!(grok_among(&crate::mission::account_dirs::Accounts::single(&home), &ids).is_empty(), "only Claude accounts: as before");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn a_session_with_a_process_is_live_and_a_finished_one_is_not() {

@@ -458,19 +458,37 @@ type ProgramsIn<'a> = &'a dyn Fn(&Path) -> Vec<String>;
 /// pids of the asking window's terminals: closing them is part of removing a tree, so they and
 /// what runs in them are not counted as programs in it; nor is this app, nor what it runs (its
 /// own `git` calls, a setup job, which the front judges by itself).
+///
+/// A Grok session working in a tree is one of its programs too, though no process of it is there:
+/// its leader runs its tools from the leader's own dir. Its leader's roster names its cwd
+/// (`grok_in`).
 pub fn cleanup_facts(repo: &str, panes: &[u32]) -> Result<CleanupFacts, String> {
     let all = crate::programs::all();
     let roots: std::collections::HashSet<u32> = panes.iter().copied().chain([std::process::id()]).collect();
+    let accounts = crate::mission::account_dirs::accounts();
+    let grok: Vec<crate::mission::grok::RosterRow> =
+        crate::mission::grok::rosters(&accounts).into_iter().flat_map(|(_, got)| got.unwrap_or_default()).collect();
     // `claude agents` is asked only once some tree has a program in it.
     let spared = std::cell::OnceCell::new();
     let programs = |tree: &Path| -> Vec<String> {
+        let mut out = grok_in(&grok, tree);
         if crate::programs::inside(&all, tree, &roots, crate::chrome::parent_of).is_empty() {
-            return vec![];
+            return out;
         }
         let roots = spared.get_or_init(|| roots.iter().copied().chain(crate::chrome::claude_pids()).collect());
-        crate::programs::inside(&all, tree, roots, crate::chrome::parent_of).iter().map(|p| p.label()).collect()
+        out.extend(crate::programs::inside(&all, tree, roots, crate::chrome::parent_of).iter().map(|p| p.label()));
+        out
     };
     cleanup_facts_with(repo, &run_gh, &programs)
+}
+
+/// The Grok sessions running in `tree` (`grok::is_live`) as programs in it: `grok (<short id>)`,
+/// mnemo's short id for it as a process gets its pid.
+pub fn grok_in(rows: &[crate::mission::grok::RosterRow], tree: &Path) -> Vec<String> {
+    rows.iter()
+        .filter(|r| crate::mission::grok::is_live(r) && !r.cwd.is_empty() && Path::new(&r.cwd).starts_with(tree))
+        .map(|r| format!("grok ({})", crate::mission::grok::short_id(&r.session_id)))
+        .collect()
 }
 
 fn cleanup_facts_with(repo: &str, gh: GhRun, programs: ProgramsIn) -> Result<CleanupFacts, String> {
@@ -834,6 +852,19 @@ mod tests {
         sh_git(&["worktree", "add", "-q", "-b", "far", &s(&far)], &root);
         assert!(remove(&s(&far), true).unwrap_err().contains("outside"));
         assert!(far.exists());
+    }
+
+    #[test]
+    fn a_grok_session_working_in_a_tree_is_a_program_in_it() {
+        let rows = crate::mission::grok::parse_roster(
+            r#"[{"session_id":"01a1451f-0000-7000-8000-00000000c41d","cwd":"/gh/r-wt-c-x/sub","activity":"working","resident":true},
+                {"session_id":"01a1451f-0000-7000-8000-0000000d0e0d","cwd":"/gh/r-wt-c-x","activity":"dormant","resident":false},
+                {"session_id":"01a1451f-0000-7000-8000-00000000a1a1","cwd":"/gh/r-wt-c-xy","activity":"idle","resident":true}]"#,
+        )
+        .unwrap();
+        assert_eq!(grok_in(&rows, Path::new("/gh/r-wt-c-x")), ["grok (0000c41d)"]);
+        assert!(grok_in(&rows, Path::new("/gh/r-wt-c-z")).is_empty());
+        assert!(grok_in(&[], Path::new("/gh/r-wt-c-x")).is_empty());
     }
 
     #[test]
