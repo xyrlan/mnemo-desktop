@@ -1,13 +1,14 @@
+import type { Agent } from '../../agent/active'
 import type { PaneRuns } from '../../chrome/running'
 import { createStore, PROMPT_DELAY_MS } from '../../layout/store'
 import type { PtyClient } from '../../pty/client'
 import { nexusStore } from '../store'
 import { fakeHost, settle } from './fixtures'
 import { createDrawer } from './sessions'
-import { claudeCommand, createSessions, followPanes, labelFor, RESUME_WINDOW_MS, type Sessions } from './start'
+import { createSessions, followPanes, labelFor, RESUME_WINDOW_MS, type Sessions } from './start'
 
 /** The layout store on a PTY that records what is done to it: panes are 1, 2, … */
-function world(over: { failSpawn?: boolean; skip?: boolean; runs?: (pane: number) => PaneRuns } = {}) {
+function world(over: { failSpawn?: boolean; skip?: boolean; runs?: (pane: number) => PaneRuns; agent?: () => Agent } = {}) {
   const writes: [number, string][] = []
   const spawned: (string | undefined)[] = []
   const killed: number[] = []
@@ -40,6 +41,7 @@ function world(over: { failSpawn?: boolean; skip?: boolean; runs?: (pane: number
     newId: () => `0000000${++ids}-0000-4000-8000-000000000000`,
     runs: async (pane) => over.runs?.(pane) ?? 'idle',
     now: Date.now,
+    ...(over.agent ? { agent: over.agent } : {}),
   })
   return { layout, host, drawer, sessions, writes, spawned, killed }
 }
@@ -73,10 +75,68 @@ test('claude starts in the repo as Launch agent types it, under an id of its own
   }
 })
 
-test('the permission setting is Launch agent’s; a resume types claude --resume and keeps the id', () => {
-  expect(claudeCommand(false, { sessionId: 'abc' })).toBe('claude --session-id abc')
-  expect(claudeCommand(true, { resume: 'abc' })).toBe('claude --dangerously-skip-permissions --resume abc')
-  expect(claudeCommand(false, { resume: 'abc' })).toBe('claude --resume abc')
+test('the permission setting is Launch agent’s; a resume types claude --resume and keeps the id', async () => {
+  vi.useFakeTimers()
+  try {
+    // The default account active, as with no accounts at all: Claude, typed as before Grok.
+    const w = world({ skip: false, agent: () => ({ kind: 'claude', config_dir: null }) })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'abc' })
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(w.writes).toEqual([
+      [1, `claude --session-id ${ID1}\n`],
+      [2, 'claude --resume abc\n'],
+    ])
+    expect(w.layout.getState().panes[1].agent).toBeUndefined()
+    expect(w.layout.getState().snapshotForSave().offscreen).toEqual([
+      { pane: 1, cwd: '/work/mnemo', sessionId: ID1 },
+      { pane: 2, cwd: '/work/mnemo', sessionId: 'abc' },
+    ])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+const GROK_WORK: Agent = { kind: 'grok', config_dir: '/Users/me/.grok-work' }
+
+test('a Grok account active starts grok in leader mode under the id, approving every tool as Launch agent skips prompts; the pane keeps its account', async () => {
+  vi.useFakeTimers()
+  try {
+    const w = world({ agent: () => GROK_WORK })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo-desktop' })
+    expect(tabs()).toEqual([{ id: ID1, kind: 'captain', key: 'pane:1', label: 'grok · mnemo-desktop' }])
+    expect(w.layout.getState().panes[1]).toMatchObject({ offscreen: true, sessionId: ID1, agent: GROK_WORK })
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    // The pane runs on the active account already: grok's own words, nothing in front of them.
+    expect(w.writes).toEqual([[1, `grok --leader --always-approve -s ${ID1}\n`]])
+    expect(w.sessions.paneOf(ID1)).toBe(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a Grok session resumes on its own account and CLI whatever is active now; one the app never ran resumes on the active one', async () => {
+  vi.useFakeTimers()
+  try {
+    let active: Agent = GROK_WORK
+    const w = world({ skip: false, agent: () => active })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })
+    // Its pane is at its prompt again (grok ended), and the default Claude account is active.
+    active = { kind: 'claude', config_dir: null }
+    vi.advanceTimersByTime(PROMPT_DELAY_MS + RESUME_WINDOW_MS)
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: ID1 })
+    expect(tabs().at(-1)).toEqual({ id: ID1, kind: 'captain', key: 'pane:2', label: 'grok · mnemo' })
+    expect(w.layout.getState().panes[1].agent).toBeUndefined()
+    expect(w.layout.getState().panes[2]).toMatchObject({ sessionId: ID1, agent: GROK_WORK })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', resume: 'never-seen' })
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(w.writes.slice(1)).toEqual([
+      [2, `env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -r ${ID1}\n`],
+      [3, 'claude --resume never-seen\n'],
+    ])
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 test('a resume of a session a pane of the app runs already shows that pane: nothing is started', async () => {
@@ -237,6 +297,7 @@ test('a shell, and a saved command typed once the prompt is up, each in a tab na
 test('a session that cannot start rejects with why, for its caller to say, and nothing is opened', async () => {
   const w = world({ failSpawn: true })
   await expect(w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })).rejects.toThrow('Could not start claude in /work/mnemo: no shell')
+  await expect(world({ failSpawn: true, agent: () => GROK_WORK }).sessions.openSession({ kind: 'claude', root: '/work/mnemo' })).rejects.toThrow('Could not start grok in /work/mnemo: no shell')
   await expect(w.sessions.openSession({ kind: 'shell', root: '/work/mnemo' })).rejects.toThrow('Could not open a terminal in /work/mnemo: no shell')
   expect(tabs()).toEqual([])
 })

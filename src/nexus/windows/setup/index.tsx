@@ -1,12 +1,15 @@
 import { useEffect, useState, type JSX, type ReactNode } from 'react'
 import { checkAgain, setup, useLookForUpdate, useSetup } from '../../../setup/app-store'
 import type { Run } from '../../../setup/store'
-import { currentOs, ESSENTIAL, installRoute, needsSetup, newerMnemo, TOOLS, UPDATE_HINT, WHAT, type Route, type ToolName, type ToolStatus } from '../../../setup/tools'
+import { currentOs, installRoute, isNeeded, neededTools, needsSetup, newerMnemo, TOOLS, UPDATE_HINT, WHAT, type Route, type ToolName, type ToolStatus } from '../../../setup/tools'
 import { registerWindow } from '../../ui/windows'
 import { inTerminal } from './terminal'
 import './setup.css'
 
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** The tools listed: every one, `grok` once the status has a row for it. */
+const shownTools = (rows: ToolStatus[]) => TOOLS.filter((n) => n !== 'grok' || rows.some((r) => r.name === 'grok'))
 
 /** Opens `route`'s terminal; the window gives way to the drawer that shows it. A terminal that did
  *  not open says why. */
@@ -88,6 +91,8 @@ function Action({ name, open }: { name: ToolName; open: Open }) {
       )
     case 'claude':
       return <Terminal label="Install Claude Code" route={installRoute('claude', os)} open={open} after="then starts claude there to log in" />
+    case 'grok':
+      return <Terminal label="Install Grok Build" route={installRoute('grok', os)} open={open} after="then runs grok login there" />
     case 'git':
       return <Terminal label="Install git" route={installRoute('git', os)} open={open} />
     case 'gh':
@@ -95,14 +100,14 @@ function Action({ name, open }: { name: ToolName; open: Open }) {
   }
 }
 
-function Tool({ name, row, open }: { name: ToolName; row: ToolStatus | undefined; open: Open }) {
+function Tool({ name, row, needed, open }: { name: ToolName; row: ToolStatus | undefined; needed: boolean; open: Open }) {
   const mnemo = useSetup((s) => s.mnemo)
   const path = row?.path ?? null
-  const state = path ? 'found' : ESSENTIAL.includes(name) ? 'needed' : 'missing'
+  const state = path ? 'found' : needed ? 'needed' : 'missing'
   return (
     <li className="nx-row nx-su-tool" data-tool={name} data-state={state}>
       <span className="nx-su-mark" aria-hidden>
-        {path ? '✓' : ESSENTIAL.includes(name) ? '✕' : '○'}
+        {path ? '✓' : needed ? '✕' : '○'}
       </span>
       <div className="nx-su-body">
         <div className="nx-su-head">
@@ -125,10 +130,28 @@ function Tool({ name, row, open }: { name: ToolName; row: ToolStatus | undefined
   )
 }
 
-/** SYSTEMS › Setup (spec `2026-10-15-nexus-app-design.md`, Q8): the four programs the app runs,
- *  found or missing, as the setup screen shows them. mnemo installs (and updates) inside the app;
- *  git, gh and Claude Code install in a terminal the drawer shows, and the window gives way to it.
- *  Opened, it checks again, so it is current after an installer ran. */
+/** The tools a summary names, as a sentence says them: `a`, `a and b`, `a, b and c`. */
+const listed = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`)
+
+/** What the summary says of the tools the app needs (`neededTools`): both, or all, when there is
+ *  more than one. */
+function summary(rows: ToolStatus[], shown: ToolName[]): string {
+  const needed = neededTools(rows)
+  const names = listed(needed)
+  if (needsSetup(rows)) {
+    const each = needed.length === 1 ? 'is needed' : needed.length === 2 ? 'are both needed' : 'are all needed'
+    return `${names} ${each}. Install what is missing, one click each.`
+  }
+  if (shown.every((n) => rows.find((r) => r.name === n)?.path)) return 'Everything is in place.'
+  return `${names} ${needed.length === 1 ? 'is' : 'are'} in place.`
+}
+
+/** SYSTEMS › Setup (spec `2026-10-15-nexus-app-design.md`, Q8): the programs the app runs, found
+ *  or missing, as the setup screen shows them, the ones the accounts need marked (spec
+ *  `2026-10-16-grok-accounts-design.md`, decision 10). mnemo installs (and updates) inside the
+ *  app; git, gh, Claude Code and Grok Build install in a terminal the drawer shows, and the window
+ *  gives way to it. Opened, it checks again, so it is current after an installer ran. `grok` is
+ *  listed once the status reads it. */
 export function SetupWindow({ close }: { close: () => void }): JSX.Element {
   const rows = useSetup((s) => s.rows)
   const checking = useSetup((s) => s.checking)
@@ -161,15 +184,11 @@ export function SetupWindow({ close }: { close: () => void }): JSX.Element {
       {rows && (
         <>
           <p className="nx-su-summary" data-missing={needsSetup(rows) ? '' : undefined}>
-            {needsSetup(rows)
-              ? 'claude and mnemo are both needed. Install what is missing, one click each.'
-              : TOOLS.every((n) => rows.find((r) => r.name === n)?.path)
-                ? 'Everything is in place.'
-                : 'claude and mnemo are in place.'}
+            {summary(rows, shownTools(rows))}
           </p>
           <ul className="nx-su-tools">
-            {TOOLS.map((n) => (
-              <Tool key={n} name={n} row={rows.find((r) => r.name === n)} open={open} />
+            {shownTools(rows).map((n) => (
+              <Tool key={n} name={n} row={rows.find((r) => r.name === n)} needed={isNeeded(rows, n)} open={open} />
             ))}
           </ul>
         </>

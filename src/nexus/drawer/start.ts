@@ -1,6 +1,10 @@
 import type { StoreApi } from 'zustand/vanilla'
+import { activeAgent, type Agent } from '../../agent/active'
+import { sessionCommand } from '../../agent/command'
+import { binaryOf, type AgentKind } from '../../agent/kind'
 import type { PaneRuns } from '../../chrome/running'
 import type { Pane } from '../../layout/store'
+import { onAccount } from '../../mission/account'
 import type { PaneId } from '../../layout/tree'
 import { basename } from '../../path/path'
 import type { DrawerTab, NexusState } from '../store'
@@ -14,7 +18,7 @@ import type { Drawer } from './sessions'
 /** What of the layout store the sessions use. */
 export type SessionLayout = StoreApi<{
   panes: Record<PaneId, Pane>
-  openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
+  openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string, agent?: Agent): Promise<PaneId>
   closePane(id?: PaneId): Promise<void>
   setSessionId(id: PaneId, sessionId: string | undefined): void
   typedAt(id: PaneId): number | undefined
@@ -26,8 +30,11 @@ export type StartDeps = {
   nexus: StoreApi<NexusState>
   /** Settings' permission toggle, as the workbench's *Launch agent* reads it. */
   skipPermissions(): boolean
-  /** A new Claude session id: a UUID (`claude --session-id`). */
+  /** A new session id: a UUID (`claude --session-id`, `grok -s`). */
   newId(): string
+  /** The active account's CLI and home, which a new session starts on (`activeAgent` when not
+   *  given). */
+  agent?(): Agent
   /** What runs in pane `pane` now (`paneRuns`); never rejects. */
   runs(pane: PaneId): Promise<PaneRuns>
   now(): number
@@ -81,19 +88,15 @@ export type Sessions = {
   lost(pane: PaneId): Promise<boolean>
 }
 
-/** What *Launch agent* types (`agentCommand` in the workbench): `claude`, skipping its permission
- *  prompts unless Settings say not to; then the session to resume, or the id to start under, so
- *  its tab is its captain's from the first moment. */
-export function claudeCommand(skipPermissions: boolean, how: { resume: string } | { sessionId: string }): string {
-  const claude = skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude'
-  return 'resume' in how ? `${claude} --resume ${how.resume}` : `${claude} --session-id ${how.sessionId}`
+/** What a tab of `spec` is called before the ship knows it: what it runs (a session on `kind`'s
+ *  CLI), and where. */
+export function labelFor(spec: SessionSpec, kind: AgentKind = 'claude'): string {
+  if (spec.kind === 'command') return spec.label
+  return `${spec.kind === 'claude' ? binaryOf(kind) : 'shell'} · ${basename(spec.root) || spec.root}`
 }
 
-/** What a tab of `spec` is called before the ship knows it: what it runs, and where. */
-export function labelFor(spec: SessionSpec): string {
-  if (spec.kind === 'command') return spec.label
-  return `${spec.kind === 'claude' ? 'claude' : 'shell'} · ${basename(spec.root) || spec.root}`
-}
+/** Whether two agents are one account's. */
+const sameAgent = (a: Agent, b: Agent) => a.kind === b.kind && a.config_dir === b.config_dir
 
 /** What a session tab on terminal `p` is called: the terminal's title, else a shell in its folder. */
 export function shellLabel(p: Pick<Pane, 'title' | 'cwd'> | undefined): string {
@@ -147,8 +150,12 @@ export function createSessions(d: StartDeps): Sessions {
     paneOf,
 
     async openSession(spec) {
-      const label = labelFor(spec)
       if (spec.kind === 'claude') {
+        const active = (d.agent ?? activeAgent)()
+        // The session's own account: the Grok one a pane of the app ran it on (`Pane.agent`), so
+        // it resumes on its own home whatever is active now (decision 6); else the active one.
+        const own = (spec.resume && Object.values(panes()).find((p) => p.sessionId === spec.resume && p.agent)?.agent) || active
+        const label = labelFor(spec, own.kind)
         const id = spec.resume ?? d.newId()
         const tab: DrawerTab = { id, kind: 'captain', key: null, readOnly: null, label, sessionId: id, cwd: spec.root }
         if (spec.resume) {
@@ -166,15 +173,21 @@ export function createSessions(d: StartDeps): Sessions {
           if (running) return show(tab, running.id)
           for (const p of Object.values(panes())) if (p.sessionId === spec.resume) d.layout.getState().setSessionId(p.id, undefined)
         }
-        const cmd = claudeCommand(d.skipPermissions(), spec.resume ? { resume: spec.resume } : { sessionId: id })
+        // *Launch agent*'s words on the session's CLI: skipping its permission prompts unless
+        // Settings say not to; then the session to resume, or the id to start under, so its tab is
+        // its captain's from the first moment.
+        const words = sessionCommand(own.kind, { skipPermissions: d.skipPermissions(), ...(spec.resume ? { resume: spec.resume } : { sessionId: id }) })
+        const cmd = sameAgent(own, active) ? words : onAccount(words, { account_env: own })
         let pane: PaneId
         try {
-          pane = await d.layout.getState().openOffscreen(spec.root, cmd, id)
+          // A Grok session's pane keeps its account, for the restore to resume it there.
+          pane = await d.layout.getState().openOffscreen(spec.root, cmd, id, own.kind === 'grok' ? own : undefined)
         } catch (e) {
-          throw failed(`Could not start claude in ${spec.root}`, e)
+          throw failed(`Could not start ${binaryOf(own.kind)} in ${spec.root}`, e)
         }
         return show(tab, pane)
       }
+      const label = labelFor(spec)
       let pane: PaneId
       try {
         pane = await d.layout.getState().openOffscreen(spec.root, spec.kind === 'command' ? spec.command : undefined)

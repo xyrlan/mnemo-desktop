@@ -4,7 +4,8 @@ import { nexusRoutes } from '../nexus/outside'
 
 /** What a click does with GitHub: a dispatch runs headless with `runJob`, its output captured
  *  and shown in its job's log rather than typed into a fresh terminal; a page opens in the system
- *  browser (`nexus/outside`). */
+ *  browser (`nexus/outside`). A job runs on the active account (`job.rs`): `MNEMO_AGENT` and its
+ *  kind's variable, so `mnemo dispatch` and `mnemo resume` spawn on that account's CLI. */
 
 type DispatchOpts = { model?: string; effort?: string; may?: string }
 

@@ -1,7 +1,8 @@
 //! `tools_add_to_path`: an explicit, user-triggered action (never run automatically) that puts
 //! `crate::tools::extra_dirs()` on the user's own PATH, so a terminal opened outside this app
-//! also finds `mnemo` and `claude`. User scope only — no administrator rights, and the
-//! machine-wide PATH is never touched.
+//! also finds `mnemo`, `claude` and `grok`. User scope only — no administrator rights, and the
+//! machine-wide PATH is never touched. The block's markers still say "mnemo and claude": they are
+//! how a block written before `grok` is found and replaced.
 //!
 //! macOS and Linux: written as one marked block in the rc file the user's interactive shell
 //! reads (see `mission::login_path`'s doc comment on why that is `.zshrc` for zsh, not a

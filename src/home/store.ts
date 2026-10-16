@@ -1,4 +1,6 @@
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
+import { activeAgent, type Agent } from '../agent/active'
+import { sessionCommand } from '../agent/command'
 import type { HomeClient } from './client'
 import { cloneDest, EMPTY, stopCmd, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type OpenedPr, type Pr } from './types'
 
@@ -92,7 +94,8 @@ const without = (list: string[], v: string) => list.filter((x) => x !== v)
  *  a pin shows and a hide sticks (the fleet leaves out a repo Home lists as hidden). */
 const listedRoots = (s: HomeSettings) => [...new Set([...s.projects, ...s.homePinned, ...s.homeHidden])]
 
-export function createHomeStore(client: LensClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike): HomeStore {
+/** `agent`: the active account's CLI, which a new session starts (`activeAgent` when not given). */
+export function createHomeStore(client: LensClient, settings: () => HomeSettings, setSetting: SetSetting, layout: LayoutLike, agent: () => Agent = activeAgent): HomeStore {
   /** Save `root` as a project; one the user hid (or forgot) shows again. */
   async function addProject(root: string) {
     const s = settings()
@@ -174,7 +177,7 @@ export function createHomeStore(client: LensClient, settings: () => HomeSettings
     openPr: (repo, pr) => set({ openedPr: { repo, pr } }),
     closePr: () => set({ openedPr: null }),
     stopChild: (repo, s) => void layout.openCommandTab(repo.root, stopCmd(s)),
-    newSession: (root) => void layout.openCommandTab(root, 'claude'),
+    newSession: (root) => void layout.openCommandTab(root, sessionCommand(agent().kind, {})),
     shell: (root) => void layout.newTab(root),
     async openFolder() {
       const picked = await client.pickFolder()

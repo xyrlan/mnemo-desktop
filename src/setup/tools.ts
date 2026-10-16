@@ -1,25 +1,37 @@
-/** What the setup screen knows about the four programs the app runs, and how each OS installs
- *  the ones a click opens a terminal for. Pure, so every OS's route is a unit test on any OS. */
+/** What the setup screen knows about the programs the app runs, and how each OS installs the
+ *  ones a click opens a terminal for. Pure, so every OS's route is a unit test on any OS. */
 
-export type ToolName = 'git' | 'gh' | 'claude' | 'mnemo'
+export type ToolName = 'git' | 'gh' | 'claude' | 'grok' | 'mnemo'
 
 /** One row of `tools_status`: `path` is the executable found on the app's PATH (null when
- *  missing), `version` the first line of its `--version`, `managed` true when the app installed it. */
-export type ToolStatus = { name: ToolName; path: string | null; version: string | null; managed: boolean }
+ *  missing), `version` the first line of its `--version`, `managed` true when the app installed it.
+ *  `needed`: the app does nothing useful without it, for the accounts there are (`tools.rs`,
+ *  `needed`): `mnemo`, and the CLI of each kind of account in use. A row without it (from before
+ *  Grok accounts) is needed when it is `ESSENTIAL`. */
+export type ToolStatus = { name: ToolName; path: string | null; version: string | null; managed: boolean; needed?: boolean }
 
 /** The order the setup screen lists them in. */
-export const TOOLS: ToolName[] = ['git', 'claude', 'mnemo', 'gh']
+export const TOOLS: ToolName[] = ['git', 'claude', 'grok', 'mnemo', 'gh']
 
 /** What each one is for, as the setup screens say it. */
 export const WHAT: Record<ToolName, string> = {
   git: 'worktrees, branches and diffs',
-  claude: 'Claude Code, which runs every session',
+  claude: 'Claude Code, which runs the sessions of a Claude account',
+  grok: 'Grok Build, which runs the sessions of a Grok account',
   mnemo: 'rules, briefings and dispatch',
   gh: 'issues and pull requests on GitHub',
 }
 
-/** Without these two the app does nothing useful: either missing opens setup at launch. */
+/** Without these two the app does nothing useful with only Claude accounts: when a row does not
+ *  say whether it is `needed`. */
 export const ESSENTIAL: ToolName[] = ['claude', 'mnemo']
+
+/** Whether the app needs tool `name`, as its row says (`ToolStatus.needed`), else as `ESSENTIAL`
+ *  says. */
+export const isNeeded = (rows: ToolStatus[], name: ToolName): boolean => rows.find((r) => r.name === name)?.needed ?? ESSENTIAL.includes(name)
+
+/** The tools the app needs, in `TOOLS`' order. */
+export const neededTools = (rows: ToolStatus[]): ToolName[] => TOOLS.filter((n) => isNeeded(rows, n))
 
 export type Os = 'mac' | 'windows' | 'linux'
 
@@ -59,9 +71,9 @@ export const managedMnemo = (rows: ToolStatus[] | null) => !!rows?.some((r) => r
 export const UPDATE_HINT =
   "downloads it into the app's own folder, checks it, swaps it in whole, then refreshes mnemo's hooks; the mnemo you have stays if anything fails before the swap"
 
-/** Setup opens by itself when `claude` or `mnemo` is missing; a row `tools_status` left out
- *  counts as missing. */
-export const needsSetup = (rows: ToolStatus[]) => ESSENTIAL.some((n) => !found(rows, n))
+/** Setup opens by itself when a tool the app needs is missing (`isNeeded`): `mnemo`, and `claude`
+ *  or `grok` for the accounts there are. A row `tools_status` left out counts as missing. */
+export const needsSetup = (rows: ToolStatus[]) => neededTools(rows).some((n) => !found(rows, n))
 
 /** `command` is typed into a new terminal tab; `shows` is the short form a label prints. */
 export type Route = { command: string; shows: string }
@@ -97,12 +109,28 @@ function claudeRoute(os: Os): Route {
   return { command: `${install} && ~/.local/bin/claude`, shows: install }
 }
 
+/** Grok Build's installer (`x.ai/cli`, read from `install.sh` and `install.ps1` in
+ *  `github.com/xai-org/grok-build`), then `grok login`, since a fresh install has no login. It puts
+ *  `grok` in `~/.grok/bin` (and links it into `~/.local/bin` only when that is on PATH already), so
+ *  `grok` is started by its absolute path. The Windows installer is PowerShell's, and a pane's
+ *  shell there is cmd: `powershell -Command` runs it. */
+function grokRoute(os: Os): Route {
+  if (os === 'windows') {
+    const install = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://x.ai/cli/install.ps1 | iex"'
+    return { command: `${install} && "%USERPROFILE%\\.grok\\bin\\grok.exe" login`, shows: 'irm https://x.ai/cli/install.ps1 | iex' }
+  }
+  const install = 'curl -fsSL https://x.ai/cli/install.sh | bash'
+  return { command: `${install} && ~/.grok/bin/grok login`, shows: install }
+}
+
 /** How this OS installs a tool from a terminal. `mnemo` has none: the app installs it itself
  *  (`tools_install_mnemo`). `brew` exists only on a Mac. */
 export function installRoute(tool: Exclude<ToolName, 'mnemo'>, os: Os): Route {
   switch (tool) {
     case 'claude':
       return claudeRoute(os)
+    case 'grok':
+      return grokRoute(os)
     case 'git':
       if (os === 'mac') return same('xcode-select --install')
       if (os === 'windows') return same('winget install --id Git.Git -e --source winget')

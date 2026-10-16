@@ -21,6 +21,9 @@ import {
   tidy,
   withTab,
 } from './groups'
+import type { Agent } from '../agent/active'
+import { sessionCommand } from '../agent/command'
+import { onAccount } from '../mission/account'
 import type { PtyClient } from '../pty/client'
 import { notTyped, typed } from '../pty/typed'
 import { providedSessions, type PtyInfo, type SessionClient } from '../terminal/sessions'
@@ -49,6 +52,11 @@ export type Pane = {
   renewed?: true
   /** The Claude Code session this terminal runs, when opened for one (Home focuses it instead of forking). */
   sessionId?: string
+  /** The account a Grok session in it runs on, when the app started it there (`openOffscreen`): a
+   *  Grok session stays on the account that started it (spec `2026-10-16-grok-accounts-design.md`,
+   *  decision 6), so the restore resumes it there. None for a Claude session, whose account follows
+   *  the active one. Goes when the pane is given another session. */
+  agent?: Agent
   /** Which face a terminal pane shows: the xterm (default) or its Claude session as cards (round 20).
    *  The PTY runs underneath either way. */
   face?: Face
@@ -60,7 +68,7 @@ export type Pane = {
 }
 
 /** An offscreen pane as the workspace file keeps it, beside the worktrees (`offscreen`). */
-export type SavedOffscreen = { pane: PaneId; cwd?: string; title?: string; sessionId?: string }
+export type SavedOffscreen = { pane: PaneId; cwd?: string; title?: string; sessionId?: string; agent?: Agent }
 /** What `snapshotForSave` writes: the worktrees, and the offscreen panes when there are any. */
 export type WorkspaceFile = Saved & { offscreen?: SavedOffscreen[] }
 export type Face = 'terminal' | 'conversation'
@@ -170,10 +178,11 @@ export type Actions = {
    *  `Date.now()`; undefined when none was. What it starts may not run yet. */
   typedAt(id: PaneId): number | undefined
   /** A terminal in `cwd` in no tab (`Pane.offscreen`), that types `cmd` once its shell prompt is up;
-   *  `sessionId` marks it as running that Claude session. Nothing shown changes. Rejects, with no
+   *  `sessionId` marks it as running that session, and `agent` the Grok account it runs on
+   *  (`Pane.agent`). Nothing shown changes. Rejects, with no
    *  pane, when the shell could not be spawned. While no view shows it, what it prints is not kept:
    *  the next view is drawn from the core's screen. */
-  openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string): Promise<PaneId>
+  openOffscreen(cwd: string | undefined, cmd?: string, sessionId?: string, agent?: Agent): Promise<PaneId>
   /** The workbench's tabs, as a workspace saved before the Nexus was the app holds them (#459), made
    *  into what the Nexus shows: every terminal pane in a tab, of every worktree, becomes an
    *  offscreen pane under its id, its program running on; while no view shows it, what it prints
@@ -304,7 +313,9 @@ export type Actions = {
    *  core's screen once a view shows it. One whose shell is gone comes back only when it ran a
    *  Claude session no running `claude` holds: on a new shell, resuming it, as a tab's would. When
    *  that cannot be told, it comes back on a new shell with its id and nothing typed, as a tab's
-   *  does: its session is never lost on an answer nobody could give (#460). */
+   *  does: its session is never lost on an answer nobody could give (#460). One that ran a Grok
+   *  session (`Pane.agent`) comes back on a new shell resuming it on its own account, whatever runs
+   *  it: the TUI is one more client of the session its home's leader holds, never a second copy. */
   restore(saved: unknown): Promise<void>
 }
 
@@ -812,15 +823,24 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         const cwd = info.cwd || p.cwd
         // Drawn from the core's screen once a view shows it: nothing is attached meanwhile.
         blank.add(p.pane)
-        set((s) => ({ panes: { ...s.panes, [p.pane]: offscreenPane(p.pane, cwd, p.sessionId, p.title) } }))
+        set((s) => ({ panes: { ...s.panes, [p.pane]: offscreenPane(p.pane, cwd, p.sessionId, p.title, p.agent) } }))
         void pty.onExit(p.pane, (code) => get().paneExited(p.pane, code))
       }
       if (!respawn.length) return
-      const running = await liveSessions(respawn.map((p) => p.sessionId!)).then((ids) => new Set(ids), () => null)
+      // `liveSessions` asks the running `claude`s: a Grok session is not theirs to answer for.
+      const claude = respawn.filter((p) => !p.agent)
+      const running = claude.length ? await liveSessions(claude.map((p) => p.sessionId!)).then((ids) => new Set(ids), () => null) : new Set<string>()
       for (const p of respawn) {
-        if (running?.has(p.sessionId!)) continue
+        const resume = p.agent
+          ? onAccount(sessionCommand(p.agent.kind, { resume: p.sessionId }), { account_env: p.agent })
+          : running?.has(p.sessionId!)
+            ? null
+            : running
+              ? `claude --resume ${p.sessionId}`
+              : undefined
+        if (resume === null) continue
         const id = await get()
-          .openOffscreen(p.cwd, running ? `claude --resume ${p.sessionId}` : undefined, p.sessionId)
+          .openOffscreen(p.cwd, resume, p.sessionId, p.agent)
           .catch(() => null)
         if (id !== null) set((s) => ({ panes: { ...s.panes, [id]: { ...s.panes[id], renewed: true } } }))
       }
@@ -923,13 +943,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       typeCommand,
       typedAt: (id) => commandAt.get(id),
 
-      async openOffscreen(cwd, cmd, sessionId) {
+      async openOffscreen(cwd, cmd, sessionId, agent) {
         let assigned: PaneId | null = null
         const early: Uint8Array[] = []
         const id = await pty.spawn({ cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, onOutput: (b) => (assigned === null ? early.push(b) : route(assigned, b)) })
         assigned = id
         hold(id, early)
-        set((s) => ({ panes: { ...s.panes, [id]: offscreenPane(id, cwd, sessionId) } }))
+        set((s) => ({ panes: { ...s.panes, [id]: offscreenPane(id, cwd, sessionId, undefined, agent) } }))
         void pty.onExit(id, (code) => get().paneExited(id, code))
         if (cmd) typeCommand(id, cmd)
         return id
@@ -1259,7 +1279,13 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
       },
 
       setSessionId(id, sessionId) {
-        set((s) => (s.panes[id] ? { panes: { ...s.panes, [id]: { ...s.panes[id], sessionId } } } : {}))
+        set((s) => {
+          const p = s.panes[id]
+          if (!p) return {}
+          // Another session in the pane is not known to be on the account the last one ran on.
+          const { agent, ...rest } = p
+          return { panes: { ...s.panes, [id]: agent && sessionId !== p.sessionId ? { ...rest, sessionId } : { ...p, sessionId } } }
+        })
       },
       setFace(id, face) {
         set((s) => (s.panes[id]?.view === 'terminal' ? { panes: { ...s.panes, [id]: { ...s.panes[id], face } } } : {}))
@@ -1370,7 +1396,9 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
         } else if (away?.tabs.length) layouts.push([null, away])
         const worktrees = layouts.map(([path, l]): SavedWorktree => ({ path, ...saveLayout(l, s.panes) }))
         const offscreen = Object.values(s.panes).flatMap((p): SavedOffscreen[] =>
-          p.offscreen && p.id > 0 ? [{ pane: p.id, ...(p.cwd ? { cwd: p.cwd } : {}), ...(p.title ? { title: p.title } : {}), ...(p.sessionId ? { sessionId: p.sessionId } : {}) }] : [],
+          p.offscreen && p.id > 0
+            ? [{ pane: p.id, ...(p.cwd ? { cwd: p.cwd } : {}), ...(p.title ? { title: p.title } : {}), ...(p.sessionId ? { sessionId: p.sessionId } : {}), ...(p.sessionId && p.agent ? { agent: p.agent } : {}) }]
+            : [],
         )
         return { version: SAVED_VERSION, activeWorktree: s.activeWorktree, worktrees, ...(offscreen.length ? { offscreen } : {}) }
       },
@@ -1409,8 +1437,18 @@ export function createStore(pty: PtyClient, opts: StoreOptions = {}): Store {
 
 const NO_TABS: Tab[] = []
 
-function offscreenPane(id: PaneId, cwd: string | undefined, sessionId: string | undefined, title?: string): Pane {
-  return { id, view: 'terminal', offscreen: true, ...(cwd ? { cwd } : {}), ...(sessionId ? { sessionId } : {}), ...(title ? { title } : {}) }
+function offscreenPane(id: PaneId, cwd: string | undefined, sessionId: string | undefined, title?: string, agent?: Agent): Pane {
+  return { id, view: 'terminal', offscreen: true, ...(cwd ? { cwd } : {}), ...(sessionId ? { sessionId } : {}), ...(title ? { title } : {}), ...(agent ? { agent } : {}) }
+}
+
+/** A saved pane's Grok account (`Pane.agent`), when it reads as one: a session is resumed on it,
+ *  its home typed into a shell, so only a rooted path (or none: `~/.grok`) gets through. */
+function parseAgent(x: unknown): Agent | undefined {
+  if (typeof x !== 'object' || x === null) return undefined
+  const { kind, config_dir } = x as Record<string, unknown>
+  if (kind !== 'grok') return undefined
+  if (config_dir === null) return { kind, config_dir }
+  return typeof config_dir === 'string' && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(config_dir) ? { kind, config_dir } : undefined
 }
 
 /** The offscreen panes a saved file lists (`WorkspaceFile.offscreen`); what cannot be read is left
@@ -1421,7 +1459,7 @@ function parseOffscreen(saved: unknown): SavedOffscreen[] {
   const seen = new Set<PaneId>()
   return list.flatMap((x): SavedOffscreen[] => {
     if (typeof x !== 'object' || x === null) return []
-    const { pane, cwd, title, sessionId } = x as Record<string, unknown>
+    const { pane, cwd, title, sessionId, agent } = x as Record<string, unknown>
     if (!Number.isInteger(pane) || (pane as number) <= 0 || seen.has(pane as number)) return []
     seen.add(pane as number)
     return [
@@ -1430,6 +1468,7 @@ function parseOffscreen(saved: unknown): SavedOffscreen[] {
         ...(typeof cwd === 'string' && cwd ? { cwd } : {}),
         ...(typeof title === 'string' && title ? { title } : {}),
         ...(typeof sessionId === 'string' && SESSION_ID.test(sessionId) ? { sessionId } : {}),
+        ...(typeof sessionId === 'string' && SESSION_ID.test(sessionId) && parseAgent(agent) ? { agent: parseAgent(agent) } : {}),
       },
     ]
   })

@@ -1,22 +1,27 @@
-//! Where the app finds `git`, `gh`, `claude` and `mnemo`.
+//! Where the app finds `git`, `gh`, `claude`, `grok` and `mnemo`, and which of them the accounts
+//! need.
 //!
 //! Every call to one of them resolves through `mission::login_path()`, and every terminal pane
 //! gets `pane_path`. Both carry `extra_dirs()`: the directories the app installs tools into
-//! (`managed_dir`) and `~/.local/bin`, where Claude Code's native installer puts `claude` on
-//! every OS. So a tool the app or that installer put in place is found with nothing on the
+//! (`managed_dir`), `~/.local/bin`, where Claude Code's native installer puts `claude` on every
+//! OS, and `~/.grok/bin`, where xAI's installer puts `grok` (`install.sh` and `install.ps1` in
+//! `github.com/xai-org/grok-build`; it links it into `~/.local/bin` only when that is on `PATH`
+//! already). So a tool the app or those installers put in place is found with nothing on the
 //! system `PATH`, and without a restart. `system-path` writes the same list to the user's own
 //! `PATH`, so the two cannot drift.
 //!
 //! Most of this is Windows behaviour CI only half sees, so it is kept in pure functions over
 //! strings and paths with the separator passed in: the Windows cases run on every OS.
 
+use crate::agent_kind::AgentKind;
+use crate::mission::account_dirs::Accounts;
 use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// The tools the setup screen reports, in its order.
-pub const TOOLS: [&str; 4] = ["git", "gh", "claude", "mnemo"];
+pub const TOOLS: [&str; 5] = ["git", "gh", "claude", "grok", "mnemo"];
 
 /// Tools the app installs itself, each into its own `managed_dir`.
 const MANAGED: [&str; 1] = ["mnemo"];
@@ -40,8 +45,8 @@ fn managed_dir_in(home: &Path, tool: &str) -> PathBuf {
 }
 
 /// Every directory the app puts on `PATH` beyond what the system gives it: the managed dirs,
-/// then `~/.local/bin`. Whether they exist yet or not: a pane opened before an install must
-/// find the tool once the install is done.
+/// then `~/.local/bin`, then `~/.grok/bin`. Whether they exist yet or not: a pane opened before
+/// an install must find the tool once the install is done.
 pub fn extra_dirs() -> Vec<PathBuf> {
     extra_dirs_in(&home())
 }
@@ -51,7 +56,11 @@ fn extra_dirs_in(home: &Path) -> Vec<PathBuf> {
     if !home.is_absolute() {
         return Vec::new();
     }
-    MANAGED.iter().map(|t| managed_dir_in(home, t)).chain([home.join(".local").join("bin")]).collect()
+    MANAGED
+        .iter()
+        .map(|t| managed_dir_in(home, t))
+        .chain([home.join(".local").join("bin"), home.join(AgentKind::Grok.default_dir_name()).join("bin")])
+        .collect()
 }
 
 /// Forget the cached `login_path()`, so the next call reads PATH again: after an install, or
@@ -315,6 +324,22 @@ pub struct ToolStatus {
     pub version: Option<String>,
     /// The executable is in the app's `managed_dir` for this tool.
     pub managed: bool,
+    /// The app does nothing useful without it, for the accounts there are (`needed`).
+    pub needed: bool,
+}
+
+/// Whether the app needs `tool` for `accounts`, `active` the kind of the active one (spec
+/// `2026-10-16-grok-accounts-design.md`, decision 10): `mnemo` always; `claude` while a Claude
+/// account is in use, the active one or one besides the default (which is always listed, logged in
+/// or not); `grok` while a Grok account is. With no accounts of its own that is `claude` and
+/// `mnemo`, as before Grok.
+pub fn needed(tool: &str, accounts: &Accounts, active: AgentKind) -> bool {
+    match tool {
+        "mnemo" => true,
+        "claude" => active == AgentKind::Claude || accounts.iter().any(|a| a.kind == AgentKind::Claude && !a.is_default),
+        "grok" => active == AgentKind::Grok || accounts.iter().any(|a| a.kind == AgentKind::Grok),
+        _ => false,
+    }
 }
 
 /// The first non-empty line of `out`, trimmed.
@@ -369,28 +394,35 @@ fn status_of(name: &'static str, path_env: &str, lookup: &Lookup, managed: &Path
         version: found.as_deref().and_then(|p| version_of(p, path_env, timeout)),
         managed: found.as_deref().is_some_and(|p| is_under(p, managed)),
         path: found.map(|p| p.to_string_lossy().into_owned()),
+        needed: false,
     }
 }
 
-/// One row per tool in `TOOLS`, read from a fresh `login_path()`. The four `--version` calls
-/// run side by side.
+/// One row per tool in `TOOLS`, read from a fresh `login_path()`, each marked `needed` for the
+/// accounts as `accounts.json` says now. The `--version` calls run side by side.
 pub fn read_status() -> Vec<ToolStatus> {
     refresh();
     let path = crate::mission::login_path();
     let lookup = Lookup::native();
+    let accounts = crate::mission::account_dirs::accounts();
+    let active = crate::accounts::Place::real().for_new_pane().kind;
     std::thread::scope(|s| {
         let rows: Vec<_> = TOOLS
             .iter()
             .map(|&t| (t, s.spawn(|| status_of(t, &path, &lookup, &managed_dir(t), VERSION_TIMEOUT))))
             .collect();
         rows.into_iter()
-            .map(|(name, h)| h.join().unwrap_or(ToolStatus { name, path: None, version: None, managed: false }))
+            .map(|(name, h)| ToolStatus {
+                needed: needed(name, &accounts, active),
+                ..h.join().unwrap_or(ToolStatus { name, path: None, version: None, managed: false, needed: false })
+            })
             .collect()
     })
 }
 
-/// Which of `git`, `gh`, `claude` and `mnemo` the app finds, where, and at what version. Reads
-/// PATH again on every call, so "check again" after an install in a pane shows the new tool.
+/// Which of `git`, `gh`, `claude`, `grok` and `mnemo` the app finds, where, at what version, and
+/// which of them the accounts need. Reads PATH again on every call, so "check again" after an
+/// install in a pane shows the new tool.
 #[tauri::command]
 pub async fn tools_status() -> Vec<ToolStatus> {
     tauri::async_runtime::spawn_blocking(read_status).await.unwrap_or_default()
@@ -416,12 +448,12 @@ mod tests {
     }
 
     #[test]
-    fn extra_dirs_are_the_managed_dirs_then_the_claude_installers_bin() {
+    fn extra_dirs_are_the_managed_dirs_then_the_claude_and_grok_installers_bins() {
         // Absolute on this OS: `/home/u` has no drive letter, so Windows would call it relative.
         let home = std::env::temp_dir().join("u");
         assert_eq!(
             extra_dirs_in(&home),
-            vec![home.join(".mnemo-desktop").join("tools").join("mnemo"), home.join(".local").join("bin")]
+            vec![home.join(".mnemo-desktop").join("tools").join("mnemo"), home.join(".local").join("bin"), home.join(".grok").join("bin")]
         );
         assert!(extra_dirs_in(Path::new("")).is_empty(), "no home, no relative PATH entries");
         assert_eq!(extra_dirs().first(), Some(&managed_dir("mnemo")));
@@ -583,7 +615,7 @@ mod tests {
         let row = status_of("mnemo", &path, &lookup, &managed, VERSION_TIMEOUT);
         assert_eq!(
             row,
-            ToolStatus { name: "mnemo", path: Some(mnemo.to_string_lossy().into_owned()), version: Some("mnemo 1.6.0".into()), managed: true }
+            ToolStatus { name: "mnemo", path: Some(mnemo.to_string_lossy().into_owned()), version: Some("mnemo 1.6.0".into()), managed: true, needed: false }
         );
         let git = status_of("git", &path, &lookup, &managed_dir_in(&home, "git"), VERSION_TIMEOUT);
         assert!(git.path.is_some() && !git.managed, "{git:?}");
@@ -621,11 +653,30 @@ mod tests {
 
     #[test]
     fn a_row_serialises_as_the_setup_screen_reads_it() {
-        let row = ToolStatus { name: "claude", path: None, version: None, managed: false };
+        let row = ToolStatus { name: "claude", path: None, version: None, managed: false, needed: true };
         assert_eq!(
             serde_json::to_value(&row).unwrap(),
-            serde_json::json!({ "name": "claude", "path": null, "version": null, "managed": false })
+            serde_json::json!({ "name": "claude", "path": null, "version": null, "managed": false, "needed": true })
         );
+    }
+
+    #[test]
+    fn the_accounts_need_mnemo_and_the_cli_of_each_kind_in_use() {
+        let home = Path::new("/Users/x");
+        let need = |accounts: &Accounts, active| TOOLS.into_iter().filter(|t| needed(t, accounts, active)).collect::<Vec<_>>();
+        // No accounts of its own: as before Grok.
+        assert_eq!(need(&Accounts::single(home), AgentKind::Claude), ["claude", "mnemo"]);
+        let grok = r#"{ "active": "grok", "accounts": [{ "id": "grok", "label": "Grok", "configDir": "/Users/x/.grok", "isDefault": false, "kind": "grok" }] }"#;
+        let only_grok = Accounts::parse(grok, home);
+        // The default Claude account is always listed: a Grok one active does not need claude.
+        assert_eq!(need(&only_grok, AgentKind::Grok), ["grok", "mnemo"]);
+        // The default one active again: both.
+        assert_eq!(need(&only_grok, AgentKind::Claude), ["claude", "grok", "mnemo"]);
+        let both = r#"{ "accounts": [
+            { "id": "work", "label": "Work", "configDir": "/Users/x/.claude-work", "isDefault": false },
+            { "id": "grok", "label": "Grok", "configDir": "/Users/x/.grok", "isDefault": false, "kind": "grok" } ] }"#;
+        assert_eq!(need(&Accounts::parse(both, home), AgentKind::Grok), ["claude", "grok", "mnemo"]);
+        assert!(!needed("git", &Accounts::single(home), AgentKind::Claude) && !needed("gh", &Accounts::single(home), AgentKind::Claude));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { installRoute, needsSetup, newerMnemo, osOf, type ToolName, type ToolStatus } from './tools'
+import { installRoute, isNeeded, neededTools, needsSetup, newerMnemo, osOf, type ToolName, type ToolStatus } from './tools'
 
 const row = (name: ToolName, path: string | null = `/bin/${name}`): ToolStatus => ({ name, path, version: path && `${name} 1.0`, managed: false })
 const all = (missing: ToolName[] = []) => (['git', 'gh', 'claude', 'mnemo'] as ToolName[]).map((n) => row(n, missing.includes(n) ? null : `/bin/${n}`))
@@ -19,6 +19,33 @@ test('setup is needed when claude or mnemo is missing, never for git or gh alone
   expect(needsSetup(all(['git', 'gh']))).toBe(false)
   // A tool the status left out is missing, not present.
   expect(needsSetup(all().filter((r) => r.name !== 'mnemo'))).toBe(true)
+})
+
+test('with the accounts in the rows, setup needs mnemo and the CLI of each kind in use: claude only for a Claude account', () => {
+  const rows = (needed: ToolName[], missing: ToolName[]) =>
+    (['git', 'gh', 'claude', 'grok', 'mnemo'] as ToolName[]).map((n) => ({ ...row(n, missing.includes(n) ? null : `/bin/${n}`), needed: needed.includes(n) }))
+  // Only Grok accounts in use: no claude is fine, no grok is not.
+  expect(needsSetup(rows(['grok', 'mnemo'], ['claude']))).toBe(false)
+  expect(needsSetup(rows(['grok', 'mnemo'], ['grok']))).toBe(true)
+  expect(neededTools(rows(['grok', 'mnemo'], []))).toEqual(['grok', 'mnemo'])
+  // Both kinds in use: both CLIs.
+  expect(needsSetup(rows(['claude', 'grok', 'mnemo'], ['claude']))).toBe(true)
+  expect(neededTools(rows(['claude', 'grok', 'mnemo'], []))).toEqual(['claude', 'grok', 'mnemo'])
+  // A row from before Grok accounts says nothing: `ESSENTIAL` decides, and grok is never needed.
+  expect(isNeeded(all(), 'claude')).toBe(true)
+  expect(isNeeded(all(), 'grok')).toBe(false)
+  expect(neededTools(all())).toEqual(['claude', 'mnemo'])
+})
+
+test('Grok Build installs through xAI’s installer for this OS, then logs in with grok by its path', () => {
+  const mac = installRoute('grok', 'mac')
+  expect(mac.shows).toBe('curl -fsSL https://x.ai/cli/install.sh | bash')
+  expect(mac.command).toBe('curl -fsSL https://x.ai/cli/install.sh | bash && ~/.grok/bin/grok login')
+  expect(installRoute('grok', 'linux')).toEqual(mac)
+  // The installer is PowerShell's; the pane's shell is cmd, which hands it to powershell.
+  const win = installRoute('grok', 'windows')
+  expect(win.shows).toBe('irm https://x.ai/cli/install.ps1 | iex')
+  expect(win.command).toBe('powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://x.ai/cli/install.ps1 | iex" && "%USERPROFILE%\\.grok\\bin\\grok.exe" login')
 })
 
 test('Claude Code installs through its native installer for this OS, then starts claude to log in', () => {
