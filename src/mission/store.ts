@@ -30,10 +30,12 @@ export type MissionActions = {
   setDraft(id: string, text: string): void
   sendReply(id: string): Promise<boolean>
   /** Types the draft, exactly as written, into the child's terminal through `claude attach`, so
-   *  the child reads it as its user's turn and it can approve a push or a PR. `suggested` is the
+   *  the child reads it as its user's turn and it can approve a push or a PR; a Grok child gets it
+   *  as a turn through its leader, which is its user's turn too (`typeAsMe`). `suggested` is the
    *  child's own suggested reply: sent unedited it would be the child approving itself. */
   replyAsMe(id: string, suggested?: string | null): Promise<boolean>
-  /** Replace the draft with its English translation (via `claude -p`). */
+  /** Replace the draft with its English translation (via `claude -p`, or `grok -p` when the active
+   *  account is a Grok one: `mission::translate`). */
   translateDraft(id: string): Promise<boolean>
 }
 

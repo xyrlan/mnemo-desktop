@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { bufferLines, tail } from '../terminal/buffer'
 import { tauriPty } from '../pty/client'
 import { DETACH_KEY, promptOptions } from '../cockpit/prompt'
-import { accountOf, idOf, onAccount, type Target } from './account'
+import { accountOf, idOf, kindOfRow, onAccount, type Target } from './account'
 import { paneShell, thenLeave, typed, type Shell } from '../pty/typed'
 
 /** "Reply as me": the draft, as typed, goes into the child's own terminal through a hidden
@@ -18,7 +18,12 @@ import { paneShell, thenLeave, typed, type Shell } from '../pty/typed'
  *  - ← does not detach, it opens the agent view with a new-session field focused; Ctrl+Z lets go
  *    of the session (on 2.1.282 it suspends the attach rather than ending it: see `attached`);
  *  - a bracketed paste keeps a multi-line reply as one turn (a bare newline would be Enter);
- *  - typed while the child works, the turn is queued and still `human`. */
+ *  - typed while the child works, the turn is queued and still `human`.
+ *
+ *  A Grok session has no input box to type into from here: its TUI is one client of the session its
+ *  leader holds (spec `2026-10-16-grok-accounts-design.md`, decision 4). A turn sent through the
+ *  leader (`mnemo grok send`, which `mission_reply` runs for a Grok row) is the user's turn, so
+ *  "reply as me" sends it that way, and nothing here attaches to a Grok session. */
 
 /** One hidden attach: the PTY and the screen its output draws. */
 export type AttachSession = {
@@ -29,6 +34,8 @@ export type AttachSession = {
 }
 
 export type Deps = {
+  /** A user turn to a Grok session through its leader (`mission_reply`). */
+  send: (id: string, text: string) => Promise<void>
   /** What the child's process is parked on (`claude agents`), null when nothing. */
   waitingFor: (id: string) => Promise<string | null>
   /** A login shell on a hidden PTY; the command is typed into it. */
@@ -111,6 +118,7 @@ async function openHidden(): Promise<AttachSession> {
 }
 
 const defaults: Deps = {
+  send: (id, text) => invoke<void>('mission_reply', { id, text }),
   waitingFor: (id) => invoke<string | null>('mission_waiting_for', { id }),
   open: openHidden,
   get shell() {
@@ -130,6 +138,8 @@ export type Until = <T>(what: string, ms: number, probe: () => T | null) => Prom
  *  closing the PTY ends it. */
 export async function attached<R>(target: Target, d: Deps, body: (s: AttachSession, until: Until) => Promise<R>): Promise<R> {
   const id = idOf(target)
+  // Its screen is Grok's TUI, whose prompts and box nothing here reads: nothing is typed at it.
+  if (kindOfRow(accountOf(target)) === 'grok') throw new Error(`${id} is a Grok session: answer it in its own terminal (attach to it), nothing was typed`)
   const s = await d.open()
   try {
     // When the attach ends, the PTY ends, and no shell is left to type into.
@@ -160,6 +170,8 @@ export async function typeAsMe(target: Target, text: string, deps: Partial<Deps>
   const d = { ...defaults, ...deps }
   const id = idOf(target)
   if (!text.trim()) throw new Error('nothing to type')
+  // A Grok session takes the turn from its leader as its user's, as written: no screen to read.
+  if (kindOfRow(accountOf(target)) === 'grok') return d.send(id, text)
   // Typed first, a `!` puts Claude Code's input in shell mode: the reply would run as a command.
   if (text.trimStart().startsWith('!')) throw new Error("a reply that starts with ! would run as a shell command in the child's terminal: reword it, nothing was typed")
   const waiting = await d.waitingFor(id)

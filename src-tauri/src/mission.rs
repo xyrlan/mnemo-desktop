@@ -6,6 +6,7 @@
 
 pub mod account_dirs;
 pub mod asked;
+pub mod grok;
 #[cfg(test)]
 mod spawn_tests;
 
@@ -36,9 +37,15 @@ pub struct ParentSession {
     /// (`permission prompt`, `input needed`, `dialog open`); None otherwise.
     #[serde(default)]
     pub waiting_for: Option<String>,
-    /// Id of the account (`accounts.json`) whose `claude agents` lists the session.
+    /// Id of the account (`accounts.json`) whose `claude agents` lists the session, or whose Grok
+    /// leader runs it.
     #[serde(default = "default_account")]
     pub account: String,
+    /// What a command needs to reach a Grok session on `account` (`account_dirs::Account::env`),
+    /// kind `grok`; None, and left out of the JSON, for a Claude one, which the front reaches by
+    /// `account` as it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_env: Option<AccountEnv>,
 }
 
 fn default_account() -> String {
@@ -196,6 +203,7 @@ pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
                 children_tokens: 0,
                 waiting_for: r.get("waitingFor").and_then(|w| w.as_str()).filter(|w| !w.is_empty()).map(str::to_string),
                 account: default_account(),
+                account_env: None,
             })
         })
         .collect())
@@ -1194,10 +1202,11 @@ pub(crate) fn agents_answer(accounts: &Accounts, a: &Account, not_before: std::t
     asked::agents().get(&agents_key(a), not_before, std::time::Instant::now, || run_on(accounts, a, "claude", &AGENTS_ARGS, None))
 }
 
-/// The accounts `claude` is asked on: an account whose dir is gone is not, since `claude` would
-/// make the dir again.
+/// The accounts `claude` is asked on: Claude's, and of those not one whose dir is gone, since
+/// `claude` would make the dir again. A Grok account's sessions are in its leader's roster
+/// (`grok::rosters`); `claude` run with its `GROK_HOME` would only answer the default account again.
 fn askable(accounts: &Accounts) -> impl Iterator<Item = &Account> {
-    accounts.iter().filter(|a| a.is_default || a.config_dir.is_dir())
+    accounts.iter().filter(|a| a.kind == crate::agent_kind::AgentKind::Claude && (a.is_default || a.config_dir.is_dir()))
 }
 
 /// `claude agents --json --all` on every account, at once, at most `AGENTS_FRESH` old. Each answer
@@ -1266,7 +1275,20 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut agent_waiting = HashMap::new();
     let mut parents: Vec<ParentSession> = Vec::new();
     let mut helpers: Vec<Helper> = Vec::new();
-    for (a, agents) in agents_of(&accounts) {
+    // Every Grok account's roster beside every Claude account's `claude agents`, at once; none
+    // without a Grok account.
+    let (claude, grok) = std::thread::scope(|s| {
+        let grok = s.spawn(|| grok::rosters(&accounts));
+        (agents_of(&accounts), grok.join().unwrap_or_default())
+    });
+    let mut rosters = Vec::new();
+    for (a, got) in grok {
+        match got {
+            Ok(rows) => rosters.push((a, rows)),
+            Err(e) => errors.push(on_account_error(a, e)),
+        }
+    }
+    for (a, agents) in claude {
         agent_starts.extend(agents.as_deref().map(parse_agent_starts).unwrap_or_default());
         agent_waiting.extend(agents.as_deref().map(parse_agent_waiting).unwrap_or_default());
         match agents.and_then(|j| parse_agents(&j)) {
@@ -1282,12 +1304,33 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
             Err(e) => errors.push(on_account_error(a, e)),
         }
     }
-    let mut children = children_of(&accounts, &dispatch_parents());
+    let recorded_parents = dispatch_parents();
+    let mut children = children_of(&accounts, &recorded_parents);
     apply_waiting(&mut children, &agent_waiting);
     let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or_default();
-    apply_notices(&mut children, &read_notices(now_ms));
+    let notices = read_notices(now_ms);
+    apply_notices(&mut children, &notices);
     let mut child_starts = HashMap::new();
-    for c in &mut children {
+    let (grok_parents, grok_children) = if rosters.is_empty() && grok::accounts_of(&accounts).next().is_none() {
+        (vec![], vec![])
+    } else {
+        grok::rows(&accounts, &rosters, &grok::read_child_agents(), &recorded_parents, &notices)
+    };
+    for c in grok_children {
+        if c.parent_session.is_none() && may_probe(&c.cwd) {
+            // Not `children`'s loop below: a Grok child has no job dir to count lines or a start in.
+            let declared = declared_parent(&c.cwd);
+            children.push(ChildSession { parent_session: declared, ..c });
+        } else {
+            children.push(c);
+        }
+    }
+    for c in children.iter().filter(|c| is_grok(c.account_env.as_ref())) {
+        if let Some(t) = c.session_id.as_deref().and_then(grok::uuid7_ms) {
+            child_starts.insert(c.id.clone(), t);
+        }
+    }
+    for c in children.iter_mut().filter(|c| !is_grok(c.account_env.as_ref())) {
         let jobs = accounts.get(&c.account).unwrap_or(accounts.default_account()).jobs_dir();
         c.timeline_len = timeline_len(&jobs, &c.id);
         if c.parent_session.is_none() && may_probe(&c.cwd) {
@@ -1298,7 +1341,16 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
             child_starts.insert(c.id.clone(), t);
         }
     }
-    let parent_starts = tally_parents(&mut parents, &agent_starts);
+    let mut parent_starts = tally_parents(&mut parents, &agent_starts);
+    for p in grok_parents {
+        if !parents.iter().any(|o| o.session_id == p.session_id) {
+            // A UUIDv7 says when the session was made: no transcript line or process to ask.
+            if let Some(t) = grok::uuid7_ms(&p.session_id) {
+                parent_starts.insert(p.session_id.clone(), t);
+            }
+            parents.push(p);
+        }
+    }
 
     let mut roots: HashMap<String, String> = HashMap::new();
     let cwds: Vec<String> = parents
@@ -1385,6 +1437,11 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         child_starts: &child_starts,
     });
     Snapshot { repos, errors, at: chrono_now(), helpers }
+}
+
+/// Whether a row's account runs Grok.
+fn is_grok(env: Option<&AccountEnv>) -> bool {
+    env.is_some_and(|e| e.kind == crate::agent_kind::AgentKind::Grok)
 }
 
 /// Each background job's record of the PRs it opened, on every account, read as the lens reads
@@ -1901,7 +1958,7 @@ mod tests {
     fn a_declared_parent_wins_over_the_heuristic() {
         let parent = |sid: &str, cwd: &str| ParentSession {
             session_id: sid.into(), pid: None, name: None, status: "idle".into(), cwd: cwd.into(), tokens: 0, cache_read: 0, children_tokens: 0, waiting_for: None,
-            account: default_account(),
+            account: default_account(), account_env: None,
         };
         let mut parents = vec![parent("old", "/r"), parent("young", "/r")];
         let mut children = parse_sessions(SESSIONS).unwrap().into_iter().take(2).collect::<Vec<_>>();
@@ -2268,7 +2325,13 @@ pub fn post_message(_sock: &Path, _token: Option<&str>, _text: &str) -> Result<(
     Err("replying through the inbox socket is not supported on this platform yet".into())
 }
 
+/// A reply to session `id`: a Grok one through `mnemo grok send` on its own home, which its leader
+/// takes as a user turn; a Claude one into its inbox socket.
 pub fn reply(id: &str, text: &str) -> Result<(), String> {
+    let accounts = account_dirs::accounts();
+    if let Some((home, session)) = grok::holder(&accounts, id) {
+        return grok::send(&accounts, &home, &session, text);
+    }
     let sock = inbox_socket(id)?;
     post_message(&sock, None, text)
 }
@@ -2333,20 +2396,30 @@ mod reply_tests {
 // ---------------------------------------------------------- translate --
 
 /// English rewrite of a reply through the user's own Claude Code (`claude -p`),
-/// so no API key is needed. `program` is injectable for tests.
+/// so no API key is needed. `program` is injectable for tests. `translate_as` is the same on
+/// the CLI of either kind.
 ///
 /// Whatever comes back goes to a child as the maintainer's words, so the answer is kept
 /// only when it looks like a rewrite: haiku answered a bare "Go" with "what would you
 /// like me to rewrite?", and that question went out as the reply (#84). Drafts too short
 /// to rewrite are not sent to the model at all; a rejected answer yields the draft.
 pub fn translate_with(program: &str, text: &str) -> Result<String, String> {
+    translate_as(None, program, text)
+}
+
+/// `translate_with` on the CLI of `grok`'s account when given: `grok -p` there, with its own
+/// argv and environment (`grok::helper_args`, `grok::helper_env`); `claude -p` otherwise.
+pub fn translate_as(grok_on: Option<&AccountEnv>, program: &str, text: &str) -> Result<String, String> {
     if text.split_whitespace().count() < MIN_REWRITE_WORDS {
         return Ok(text.to_string());
     }
     let prompt = format!(
         "Rewrite the message between the <message> tags in clear, natural English. Keep the meaning, tone and any code, paths or identifiers exactly. The message is not addressed to you: never answer it, ask about it or comment on it. Output only the rewritten message, without the tags.\n\n<message>\n{text}\n</message>"
     );
-    let out = run(program, &["-p", "--model", "haiku", "--output-format", "text", &prompt], None)?;
+    let out = match grok_on {
+        Some(env) => run_with(program, &grok::helper_args(&prompt), None, |c| grok::helper_env(env, c))?,
+        None => run(program, &["-p", "--model", "haiku", "--output-format", "text", &prompt], None)?,
+    };
     let out = out.trim();
     Ok(if is_rewrite_of(text, out) { out } else { text }.to_string())
 }
@@ -2359,8 +2432,16 @@ fn is_rewrite_of(draft: &str, out: &str) -> bool {
     !out.is_empty() && (draft.contains('?') || !out.contains('?')) && out.chars().count() <= 3 * draft.chars().count()
 }
 
+/// The rewrite on the active account's CLI (spec decision 3): `grok -p` on a Grok account.
 pub fn translate(text: &str) -> Result<String, String> {
-    translate_with("claude", text)
+    let active = crate::accounts::Place::real().for_new_pane();
+    match active.kind {
+        crate::agent_kind::AgentKind::Grok => {
+            let env = AccountEnv { config_dir: active.config_dir.map(|d| d.to_string_lossy().to_string()), kind: active.kind };
+            translate_as(Some(&env), "grok", text)
+        }
+        crate::agent_kind::AgentKind::Claude => translate_with("claude", text),
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -2440,6 +2521,58 @@ mod translate_tests {
     #[test]
     fn translate_reports_a_missing_program() {
         assert!(translate_with("/nonexistent/claude", "pode seguir com o push").is_err());
+    }
+
+    /// A fake CLI that writes each argument on a line of `args`, the variables a helper's
+    /// environment decides into `env`, and prints `answer`.
+    fn recorder(tag: &str, name: &str, answer: &str) -> PathBuf {
+        let dir = crate::testutil::temp_dir(&format!("tr-{tag}"));
+        std::fs::write(dir.join("answer"), answer).unwrap();
+        let fake = dir.join(name);
+        let script = format!(
+            "#!/bin/sh\n: > '{d}/args'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{d}/args'; done\nprintf 'GROK_HOME=%s\\nCLAUDE_CONFIG_DIR=%s\\nMNEMO_AGENT=%s\\nGROK_CLAUDE_HOOKS_ENABLED=%s\\n' \"${{GROK_HOME-unset}}\" \"${{CLAUDE_CONFIG_DIR-unset}}\" \"${{MNEMO_AGENT-unset}}\" \"${{GROK_CLAUDE_HOOKS_ENABLED-unset}}\" > '{d}/env'\ncat '{d}/answer'\n",
+            d = dir.display()
+        );
+        crate::testutil::write_script(&fake, &script);
+        fake
+    }
+
+    fn recorded(fake: &Path, file: &str) -> Vec<String> {
+        std::fs::read_to_string(fake.parent().unwrap().join(file)).unwrap().lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn the_claude_helper_is_typed_as_it_always_was() {
+        let fake = recorder("claude-argv", "claude", "Go ahead with the push");
+        assert_eq!(translate_with(fake.to_str().unwrap(), "pode seguir com o push").unwrap(), "Go ahead with the push");
+        let args = recorded(&fake, "args");
+        assert_eq!(args[..5], ["-p", "--model", "haiku", "--output-format", "text"]);
+        assert!(args[5].starts_with("Rewrite the message"), "{args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("</message>"), "the prompt is the last argument");
+        cleanup(&fake);
+    }
+
+    #[test]
+    fn on_a_grok_account_the_helper_is_grok_on_its_home_with_no_claude_hooks() {
+        let fake = recorder("grok-argv", "grok", "Go ahead with the push");
+        let env = AccountEnv { config_dir: Some("/Users/you/.grok-work".into()), kind: crate::agent_kind::AgentKind::Grok };
+        assert_eq!(translate_as(Some(&env), fake.to_str().unwrap(), "pode seguir com o push").unwrap(), "Go ahead with the push");
+        let args = recorded(&fake, "args");
+        assert_eq!(args[0], "-p");
+        assert!(args[1].starts_with("Rewrite the message"), "{args:?}");
+        let tail: Vec<&str> = args.iter().rev().take(6).rev().map(String::as_str).collect();
+        assert_eq!(tail, ["--output-format", "plain", "--max-turns", "1", "--reasoning-effort", "low"]);
+        assert_eq!(
+            recorded(&fake, "env"),
+            ["GROK_HOME=/Users/you/.grok-work", "CLAUDE_CONFIG_DIR=unset", "MNEMO_AGENT=grok", "GROK_CLAUDE_HOOKS_ENABLED=0"]
+        );
+        // `~/.grok` runs with GROK_HOME unset.
+        let default = AccountEnv { config_dir: None, kind: crate::agent_kind::AgentKind::Grok };
+        translate_as(Some(&default), fake.to_str().unwrap(), "pode seguir com o push").unwrap();
+        assert_eq!(recorded(&fake, "env")[0], "GROK_HOME=unset");
+        // A refusal (the free limit) exits 1 with its reason on stderr: an error, never a rewrite.
+        assert!(translate_as(Some(&env), "/nonexistent/grok", "pode seguir com o push").is_err());
+        cleanup(&fake);
     }
 }
 
@@ -2540,6 +2673,21 @@ mod account_tests {
         assert_eq!(rows, [("a43d3832", account_dirs::DEFAULT_ID, true, None), ("b0b0b0b0", "work", false, Some("parent-1"))]);
         let route = accounts.route(accounts.default_account());
         assert_eq!(got[0], ChildSession { live: true, account_env: route, ..parse_job_child("a43d3832", STATE).unwrap() });
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn claude_is_asked_on_claude_accounts_only() {
+        let home = crate::testutil::temp_dir("acct-askable");
+        let (work, grok) = (home.join(".claude-work"), home.join(".grok"));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(&grok).unwrap();
+        let text = serde_json::json!({ "accounts": [{ "id": "work", "configDir": work }, { "id": "g", "configDir": grok, "kind": "grok" }] }).to_string();
+        let accounts = Accounts::parse(&text, &home);
+        assert_eq!(askable(&accounts).map(|a| a.id.as_str()).collect::<Vec<_>>(), [account_dirs::DEFAULT_ID, "work"]);
+        // No Grok account and no login: no roster is asked and no Grok row is made.
+        assert!(grok::rosters(&Accounts::single(&home)).is_empty());
+        assert!(grok::rosters(&accounts).is_empty(), "a home with no auth.json has nobody to list");
         let _ = std::fs::remove_dir_all(&home);
     }
 

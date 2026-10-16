@@ -2,6 +2,12 @@
 //! every account's `claude agents` matched against the process tree under the pane's shell. That
 //! answer is the app's one per account, shared with the mission poll and Home
 //! (`mission::agents_of`).
+//!
+//! Grok Build's TUI is no process its roster names: the leader runs the session, the TUI is one of
+//! its clients. A pane runs Grok when a `grok` process that is its TUI (`grok_tui`) is under the
+//! shell, and its session is the id that process was started with (`-s`/`--session-id` for a new
+//! one, `-r`/`--resume` for one resumed: `grok --help`, 1.0.60). Command lines are read only when
+//! there is a Grok account, so a machine with only Claude accounts starts nothing new.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -122,12 +128,109 @@ pub const AGENTS_CANNOT_SAY: &str = "claude agents could not say which Claude se
 /// The Claude Code session running under a pane's shell, None when there is none. An error when the
 /// process tree could not be walked, or when `claude agents` could not answer on any account
 /// (`AGENTS_CANNOT_SAY`; `claude` not installed reads the same).
+///
+/// A Grok TUI under it gives the session it was started on, whatever `claude agents` says or fails
+/// to; one started bare (no id on its command line) gives none.
 pub fn session_of(pane_pid: u32) -> Result<Option<String>, String> {
-    let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
-    if agents.is_empty() {
-        return Ok(None);
+    let agents = live_agents();
+    if let Some(agents) = agents.as_ref().filter(|a| !a.is_empty()) {
+        if let Some(s) = session_below(pane_pid, agents, children_of()?) {
+            return Ok(Some(s));
+        }
     }
-    Ok(session_below(pane_pid, &agents, children_of()?))
+    if grok_accounts() {
+        if let Some(found) = grok_below(pane_pid, children_of()?, process_args) {
+            return Ok(found);
+        }
+    }
+    match agents {
+        None => Err(AGENTS_CANNOT_SAY.to_string()),
+        Some(_) => Ok(None),
+    }
+}
+
+// ---------------------------------------------------------------- grok --
+
+/// What `grok` names that is not its TUI: the leader and its bridge (`agent`), and the commands that
+/// print and exit (`grok --help`, 1.0.60).
+const GROK_NOT_TUI: &[&str] = &[
+    "agent", "leader", "login", "logout", "models", "inspect", "export", "memory", "mcp", "update", "completions", "cursor-worker", "help", "plugin", "plugins", "worktree",
+];
+
+/// Flags that make `grok` a headless run or a printout rather than the TUI.
+const GROK_HEADLESS: &[&str] = &["-p", "--single", "--prompt-file", "--prompt-json", "-v", "--version", "-h", "--help"];
+
+/// Whether `s` is a UUID as Grok reads one: `grok -r` takes anything else as a title.
+fn uuid_shaped(s: &str) -> bool {
+    s.len() == 36 && s.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() })
+}
+
+/// What a process with command line `args` is: None when it is not Grok's TUI; Some of the session
+/// it was started on when it is, the id after `-s`/`--session-id` (a new session, also the fork's
+/// with `--fork-session`) else after `-r`/`--resume`, None when it names neither.
+pub fn grok_tui(args: &str) -> Option<Option<String>> {
+    let mut words = args.split_whitespace();
+    let program = words.next()?;
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    if !name.eq_ignore_ascii_case("grok") && !name.eq_ignore_ascii_case("grok.exe") {
+        return None;
+    }
+    let words: Vec<&str> = words.collect();
+    if words.iter().any(|w| GROK_HEADLESS.contains(w)) {
+        return None;
+    }
+    if words.iter().find(|w| !w.starts_with('-')).is_some_and(|w| GROK_NOT_TUI.contains(w)) {
+        return None;
+    }
+    let after = |flags: &[&str]| {
+        words.iter().enumerate().find_map(|(i, w)| {
+            let value = flags.iter().find_map(|f| w.strip_prefix(&format!("{f}="))).or_else(|| flags.contains(w).then(|| words.get(i + 1).copied()).flatten())?;
+            uuid_shaped(value).then(|| value.to_ascii_lowercase())
+        })
+    };
+    Some(after(&["-s", "--session-id"]).or_else(|| after(&["-r", "--resume"])))
+}
+
+/// The Grok TUI nearest below `root` (`grok_tui`), walking the tree as `session_below` does over
+/// one reading of every command line in it (`args_of`). None when there is none, and when nothing
+/// runs under `root` at all, which asks no command line.
+pub fn grok_below(root: u32, mut children: impl FnMut(&[u32]) -> Vec<u32>, args_of: impl FnOnce(&[u32]) -> HashMap<u32, String>) -> Option<Option<String>> {
+    let mut seen = std::collections::HashSet::from([root]);
+    let mut levels = vec![vec![root]];
+    for _ in 0..MAX_DEPTH {
+        let next: Vec<u32> = children(levels.last()?).into_iter().filter(|p| seen.insert(*p)).collect();
+        if next.is_empty() {
+            break;
+        }
+        levels.push(next);
+    }
+    if levels.len() == 1 {
+        return None;
+    }
+    let args = args_of(&levels.concat());
+    levels.iter().find_map(|level| level.iter().find_map(|p| args.get(p).and_then(|a| grok_tui(a))))
+}
+
+/// The command line of each of `pids` that is running, from `ps`; empty where there is none to ask
+/// (Windows) or it fails.
+pub fn process_args(pids: &[u32]) -> HashMap<u32, String> {
+    if cfg!(windows) || pids.is_empty() {
+        return HashMap::new();
+    }
+    let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    let Ok(out) = crate::proc::command("ps").args(["-o", "pid=,args=", "-p", &list]).stdin(std::process::Stdio::null()).output() else { return HashMap::new() };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let (pid, args) = l.trim_start().split_once(char::is_whitespace)?;
+            Some((pid.parse().ok()?, args.trim().to_string()))
+        })
+        .collect()
+}
+
+/// Whether the app has a Grok account: only then is a pane's command line read for one.
+fn grok_accounts() -> bool {
+    crate::mission::grok::accounts_of(&crate::mission::account_dirs::accounts()).next().is_some()
 }
 
 /// The pids of the live Claude Code sessions on every account, from `claude agents --json` at most
@@ -293,7 +396,9 @@ fn claude_gate(shell: Result<Shell, String>, running: impl FnOnce() -> Result<bo
 }
 
 /// What runs under a pane's shell, for what the drawer decides about the pane (#460): whether to
-/// end it, show it as a session's, or resume that session elsewhere.
+/// end it, show it as a session's, or resume that session elsewhere. `Claude` is an agent CLI's
+/// session, Grok Build's TUI included (`grok_tui`): the drawer treats both alike, and the wire
+/// word stays `claude`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneRuns {
@@ -333,9 +438,20 @@ pub async fn chrome_pane_runs(pane_pid: u32) -> Result<PaneRuns, String> {
         let table = crate::procs::table()?;
         // A `claude agents` answer a few seconds old is enough here, and costs no process spawn
         // for every pane that runs something else (`live_agents`).
+        // A Grok TUI is looked for only when no Claude is, and only with a Grok account.
         let claude = || {
-            let Some(agents) = live_agents() else { return Err(AGENTS_CANNOT_SAY.to_string()) };
-            Ok(!agents.is_empty() && session_below(pane_pid, &agents, |pids| table.children(pids)).is_some())
+            let said = match live_agents() {
+                None => Err(AGENTS_CANNOT_SAY.to_string()),
+                Some(agents) => Ok(!agents.is_empty() && session_below(pane_pid, &agents, |pids| table.children(pids)).is_some()),
+            };
+            if said == Ok(true) || !grok_accounts() {
+                return said;
+            }
+            if grok_below(pane_pid, |pids| table.children(pids), process_args).is_some() {
+                Ok(true)
+            } else {
+                said
+            }
         };
         Ok(pane_runs(shell_of(pane_pid, |p| table.children(p), crate::procs::image_of, crate::procs::groups), claude))
     })
@@ -533,6 +649,67 @@ mod tests {
 
         // An idle pane is refused either way.
         assert_eq!(claude_running(5003, cached.clone(), t0, parents(&[]), fresh(Some(agents.clone())), || Ok(pgrep(&calls))), Ok(false));
+    }
+
+    #[test]
+    fn grok_s_tui_is_told_from_its_other_commands_and_names_its_session() {
+        const ID: &str = "01a1451f-bfc0-7481-afec-c2286636bc5d";
+        // What the app types (`attachCmd` in src/mission/account.ts) and what a new pane starts.
+        assert_eq!(grok_tui(&format!("grok --leader -r {ID}")), Some(Some(ID.to_string())));
+        assert_eq!(grok_tui(&format!("/Users/you/.grok/bin/grok --leader -s {ID}")), Some(Some(ID.to_string())));
+        assert_eq!(grok_tui(&format!("grok --resume={}", ID.to_uppercase())), Some(Some(ID.to_string())));
+        assert_eq!(grok_tui(&format!("grok -r 01a1451f-0000-7000-8000-000000000000 --fork-session -s {ID}")), Some(Some(ID.to_string())), "the fork's own id");
+        assert_eq!(grok_tui("grok"), Some(None), "a bare TUI: Grok, on no session the app can name");
+        assert_eq!(grok_tui("grok -r fix-login-bug"), Some(None), "a title is no id");
+        assert_eq!(grok_tui("grok fix the bug"), Some(None), "an initial prompt");
+        for not in [
+            "/Users/you/.grok/bin/grok agent leader --no-exit-on-disconnect --relay-on-demand",
+            "grok agent --leader stdio",
+            "grok login --device-auth",
+            "grok -p hello --output-format plain",
+            "grok --version",
+            "groker --leader",
+            "claude --resume x",
+            "",
+        ] {
+            assert_eq!(grok_tui(not), None, "{not}");
+        }
+        assert_eq!(grok_tui(r"C:\Users\you\.grok\bin\grok.exe --leader"), Some(None));
+    }
+
+    #[test]
+    fn a_pane_runs_the_grok_tui_nearest_below_its_shell() {
+        const ID: &str = "01a1451f-bfc0-7481-afec-c2286636bc5d";
+        // shell 100 → grok TUI 200 (resumed) → the leader it auto-started, 300.
+        let tree = |parents: &[u32]| -> Vec<u32> {
+            [(200, 100), (300, 200), (400, 300)].iter().filter(|(_, pp)| parents.contains(pp)).map(|(p, _)| *p).collect()
+        };
+        let args = |pids: &[u32]| -> HashMap<u32, String> {
+            assert!(pids.contains(&100) && pids.contains(&300), "one reading for the whole tree: {pids:?}");
+            HashMap::from([
+                (100, "-zsh".to_string()),
+                (200, format!("grok --leader -r {ID}")),
+                (300, "/Users/you/.grok/bin/grok agent leader --no-exit-on-disconnect".to_string()),
+            ])
+        };
+        assert_eq!(grok_below(100, tree, args), Some(Some(ID.to_string())));
+        let bare = |_: &[u32]| -> HashMap<u32, String> { panic!("a shell with nothing under it asks no command line") };
+        assert_eq!(grok_below(100, |_: &[u32]| vec![], bare), None);
+        let vim = |_: &[u32]| HashMap::from([(200, "vim notes.txt".to_string())]);
+        assert_eq!(grok_below(100, |p: &[u32]| if p == [100] { vec![200] } else { vec![] }, vim), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_args_reads_the_command_line_of_a_running_process() {
+        let me = std::process::id();
+        let mut done = crate::proc::command("true").spawn().unwrap();
+        let gone = done.id();
+        done.wait().unwrap();
+        let got = process_args(&[me, gone]);
+        assert!(got.get(&me).is_some_and(|a| !a.is_empty()), "{got:?}");
+        assert!(!got.contains_key(&gone), "an ended process has no command line");
+        assert!(process_args(&[]).is_empty());
     }
 
     #[test]
