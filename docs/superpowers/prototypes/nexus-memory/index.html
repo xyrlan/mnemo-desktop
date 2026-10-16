@@ -1,0 +1,830 @@
+<!-- Prototype approved by the maintainer on 2026-10-16: the deck's archive (placement A, the tower), mnemo's memory
+     packets, and robot states drawn by a held prop instead of a badge. Open it from a checkout (it reads the sprites from
+     src/nexus/sprites). It is a sketch of behaviour; the app's own code decides the details. -->
+<title>Nexus Memory Packets</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* v5. Layout: the controls, one SVG stage (the ship's bar and one deck, so packets can fly from the
+   archive), a side card for what you click, the ship's log, then "Robot states": the same robots with
+   today's badge or the proposed animation. One committed dark look, like the ship.
+   Every sprite is drawn at 1x, pixelated, from sprites/ (licence: sprites/LICENSE). */
+:root {
+  color-scheme: dark;
+  --bg: #0a0f24;
+  --panel: #10173a;
+  --panel-2: #0d1330;
+  --line: #2b3570;
+  --violet: #7c6cff;
+  --lilac: #a5b4fc;
+  --text: #cdd6ff;
+  --dim: #7380b8;
+  /* The ship's four state colours (mnemo-desktop src/theme.css, dark): colour means state only. */
+  --st-working: #eab308;
+  --st-need: #f97316;
+  --st-done: #10b981;
+  --st-idle: #737373;
+  /* A packet's direction. None is a state colour: cyan (out) is the ship's particle cyan, violet
+     (in) and white (guard) are colours of the sprites' own 24-colour palette. */
+  --dir-out: #5fe3ff;
+  --dir-in: #ab97e4;
+  --dir-guard: #f7f7fc;
+  --display: "Silkscreen", "JetBrains Mono", ui-monospace, monospace;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 var(--mono);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px 24px;
+  overflow-x: hidden;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 12px; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.brand { font-family: var(--display); font-size: 16px; letter-spacing: 4px; color: #b9b2ff; }
+.k { color: var(--dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.grp { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); }
+.seg button, .btn { font: 600 12px/1 var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 8px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.seg button { border: 0; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: #241c5c; color: #fff; box-shadow: inset 0 -2px 0 var(--violet); }
+.btn:hover, .seg button:hover { border-color: var(--violet); color: #fff; }
+.btn:focus-visible, .seg button:focus-visible, .hit:focus-visible { outline: 2px solid var(--dir-out); outline-offset: 2px; }
+.spacer { flex: 1; }
+.events { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.target { color: var(--lilac); font-weight: 700; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.stagebox { border: 1px solid #2b3570; background: #0a0f24; min-width: 0; }
+svg#stage { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--mono); }
+.crisp, .crisp * { shape-rendering: crispEdges; }
+svg image, img.px {
+  image-rendering: optimizeSpeed;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+.ico { display: inline-block; vertical-align: -4px; flex: none; shape-rendering: crispEdges; }
+.zone { font-family: var(--display); font-size: 12px; fill: var(--dim); letter-spacing: 2px; }
+.hit { cursor: pointer; }
+.agent .name { font-size: 11px; fill: var(--text); font-weight: 700; }
+.agent .count { font-size: 11px; fill: var(--dir-out); font-weight: 700; }
+.agent .selbox { fill: none; stroke: #e0e7ff; stroke-width: 2; stroke-dasharray: 4 3; display: none; }
+.agent.sel .selbox { display: inline; }
+.agent.sel .name { fill: #fff; }
+.card { border: 1px solid var(--line); background: var(--panel-2); padding: 12px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card h2 { margin: 0; font: 400 13px/1.3 var(--display); letter-spacing: 2px; color: #b9b2ff; }
+.card p { margin: 0; color: var(--dim); }
+.card ul { margin: 0; padding-left: 16px; display: grid; gap: 3px; }
+.card code { color: var(--dir-out); word-break: break-word; }
+.log { border: 1px solid var(--violet); background: var(--panel-2); padding: 8px 12px; min-width: 0; }
+.log h3 { margin: 0 0 4px; font: 400 12px/1.3 var(--display); letter-spacing: 2px; }
+.log ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.log li { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log li:first-child { color: var(--text); }
+.log time { color: var(--violet); margin-right: 8px; }
+.log .ico { margin-right: 4px; }
+.notes { color: var(--dim); font-size: 12px; display: grid; gap: 6px; min-width: 0; }
+.notes b { color: var(--text); font-weight: 600; }
+.tablebox { overflow-x: auto; max-width: 100%; }
+.tablebox table { border-collapse: collapse; min-width: 640px; font: inherit; color: inherit; }
+.tablebox th { text-align: left; color: var(--text); padding: 4px 12px 4px 0; font-weight: 600; }
+.tablebox td { padding: 3px 12px 3px 0; vertical-align: middle; }
+.pk-mini { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 2px solid; border-radius: 3px; background: #090822; box-sizing: border-box; }
+.foot { color: var(--dim); font-size: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+.foot a { color: var(--lilac); }
+
+/* ---------- robot states ---------- */
+.states { border: 1px solid var(--line); background: var(--panel-2); padding: 12px 14px 16px; display: grid; gap: 12px; min-width: 0; }
+.states h2 { margin: 0; font: 400 14px/1.3 var(--display); letter-spacing: 3px; color: #b9b2ff; }
+.states .lead { margin: 0; color: var(--dim); max-width: 88ch; }
+.states .lead b { color: var(--text); font-weight: 600; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(var(--cellw, 150px), 1fr)); }
+.cell { margin: 0; border: 1px solid #1f2a4d; background: #070b17; padding: 8px 8px 10px; display: grid; justify-items: center; gap: 6px; min-width: 0; }
+.cell svg { display: block; max-width: 100%; height: auto; }
+.cell figcaption { text-align: center; display: grid; gap: 2px; }
+.cell figcaption b { font: 400 11px/1.3 var(--display); letter-spacing: 1px; color: var(--text); }
+.cell figcaption span { font-size: 11px; color: var(--dim); line-height: 1.35; }
+
+/* ---------- a figure: pose + halo + (today) badge or (proposal) prop, + particles ---------- */
+.fig .halo { display: none; }
+.fig[data-halo="working"] .halo { display: inline; fill: url(#halo-working); }
+.fig[data-halo="need"] .halo { display: inline; fill: url(#halo-need); }
+.fig[data-halo="done"] .halo { display: inline; fill: url(#halo-done); }
+.fig .badge rect { fill: #0b1020; stroke: var(--st-idle); stroke-width: 2; }
+.fig .badge text { fill: #fff; font: 700 11px var(--mono); }
+.fig[data-badge="working"] .badge rect { stroke: var(--st-working); }
+.fig[data-badge="need"] .badge rect { stroke: var(--st-need); fill: #4c0519; }
+.fig[data-badge="done"] .badge rect { stroke: var(--st-done); }
+.fig[data-badge="done"] .badge text { fill: var(--st-done); }
+.fig[data-badge="red"] .badge rect { stroke: var(--st-need); fill: #2a0a17; }
+.fig[data-badge="red"] .badge text { fill: var(--st-need); }
+.fig[data-badge="run"] .badge rect { stroke: var(--st-working); }
+.fig[data-badge="run"] .badge text { fill: var(--st-working); }
+.mode-prop .fig .badge, .mode-prop .fig .fx-today, .mode-today .fig .prop, .mode-today .fig .fx-prop { display: none; }
+.mode-today .fig[data-state="stopped"] .body { filter: url(#grey-70); }
+.mode-prop .fig[data-state="stopped"] .body { filter: url(#grey-off); }
+.pt-z { font: 400 10px var(--display); fill: #c7d2fe; }
+.pt-Z { font: 400 13px var(--display); fill: #a5b4fc; }
+.p-spark, .p-ping, .p-smoke { transform-box: fill-box; transform-origin: center; }
+
+/* Motion. Everything below stops under reduced motion; props, halos and poses stay. */
+@media (prefers-reduced-motion: no-preference) {
+  /* today: the app's own (ship.css) */
+  .mode-today .fig[data-state="working"] .body { animation: bob 0.9s steps(2) infinite; }
+  .mode-today .fig[data-state="idle"] .body { animation: breathe 3.2s ease-in-out infinite; }
+  .fig[data-halo="working"] .halo { animation: pulse 1.6s infinite; }
+  .mode-prop .fig[data-halo="need"] .halo { animation: pulse 0.8s infinite; }
+  /* proposal: the pose still moves, the prop says what it does */
+  .mode-prop .fig[data-state="working"] .body { animation: bob 0.9s steps(2) infinite; }
+  .mode-prop .fig[data-state="done"] .body { animation: breathe 3.2s ease-in-out infinite; }
+  .mode-prop .fig[data-st="idle"] .body { animation: breath 4.2s ease-in-out infinite; }
+  .mode-prop .fig[data-st="stranded"] .body { animation: breath 6s ease-in-out infinite; }
+  .m-scan { animation: scan 1.8s ease-in-out infinite; }
+  .m-weld { animation: weld 0.24s steps(1) infinite; }
+  .m-swirl { animation: swirl 0.9s ease-in-out infinite; }
+  .m-lift { animation: lift 1.6s ease-in-out infinite; }
+  .m-flip { animation: flip 2.4s ease-in-out infinite; }
+  .m-flip-slow { animation: flip 4.8s ease-in-out infinite; }
+  .m-wave { animation: wave 0.7s ease-in-out infinite; }
+  .m-flag { animation: flutter 0.6s steps(2) infinite; }
+  .m-smoke { animation: jitter 0.36s steps(1) infinite; }
+  .p-spark { animation: spark 0.45s steps(3) infinite; }
+  .p-spark.d2 { animation-delay: 0.22s; }
+  .p-rise { animation: rise 1.6s ease-in infinite; }
+  .p-rise.d2 { animation-delay: 0.8s; }
+  .p-float { animation: float 2.4s ease-out infinite; }
+  .p-float.d2 { animation-delay: 1.2s; }
+  .p-ping { animation: ping 1.5s ease-out infinite; }
+  .p-smoke { animation: smoke 1.8s ease-out infinite; }
+  .p-smoke.d2 { animation-delay: 0.9s; }
+  .cap-busy .cbody { animation: type 0.5s steps(2) infinite; }
+  .cap-busy .cfloor { animation: pulse 2.4s ease-in-out infinite; }
+  .led { animation: blink 1.6s steps(1) infinite; }
+}
+/* Without motion a particle shows nothing (the app hides them too). */
+@media (prefers-reduced-motion: reduce) { .fig .fx-today, .fig .fx-prop .pt { display: none; } }
+.pt { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) { .pt { opacity: 1; } }
+
+@keyframes bob { 50% { transform: translate(0, -2px); } }
+@keyframes breathe { 50% { transform: translate(0, 1px); } }
+@keyframes breath { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1, 1.035); } }
+@keyframes type { 50% { transform: translate(0, 1px); } }
+@keyframes pulse { 50% { opacity: 0.55; } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+@keyframes scan { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(9deg) translate(1px, 0); } }
+@keyframes weld { 0% { transform: translate(0, 0); } 50% { transform: translate(1px, -1px); } }
+@keyframes swirl { 0%, 100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
+@keyframes lift { 0%, 100% { transform: translate(0, 0); } 45%, 60% { transform: translate(0, -8px); } }
+@keyframes flip { 0%, 62% { transform: rotate(0deg); } 82%, 100% { transform: rotate(180deg); } }
+@keyframes wave { 0%, 100% { transform: rotate(-16deg); } 50% { transform: rotate(10deg); } }
+@keyframes flutter { 0% { transform: skewY(0deg); } 50% { transform: skewY(-7deg); } }
+@keyframes jitter { 0% { transform: translate(0, 0); } 33% { transform: translate(-1px, 0); } 66% { transform: translate(1px, 0); } }
+@keyframes spark { 0% { transform: scale(0.4); opacity: 1; } 100% { transform: translate(2px, -3px) scale(2.4); opacity: 0; } }
+@keyframes rise { 0% { transform: translate(0, 0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate(0, -44px); opacity: 0; } }
+@keyframes float { 0% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 0.9; } 100% { transform: translate(6px, -34px); opacity: 0; } }
+@keyframes ping { 0% { transform: scale(0.3); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes smoke { 0% { transform: translate(0, 0) scale(0.6); opacity: 0; } 20% { opacity: 0.95; } 100% { transform: translate(5px, -22px) scale(1.7); opacity: 0; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs id="defs">
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="rackglow" x="-60%" y="-60%" width="220%" height="220%">
+      <feComponentTransfer in="SourceGraphic" result="hi"><feFuncR type="linear" slope="1.8"/><feFuncG type="linear" slope="1.8"/><feFuncB type="linear" slope="1.8"/></feComponentTransfer>
+      <feGaussianBlur in="hi" stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="hi"/></feMerge>
+    </filter>
+    <filter id="grey-70" color-interpolation-filters="sRGB">
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncR type="linear" slope="0.7"/><feFuncG type="linear" slope="0.7"/><feFuncB type="linear" slope="0.7"/></feComponentTransfer>
+    </filter>
+    <filter id="grey-off" color-interpolation-filters="sRGB">
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncR type="linear" slope="0.42" intercept="0.02"/><feFuncG type="linear" slope="0.42" intercept="0.02"/><feFuncB type="linear" slope="0.46" intercept="0.03"/></feComponentTransfer>
+    </filter>
+    <radialGradient id="halo-working"><stop offset="0" stop-color="#eab308" stop-opacity="0.6"/><stop offset="0.7" stop-color="#eab308" stop-opacity="0"/></radialGradient>
+    <radialGradient id="halo-need"><stop offset="0" stop-color="#f97316" stop-opacity="0.8"/><stop offset="0.7" stop-color="#f97316" stop-opacity="0"/></radialGradient>
+    <radialGradient id="halo-done"><stop offset="0" stop-color="#10b981" stop-opacity="0.45"/><stop offset="0.7" stop-color="#10b981" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+
+<div class="wrap mode-prop" id="wrap">
+  <header class="bar">
+    <span class="brand">MEMORY PACKETS</span>
+    <span class="spacer"></span>
+    <button id="auto" class="btn" type="button" aria-pressed="true">❚❚ Pause auto</button>
+  </header>
+
+  <section class="events" aria-label="Fire a memory event">
+    <span class="k">Fire on <span id="target" class="target">a random agent</span>:</span>
+    <button class="btn" type="button" data-ev="reflex" data-ico="reflex">reflex</button>
+    <button class="btn" type="button" data-ev="catchup" data-ico="catchup">briefing at boot</button>
+    <button class="btn" type="button" data-ev="read" data-ico="tool">MCP read</button>
+    <button class="btn" type="button" data-ev="enrich" data-ico="enrich">memory edited</button>
+    <button class="btn" type="button" data-ev="friction" data-ico="friction">friction</button>
+    <button class="btn" type="button" data-ev="briefing" data-ico="briefing">child's briefing</button>
+    <button class="btn" type="button" data-ev="enforce" data-ico="enforce">guard blocks</button>
+    <button class="btn" type="button" data-ev="learned" data-ico="learned">learned</button>
+  </section>
+
+  <div class="main">
+    <div class="stagebox">
+      <svg id="stage" viewBox="0 0 960 390" role="img" aria-label="The ship's bar and one deck">
+        <g id="shipbar" class="crisp"></g>
+        <g id="zones" class="crisp"></g>
+        <g id="archive"></g>
+        <g id="agents"></g>
+        <g id="fx"></g>
+        <g id="packets"></g>
+      </svg>
+    </div>
+    <aside class="card" id="card" aria-live="polite">
+      <h2>ONE SHAPE, AN ICON PER TYPE</h2>
+      <p>Every packet is the same small square. Its pixel icon says what kind of memory it carries.</p>
+      <p>Its frame says which way it goes:</p>
+      <ul>
+        <li><b style="color:var(--dir-out)">cyan</b>: from the archive to the agent;</li>
+        <li><b style="color:var(--dir-in)">violet</b>: from the agent to the archive;</li>
+        <li><b style="color:var(--dir-guard)">white</b>: a guard stopping the agent.</li>
+      </ul>
+      <p>Not green or amber: on the ship green means done and CI green, yellow means working, orange means needs you.</p>
+      <p>Click the rack beside <b style="color:var(--text)">mnemo-desktop</b>, a packet, or a robot.</p>
+    </aside>
+  </div>
+
+  <section class="log" aria-label="Ship's log">
+    <h3>SHIP'S LOG</h3>
+    <ol id="log"><li><time>—</time>no milestones yet</li></ol>
+  </section>
+
+  <section class="states" aria-labelledby="states-h">
+    <h2 id="states-h">ROBOT STATES</h2>
+    <p class="lead">Today a robot wears a small badge for what it does. The proposal drops the badge: <b>the pose says the state</b> (an existing sprite), <b>a held prop says the action</b> (one prop for every class), a CSS motion makes it read at a glance, and the existing particles stay, now coming off the prop. The halo under the feet keeps the ship's state colours and takes over the colour the badge's border carried (CI red: orange; CI running: yellow). The props are drawn in the sprites' palette, so the CI-green flag is not green: the green is the halo's.</p>
+    <div class="controls">
+      <span class="grp"><span class="k">Robots</span>
+        <span class="seg" role="group" aria-label="Badge or animation">
+          <button type="button" data-mode="today" aria-pressed="false">Today: badge</button><button type="button" data-mode="prop" aria-pressed="true">Proposal: animation</button>
+        </span>
+      </span>
+      <span class="grp"><span class="k">Zoom</span>
+        <span class="seg" role="group" aria-label="Zoom">
+          <button type="button" data-zoom="1" aria-pressed="false">1×</button><button type="button" data-zoom="2" aria-pressed="true">2×</button>
+        </span>
+      </span>
+      <span class="k">The toggle also switches the robots on the deck above.</span>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <div class="notes">
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>packet</th><th>pulse event</th><th>what happened</th><th>flight</th><th>on arrival</th></tr></thead>
+        <tbody>
+          <tr><td data-pk="reflex:out"></td><td><code>reflex</code></td><td>a rule injected mid-session</td><td>archive → agent</td><td>rule count on the agent +1, rule name floats</td></tr>
+          <tr><td data-pk="catchup:out"></td><td><code>catchup</code></td><td>the briefing at session start</td><td>archive → agent, as it boots</td><td>rule count set to the briefing's rules</td></tr>
+          <tr><td data-pk="tool:out reflex:out"></td><td><code>tool</code></td><td>the agent read the vault (MCP)</td><td>agent → archive → agent</td><td>rules it read added</td></tr>
+          <tr><td data-pk="enrich:in"></td><td><code>enrich</code></td><td>the agent edited a memory file</td><td>agent → archive</td><td>the rack blinks</td></tr>
+          <tr><td data-pk="friction:in"></td><td><code>friction</code></td><td>a correction it took, kept</td><td>agent → archive</td><td>the rack blinks</td></tr>
+          <tr><td data-pk="briefing:in"></td><td><code>briefing</code></td><td>a child writes what it learned as it leaves</td><td>agent → archive</td><td>the rack blinks</td></tr>
+          <tr><td data-pk="enforce:guard"></td><td><code>enforce</code></td><td>a guard rule blocked a command</td><td>archive → agent, fast</td><td>the agent shakes</td></tr>
+          <tr><td data-pk="learned:in"></td><td><code>learned</code></td><td>the vault learned a rule</td><td>no packet</td><td>the rack glows; LV goes up every few rules</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <span>Two events for the same agent within 5 s join one packet marked ×N. Packets are neutral and don't celebrate. With reduced motion nothing flies; only the counts and the rack change, and robots keep their props, still.</span>
+  </div>
+
+  <footer class="foot">Sprites: not MIT, see <a href="../../../../src/nexus/sprites/LICENSE">sprites/LICENSE</a>.</footer>
+</div>
+
+<script>
+(() => {
+  // The app's own sprites (src/nexus/sprites), drawn from the repo.
+  const SP = '../../../../src/nexus/sprites/'
+  const NS = 'http://www.w3.org/2000/svg'
+  const XL = 'http://www.w3.org/1999/xlink'
+  const $ = (s) => document.querySelector(s)
+  const el = (tag, attrs = {}, parent) => {
+    const e = document.createElementNS(NS, tag)
+    for (const k in attrs) {
+      if (k === 'href') { e.setAttribute('href', attrs[k]); e.setAttributeNS(XL, 'xlink:href', attrs[k]) }
+      else e.setAttribute(k, attrs[k])
+    }
+    if (parent) parent.appendChild(e)
+    return e
+  }
+  const txt = (parent, attrs, s) => { const t = el('text', attrs, parent); t.textContent = s; return t }
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+  const DIR = { out: '#5fe3ff', in: '#ab97e4', guard: '#f7f7fc' }
+
+  // ---------------------------------------------------------------- packet icons (10x10, palette colours)
+  // '#' = #ebe3f9, 'o' = #6d84e0: two colours of the sprites' own 24-colour palette.
+  const ICONS = {
+    reflex:   ['....##....', '...#..#...', '..#.##.#..', '.#.####.#.', '#.##oo##.#', '#.##oo##.#', '.#.####.#.', '..#.##.#..', '...#..#...', '....##....'],
+    catchup:  ['..........', '##########', '#########o', '..........', '##########', '#########o', '..........', '##########', '#########o', '..........'],
+    tool:     ['...####...', '..##oo##..', '..##..##..', '......##..', '.....##o..', '....##o...', '....##....', '..........', '....##....', '....##....'],
+    enrich:   ['.......oo.', '......o##o', '.....o##o.', '....o##o..', '...o##o...', '..o##o....', '.o##o.....', '.###......', 'o##.......', '#.........'],
+    friction: ['....##....', '...####...', '...####...', '...####...', '....##....', '....##....', '....oo....', '..........', '....##....', '....##....'],
+    briefing: ['....##....', '...####...', '..######..', '.########.', '...####...', '...####...', '...####...', '..........', '##########', 'oooooooooo'],
+    enforce:  ['....#.....', '..#.#.#...', '..#.#.#.#.', '..#.#.#.#.', '..#######.', '#.#######.', '##o######.', '.########.', '..######..', '...####...'],
+    learned:  ['....#.....', '....#.....', '...###....', '..##o##...', '####o####.', '..##o##...', '...###....', '....#.....', '....#.....', '..........'],
+  }
+  const ICOL = { '#': '#ebe3f9', o: '#6d84e0' }
+  const defs = $('#defs')
+  for (const [name, rows] of Object.entries(ICONS)) {
+    const s = el('symbol', { id: `ic-${name}`, viewBox: '0 0 10 10' }, defs)
+    rows.forEach((r, y) => [...r].forEach((c, x) => { if (ICOL[c]) el('rect', { x, y, width: 1, height: 1, fill: ICOL[c] }, s) }))
+  }
+  const ico = (name, size = 20) => `<svg class="ico" width="${size}" height="${size}" viewBox="0 0 10 10" aria-hidden="true"><use href="#ic-${name}" xlink:href="#ic-${name}"/></svg>`
+  document.querySelectorAll('[data-ico]').forEach((b) => b.insertAdjacentHTML('afterbegin', ico(b.dataset.ico, 20)))
+  document.querySelectorAll('[data-pk]').forEach((td) => {
+    td.innerHTML = td.dataset.pk.split(' ').map((s) => { const [n, d] = s.split(':'); return `<span class="pk-mini" style="border-color:${DIR[d]}">${ico(n, 20)}</span>` }).join(' → ')
+  })
+
+  // ---------------------------------------------------------------- robots: states, poses, props
+  // Hand points per pose and class (sprite pixels), measured on the 64x64 sheets.
+  const HAND = {
+    working: { mech: [42, 44], droid: [40, 37], drone: [46, 36], unknown: [40, 37] },
+    idle: { mech: [46, 41], droid: [40, 39], drone: [46, 34], unknown: [40, 39] },
+    waiting: { mech: [44, 6], droid: [41, 8], drone: [47, 30], unknown: [41, 8] },
+    sleeping: { mech: [46, 50], droid: [44, 50], drone: [46, 50], unknown: [44, 50] },
+  }
+  // Each 24x24 prop: where it is held (its grip), mirrored or not, where its particles leave from
+  // (relative to the grip), and `floor` for one that lies at the robot's feet instead of in its hand.
+  const PROPS = {
+    read: { grip: [18, 19], flip: true, out: [11, -12] },
+    edit: { grip: [4, 18], out: [18, -17] },
+    test: { grip: [12, 14], out: [0, -13] },
+    ship: { grip: [12, 20], out: [0, -9] },
+    run: { grip: [12, 12], out: [0, 0] },
+    need: { grip: [13, 21] },
+    green: { grip: [3, 18] },
+    red: { grip: [12, 15], out: [0, -7], floor: [54, 52] },
+  }
+  // One entry per state. today: the app (words.ts glyph/particlesOf/poseOf, ship.css). prop: the proposal.
+  const STATES = {
+    read:      { label: 'read', state: 'working', pose: 'working', glyph: '⌕', badge: 'working', fx: 'pages', halo: ['working', 'working'], prop: 'read', motion: 'scan', pfx: 'pages',
+                 today: 'badge ⌕ and pages', proposal: 'a scanner sweeps; pages come off the lens' },
+    edit:      { label: 'edit', state: 'working', pose: 'working', glyph: '✎', badge: 'working', fx: 'sparks', halo: ['working', 'working'], prop: 'edit', motion: 'weld', pfx: 'sparks',
+                 today: 'badge ✎ and sparks', proposal: 'a welding torch jitters; sparks at its tip' },
+    test:      { label: 'test', state: 'working', pose: 'working', glyph: '⚗', badge: 'working', fx: 'bubbles', halo: ['working', 'working'], prop: 'test', motion: 'swirl', pfx: 'bubbles',
+                 today: 'badge ⚗ and bubbles', proposal: 'a flask swirls; bubbles from its neck' },
+    ship:      { label: 'ship', state: 'working', pose: 'working', glyph: '⇪', badge: 'working', fx: 'radar', halo: ['working', 'working'], prop: 'ship', motion: 'lift', pfx: 'radar',
+                 today: 'badge ⇪ and a radar ping', proposal: 'an upload crate lifted; a radar ping' },
+    run:       { label: 'run · long command', state: 'working', pose: 'working', glyph: '⧗', badge: 'working', fx: 'radar', halo: ['working', 'working'], prop: 'run', motion: 'flip', pfx: 'radar',
+                 today: 'badge ⧗ and a radar ping', proposal: 'an hourglass flips; a radar ping' },
+    need:      { label: 'need · waits for you', state: 'need', pose: 'waiting', glyph: '!', badge: 'need', fx: null, halo: ['need', 'need'], prop: 'need', motion: 'wave', pfx: null,
+                 today: 'badge ! and an orange halo', proposal: 'waves a ! paddle; the orange halo pulses' },
+    stopped:   { label: 'stopped', state: 'stopped', pose: 'sleeping', glyph: '■', badge: 'idle', fx: null, halo: ['', ''], prop: null, motion: null, pfx: null,
+                 today: 'badge ■, greyed', proposal: 'grey and powered down, still' },
+    'ci-green': { label: 'done · CI green', state: 'done', pose: 'idle', glyph: '✓', badge: 'done', fx: null, halo: ['done', 'done'], prop: 'green', motion: 'flag', pfx: null,
+                 today: 'badge ✓, green halo', proposal: 'a flag flutters; green halo' },
+    'ci-red':  { label: 'done · CI red', state: 'done', pose: 'idle', glyph: '✗', badge: 'red', fx: null, halo: ['done', 'need'], prop: 'red', motion: 'smoke', pfx: 'smoke',
+                 today: 'badge ✗ in orange, green halo', proposal: 'a broken gear smokes at its feet; orange halo' },
+    'ci-run':  { label: 'done · CI running', state: 'done', pose: 'idle', glyph: '⧗', badge: 'run', fx: null, halo: ['done', 'working'], prop: 'run', motion: 'flip-slow', pfx: null,
+                 today: 'badge ⧗ in yellow, green halo', proposal: 'an hourglass turns slowly; yellow halo' },
+    idle:      { label: 'idle', state: 'idle', pose: 'idle', glyph: '…', badge: 'idle', fx: null, halo: ['', ''], prop: null, motion: null, pfx: null,
+                 today: 'badge …, a 1 px breathe', proposal: 'a slow breath' },
+    stranded:  { label: 'stranded', state: 'idle', pose: 'sleeping', glyph: '⏸', badge: 'idle', fx: 'zz', halo: ['', ''], prop: null, motion: null, pfx: 'zz',
+                 today: 'badge ⏸ and zZ', proposal: 'asleep, zZ, a slower breath' },
+  }
+
+  // Particles, as ship.css draws them (.ship-fx), at an anchor point.
+  const PARTICLES = {
+    sparks(g, x, y) {
+      const a = el('g', { transform: `translate(${x},${y})`, class: 'crisp' }, g)
+      const s1 = el('g', { class: 'pt p-spark' }, a)
+      ;[[0, 0, '#fff'], [3, -3, '#f9a8d4'], [-2, -4, '#fff'], [5, 1, '#f472b6'], [1, -6, '#fbcfe8'], [-4, 0, '#f0abfc']].forEach(([dx, dy, c]) => el('rect', { x: dx, y: dy, width: 2, height: 2, fill: c }, s1))
+      const s2 = el('g', { class: 'pt p-spark d2' }, a)
+      ;[[-3, 3, '#f9a8d4'], [-6, 5, '#fff'], [1, 6, '#f472b6']].forEach(([dx, dy, c]) => el('rect', { x: dx, y: dy, width: 2, height: 2, fill: c }, s2))
+    },
+    bubbles(g, x, y, x2 = x - 32, y2 = y) {
+      el('circle', { class: 'pt p-rise', cx: x, cy: y, r: 2.5, fill: 'rgba(34,211,238,0.2)', stroke: '#a5f3fc', 'stroke-width': 1 }, g)
+      el('circle', { class: 'pt p-rise d2', cx: x2, cy: y2, r: 2, fill: 'rgba(34,211,238,0.2)', stroke: '#a5f3fc', 'stroke-width': 1 }, g)
+    },
+    pages(g, x, y, x2 = x - 36, y2 = y + 6) {
+      ;[[x, y, ''], [x2, y2, ' d2']].forEach(([px, py, d]) => {
+        const p = el('g', { class: 'pt p-float crisp' + d }, g)
+        el('rect', { x: px, y: py, width: 6, height: 7, fill: '#e0e7ff' }, p)
+        el('rect', { x: px + 1, y: py + 2, width: 4, height: 1, fill: '#1f215a' }, p)
+        el('rect', { x: px + 1, y: py + 4, width: 4, height: 1, fill: '#1f215a' }, p)
+      })
+    },
+    radar(g, x, y) { el('circle', { class: 'pt p-ping', cx: x, cy: y, r: 10, fill: 'none', stroke: '#67e8f9', 'stroke-width': 2 }, g) },
+    zz(g, x, y) {
+      txt(g, { class: 'pt p-float pt-z', x, y }, 'z')
+      txt(g, { class: 'pt p-float d2 pt-Z', x: x + 6, y: y - 3 }, 'Z')
+    },
+    smoke(g, x, y) {
+      el('circle', { class: 'pt p-smoke', cx: x, cy: y, r: 3, fill: '#2d2a86' }, g)
+      el('circle', { class: 'pt p-smoke d2', cx: x + 2, cy: y - 1, r: 3, fill: '#5153bc' }, g)
+    },
+  }
+  // Where the app puts each particle on a 64x64 robot (ship.css .ship-fx[data-fx]).
+  const TODAY_AT = { sparks: [50, 30], bubbles: [48.5, 28.5], pages: [44, 6], radar: [34, 28], zz: [44, 12] }
+
+  const allFigs = []
+  const figure = (parent, cls, st, x, y) => {
+    const S = STATES[st]
+    const g = el('g', { class: 'fig', transform: `translate(${x},${y})`, 'data-st': st, 'data-state': S.state, 'data-badge': S.badge }, parent)
+    el('ellipse', { class: 'halo', cx: 32, cy: 59, rx: 36, ry: 9 }, g)
+    // The body hangs from its feet, so a breath grows upward.
+    const feet = el('g', { transform: 'translate(0,64)' }, g)
+    const body = el('g', { class: 'body' }, feet)
+    el('image', { href: `${SP}robot-${cls}-${S.pose}.png`, x: 0, y: -64, width: 64, height: 64 }, body)
+    if (S.fx) { const f = el('g', { class: 'fx-today' }, g); PARTICLES[S.fx](f, ...TODAY_AT[S.fx]) }
+    if (S.prop) {
+      const P = PROPS[S.prop]
+      const [hx, hy] = P.floor || HAND[S.pose][cls]
+      const pg = el('g', { class: 'prop', transform: `translate(${hx},${hy})` }, g)
+      const pm = el('g', { class: S.motion ? `m-${S.motion}` : '' }, pg)
+      const holder = P.flip ? el('g', { transform: 'scale(-1,1)' }, pm) : pm
+      el('image', { href: `${SP}prop-${S.prop}.png`, x: -P.grip[0], y: -P.grip[1], width: 24, height: 24 }, holder)
+      if (S.pfx && P.out) {
+        // sparks ride the torch; the rest leave from the prop and do not turn with it
+        const f = el('g', { class: 'fx-prop' }, S.pfx === 'sparks' ? pm : pg)
+        const [ox, oy] = P.out
+        if (S.pfx === 'bubbles') PARTICLES.bubbles(f, ox, oy, ox + 3, oy - 1)
+        else if (S.pfx === 'pages') PARTICLES.pages(f, ox - 3, oy - 3, ox - 8, oy + 2)
+        else PARTICLES[S.pfx](f, ox, oy)
+      }
+    }
+    if (S.pfx === 'zz') { const f = el('g', { class: 'fx-prop' }, g); PARTICLES.zz(f, 40, 30) }
+    const b = el('g', { class: 'badge', transform: 'translate(48,-4)' }, g)
+    el('rect', { x: 1, y: 1, width: 16, height: 16, rx: 3 }, b)
+    txt(b, { x: 9, y: 13, 'text-anchor': 'middle' }, S.glyph)
+    g.st = S
+    allFigs.push(g)
+    return g
+  }
+
+  // ---------------------------------------------------------------- the ship's bar (as in the app)
+  const bar = $('#shipbar')
+  el('rect', { x: 0, y: 0, width: 960, height: 38, fill: '#0b1130' }, bar)
+  el('line', { x1: 0, y1: 38, x2: 960, y2: 38, stroke: '#2b3570' }, bar)
+  txt(bar, { x: 14, y: 25, class: 'zone', fill: '#b9b2ff', 'font-size': 15, 'letter-spacing': 5 }, 'NEXUS')
+  el('rect', { x: 104, y: 9, width: 222, height: 20, fill: 'none', stroke: '#7c6cff' }, bar)
+  txt(bar, { x: 112, y: 23, fill: '#c4b5fd', 'font-size': 11, 'font-weight': 700 }, '⚡ 4 calls/min · 2k out tok/min')
+  el('rect', { x: 560, y: 9, width: 150, height: 20, fill: 'none', stroke: '#2b3570' }, bar)
+  txt(bar, { x: 568, y: 23, fill: '#cdd6ff', 'font-size': 11 }, 'Default  ▮▮▮▮▯ 71%')
+  ;[['PROJECTS', 720], ['MISSIONS', 802], ['SYSTEMS ▾', 884]].forEach(([s, x]) => {
+    el('rect', { x, y: 9, width: s.length * 8 + 6, height: 20, fill: '#111a44', stroke: '#2b3570' }, bar)
+    txt(bar, { x: x + 6, y: 23, fill: '#cdd6ff', 'font-size': 11, 'font-weight': 700 }, s)
+  })
+
+  // ---------------------------------------------------------------- one deck
+  const zones = $('#zones')
+  const Y0 = 50, DH = 330
+  const zone = (x, w, name, sub, fill) => {
+    el('rect', { x, y: Y0, width: w, height: DH, fill, stroke: '#2b3570' }, zones)
+    txt(zones, { x: x + 10, y: Y0 + 20, class: 'zone' }, name)
+    txt(zones, { x: x + 10, y: Y0 + 34, fill: '#4f5a92', 'font-size': 10 }, sub)
+  }
+  zone(8, 222, '', '', '#0f1638')
+  txt(zones, { x: 18, y: Y0 + 21, fill: '#cdd6ff', 'font-size': 13, 'font-weight': 700 }, 'mnemo-desktop')
+  zone(238, 462, 'IN FLIGHT', 'working on their own', '#0b112c')
+  zone(708, 244, 'HANGAR', 'ready · waiting for merge', '#0c1f2a')
+  for (let x = 250; x < 700; x += 30) el('line', { x1: x, y1: Y0 + 44, x2: x, y2: Y0 + DH - 6, stroke: '#141c44' }, zones)
+  // quiet captains as chips, like the real deck
+  ;['Onboarding plan', 'Mail relay setup', 'Release notes'].forEach((s, i) => {
+    const x = 16 + (i % 2) * 106, y = Y0 + 196 + Math.floor(i / 2) * 44
+    el('rect', { x, y, width: 100, height: 38, fill: '#121a44', stroke: '#2b3570' }, zones)
+    txt(zones, { x: x + 8, y: y + 23, fill: '#9aa3d6', 'font-size': 10 }, s)
+  })
+
+  const agents = [
+    { id: 'cap-round', name: '◆ Nexus v2 round', kind: 'captain', pose: 'busy', x: 10, y: Y0 + 34 },
+    { id: 'cap-audit', name: '● Windows audit', kind: 'captain', pose: 'idle', x: 122, y: Y0 + 34 },
+    { id: '682', name: '#682', kind: 'robot', cls: 'mech', st: 'edit', x: 262, y: Y0 + 92 },
+    { id: '683', name: '#683', kind: 'robot', cls: 'droid', st: 'read', x: 350, y: Y0 + 176 },
+    { id: '690', name: '#690', kind: 'robot', cls: 'drone', st: 'test', x: 438, y: Y0 + 92 },
+    { id: '462', name: '#462', kind: 'robot', cls: 'droid', st: 'need', x: 526, y: Y0 + 176 },
+    { id: '688', name: '#688', kind: 'robot', cls: 'unknown', st: 'ship', x: 614, y: Y0 + 92 },
+    { id: '685', name: '#685', kind: 'robot', cls: 'mech', st: 'ci-green', x: 798, y: Y0 + 130 },
+  ]
+  for (const a of agents) {
+    a.rules = []
+    const g = el('g', { class: 'agent hit', transform: `translate(${a.x},${a.y})`, tabindex: 0, role: 'button', 'aria-label': `Agent ${a.name}` }, $('#agents'))
+    const w = a.kind === 'captain' ? 96 : 64
+    if (a.kind === 'captain') {
+      const c = el('g', { class: `cap-${a.pose}` }, g)
+      if (a.pose === 'busy') el('ellipse', { class: 'cfloor', cx: 48, cy: 90, rx: 44, ry: 9, fill: 'url(#halo-working)' }, c)
+      const b = el('g', { class: 'cbody' }, c)
+      el('image', { href: `${SP}captain-${a.pose}.png`, x: 0, y: 0, width: 96, height: 96 }, b)
+      el('rect', { class: 'selbox', x: 4, y: -4, width: 88, height: 104, rx: 6 }, g)
+    } else {
+      a.fig = figure(g, a.cls, a.st, 0, 0)
+      el('rect', { class: 'selbox', x: -6, y: -8, width: 76, height: 104, rx: 6 }, g)
+    }
+    const h = a.kind === 'captain' ? 96 : 64
+    txt(g, { x: w / 2, y: h + 14, 'text-anchor': 'middle', class: 'name' }, a.name)
+    const cnt = el('g', { transform: `translate(${w / 2 - 14},${h + 20})`, opacity: 0 }, g)
+    el('use', { href: '#ic-reflex', width: 10, height: 10 }, cnt)
+    a.badge = txt(cnt, { x: 14, y: 9, class: 'count' }, '')
+    a.countG = cnt
+    Object.assign(a, { g, cx: a.x + w / 2, cy: a.y + h / 2 })
+    g.addEventListener('click', () => select(a))
+    g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(a) } })
+  }
+
+  // ---------------------------------------------------------------- the archive: a rack beside the deck's name
+  const RACKS = {
+    // LED pixels drawn over the 24x24 rack (its own lights do not survive the downscale)
+    a: { leds: [[7, 7], [7, 10], [7, 13], [8, 16], [10, 19]] },
+    b: { leds: [[16, 4], [18, 4], [20, 5], [2, 9], [2, 12]] },
+    c: { leds: [[15, 5], [15, 8], [15, 11], [15, 14], [15, 17], [15, 20]] },
+  }
+  const vault = { level: 7, rules: 412, learned: [] }
+  const AX = 128, AY = Y0 + 3
+  const ar = $('#archive')
+  const A = el('g', { class: 'hit', tabindex: 0, role: 'button', 'aria-label': 'The archive: the repo memory vault' }, ar)
+  const rackG = el('g', { transform: `translate(${AX},${AY})` }, A)
+  const rackImg = el('image', { href: SP + 'archive.png', x: 0, y: 0, width: 24, height: 24 }, rackG)
+  const ledG = el('g', { class: 'crisp' }, rackG)
+  const lvText = txt(A, { x: AX + 28, y: Y0 + 21, fill: '#5fe3ff', 'font-size': 10, 'font-weight': 700 }, '')
+  const LEDC = ['#bc4fed', '#f7f7fc', '#b0c7f1']
+  const setRack = (k) => {
+    rackImg.setAttribute('href', SP + 'archive.png')
+    rackImg.setAttributeNS(XL, 'xlink:href', SP + 'archive.png')
+    ledG.innerHTML = ''
+    RACKS[k].leds.forEach(([x, y], i) => {
+      const r = el('rect', { class: 'led', x, y, width: 1, height: 1, fill: LEDC[i % LEDC.length] }, ledG)
+      r.style.animationDelay = `${(i * 0.37) % 1.6}s`
+    })
+    document.querySelectorAll('[data-rack]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.rack === k)))
+  }
+  document.querySelectorAll('[data-rack]').forEach((b) => b.addEventListener('click', () => setRack(b.dataset.rack)))
+  setRack((location.hash.match(/rack-([abc])/) || [0, 'a'])[1])
+  const drawLevel = () => { lvText.textContent = `LV${vault.level}` }
+  drawLevel()
+  A.addEventListener('click', showArchive)
+  A.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showArchive() } })
+
+  // Where a packet leaves from, and how high it arcs.
+  const origin = () => ({ x: AX + 12, y: AY + 12 })
+  const lift = () => 60
+
+  // ---------------------------------------------------------------- log + card
+  const logEl = $('#log')
+  const hhmmss = () => new Date().toTimeString().slice(0, 8)
+  const log = (html) => {
+    if (logEl.firstElementChild?.textContent.includes('no milestones')) logEl.innerHTML = ''
+    const li = document.createElement('li')
+    li.innerHTML = `<time>${hhmmss()}</time>${html}`
+    logEl.prepend(li)
+    while (logEl.children.length > 6) logEl.lastElementChild.remove()
+  }
+  const L = (name) => ico(name, 14)
+  const card = $('#card')
+  const ruleList = (rs) => `<ul>${rs.map((r) => `<li><code>${esc(r[0])}</code><br><span style="color:var(--dim)">${esc(r[1])}</span></li>`).join('')}</ul>`
+  const showAgent = (a) => {
+    const st = a.st ? `<span class="k">${esc(STATES[a.st].label)}</span>` : `<span class="k">captain · ${a.pose}</span>`
+    card.innerHTML = `<h2>${esc(a.name)}</h2>${st}<span class="k">rules this session</span>
+      ${a.rules.length ? ruleList(a.rules) : '<p>None yet. Fire a reflex on it.</p>'}
+      <p>The buttons above now fire on this agent.</p>`
+  }
+  function showArchive() {
+    card.innerHTML = `<h2>ARCHIVE</h2><span class="k">mnemo-desktop's vault</span>
+      <p>Level ${vault.level} · ${vault.rules} rules</p><span class="k">learned this session</span>
+      ${vault.learned.length ? `<ul>${vault.learned.slice(-5).reverse().map((s) => `<li><code>${esc(s)}</code></li>`).join('')}</ul>` : '<p>Nothing new yet.</p>'}
+      <p>In the app, this opens the Memory window.</p>`
+  }
+  const showPacket = (p) => {
+    card.innerHTML = `<h2>PACKET ${p.count > 1 ? '×' + p.count : ''}</h2><span class="k">${esc(p.kindLabel)} · ${esc(p.agent.name)}</span>
+      ${p.slugs.length ? ruleList(p.slugs) : `<p>${esc(p.note)}</p>`}`
+  }
+  let selected = null
+  const select = (a) => {
+    selected = selected === a ? null : a
+    for (const x of agents) x.g.classList.toggle('sel', x === selected)
+    $('#target').textContent = selected ? selected.name : 'a random agent'
+    if (selected) showAgent(selected)
+  }
+
+  // ---------------------------------------------------------------- effects
+  const fx = $('#fx')
+  const tween = (ms, fn, done) => {
+    const t0 = performance.now()
+    const step = (t) => { const p = Math.min(1, (t - t0) / ms); fn(p); p < 1 ? requestAnimationFrame(step) : done?.() }
+    requestAnimationFrame(step)
+  }
+  const ring = (x, y) => {
+    if (reduce) return
+    const c = el('circle', { cx: x, cy: y, r: 8, fill: 'none', stroke: DIR.out, 'stroke-width': 2 }, fx)
+    tween(700, (p) => { c.setAttribute('r', 8 + p * 30); c.setAttribute('opacity', 1 - p) }, () => c.remove())
+  }
+  const floatText = (x, y, s, color, icon) => {
+    const g = el('g', {}, fx)
+    const t = txt(g, { x: icon ? 7 : 0, y: 0, 'text-anchor': 'middle', fill: color, 'font-size': 11, 'font-weight': 700 }, s)
+    if (icon) {
+      const w = t.getComputedTextLength ? t.getComputedTextLength() : s.length * 6.6
+      el('use', { href: `#ic-${icon}`, x: 7 - w / 2 - 14, y: -9, width: 10, height: 10 }, g)
+    }
+    tween(1800, (p) => { g.setAttribute('transform', `translate(${x},${y - p * 20})`); g.setAttribute('opacity', p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3) }, () => g.remove())
+    g.setAttribute('transform', `translate(${x},${y})`)
+  }
+  let glowTimer = null
+  const flashArchive = (ms = 380) => {
+    rackG.setAttribute('filter', 'url(#rackglow)')
+    clearTimeout(glowTimer)
+    glowTimer = setTimeout(() => rackG.removeAttribute('filter'), ms)
+  }
+
+  // ---------------------------------------------------------------- packets
+  const bez = (a, b, t, h) => {
+    const c = { x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) - h }
+    const u = 1 - t
+    return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y }
+  }
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
+  const anims = []
+  const makePacket = (p) => {
+    const g = el('g', { class: 'hit', role: 'button', tabindex: 0, 'aria-label': 'A memory packet' }, $('#packets'))
+    const col = DIR[p.dir]
+    p.box = el('rect', { x: -13, y: -13, width: 26, height: 26, rx: 3, fill: '#090822', stroke: col, 'stroke-width': p.dir === 'guard' ? 2.5 : 2, filter: 'url(#glow)' }, g)
+    p.iconEl = el('use', { href: `#ic-${p.icon}`, x: -10, y: -10, width: 20, height: 20 }, g)
+    p.countEl = txt(g, { x: 16, y: -12, fill: '#ebe3f9', 'font-size': 11, 'font-weight': 700 }, '')
+    g.addEventListener('click', (e) => { e.stopPropagation(); showPacket(p) })
+    g.style.display = 'none'
+    p.g = g
+    return p
+  }
+  const setIcon = (p, name) => { p.iconEl.setAttribute('href', `#ic-${name}`); p.iconEl.setAttributeNS(XL, 'xlink:href', `#ic-${name}`) }
+  const run = (p, legs) => { p.legs = legs; p.leg = 0; p.t0 = performance.now(); p.g.style.display = ''; anims.push(p) }
+  const frame = (now) => {
+    for (let i = anims.length - 1; i >= 0; i--) {
+      const p = anims[i]
+      const leg = p.legs[p.leg]
+      if (!leg) { p.g.remove(); anims.splice(i, 1); continue }
+      const k = reduce ? 1 : Math.min(1, (now - p.t0) / leg.dur)
+      const pos = bez(leg.from(), leg.to(), ease(k), lift())
+      p.g.setAttribute('transform', `translate(${pos.x},${pos.y})`)
+      if (p.dir === 'guard' && !reduce) p.g.setAttribute('opacity', Math.floor(now / 90) % 2 ? 1 : 0.55)
+      if (k >= 1) { leg.arrive?.(); p.leg++; p.t0 = now }
+    }
+    requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
+
+  const at = (a) => () => ({ x: a.cx, y: a.cy })
+  const from = () => () => origin()
+  const deliver = (a, slugs, s) => {
+    a.rules.push(...slugs)
+    a.badge.textContent = String(a.rules.length)
+    a.countG.setAttribute('opacity', 1)
+    ring(a.cx, a.cy)
+    floatText(a.cx, a.y - 10, s, DIR.out, 'reflex')
+    if (selected === a) showAgent(a)
+  }
+
+  const SLUGS = [
+    ['merge-requires-admin', 'matched "gh pr merge"'],
+    ['prove-the-result-first', 'matched "the measurement says"'],
+    ['worktree-tests-need-pythonpath-src', 'matched "pytest" in a worktree'],
+    ['windows-5s-timeout-is-a-budget-not-a-flake', 'matched "timeout" + "windows"'],
+    ['grep-is-a-proxy-run-the-function', 'matched "git grep | head"'],
+    ['one-session-per-working-tree', 'matched "worktree add"'],
+    ['deletion-pieces-need-git-rm', 'matched "rm -rf"'],
+  ]
+  const pick = (a) => a[Math.floor(Math.random() * a.length)]
+
+  const outward = (a, kind, slugs, kindLabel, line, opts = {}) => {
+    // Q23: a second reflex for the same agent within 5 s joins the packet still on its way.
+    const live = anims.find((p) => p.agent === a && p.dir === 'out' && p.kind === 'reflex' && performance.now() - p.born < 5000)
+    if (live && kind === 'reflex') { live.count++; live.slugs.push(...slugs); live.countEl.textContent = '×' + live.count; return }
+    const p = makePacket({ agent: a, kind, dir: opts.dir || 'out', icon: opts.icon || 'reflex', count: 1, slugs: [...slugs], kindLabel, born: performance.now() })
+    if (opts.badge) p.countEl.textContent = opts.badge
+    run(p, [{ from: from(), to: at(a), dur: opts.dur || 1200, arrive: () => {
+      if (opts.arrive) opts.arrive(p)
+      else deliver(a, p.slugs, p.count > 1 ? `×${p.count}` : p.slugs[0][0])
+      log(p.count > 1 ? `${L('reflex')}${esc(a.name)} got ${p.count} rules` : line)
+    } }])
+    flashArchive()
+  }
+  const shake = (a) => {
+    if (reduce) return
+    tween(420, (k) => a.g.setAttribute('transform', `translate(${a.x + Math.sin(k * 28) * 4 * (1 - k)},${a.y})`), () => a.g.setAttribute('transform', `translate(${a.x},${a.y})`))
+  }
+  const inward = (a, icon, note, kindLabel, line) => {
+    const p = makePacket({ agent: a, kind: 'in', dir: 'in', icon, count: 1, slugs: [], note, kindLabel, born: performance.now() })
+    run(p, [{ from: at(a), to: from(), dur: 1200, arrive: () => { flashArchive(); log(line) } }])
+  }
+  const roundTrip = (a) => {
+    const got = [pick(SLUGS), pick(SLUGS)]
+    const p = makePacket({ agent: a, kind: 'read', dir: 'out', icon: 'tool', count: 1, slugs: got, kindLabel: 'MCP read', born: performance.now() })
+    run(p, [
+      { from: at(a), to: from(), dur: 900, arrive: () => { flashArchive(); setIcon(p, 'reflex') } },
+      { from: from(), to: at(a), dur: 900, arrive: () => { deliver(a, got, `read ${got.length}`); log(`${L('reflex')}${esc(a.name)} read ${got.length} rules (MCP)`) } },
+    ])
+  }
+
+  const robots = agents.filter((a) => a.kind === 'robot')
+  const fire = (ev, a) => {
+    a = a || selected || pick(ev === 'briefing' ? robots : agents)
+    if (ev === 'reflex') { const s = pick(SLUGS); outward(a, 'reflex', [s], 'reflex', `${L('reflex')}${esc(a.name)} got <code>${esc(s[0])}</code>`) }
+    else if (ev === 'catchup') { const s = [pick(SLUGS), pick(SLUGS), pick(SLUGS)]; outward(a, 'catchup', s, 'briefing at boot', `${L('catchup')}${esc(a.name)} booted with a briefing (${s.length} rules)`, { icon: 'catchup', badge: String(s.length), arrive: () => deliver(a, s, `briefing · ${s.length} rules`) }) }
+    else if (ev === 'enrich') inward(a, 'enrich', 'The agent edited a memory file in its worktree; the archive takes the change.', 'enrich', `${L('enrich')}${esc(a.name)} → archive: memory file edited`)
+    else if (ev === 'enforce') {
+      const s = ['never-force-push-main', 'blocked "git push --force" on main']
+      outward(a, 'enforce', [s], 'enforce', `${L('enforce')}${esc(a.name)} stopped by <code>${s[0]}</code>`, { icon: 'enforce', dir: 'guard', dur: 700, arrive: () => {
+        a.rules.push(s); shake(a); floatText(a.cx, a.y - 10, 'blocked: force push', DIR.guard, 'enforce'); if (selected === a) showAgent(a)
+      } })
+    }
+    else if (ev === 'read') roundTrip(a)
+    else if (ev === 'friction') inward(a, 'friction', 'A friction note: a correction the agent took, kept for the next session.', 'friction', `${L('friction')}${esc(a.name)} → archive: friction noted`)
+    else if (ev === 'briefing') inward(a, 'briefing', 'The child uploads what it learned before it leaves.', 'briefing written', `${L('briefing')}${esc(a.name)} → archive: briefing written`)
+    else if (ev === 'learned') {
+      const s = pick(['nexus-chips-are-noise', 'adhoc-signing-resets-tcc', 'manual-wake-can-fork-a-copy', 'shell-group-says-what-a-pane-runs'])
+      vault.rules++
+      vault.learned.push(s)
+      if (vault.rules % 3 === 0) vault.level++
+      drawLevel()
+      flashArchive(1100)
+      const o = origin()
+      floatText(o.x + 40, o.y + 30, `learned ${s}`, DIR.in, 'learned')
+      log(`${L('learned')}archive learned <code>${esc(s)}</code> (level ${vault.level})`)
+    }
+  }
+  document.querySelectorAll('[data-ev]').forEach((b) => b.addEventListener('click', () => fire(b.dataset.ev)))
+
+  // ---------------------------------------------------------------- robot states grid
+  const GRID = [
+    ['read', 'droid'], ['edit', 'mech'], ['test', 'drone'], ['ship', 'unknown'],
+    ['run', 'mech'], ['need', 'droid'], ['stopped', 'drone'], ['ci-green', 'mech'],
+    ['ci-red', 'droid'], ['ci-run', 'drone'], ['idle', 'unknown'], ['stranded', 'droid'],
+  ]
+  const VB = { x: -16, y: -28, w: 96, h: 100 }
+  const grid = $('#grid')
+  const cells = []
+  for (const [st, cls] of GRID) {
+    const fig = document.createElement('figure')
+    fig.className = 'cell'
+    const svg = el('svg', { viewBox: `${VB.x} ${VB.y} ${VB.w} ${VB.h}`, role: 'img', 'aria-label': `${cls} robot, ${STATES[st].label}` })
+    fig.appendChild(svg)
+    figure(svg, cls, st, 0, 0)
+    const cap = document.createElement('figcaption')
+    cap.innerHTML = `<b>${esc(STATES[st].label)}</b><span></span><span style="color:#4a5680">${cls}</span>`
+    fig.appendChild(cap)
+    grid.appendChild(fig)
+    cells.push({ svg, st, say: cap.querySelector('span') })
+  }
+
+  const wrap = $('#wrap')
+  let mode = 'prop'
+  const setMode = (m) => {
+    mode = m
+    wrap.classList.toggle('mode-today', m === 'today')
+    wrap.classList.toggle('mode-prop', m === 'prop')
+    for (const g of allFigs) g.setAttribute('data-halo', g.st.halo[m === 'today' ? 0 : 1])
+    for (const c of cells) c.say.textContent = m === 'today' ? STATES[c.st].today : STATES[c.st].proposal
+    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)))
+  }
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)))
+  setMode(/today/.test(location.hash) ? 'today' : 'prop')
+
+  const setZoom = (z) => {
+    for (const c of cells) { c.svg.setAttribute('width', VB.w * z); c.svg.setAttribute('height', VB.h * z) }
+    grid.style.setProperty('--cellw', `${VB.w * z + 18}px`)
+    document.querySelectorAll('[data-zoom]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.zoom) === z)))
+  }
+  document.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => setZoom(Number(b.dataset.zoom))))
+  setZoom(/zoom1/.test(location.hash) || innerWidth < 700 ? 1 : 2)
+
+  // ---------------------------------------------------------------- auto play
+  const WEIGHTS = [['reflex', 46], ['catchup', 10], ['read', 14], ['enrich', 5], ['friction', 9], ['briefing', 7], ['enforce', 3], ['learned', 6]]
+  const randomEvent = () => { let r = Math.random() * 100; for (const [ev, w] of WEIGHTS) if ((r -= w) < 0) return ev; return 'reflex' }
+  let auto = true, timer = null
+  const schedule = () => {
+    clearTimeout(timer)
+    if (auto) timer = setTimeout(() => { if (!document.hidden) fire(randomEvent(), null); schedule() }, 1400 + Math.random() * 1600)
+  }
+  $('#auto').addEventListener('click', () => {
+    auto = !auto
+    $('#auto').setAttribute('aria-pressed', String(auto))
+    $('#auto').textContent = auto ? '❚❚ Pause auto' : '▶ Auto events'
+    schedule()
+  })
+  if (/still/.test(location.hash)) $('#auto').click()   // #still: no opening events, auto paused
+  else {
+    fire('reflex', agents[2])
+    setTimeout(() => fire('read', agents[4]), 700)
+    schedule()
+  }
+})()
+</script>
