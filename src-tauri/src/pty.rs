@@ -869,7 +869,7 @@ mod tests {
 
     #[test]
     fn each_pane_runs_on_the_account_active_when_it_was_spawned() {
-        let root = crate::testutil::temp_dir("pty-accounts");
+        let root = crate::accounts::short_temp_dir("pty");
         let place = crate::accounts::Place::new(root.join("home"), root.join("app"));
         let m = PtyManager::with_shell_dir(None).with_accounts(PaneAccounts::new(place.clone(), None));
         let probe = either(

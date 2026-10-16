@@ -1041,6 +1041,19 @@ pub fn accounts_move_pane(state: State<'_, PtyState>, pane: PaneId, id: String) 
     state.0.move_pane(pane, &id)
 }
 
+/// A new dir for a test's home, short enough that a Grok home in it can hold a leader socket:
+/// macOS's temp dir alone (`/var/folders/…/T/`) is half of the 103 bytes.
+#[cfg(test)]
+pub(crate) fn short_temp_dir(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let base = if cfg!(unix) { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let d = base.join(format!("mg-{tag}-{:x}{}", nanos & 0xffff_ffff, NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,6 +1061,13 @@ mod tests {
 
     fn place(tag: &str) -> Place {
         let root = crate::testutil::temp_dir(&format!("accounts-{tag}"));
+        std::fs::create_dir_all(root.join("home/.claude")).unwrap();
+        Place::new(root.join("home"), root.join("app"))
+    }
+
+    /// `place` in a short dir, for a test that adds Grok accounts.
+    fn grok_place(tag: &str) -> Place {
+        let root = short_temp_dir(tag);
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         Place::new(root.join("home"), root.join("app"))
     }
@@ -1680,7 +1700,7 @@ mod tests {
 
     #[test]
     fn the_first_grok_account_is_dot_grok_and_the_next_its_own_home_with_nothing_linked() {
-        let p = place("grok-add");
+        let p = grok_place("grok-add");
         logged_in(&p, "me@x.io");
         std::fs::write(p.home.join(".claude/history.jsonl"), "{}\n").unwrap();
         let g = p.add("Grok", AgentKind::Grok).unwrap();
@@ -1731,7 +1751,7 @@ mod tests {
 
     #[test]
     fn a_grok_accounts_email_and_problem_come_from_its_auth_json() {
-        let p = place("grok-login");
+        let p = grok_place("grok-login");
         p.add("Grok", AgentKind::Grok).unwrap();
         p.add("Side", AgentKind::Grok).unwrap();
         let (main, side) = (p.home.join(".grok"), p.home.join(".grok-side"));
@@ -1756,7 +1776,7 @@ mod tests {
 
     #[test]
     fn a_grok_home_whose_leader_socket_would_be_too_long_is_refused() {
-        let p = place("grok-long");
+        let p = grok_place("grok-long");
         p.add("Grok", AgentKind::Grok).unwrap();
         let label = "a".repeat(SOCKET_PATH_MAX);
         let err = p.add(&label, AgentKind::Grok).unwrap_err();
