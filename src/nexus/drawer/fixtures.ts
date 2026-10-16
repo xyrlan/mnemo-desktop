@@ -62,6 +62,7 @@ export const robotOf = (over: Partial<ShipRobot> = {}): ShipRobot => {
     twin: 'a',
     need: null,
     injected: [],
+    briefing: false,
     ...over,
   }
 }

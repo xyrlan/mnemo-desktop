@@ -267,6 +267,17 @@ export function buildShip(input: ShipInput): Ship {
     }
     placed.push({ ...p, repo })
   }
+  // A helper in an ended child's worktree is mnemo writing that child's briefing. A worktree a
+  // respawn reused names the last child to end in it; a repo's own folder names no child.
+  const helperCwds = new Set((snapshot.helpers ?? []).map((h) => norm(h.cwd)))
+  const writing = new Map<string, Placed>()
+  for (const p of placed) {
+    const cwd = norm(p.robot.child.cwd)
+    if (!helperCwds.has(cwd) || !ended(p.robot.child) || cwd === norm(p.repo.root)) continue
+    const other = writing.get(cwd)
+    if (!other || p.endedAt > other.endedAt) writing.set(cwd, p)
+  }
+  for (const p of writing.values()) p.robot.briefing = true
   const aboard = placed.filter((p) => !p.left)
   const departed = placed.flatMap((p) => (p.left ? [{ ...p.left, robot: p.robot }] : []))
 
@@ -560,6 +571,7 @@ function robotOf(
     twin: null,
     need,
     injected: c.session_id ? injectedRules(input.events, c.session_id) : [],
+    briefing: false,
   }
   return { robot, endedAt: Number.isFinite(endedAt) ? endedAt : now - idleMs, left: end ? { robot, kind: end.kind, at: end.at } : null }
 }

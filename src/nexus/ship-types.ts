@@ -112,6 +112,9 @@ export type ShipRobot = {
   need: Need | null
   /** Rule slugs mnemo injected into the session, newest first. */
   injected: string[]
+  /** Ended, and mnemo is writing its briefing: a helper runs in its worktree
+   *  (`Snapshot.helpers`). Of children that share a worktree, only the last to end. */
+  briefing: boolean
 }
 
 /** `asleep`: idle for longer than `CAPTAIN_SLEEP_MS`, a session kept open to come back to.

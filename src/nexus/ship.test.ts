@@ -179,6 +179,26 @@ describe('buildShip: done, leaving and the PR', () => {
     expect([r.state, r.zone, r.action, r.act]).toEqual(['done', 'hangar', null, null])
   })
 
+  it('is writing its briefing while a helper runs in its worktree, and no captain stands for the helper', () => {
+    const done = kid('a1', { live: false, state: 'stopped', updated_at: iso(2 * MIN) })
+    const helpers = [{ cwd: `${ROOT}-wt-a1/`, account: 'default' }]
+    const s = ship({ ...snap(repo({ parents: [boss()], children: [done] })), helpers })
+    expect(robot(s, 'a1').briefing).toBe(true)
+    expect(s.decks[0].captains.map((c) => c.id)).toEqual([P1])
+    expect(robot(one(done), 'a1').briefing).toBe(false)
+    // A live child in that worktree is not ending: whatever runs there is not its briefing.
+    expect(robot(ship({ ...snap(repo({ parents: [boss()], children: [kid('a1')] })), helpers }), 'a1').briefing).toBe(false)
+  })
+
+  it('gives a reused worktree’s briefing to the child that ended last, and the repo’s own folder to none', () => {
+    const first = kid('a1', { live: false, state: 'stopped', updated_at: iso(20 * MIN) })
+    const again = kid('a2', { live: false, state: 'stopped', updated_at: iso(2 * MIN), cwd: `${ROOT}-wt-a1` })
+    const s = ship({ ...snap(repo({ parents: [boss()], children: [first, again] })), helpers: [{ cwd: `${ROOT}-wt-a1`, account: 'default' }] })
+    expect([robot(s, 'a1').briefing, robot(s, 'a2').briefing]).toEqual([false, true])
+    const inRoot = kid('a3', { live: false, state: 'stopped', updated_at: iso(2 * MIN), cwd: ROOT })
+    expect(robot(ship({ ...snap(repo({ parents: [boss()], children: [inRoot] })), helpers: [{ cwd: ROOT, account: 'default' }] }), 'a3').briefing).toBe(false)
+  })
+
   it('leaves 40 min after it ended when it has no PR', () => {
     expect(has(one(kid('a1', { live: false, state: 'done', updated_at: iso(LINGER_MS - MIN) })), 'a1')).toBe(true)
     expect(has(one(kid('a1', { live: false, state: 'done', updated_at: iso(LINGER_MS + MIN) })), 'a1')).toBe(false)

@@ -54,6 +54,7 @@ export function robot(id: string, over: Partial<ShipRobot> = {}): ShipRobot {
     twin: null,
     need: null,
     injected: [],
+    briefing: false,
     ...over,
   }
 }

@@ -148,6 +148,17 @@ pub struct Snapshot {
     pub repos: Vec<RepoGroup>,
     pub errors: Vec<String>,
     pub at: String,
+    /// Headless `claude` processes (`helper_pid`): no one's parent, so in no repo's `parents`.
+    #[serde(default)]
+    pub helpers: Vec<Helper>,
+}
+
+/// A `claude --print` or SDK process. mnemo's SessionEnd hook runs one in an ended child's
+/// worktree while it turns the child's transcript into a briefing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Helper {
+    pub cwd: String,
+    pub account: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -188,6 +199,24 @@ pub fn parse_agents(json: &str) -> Result<Vec<ParentSession>, String> {
             })
         })
         .collect())
+}
+
+/// Whether process `pid` of the account at `config_dir` is a headless `claude` (`--print`, the
+/// SDK): `entrypoint: "sdk-cli"` in its `sessions/<pid>.json`, where an interactive one says
+/// `"cli"`. `claude agents` lists both as `interactive`, a headless one named `<dir>-NN` and under
+/// a session id that never gets a transcript, and has no field that tells them apart (seen
+/// 2.1.301). A missing or unreadable file is not a helper.
+pub fn helper_pid(config_dir: &Path, pid: u64) -> bool {
+    std::fs::read_to_string(config_dir.join("sessions").join(format!("{pid}.json")))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .is_some_and(|v| v.get("entrypoint").and_then(|e| e.as_str()) == Some("sdk-cli"))
+}
+
+/// `parse_agents`' rows split into parents and helpers (`helper_pid`).
+pub fn split_helpers(rows: Vec<ParentSession>, config_dir: &Path) -> (Vec<ParentSession>, Vec<Helper>) {
+    let (helpers, parents): (Vec<_>, Vec<_>) = rows.into_iter().partition(|p| p.pid.is_some_and(|pid| helper_pid(config_dir, pid)));
+    (parents, helpers.into_iter().map(|p| Helper { cwd: p.cwd, account: p.account }).collect())
 }
 
 /// `mnemo sessions --json --all`.
@@ -1236,11 +1265,14 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut agent_starts = HashMap::new();
     let mut agent_waiting = HashMap::new();
     let mut parents: Vec<ParentSession> = Vec::new();
+    let mut helpers: Vec<Helper> = Vec::new();
     for (a, agents) in agents_of(&accounts) {
         agent_starts.extend(agents.as_deref().map(parse_agent_starts).unwrap_or_default());
         agent_waiting.extend(agents.as_deref().map(parse_agent_waiting).unwrap_or_default());
         match agents.and_then(|j| parse_agents(&j)) {
             Ok(ps) => {
+                let (ps, hs) = split_helpers(ps, &a.config_dir);
+                helpers.extend(hs.into_iter().map(|h| Helper { account: a.id.clone(), ..h }));
                 for p in ps {
                     if !parents.iter().any(|o| o.session_id == p.session_id) {
                         parents.push(ParentSession { account: a.id.clone(), ..p });
@@ -1352,7 +1384,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         parent_starts: &parent_starts,
         child_starts: &child_starts,
     });
-    Snapshot { repos, errors, at: chrono_now() }
+    Snapshot { repos, errors, at: chrono_now(), helpers }
 }
 
 /// Each background job's record of the PRs it opened, on every account, read as the lens reads
@@ -1479,6 +1511,30 @@ mod tests {
         assert!(!p.is_empty());
         assert!(p.iter().all(|x| x.pid.is_some()));
         assert!(p.iter().any(|x| x.cwd == "/Users/you/github/mnemo" && x.status == "busy"));
+    }
+
+    #[test]
+    fn a_headless_claude_is_a_helper_not_a_parent() {
+        // As `claude agents --json --all` listed a `claude --print` in a child's worktree beside an
+        // interactive session (2.1.301): both `interactive`, the headless one named `<dir>-NN`.
+        let rows = parse_agents(
+            r#"[
+              {"pid": 111, "cwd": "/Users/you/github/mnemo-wt-c-grok-install", "kind": "interactive", "sessionId": "aaaaaaaa-1111-4000-8000-000000000001", "name": "mnemo-wt-c-grok-install-78", "status": "busy"},
+              {"pid": 222, "cwd": "/Users/you/github/mnemo", "kind": "interactive", "sessionId": "bbbbbbbb-2222-4000-8000-000000000002", "name": "mnemo-d6", "status": "idle"},
+              {"pid": 333, "cwd": "/Users/you/github/mnemo", "kind": "interactive", "sessionId": "cccccccc-3333-4000-8000-000000000003", "name": "mnemo-4f", "status": "idle"}
+            ]"#,
+        )
+        .unwrap();
+        let dir = std::env::temp_dir().join(format!("mnemo-helpers-{}", std::process::id()));
+        let sessions = dir.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(sessions.join("111.json"), r#"{"pid":111,"kind":"interactive","entrypoint":"sdk-cli","nameSource":"derived"}"#).unwrap();
+        std::fs::write(sessions.join("222.json"), r#"{"pid":222,"kind":"interactive","entrypoint":"cli","nameSource":"derived"}"#).unwrap();
+        // 333 has no file: a parent, never hidden for want of one.
+        let (parents, helpers) = split_helpers(rows, &dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(parents.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![Some(222), Some(333)]);
+        assert_eq!(helpers, vec![Helper { cwd: "/Users/you/github/mnemo-wt-c-grok-install".into(), account: default_account() }]);
     }
 
     #[test]

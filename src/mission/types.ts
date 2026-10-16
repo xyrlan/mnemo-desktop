@@ -74,7 +74,11 @@ export type Pr = {
 export type Piece = { name: string; branch: string; child: ChildSession | null; pr: Pr | null }
 export type Mission = { feature: string; contract_path: string; pieces: Piece[]; landable: boolean }
 export type RepoGroup = { root: string; name: string; parents: ParentSession[]; missions: Mission[]; children: ChildSession[] }
-export type Snapshot = { repos: RepoGroup[]; errors: string[]; at: string }
+/** A headless `claude` (`--print`, the SDK): no one's parent. mnemo's SessionEnd hook runs one in
+ *  an ended child's worktree while it turns the child's transcript into a briefing. */
+export type Helper = { cwd: string; account: string }
+/** `helpers`: absent in snapshots from before it. */
+export type Snapshot = { repos: RepoGroup[]; errors: string[]; at: string; helpers?: Helper[] }
 export type TimelineLine = { at: string; state: string; detail: string; text: string }
 export type Timeline = { lines: TimelineLine[]; total: number }
 

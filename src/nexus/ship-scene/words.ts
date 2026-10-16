@@ -48,8 +48,14 @@ export function robotName(r: Pick<ShipRobot, 'label' | 'twin'>): string {
 
 const CI_SAY: Record<Exclude<Ci, null>, string> = { green: 'CI green · waiting for merge', red: 'CI red', run: 'CI running', wait: 'CI queued' }
 
-/** What a robot's speech bubble says, and the smaller line under it. */
+/** What a robot's speech bubble says, and the smaller line under it: while mnemo writes an ended
+ *  robot's briefing, that. */
 export function robotLine(r: ShipRobot): { say: string; act: string } {
+  const line = sayOf(r)
+  return r.briefing ? { say: line.say, act: '✎ writing its briefing' } : line
+}
+
+function sayOf(r: ShipRobot): { say: string; act: string } {
   if (r.state === 'done') {
     const head = r.pr ? `✓ PR #${r.pr.number} · ${r.ci ? CI_SAY[r.ci] : 'open'}` : '✓ finished'
     return { say: r.line ? `${head} — ${r.line}` : head, act: '' }
@@ -101,6 +107,12 @@ export type Look = { pose: RobotPose; prop: PropKind | null; motion: PropMotion 
 const WORKING_MOTION: Record<ActionKind, PropMotion> = { read: 'scan', edit: 'weld', test: 'swirl', ship: 'lift', run: 'flip' }
 
 export function lookOf(r: ShipRobot): Look {
+  const look = stateLook(r)
+  // Ended, its transcript read into a briefing: the scanner over it, pages off it.
+  return r.briefing ? { ...look, prop: 'read', motion: 'scan', particles: 'pages' } : look
+}
+
+function stateLook(r: ShipRobot): Look {
   const pose = poseOf(r)
   const particles = particlesOf(r)
   if (r.state === 'working') {
@@ -123,6 +135,10 @@ const CI_DONE: Record<Exclude<Ci, null>, string> = { green: 'CI green', red: 'CI
 /** Its state and action in words, which the badge no longer shows: `editing`, `waits for you`,
  *  `finished, CI red`. For its accessible name and its hover. */
 export function doingOf(r: ShipRobot): string {
+  return r.briefing ? `${stateDoing(r)}, writing its briefing` : stateDoing(r)
+}
+
+function stateDoing(r: ShipRobot): string {
   if (r.state === 'working') return DOING[r.action ?? 'read']
   if (r.state === 'need') return 'waits for you'
   if (r.state === 'stopped') return 'stopped'
