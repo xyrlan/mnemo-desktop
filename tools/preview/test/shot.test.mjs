@@ -74,6 +74,39 @@ test('terminal-pane: a saved workspace’s pane comes back as a drawer session, 
   assert.deepEqual(await pngSize(out), { width: 1440, height: 900 })
 })
 
+/** Every quiet captain's chip that covers a captain's sprite or name, or a docked captain (#465):
+ *  `[chip, figure]` pairs, by name. */
+const overlaps = (page) =>
+  page.evaluate(() => {
+    const figures = [...document.querySelectorAll('.ship-captain .ship-console img, .ship-captain .ship-cname, .ship-captain .ship-topic, .ship-captain .ship-pact, .ship-docked')]
+    const chips = [...document.querySelectorAll('.ship-chip-captain')]
+    const named = (e) => `${e.className} ${(e.closest('[data-ship-id]')?.getAttribute('data-ship-id') ?? '').slice(0, 8)}`
+    const out = []
+    for (const c of chips) {
+      const a = c.getBoundingClientRect()
+      for (const f of figures) {
+        const b = f.getBoundingClientRect()
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) out.push([named(c), named(f)])
+      }
+    }
+    return { chips: chips.length, captains: document.querySelectorAll('.ship-captain').length, out }
+  })
+
+for (const [scenario, size] of [
+  ['nexus-quiet', { width: 1440, height: 900 }],
+  ['nexus-quiet', { width: 1160, height: 900 }],
+  ['nexus', { width: 1440, height: 900 }],
+  ['nexus', { width: 1024, height: 768 }],
+]) {
+  test(`${scenario} at ${size.width}x${size.height}: no quiet captain's chip covers a captain (#465)`, async () => {
+    const out = path.join(dir, `${scenario}-${size.width}.png`)
+    const { pageErrors, inspected } = await shoot({ scenario, out, size, log: () => {}, inspect: overlaps })
+    assert.deepEqual(pageErrors, [])
+    assert.ok(inspected.chips > 0 && inspected.captains > 0, `drew ${inspected.chips} chips and ${inspected.captains} captains`)
+    assert.deepEqual(inspected.out, [])
+  })
+}
+
 test('an unknown scenario names the ones there are', async () => {
   await assert.rejects(shoot({ scenario: 'nope', out: path.join(dir, 'x.png') }), /no scenario named nope \(have: .*empty-workspace/)
 })
