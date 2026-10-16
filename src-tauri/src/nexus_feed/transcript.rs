@@ -20,7 +20,7 @@ use crate::mission::stamp_ms;
 pub const RATE_WINDOW_MS: u64 = 5 * 60_000;
 /// A tool call's target, at most; the ship's line clips it again.
 const TARGET_CHARS: usize = 90;
-/// A parent's topic, at most (`ship-types.ts`, `SessionFeed.topic`).
+/// A parent's topic or title, at most (`ship-types.ts`, `SessionFeed.topic`).
 const TOPIC_CHARS: usize = 200;
 /// Bytes read at a time. A line longer than this is read whole before it is parsed.
 const CHUNK: usize = 8 << 20;
@@ -49,6 +49,10 @@ pub struct Reader {
     context: Option<u64>,
     model: Option<String>,
     topic: Option<String>,
+    /// The latest `ai-title`: Claude Code names the session, and names it again as it goes on.
+    ai_title: Option<String>,
+    /// The latest `custom-title`: the name a person gave it (`/rename`, `claude --name`).
+    custom_title: Option<String>,
     /// The unanswered `AskUserQuestion`, by its `tool_use` id.
     ask: Option<(String, Ask)>,
     /// Calls made within `RATE_WINDOW_MS` of the last read, oldest first.
@@ -67,6 +71,8 @@ struct Line<'a> {
     origin: Option<Origin>,
     #[serde(borrow)]
     message: Option<Message<'a>>,
+    ai_title: Option<String>,
+    custom_title: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -286,6 +292,13 @@ impl Reader {
             if line.is_sidechain == Some(true) {
                 continue;
             }
+            // Title lines carry no timestamp.
+            let title = |t: &Option<String>| t.as_deref().map(|t| clip(&squeeze(t), TOPIC_CHARS)).filter(|t| !t.is_empty());
+            match line.kind.as_str() {
+                "ai-title" => self.ai_title = title(&line.ai_title).or(self.ai_title.take()),
+                "custom-title" => self.custom_title = title(&line.custom_title).or(self.custom_title.take()),
+                _ => {}
+            }
             let Some(at) = line.timestamp.as_deref().and_then(stamp_ms) else { continue };
             match line.kind.as_str() {
                 "assistant" => self.assistant(&line, at, now, home),
@@ -394,7 +407,8 @@ impl Reader {
         self.calls.iter().filter(move |c| c.at + RATE_WINDOW_MS > now)
     }
 
-    /// What the feed says of this session. `topic` is a parent's alone.
+    /// What the feed says of this session. `topic` and `title` are a parent's alone; the name a
+    /// person gave it is its title before the one Claude Code did.
     pub fn session(&self, parent: bool) -> SessionFeed {
         SessionFeed {
             activity: self.activity.clone(),
@@ -402,6 +416,7 @@ impl Reader {
             context: self.context,
             model: self.model.clone(),
             topic: if parent { self.topic.clone() } else { None },
+            title: if parent { self.custom_title.clone().or_else(|| self.ai_title.clone()) } else { None },
             contract: None,
             ask: self.ask.as_ref().map(|(_, a)| a.clone()),
         }
@@ -544,6 +559,25 @@ mod tests {
         ]);
         assert_eq!(r.session(true).topic.as_deref(), Some("land the feed piece"));
         assert_eq!(r.session(false).topic, None, "a child has no topic");
+    }
+
+    #[test]
+    fn the_title_is_the_latest_ai_title_unless_a_person_named_it() {
+        let ai = |t: &str| json!({ "type": "ai-title", "aiTitle": t, "sessionId": "s" }).to_string();
+        let custom = |t: &str| json!({ "type": "custom-title", "customTitle": t, "sessionId": "s" }).to_string();
+        let r = read(&[prompt(1, json!("[Pasted text #1 +40 lines] lorem"), Some("human")), ai("Subscriber cohort analysis"), ai("  Second   version of\nthe checkout ")]);
+        assert_eq!(r.session(true).title.as_deref(), Some("Second version of the checkout"), "lines without a timestamp are read; the last wins");
+        assert_eq!(r.session(false).title, None, "a child has no title");
+        let r = read(&[ai("Subscriber cohort analysis"), ai("   ")]);
+        assert_eq!(r.session(true).title.as_deref(), Some("Subscriber cohort analysis"), "a blank title changes nothing");
+        let r = read(&[custom("approve probe"), ai("Probe the approval route")]);
+        assert_eq!(r.session(true).title.as_deref(), Some("approve probe"), "the name a person gave it wins");
+        assert_eq!(read(&[prompt(1, json!("lorem"), Some("human"))]).session(true).title, None);
+
+        let mut r = Reader::default();
+        r.feed(&(ai("First") + "\n"), T0_MS, "/Users/you");
+        r.feed(&(ai("Later") + "\n"), T0_MS, "/Users/you");
+        assert_eq!(r.session(true).title.as_deref(), Some("Later"), "a later read renames it");
     }
 
     #[test]

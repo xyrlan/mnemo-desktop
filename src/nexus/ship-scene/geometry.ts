@@ -71,8 +71,9 @@ export type DeckLayout = {
 /** Room for this many big captains (topic and action under each) in COMMAND; past it they stand two
  *  to a row, name only. */
 export const bigCaptains = (cmdW: number) => (cmdW >= 250 ? 2 : 1)
-const BIG_H = 172
-const SMALL_ROW = 124
+/** A captain's name takes up to two lines under its console. */
+const BIG_H = 186
+const SMALL_ROW = 138
 const QUIET_H = 34
 /** Between the captains' topics and action pills and the first row of quiet chips. */
 const QUIET_GAP = 36

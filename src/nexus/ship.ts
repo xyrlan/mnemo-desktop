@@ -288,7 +288,7 @@ export function buildShip(input: ShipInput): Ship {
     return {
       id,
       parent,
-      name: id.startsWith('orphan:') ? 'no parent' : view?.title || parent?.name || `session ${id.slice(0, 8)}`,
+      name: id.startsWith('orphan:') ? 'no parent' : f?.title || view?.title || parent?.name || `session ${id.slice(0, 8)}`,
       emblem,
       pose,
       topic: f?.topic ?? null,

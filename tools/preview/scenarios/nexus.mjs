@@ -1,6 +1,9 @@
 // The Nexus, the app (#459), the account switcher in its bar: one
-// repo's deck with two captains and a crew in every zone, a blocked child on the bridge, green and running PRs in the hangar, a stranded child,
+// repo's deck with three captains, three quiet ones and a crew in every zone, a blocked child on the bridge, green and running PRs in the hangar, a stranded child,
 // twins, and a second repo docked. Synthetic data; the feed answers as `nexus_feed` would.
+// Parents carry the names `claude agents` gives them (a first prompt cut short: a pasted
+// timestamp, `[Pasted text #1…]`, an address; or `session <id>`); the feed's `title` (the
+// transcript's last `ai-title`) is what the ship names them by.
 import { scenario } from '../scenario.mjs'
 import { appIpc, HOME, REPO } from '../fixtures/app.mjs'
 
@@ -12,6 +15,10 @@ const iso = (ms) => new Date(ms).toISOString()
 const ROUND = 'aaaaaaaa-1111-4000-8000-000000000001'
 const AUDIT = 'bbbbbbbb-2222-4000-8000-000000000002'
 const DOCKED = 'cccccccc-3333-4000-8000-000000000003'
+const TITLES = 'eeeeeeee-5555-4000-8000-000000000005'
+const MAIL = 'ffffffff-6666-4000-8000-000000000006'
+const MERGE = '99999999-7777-4000-8000-000000000007'
+const PLAN = '88888888-8888-4000-8000-000000000008'
 
 const parent = (session_id, cwd, name, status) => ({ session_id, pid: 4000, name, status, cwd, waiting_for: null, account: 'default' })
 const url = (n) => `https://github.com/xyrlan/mnemo-desktop/pull/${n}`
@@ -50,12 +57,20 @@ const crew = [
   child(6, 687, ROUND, { tempo: 'blocked', needs: 'Two tests in another module import the reviewer. Move it to tools/, or delete those tests too?', waiting_for: 'input needed', detail: 'asking where the reviewer goes' }),
   child(7, 690, ROUND, { detail: 'twin A: reading the pane store' }),
   child(8, 690, ROUND, { detail: 'twin B: reading the terminal view' }),
+  child(9, 462, TITLES, { detail: 'reading the transcript tailer' }),
 ]
 
 const MISSION = {
   repos: [
-    { root: REPO, name: 'mnemo-desktop', parents: [parent(ROUND, REPO, 'Nexus v2 round', 'busy'), parent(AUDIT, REPO, 'Windows audit', 'idle')], missions: [], children: crew },
-    { root: MNEMO, name: 'mnemo', parents: [parent(DOCKED, MNEMO, 'Release notes', 'idle')], missions: [], children: [] },
+    { root: REPO, name: 'mnemo-desktop', parents: [
+        parent(ROUND, REPO, '[11/10/2026, 14:02:11] ok so the bar', 'busy'),
+        parent(AUDIT, REPO, '[Pasted text #1 +38 lines]', 'idle'),
+        parent(TITLES, REPO, 'session eeeeeeee', 'busy'),
+        parent(MAIL, REPO, 'dev@example.com sent me this', 'idle'),
+        parent(MERGE, REPO, 'quao complex is the merge', 'idle'),
+        parent(PLAN, REPO, 'Vamos seguir com o plano', 'idle'),
+      ], missions: [], children: crew },
+    { root: MNEMO, name: 'mnemo', parents: [parent(DOCKED, MNEMO, '<local-command-caveat>Caveat: the', 'idle')], missions: [], children: [] },
   ],
   errors: [],
   at: iso(now),
@@ -71,12 +86,19 @@ const feedOf = {
   [crew[5].id]: { activity: act('AskUserQuestion', 'Where should the reviewer go?', 2, true), said: null, ask: { question: 'Two tests in another module import the reviewer. Move it to tools/, or delete those tests too?', options: ['Move it to tools/', 'Delete the tests'] } },
   [crew[6].id]: { activity: act('Read', 'store.ts', 0.2), said: { text: 'Reading how panes hold their sinks.', at: ago(0.4) } },
   [crew[7].id]: { activity: act('Grep', 'attachSink', 0.6), said: { text: 'Looking for every caller of attachSink.', at: ago(0.8) } },
+  [crew[8].id]: { activity: act('Read', 'transcript.rs', 0.2), said: { text: 'Reading how the feed tails a transcript.', at: ago(0.3) } },
 }
+const captain = (topic, title, extra = {}) => ({ activity: null, said: null, context: 90_000, model: 'claude-opus-4', topic, title, contract: null, ask: null, ...extra })
 const FEED = {
   sessions: Object.fromEntries([
-    ...Object.entries(feedOf).map(([k, v]) => [k, { context: 120_000, model: 'claude-opus-4', topic: null, contract: null, ask: null, said: null, ...v }]),
-    [ROUND, { activity: act('Bash', 'mnemo sessions', 0.5), said: { text: 'Five children out; reviewing as they land.', at: ago(1) }, context: 180_000, model: 'claude-opus-4', topic: 'Build Nexus v2 from the contract', contract: null, ask: null }],
-    [AUDIT, { activity: null, said: { text: 'Waiting for the Windows job.', at: ago(30) }, context: 90_000, model: 'claude-opus-4', topic: 'Audit the Windows build', contract: null, ask: null }],
+    ...Object.entries(feedOf).map(([k, v]) => [k, { context: 120_000, model: 'claude-opus-4', topic: null, title: null, contract: null, ask: null, said: null, ...v }]),
+    [ROUND, captain('merge the twins once both land', 'Nexus v2 round', { activity: act('Bash', 'mnemo sessions', 0.5), said: { text: 'Five children out; reviewing as they land.', at: ago(1) }, context: 180_000 })],
+    [AUDIT, captain('and the arm64 job too?', 'Windows build audit', { said: { text: 'Waiting for the Windows job.', at: ago(30) } })],
+    [TITLES, captain('session b98621 has no name either', 'Name each captain by its session title', { activity: act('Bash', 'mnemo dispatch', 0.4) })],
+    [MAIL, captain('reply in English', 'Mail relay setup')],
+    [MERGE, captain('ok merge it', 'Merge conflict review for the drawer and the conversation parser')],
+    [PLAN, captain('também, por favor', 'Onboarding plan')],
+    [DOCKED, captain('ship it', 'Release notes for v0.5')],
   ]),
   prs: {
     [url(701)]: { state: 'OPEN', mergedAt: null, closedAt: null, checks: [{ name: 'test (ubuntu-latest)', startedAt: ago(38), completedAt: ago(30), conclusion: 'SUCCESS' }, { name: 'test (macos-latest)', startedAt: ago(38), completedAt: ago(29), conclusion: 'SUCCESS' }] },

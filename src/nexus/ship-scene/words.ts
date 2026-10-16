@@ -250,3 +250,9 @@ export function captainTopic(c: Captain): string | null {
   if (c.pose === 'empty') return 'children with no recorded parent'
   return c.topic ? `“${c.topic.slice(0, 80)}”` : null
 }
+
+/** A captain's hover: its whole name, which the ship cuts after two lines, then its latest prompt. */
+export function captainHover(c: Captain): string {
+  if (c.pose === 'empty') return 'no parent: children with no recorded parent'
+  return c.topic ? `${c.name}\n“${c.topic}”` : c.name
+}

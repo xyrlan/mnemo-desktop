@@ -21,7 +21,7 @@ const boss = (over: Partial<ParentSession> = {}): ParentSession => parent({ sess
 const kid = (id: string, over: Partial<ChildSession> = {}): ChildSession =>
   child({ id, session_id: sid(id), cwd: `${ROOT}-wt-${id}`, updated_at: iso(NOW - 10 * SEC), parent_session: P1, ...over })
 const pr = (n: number, over: Partial<Pr> = {}): Pr => ({ number: n, url: `https://github.com/you/mnemo-desktop/pull/${n}`, state: 'OPEN', head: `fix/issue-${n}`, ci: 'pending', ...over })
-const sf = (over: Partial<SessionFeed> = {}): SessionFeed => ({ activity: null, said: null, context: null, model: null, topic: null, contract: null, ask: null, ...over })
+const sf = (over: Partial<SessionFeed> = {}): SessionFeed => ({ activity: null, said: null, context: null, model: null, topic: null, title: null, contract: null, ask: null, ...over })
 const fate = (over: Partial<PrFate> = {}): PrFate => ({ state: 'OPEN', mergedAt: null, closedAt: null, checks: [], ...over })
 const check = (startedAt: number, completedAt: number | null, conclusion = 'SUCCESS'): CheckRun => ({ name: 'test', startedAt, completedAt, conclusion })
 const feedOf = (sessions: Record<string, SessionFeed> = {}, prs: Record<string, PrFate> = {}): Feed => ({ sessions, prs, rate: null, at: NOW })

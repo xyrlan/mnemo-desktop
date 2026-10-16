@@ -27,7 +27,7 @@ const sid = (id: string) => `${id}-0000-4000-8000-000000000000`
 const kid = (id: string, over: Partial<ChildSession> = {}): ChildSession =>
   child({ id, session_id: sid(id), cwd: `${ROOT}-wt-${id}`, updated_at: iso(10 * SEC), parent_session: P1, ...over })
 const pr = (n: number, over: Partial<Pr> = {}): Pr => ({ number: n, url: `https://github.com/you/mnemo-desktop/pull/${n}`, state: 'OPEN', head: `fix/issue-${n}`, ci: 'pending', ...over })
-const sf = (over: Partial<SessionFeed> = {}): SessionFeed => ({ activity: null, said: null, context: null, model: null, topic: null, contract: null, ask: null, ...over })
+const sf = (over: Partial<SessionFeed> = {}): SessionFeed => ({ activity: null, said: null, context: null, model: null, topic: null, title: null, contract: null, ask: null, ...over })
 const check = (startedAgo: number | null, completedAgo: number | null, conclusion: string | null = 'SUCCESS'): CheckRun => ({
   name: 'test',
   startedAt: startedAgo === null ? null : NOW - startedAgo,
@@ -305,10 +305,13 @@ describe('buildShip: captains', () => {
     expect([cap.id, cap.pose, cap.parent, cap.name]).toEqual([GONE, 'offline', null, 'session 99999999'])
   })
 
-  it('names a captain by its tab title, else its claude agents name', () => {
-    const s = ship(snap(repo({ parents: [boss({ name: 'mnemo-18' })], children: [kid('a1')] })), { agents: { [P1]: { state: 'idle', waitingFor: null, title: 'nexus v2 round' } } })
-    expect(s.decks[0].captains[0].name).toBe('nexus v2 round')
-    expect(ship(snap(repo({ parents: [boss({ name: 'mnemo-18' })], children: [kid('a1')] }))).decks[0].captains[0].name).toBe('mnemo-18')
+  it("names a captain by the feed's title, else Home's title, else its claude agents name", () => {
+    const one = snap(repo({ parents: [boss({ name: 'mnemo-18' })], children: [kid('a1')] }))
+    const agents = { [P1]: { state: 'idle' as const, waitingFor: null, title: '[11/10/2026, 14:02:11] lorem' } }
+    const named = ship(one, { agents, feed: feedOf({ [P1]: sf({ topic: '[Pasted text #1 +12 lines]', title: 'Second version of the checkout' }) }) })
+    expect(named.decks[0].captains[0].name).toBe('Second version of the checkout')
+    expect(ship(one, { agents, feed: feedOf({ [P1]: sf({ topic: 'lorem' }) }) }).decks[0].captains[0].name).toBe('[11/10/2026, 14:02:11] lorem')
+    expect(ship(one).decks[0].captains[0].name).toBe('mnemo-18')
   })
 
   it('poses a captain: alert when a child needs you, busy as the fleet says, else idle', () => {
