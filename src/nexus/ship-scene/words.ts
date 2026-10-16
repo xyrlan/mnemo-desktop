@@ -1,3 +1,4 @@
+import type { PropKind } from '../sprites'
 import type { ActionKind, Captain, Ci, Exception, FleetRate, LogKind, RobotPose, Ship, ShipAction, ShipRobot } from '../ship-types'
 
 /** Everything the ship says, in English (spec "What it is"). Pure. */
@@ -58,23 +59,14 @@ export function robotLine(r: ShipRobot): { say: string; act: string } {
   return { say: r.line || r.act || '…', act: r.line ? (r.act ?? '') : '' }
 }
 
-const ACTION_GLYPH: Record<ActionKind, string> = { read: '⌕', edit: '✎', test: '⚗', ship: '⇪', run: '⧗' }
+export type Particles = 'sparks' | 'bubbles' | 'pages' | 'zz' | 'radar' | 'smoke'
 
-/** The action badge (spec "What it is"): what it is doing, CI on a finished PR, or ! for you. */
-export function glyph(r: ShipRobot): string {
-  if (r.state === 'need') return '!'
-  if (r.state === 'stopped') return '■'
-  if (r.state === 'done') return r.ci === 'red' ? '✗' : r.ci === 'run' || r.ci === 'wait' ? '⧗' : '✓'
-  if (r.state === 'idle') return r.zone === 'stranded' ? '⏸' : '…'
-  return r.action ? ACTION_GLYPH[r.action] : '⌕'
-}
-
-export type Particles = 'sparks' | 'bubbles' | 'pages' | 'zz' | 'radar'
-
-/** The particles round a robot (spec "Motion"): sparks while it edits, bubbles while it tests,
- *  pages while it reads, a radar ping while it ships or a long command runs, zZ while stranded. */
+/** The particles round a robot (spec "Motion"), coming off what it holds: sparks while it edits,
+ *  bubbles while it tests, pages while it reads, a radar ping while it ships or a long command
+ *  runs, smoke from a red CI's broken gear, zZ while stranded. */
 export function particlesOf(r: ShipRobot): Particles | null {
   if (r.state === 'working') return r.action === 'edit' ? 'sparks' : r.action === 'test' ? 'bubbles' : r.action === 'ship' || r.action === 'run' ? 'radar' : 'pages'
+  if (r.state === 'done' && r.ci === 'red') return 'smoke'
   if (r.state === 'idle' && r.zone === 'stranded') return 'zz'
   return null
 }
@@ -86,8 +78,56 @@ export function poseOf(r: ShipRobot): RobotPose {
   if (r.state === 'working') return 'working'
   if (r.state === 'need') return 'waiting'
   if (r.state === 'stopped') return 'sleeping'
-  if (r.state === 'idle' && r.idleMs > SLEEP_MS) return 'sleeping'
+  if (r.state === 'idle' && (r.zone === 'stranded' || r.idleMs > SLEEP_MS)) return 'sleeping'
   return 'idle'
+}
+
+/** How a held prop moves: a scanner sweeps, a torch jitters, a flask swirls, a crate is lifted,
+ *  an hourglass flips (slowly while CI runs), a paddle waves, a flag flutters, a gear smokes. */
+export type PropMotion = 'scan' | 'weld' | 'swirl' | 'lift' | 'flip' | 'flip-slow' | 'wave' | 'flag' | 'smoke'
+
+/** How the body itself moves: a working bob, a finished robot's 1 px breathe, an idle one's slow
+ *  breath, a stranded one's slower one; a stopped robot is still. */
+export type BodyMotion = 'bob' | 'breathe' | 'breath' | 'breath-slow'
+
+/** The halo under the feet: the state colour the badge's border carried. */
+export type Halo = 'working' | 'need' | 'done'
+
+/** What a robot looks like (#473): the pose says the state, a held prop the action (one prop for
+ *  every class), its motion makes it read at a glance, the particles come off it, the halo carries
+ *  the state colour. No badge. */
+export type Look = { pose: RobotPose; prop: PropKind | null; motion: PropMotion | null; particles: Particles | null; halo: Halo | null; body: BodyMotion | null }
+
+const WORKING_MOTION: Record<ActionKind, PropMotion> = { read: 'scan', edit: 'weld', test: 'swirl', ship: 'lift', run: 'flip' }
+
+export function lookOf(r: ShipRobot): Look {
+  const pose = poseOf(r)
+  const particles = particlesOf(r)
+  if (r.state === 'working') {
+    const action = r.action ?? 'read'
+    return { pose, prop: action, motion: WORKING_MOTION[action], particles, halo: 'working', body: 'bob' }
+  }
+  if (r.state === 'need') return { pose, prop: 'need', motion: 'wave', particles, halo: 'need', body: null }
+  if (r.state === 'stopped') return { pose, prop: null, motion: null, particles, halo: null, body: null }
+  if (r.state === 'done') {
+    if (r.ci === 'red') return { pose, prop: 'red', motion: 'smoke', particles, halo: 'need', body: 'breathe' }
+    if (r.ci === 'run' || r.ci === 'wait') return { pose, prop: 'run', motion: 'flip-slow', particles, halo: 'working', body: 'breathe' }
+    return { pose, prop: 'green', motion: 'flag', particles, halo: 'done', body: 'breathe' }
+  }
+  return { pose, prop: null, motion: null, particles, halo: null, body: r.zone === 'stranded' ? 'breath-slow' : 'breath' }
+}
+
+const DOING: Record<ActionKind, string> = { read: 'reading', edit: 'editing', test: 'testing', ship: 'shipping', run: 'running a long command' }
+const CI_DONE: Record<Exclude<Ci, null>, string> = { green: 'CI green', red: 'CI red', run: 'CI running', wait: 'CI queued' }
+
+/** Its state and action in words, which the badge no longer shows: `editing`, `waits for you`,
+ *  `finished, CI red`. For its accessible name and its hover. */
+export function doingOf(r: ShipRobot): string {
+  if (r.state === 'working') return DOING[r.action ?? 'read']
+  if (r.state === 'need') return 'waits for you'
+  if (r.state === 'stopped') return 'stopped'
+  if (r.state === 'done') return r.ci ? `finished, ${CI_DONE[r.ci]}` : 'finished'
+  return r.zone === 'stranded' ? 'stranded' : 'idle'
 }
 
 /** What the hover adds: title, model and context, contract, twin, rules. */

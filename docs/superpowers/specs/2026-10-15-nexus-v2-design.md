@@ -53,10 +53,12 @@ you can be done from it, and the position of every figure says whether it needs 
 - **Ship's log:** a one-line ticker of the latest milestone (dispatched, PR opened, CI green or red,
   merged, stranded, finished without a PR, and what you did). It expands into the list.
 
-What the robot is *doing* is never its position. It shows in its **action badge** (⌕ reading,
-✎ editing, ⚗ testing, ⇪ publishing, ⧗ a long command running, ✓/✗/⧗ CI on a finished PR, ! needs
-you, ■ stopped), its **particles** (sparks, bubbles, pages, zZ, a radar ping) and its **speech
-bubble**. A room shows as many bubbles at once as its width allows, roughly one per 240 px. The
+What the robot is *doing* is never its position. Its **pose** says its state, a **held prop** its
+action (#473: a scanner reading, a torch editing, a flask testing, a crate shipping, an hourglass for
+a long command or CI running, a ! paddle when it needs you, a flag for CI green, a broken gear at its
+feet for CI red; none when idle, stranded or stopped), with a motion on the prop, its **particles**
+(sparks, bubbles, pages, smoke, zZ, a radar ping) coming off it, the **halo** under its feet in the
+state colour, and its **speech bubble**. No badge. A room shows as many bubbles at once as its width allows, roughly one per 240 px. The
 freshest lines speak first and the rest take turns every ~4.5 s.
 
 ## Where it sits in the app

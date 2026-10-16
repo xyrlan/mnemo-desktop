@@ -279,13 +279,59 @@ test('a deck draws captains at their consoles, rooms lit by who stands in them, 
   expect(robotEl('360')!.dataset.zone).toBe('hangar')
   expect(robotEl('360')!.dataset.ci).toBe('green')
   expect(robotEl('360')!.querySelector('.ship-shuttle')).not.toBeNull()
-  expect(robotEl('370')!.querySelector('.ship-ab')!.textContent).toBe('⏸')
-  expect(robotEl('359')!.querySelector('.ship-fx')!.getAttribute('data-fx')).toBe('radar')
-  const imgs = [...robotEl('359')!.querySelectorAll('img')].map((i) => i.getAttribute('src'))
+  expect(robotEl('370')!.querySelector('.ship-fx')!.getAttribute('data-fx')).toBe('zz')
+  expect(robotEl('359')!.querySelector('.ship-prop .ship-fx')!.getAttribute('data-fx')).toBe('radar')
+  const imgs = [...robotEl('359')!.querySelectorAll('.ship-body img')].map((i) => i.getAttribute('src'))
   expect(imgs).toEqual([SPRITES.accessories[0].src, SPRITES.robots.droid.working.src])
   const empty = deck({ flight: [robot('1')] })
   await draw({ ship: ship({ decks: [empty] }) })
   expect($('.ship-room[data-zone="hangar"]')!.hasAttribute('data-lit')).toBe(false)
+})
+
+/** Every state in #473's table, one robot each, of every class. */
+const STATES = [
+  robot('r1', { action: 'read', klass: 'mech' }),
+  robot('r2', { action: 'edit' }),
+  robot('r3', { action: 'test', klass: 'drone' }),
+  robot('r4', { action: 'ship', klass: 'unknown' }),
+  robot('r5', { action: 'run' }),
+  robot('r6', { state: 'need', zone: 'bridge', action: null, klass: 'mech' }),
+  robot('r7', { state: 'stopped', action: null }),
+  robot('r8', { state: 'done', zone: 'hangar', action: null, ci: 'green', pr: pr(801) }),
+  robot('r9', { state: 'done', zone: 'hangar', action: null, ci: 'red', pr: pr(802) }),
+  robot('r10', { state: 'done', zone: 'hangar', action: null, ci: 'run', pr: pr(803) }),
+  robot('r11', { state: 'idle', action: null, idleMs: 60_000 }),
+  robot('r12', { state: 'idle', zone: 'stranded', action: null, idleMs: 20 * 60_000 }),
+]
+const PROP_OF: Record<string, keyof typeof SHIP_SPRITES.props | null> = { r1: 'read', r2: 'edit', r3: 'test', r4: 'ship', r5: 'run', r6: 'need', r7: null, r8: 'green', r9: 'red', r10: 'run', r11: null, r12: null }
+
+test('a robot shows its state by its pose and the prop it holds, never a badge (#473)', async () => {
+  await draw({ ship: ship({ decks: [deck({ flight: STATES.filter((r) => r.zone !== 'hangar'), hangar: STATES.filter((r) => r.zone === 'hangar') })] }) })
+  for (const r of STATES) {
+    const el = robotEl(r.id)!
+    const prop = el.querySelectorAll('.ship-prop img')
+    const want = PROP_OF[r.id]
+    expect(prop.length, r.id).toBe(want ? 1 : 0)
+    if (want) expect(prop[0].getAttribute('src'), r.id).toBe(SHIP_SPRITES.props[want].src)
+    expect(el.querySelector('.ship-ab'), r.id).toBeNull()
+    // No glyph anywhere on the figure: its tag is all the text it draws.
+    expect(el.querySelector('.ship-figure')!.textContent, r.id).toBe(el.querySelector('.ship-tag')!.textContent)
+  }
+  expect(robotEl('r2')!.querySelector('.ship-figure')!.getAttribute('aria-label')).toBe('#r2, editing')
+  expect(robotEl('r9')!.querySelector('.ship-figure')!.getAttribute('aria-label')).toBe('#r9, finished, CI red')
+  expect(robotEl('r6')!.querySelector('.ship-figure')!.getAttribute('aria-label')).toBe('#r6, waits for you')
+  // The halo carries the colour: CI red the need one, CI running the working one.
+  expect(['r8', 'r9', 'r10', 'r11'].map((id) => robotEl(id)!.dataset.halo)).toEqual(['done', 'need', 'working', undefined])
+  // The prop sits at the class's hand for the pose; the broken gear at the feet; sparks ride the torch.
+  expect(robotEl('r1')!.querySelector<HTMLElement>('.ship-prop')!.style.left).toBe('42px')
+  expect(robotEl('r6')!.querySelector<HTMLElement>('.ship-prop')!.style.top).toBe('6px')
+  expect(robotEl('r9')!.querySelector<HTMLElement>('.ship-prop')!.style.left).toBe('54px')
+  expect(robotEl('r2')!.querySelector('.ship-grip > .ship-fx')!.getAttribute('data-fx')).toBe('sparks')
+  expect(robotEl('r3')!.querySelector('.ship-grip')!.getAttribute('data-motion')).toBe('swirl')
+  expect(robotEl('r7')!.querySelector('.ship-held, .ship-fx')).toBeNull()
+  // The hover says it too.
+  await hover(robotEl('r2')!.querySelector('.ship-figure'))
+  expect($('.ship-hover[data-hover="r2"] .ship-say b')!.textContent).toBe('◆ #r2, editing')
 })
 
 test('the docks hold repos with only quiet captains; a captain clicked opens', async () => {
