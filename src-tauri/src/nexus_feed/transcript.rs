@@ -4,6 +4,11 @@
 //!
 //! Lines are read into structs that name only the fields the feed needs, so a tool result or a
 //! file a `Write` put down is skipped by the parser, never copied.
+//!
+//! A Grok Build session's `chat_history.jsonl` is read the same way, by its own shapes (see
+//! `src/conversation/parse-grok.ts`). Its records carry no time and no tokens, so a line is
+//! stamped with the file's mtime when it is read, and the calls and their tokens come from
+//! `usage.json` beside it, the context from `signals.json`, the title from `summary.json`.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -26,11 +31,13 @@ const TOPIC_CHARS: usize = 200;
 const CHUNK: usize = 8 << 20;
 
 /// One API call, counted once per message id: Claude Code writes a line per content block of an
-/// assistant message, each repeating the message's usage.
+/// assistant message, each repeating the message's usage. A Grok session's are one per turn, as
+/// `usage.json` sums them: `calls` says how many.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
     pub id: Option<String>,
     pub at: u64,
+    pub calls: u64,
     pub output: u64,
     pub input: u64,
     pub cache_read: u64,
@@ -57,6 +64,16 @@ pub struct Reader {
     ask: Option<(String, Ask)>,
     /// Calls made within `RATE_WINDOW_MS` of the last read, oldest first.
     calls: VecDeque<Call>,
+    /// A Grok history's side files, by when each was last read.
+    grok: Option<GrokSide>,
+}
+
+/// When a Grok session's `usage.json`, `signals.json` and `summary.json` were last read.
+#[derive(Debug, Default)]
+struct GrokSide {
+    usage: Option<SystemTime>,
+    signals: Option<SystemTime>,
+    summary: Option<SystemTime>,
 }
 
 #[derive(Deserialize, Default)]
@@ -128,6 +145,8 @@ struct Input {
     skill: Option<Value>,
     path: Option<Value>,
     notebook_path: Option<Value>,
+    /// Grok's `read_file` names its path this.
+    target_file: Option<Value>,
     message: Option<Value>,
     questions: Option<Value>,
 }
@@ -181,8 +200,8 @@ fn target(name: &str, input: &Input, home: &str) -> String {
     } else if name == "AskUserQuestion" {
         questions(input.questions.as_ref()).map(|a| a.question)
     } else {
-        let paths = [&input.file_path, &input.path, &input.notebook_path];
-        [&input.command, &input.file_path, &input.pattern, &input.description, &input.prompt, &input.url, &input.query, &input.skill, &input.path, &input.notebook_path]
+        let paths = [&input.file_path, &input.path, &input.notebook_path, &input.target_file];
+        [&input.command, &input.file_path, &input.target_file, &input.pattern, &input.description, &input.prompt, &input.url, &input.query, &input.skill, &input.path, &input.notebook_path]
             .into_iter()
             .find_map(|k| {
                 let v = s(k)?;
@@ -255,12 +274,18 @@ impl Reader {
         use std::io::{Read, Seek, SeekFrom};
         let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let (len, mtime) = (meta.len(), meta.modified().ok());
+        let grok = is_grok_history(path);
         if len == self.len && mtime == self.mtime {
+            if grok {
+                self.grok_side(path, now);
+            }
             return Ok(());
         }
         if len < self.offset {
             *self = Reader::default();
         }
+        // A Grok line has no time of its own: it was written by the last write the file had.
+        let written = mtime.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(now, |d| d.as_millis() as u64);
         let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         f.seek(SeekFrom::Start(self.offset)).map_err(|e| e.to_string())?;
         let mut left = len - self.offset;
@@ -275,13 +300,21 @@ impl Reader {
             left -= n as u64;
             pending.extend_from_slice(&buf[..n]);
             if let Some(end) = pending.iter().rposition(|b| *b == b'\n') {
-                self.feed(&String::from_utf8_lossy(&pending[..=end]), now, home);
+                let text = String::from_utf8_lossy(&pending[..=end]);
+                if grok {
+                    self.feed_grok(&text, written, home);
+                } else {
+                    self.feed(&text, now, home);
+                }
                 self.offset += end as u64 + 1;
                 pending.drain(..=end);
             }
         }
         self.len = len;
         self.mtime = mtime;
+        if grok {
+            self.grok_side(path, now);
+        }
         Ok(())
     }
 
@@ -319,6 +352,7 @@ impl Reader {
                 let call = Call {
                     id: m.id.clone(),
                     at,
+                    calls: 1,
                     output: n(u.output_tokens),
                     input: n(u.input_tokens),
                     cache_read: n(u.cache_read_input_tokens),
@@ -420,6 +454,187 @@ impl Reader {
             contract: None,
             ask: self.ask.as_ref().map(|(_, a)| a.clone()),
         }
+    }
+}
+
+// -- Grok Build --
+
+/// Whether `path` is a Grok session's history: Claude Code names every transcript
+/// `<session id>.jsonl`, Grok every history this.
+pub fn is_grok_history(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n == crate::conversation::grok::CHAT_HISTORY)
+}
+
+/// Grok's tools under the Claude Code names it maps them to (`xai-grok-tools/src/types/
+/// claude_alias.rs`), as `parse-grok.ts` shows them.
+fn claude_name(grok: &str) -> &str {
+    match grok {
+        "run_terminal_command" => "Bash",
+        "read_file" => "Read",
+        "write" => "Write",
+        "search_replace" | "hashline_edit" => "Edit",
+        "grep" => "Grep",
+        "list_dir" => "LS",
+        "web_search" => "WebSearch",
+        other => other,
+    }
+}
+
+/// One `chat_history.jsonl` record, by the fields the feed reads.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GrokLine<'a> {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(borrow)]
+    content: Option<&'a RawValue>,
+    tool_calls: Vec<GrokCall>,
+    model_id: Option<String>,
+    tool_call_id: Option<String>,
+    synthetic_reason: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GrokCall {
+    id: Option<String>,
+    name: Option<String>,
+    /// A JSON object, written as a string.
+    arguments: Option<String>,
+}
+
+/// One turn of `usage.json`. `inputTokens` is the prompt's whole size, cache reads included
+/// (`xai-chat-state/src/usage.rs`: `prompt_tokens`, `cached_prompt_tokens`).
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct GrokTurn {
+    turn_number: Option<u64>,
+    ended_at: Option<String>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_read_tokens: u64,
+    cache_creation_tokens: u64,
+    model_calls: u64,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GrokUsage {
+    turns: Vec<GrokTurn>,
+}
+
+/// The person's words in a prompt's `<user_query>` blocks.
+fn user_query(text: &str) -> Option<String> {
+    let (open, close) = ("<user_query>", "</user_query>");
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(open) {
+        let body = &rest[i + open.len()..];
+        let Some(j) = body.find(close) else { break };
+        let q = body[..j].trim();
+        if !q.is_empty() {
+            found.push(q);
+        }
+        rest = &body[j + close.len()..];
+    }
+    (!found.is_empty()).then(|| found.join("\n\n"))
+}
+
+impl Reader {
+    /// Take in complete `chat_history.jsonl` lines, written at `at`.
+    pub fn feed_grok(&mut self, text: &str, at: u64, home: &str) {
+        for raw in text.lines() {
+            let Ok(line) = serde_json::from_str::<GrokLine>(raw) else { continue };
+            match line.kind.as_str() {
+                "assistant" => {
+                    if let Some(model) = line.model_id.as_deref().filter(|m| m.starts_with("grok")) {
+                        self.model = Some(model.to_string());
+                    }
+                    if let (Some(t), _) = content(line.content) {
+                        if !t.trim().is_empty() {
+                            self.said = Some(Said { text: tilde(&t, home), at });
+                        }
+                    }
+                    if let Some(call) = line.tool_calls.into_iter().last() {
+                        let name = claude_name(call.name.as_deref().unwrap_or_default()).to_string();
+                        let input: Input = call.arguments.as_deref().and_then(|a| serde_json::from_str(a).ok()).unwrap_or_default();
+                        self.activity = Some(Activity { target: target(&name, &input, home), tool: name, at, running: true });
+                        self.tool_id = call.id;
+                    }
+                }
+                "tool_result" => {
+                    if line.tool_call_id.is_some() && line.tool_call_id == self.tool_id {
+                        if let Some(a) = self.activity.as_mut() {
+                            a.running = false;
+                        }
+                    }
+                }
+                // Only a prompt the person typed: Grok's own injections carry another reason.
+                "user" if matches!(line.synthetic_reason.as_deref(), None | Some("human") | Some("interjection")) => {
+                    let (text, blocks) = content(line.content);
+                    let text = text.unwrap_or_else(|| blocks.iter().filter(|b| b.kind == "text").filter_map(|b| b.text.as_deref()).collect::<Vec<_>>().join("\n"));
+                    if let Some(q) = user_query(&text) {
+                        self.topic = Some(clip(&squeeze(&tilde(&q, home)), TOPIC_CHARS));
+                        if let Some(a) = self.activity.as_mut() {
+                            a.running = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Read what changed of the files beside a Grok history: the turns' calls and tokens, the
+    /// context, the title. Each is read again only when its mtime moved.
+    fn grok_side(&mut self, history: &Path, now: u64) {
+        let Some(dir) = history.parent() else { return };
+        let side = self.grok.get_or_insert_with(GrokSide::default);
+        let changed = |name: &str, seen: &mut Option<SystemTime>| -> Option<String> {
+            let path = dir.join(name);
+            let mtime = std::fs::metadata(&path).ok()?.modified().ok();
+            if mtime.is_some() && mtime == *seen {
+                return None;
+            }
+            let text = std::fs::read_to_string(&path).ok()?;
+            *seen = mtime;
+            Some(text)
+        };
+        let usage = changed(crate::conversation::grok::USAGE, &mut side.usage);
+        let signals = changed("signals.json", &mut side.signals);
+        let summary = changed("summary.json", &mut side.summary);
+        if let Some(u) = usage.and_then(|t| serde_json::from_str::<GrokUsage>(&t).ok()) {
+            self.calls = u
+                .turns
+                .into_iter()
+                .filter(|t| t.model_calls > 0)
+                .filter_map(|t| {
+                    let at = stamp_ms(t.ended_at.as_deref()?)?;
+                    let cached = t.cached_read_tokens + t.cache_creation_tokens;
+                    Some(Call {
+                        id: t.turn_number.map(|n| format!("turn {n}")),
+                        at,
+                        calls: t.model_calls,
+                        output: t.output_tokens,
+                        input: t.input_tokens.saturating_sub(cached),
+                        cache_read: t.cached_read_tokens,
+                        cache_creation: t.cache_creation_tokens,
+                    })
+                })
+                .collect();
+        }
+        if let Some(v) = signals.and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+            if let Some(n) = v.get("contextTokensUsed").and_then(Value::as_u64).filter(|n| *n > 0) {
+                self.context = Some(n);
+            }
+        }
+        if let Some(v) = summary.and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+            let title = v.get("generated_title").or_else(|| v.get("session_summary")).and_then(Value::as_str);
+            if let Some(t) = title.map(|t| clip(&squeeze(t), TOPIC_CHARS)).filter(|t| !t.is_empty()) {
+                self.ai_title = Some(t);
+            }
+        }
+        self.forget_before(now);
     }
 }
 
@@ -664,5 +879,101 @@ mod tests {
         let a = r.session(false).activity.unwrap();
         assert_eq!((a.tool.as_str(), a.running), ("Read", true));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -- Grok --
+
+    /// A Grok session that wrote, ran and was asked again, as `chat_history.jsonl` holds it.
+    fn grok_history() -> String {
+        [
+            json!({ "type": "system", "content": "You are Grok…" }),
+            json!({ "type": "user", "content": [{ "type": "text", "text": "<user_info>\nWorkspace Path: /Users/you/proj\n</user_info>" }] }),
+            json!({ "type": "user", "content": [{ "type": "text", "text": "<system-reminder>skills…</system-reminder>" }], "synthetic_reason": "system_reminder" }),
+            json!({ "type": "user", "content": [{ "type": "text", "text": "<user_query>\nFix   the login\nbug\n</user_query>" }], "prompt_index": 0 }),
+            json!({ "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "x" }),
+            json!({ "type": "assistant", "content": "Reading /Users/you/proj/a.ts first.", "model_id": "grok-4.7",
+                "tool_calls": [{ "id": "c0", "name": "read_file", "arguments": "{\"target_file\":\"/Users/you/proj/src/a.ts\"}" }] }),
+            json!({ "type": "tool_result", "tool_call_id": "c0", "content": "1→x" }),
+            json!({ "type": "assistant", "content": "", "model_id": "grok-4.7",
+                "tool_calls": [{ "id": "c1", "name": "run_terminal_command", "arguments": "{\"command\":\"pnpm test\"}" }] }),
+        ]
+        .iter()
+        .map(|v| v.to_string() + "\n")
+        .collect()
+    }
+
+    #[test]
+    fn a_grok_history_gives_the_model_what_was_said_the_running_call_and_the_prompt() {
+        let mut r = Reader::default();
+        r.feed_grok(&grok_history(), T0_MS, "/Users/you");
+        let s = r.session(true);
+        assert_eq!(s.model.as_deref(), Some("grok-4.7"));
+        assert_eq!(s.said, Some(Said { text: "Reading ~/proj/a.ts first.".into(), at: T0_MS }));
+        assert_eq!(s.activity, Some(Activity { tool: "Bash".into(), target: "pnpm test".into(), at: T0_MS, running: true }));
+        assert_eq!(s.topic.as_deref(), Some("Fix the login bug"));
+        assert_eq!((s.context, s.title), (None, None));
+
+        // Its result ends the call; Grok's own injection is no prompt and ends nothing.
+        r.feed_grok(&(json!({ "type": "user", "content": [{ "type": "text", "text": "<user_query>sneaky</user_query>" }], "synthetic_reason": "task_completed" }).to_string() + "\n"), T0_MS + 1, "");
+        assert!(r.session(true).activity.unwrap().running);
+        r.feed_grok(&(json!({ "type": "tool_result", "tool_call_id": "c1", "content": "exit: 0\nok" }).to_string() + "\n"), T0_MS + 2, "");
+        let s = r.session(true);
+        assert!(!s.activity.unwrap().running);
+        assert_eq!(s.topic.as_deref(), Some("Fix the login bug"));
+    }
+
+    #[test]
+    fn a_grok_read_names_its_file_by_target_file() {
+        let input = |v: Value| serde_json::from_value::<Input>(v).unwrap();
+        assert_eq!(target("Read", &input(json!({ "target_file": "/Users/you/proj/src/a.ts" })), ""), "a.ts");
+        assert_eq!(user_query("<user_query>\n a \n</user_query>x<user_query>b</user_query>").as_deref(), Some("a\n\nb"));
+        assert_eq!(user_query("<user_info>x</user_info>"), None);
+    }
+
+    fn turn(n: u64, ended: &str, calls: u64) -> Value {
+        json!({ "turnNumber": n, "endedAt": ended, "inputTokens": 12_000, "outputTokens": 300, "cachedReadTokens": 10_000,
+            "cacheCreationTokens": 0, "reasoningTokens": 50, "totalTokens": 12_300, "modelCalls": calls, "turnCount": 1 })
+    }
+
+    #[test]
+    fn a_grok_session_s_calls_and_tokens_come_from_usage_json_its_context_and_title_beside_it() {
+        let dir = crate::testutil::temp_dir("nexus-feed-grok").join("01a1451e-2815-7532-b1a2-9c82363c4949");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("chat_history.jsonl");
+        std::fs::write(&path, grok_history()).unwrap();
+        // The turn 9 minutes before `now` is outside the window; the one a minute before, inside.
+        let now = T0_MS + 600_000;
+        let usage = json!({ "sessionId": "x", "updatedAt": at(540), "session": {}, "turns": [turn(1, &at(60), 4), turn(2, &at(540).replace('Z', "+00:00"), 3)] });
+        std::fs::write(dir.join("usage.json"), usage.to_string()).unwrap();
+        std::fs::write(dir.join("signals.json"), json!({ "contextTokensUsed": 23_456, "contextWindowTokens": 256_000 }).to_string()).unwrap();
+        std::fs::write(dir.join("summary.json"), json!({ "generated_title": "Fix  the login bug", "session_summary": "Fix" }).to_string()).unwrap();
+
+        let mut r = Reader::default();
+        r.refresh(&path, now, "").unwrap();
+        let calls: Vec<_> = r.recent(now).cloned().collect();
+        assert_eq!(calls, [Call { id: Some("turn 2".into()), at: T0_MS + 540_000, calls: 3, output: 300, input: 2_000, cache_read: 10_000, cache_creation: 0 }]);
+        let s = r.session(true);
+        assert_eq!((s.context, s.title.as_deref()), (Some(23_456), Some("Fix the login bug")));
+        assert_eq!(r.session(false).title, None);
+        // Stamped with when the file was written, not when it was read.
+        let written = std::fs::metadata(&path).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        assert_eq!(s.activity.unwrap().at, written);
+
+        // A new turn rewrites usage.json while the history stands still: it is read again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let usage = json!({ "turns": [turn(2, &at(540), 3), turn(3, &at(580), 1)] });
+        std::fs::write(dir.join("usage.json"), usage.to_string()).unwrap();
+        r.refresh(&path, now, "").unwrap();
+        assert_eq!(r.recent(now).map(|c| c.calls).sum::<u64>(), 4);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_claude_transcript_is_never_read_as_a_grok_history() {
+        assert!(is_grok_history(Path::new("/h/.grok/sessions/%2Fp/0199/chat_history.jsonl")));
+        assert!(!is_grok_history(Path::new("/h/.claude/projects/-p/0f8e3c1a.jsonl")));
+        let mut r = Reader::default();
+        r.feed(&(grok_history()), T0_MS, "");
+        assert_eq!(r.session(true), SessionFeed::default(), "a Grok line has no timestamp, so the Claude reader takes nothing");
     }
 }

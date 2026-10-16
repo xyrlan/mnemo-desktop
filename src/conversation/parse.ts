@@ -1,3 +1,4 @@
+import { deriveGrokConversation, isGrokRecord } from './parse-grok'
 import type { Card, ContextUsage, Conversation, DiffHunk, ImageRef, PrLink, RuleChannel, RuleChip, ToolOutcome, TranscriptRecord } from './types'
 
 /** One transcript line as a record; `null` for a line that is not a JSON object with a `type`. */
@@ -211,8 +212,10 @@ function sessionBlock(text: string): { briefing: string | null; briefings?: numb
 }
 
 /** The conversation `records` (in file order) describe. Pure: the same records always give the
- *  same cards, with the same ids. */
+ *  same cards, with the same ids. A Grok Build history (`chat_history.jsonl`) is told by its
+ *  records' shape and read by `parse-grok.ts`. */
 export function deriveConversation(records: TranscriptRecord[]): Conversation {
+  if (records.some(isGrokRecord)) return deriveGrokConversation(records)
   const cards: Card[] = []
   const ids = new Set<string>()
   let sessionId: string | null = null

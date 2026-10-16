@@ -8,7 +8,11 @@
  *  - the mission pane shows a child's through `ConversationView` too.
  *
  *  Shapes were read off real 2.1.280 transcripts on 2026-09-23 (spec: docs/superpowers/specs/
- *  2026-09-23-conversation-view-design.md). */
+ *  2026-09-23-conversation-view-design.md). A Grok Build session's `chat_history.jsonl` meets
+ *  the same types: the tailer streams it as raw lines too, and `parse-grok.ts` turns it into a
+ *  `Conversation` (spec 2026-10-16-grok-accounts-design.md, decision 8). */
+
+import type { AgentKind } from '../agent/kind'
 
 /** One JSONL line as `JSON.parse` gave it. The parser is the only reader of its fields. */
 export type TranscriptRecord = { type: string; uuid?: string; timestamp?: string; [k: string]: unknown }
@@ -116,6 +120,11 @@ export type FollowEvent =
   | { kind: 'lines'; start: number; end: number; lines: string[] }
   | { kind: 'reset' }
   | { kind: 'missing' }
+
+/** Which CLI's file a follow reads: `conversation_follow` and `conversation_earlier` take these
+ *  beside `sessionId` and `cwd`. Absent, a Claude transcript; `grok`, the session's
+ *  `chat_history.jsonl` in `home`, its account's Grok home (every Grok home when absent). */
+export type FollowSource = { kind?: AgentKind; home?: string | null }
 
 /** Earlier lines, for "load earlier": the `count` complete lines ending right before `before`.
  *  `start === 0` means the top of the file was reached. */
