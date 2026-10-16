@@ -57,8 +57,8 @@ pub struct PtyManager {
     /// Where the shell integration rc files are written; `None` turns integration off.
     shell_dir: Option<PathBuf>,
     hosting: Hosting,
-    /// The Claude Code account each pane is spawned on (`src/accounts.rs`); `None` leaves
-    /// `CLAUDE_CONFIG_DIR` as the app has it.
+    /// The account each pane is spawned on (`src/accounts.rs`); `None` leaves `CLAUDE_CONFIG_DIR`,
+    /// `GROK_HOME` and `MNEMO_AGENT` as the app has them.
     accounts: Option<PaneAccounts>,
 }
 
@@ -471,14 +471,23 @@ impl PtyManager {
     }
 }
 
-/// Runs `cmd` on `account`: the default account with `CLAUDE_CONFIG_DIR` unset, exactly as before
-/// there were accounts, even when the app itself was started with it set; another with it set
-/// to that account's dir.
+/// Runs `cmd` on `account`, in the variable of its kind: the default account with
+/// `CLAUDE_CONFIG_DIR` unset, exactly as before there were accounts, even when the app itself was
+/// started with it set; another Claude one with it set to that account's dir; a Grok one with
+/// `GROK_HOME` unset (`~/.grok`) or set to its home. The other kind's variable is removed, so a
+/// Grok pane never carries a Claude account's dir, nor the reverse, and `MNEMO_AGENT` says the
+/// kind to mnemo (spec `2026-10-16-grok-accounts-design.md`, decision 3).
 fn on_account(cmd: &mut CommandBuilder, account: &PaneAccount) {
+    use crate::agent_kind::{AgentKind, AGENT_ENV};
+    let var = account.kind.home_var();
     match &account.config_dir {
-        Some(dir) => cmd.env(crate::accounts::CONFIG_DIR_VAR, dir),
-        None => cmd.env_remove(crate::accounts::CONFIG_DIR_VAR),
+        Some(dir) => cmd.env(var, dir),
+        None => cmd.env_remove(var),
     }
+    for other in [AgentKind::Claude, AgentKind::Grok].into_iter().filter(|k| *k != account.kind) {
+        cmd.env_remove(other.home_var());
+    }
+    cmd.env(AGENT_ENV, account.kind.as_str());
 }
 
 /// A sink as the host's subscriber, for terminals held in-process.
@@ -860,22 +869,35 @@ mod tests {
 
     #[test]
     fn each_pane_runs_on_the_account_active_when_it_was_spawned() {
-        let root = crate::testutil::temp_dir("pty-accounts");
+        let root = crate::accounts::short_temp_dir("pty");
         let place = crate::accounts::Place::new(root.join("home"), root.join("app"));
         let m = PtyManager::with_shell_dir(None).with_accounts(PaneAccounts::new(place.clone(), None));
         let probe = either(
-            "printf '[%s]' \"${CLAUDE_CONFIG_DIR-unset}\"",
-            "if defined CLAUDE_CONFIG_DIR (echo [!CLAUDE_CONFIG_DIR!]) else (echo [unset])",
+            "printf '[%s|%s|%s]' \"${CLAUDE_CONFIG_DIR-unset}\" \"${GROK_HOME-unset}\" \"${MNEMO_AGENT-unset}\"",
+            "(if defined CLAUDE_CONFIG_DIR (echo [!CLAUDE_CONFIG_DIR!]) else (echo [unset])) & (if defined GROK_HOME (echo [!GROK_HOME!]) else (echo [unset])) & (if defined MNEMO_AGENT (echo [!MNEMO_AGENT!]) else (echo [unset]))",
         );
+        // That the pane's shell printed `CLAUDE_CONFIG_DIR`, `GROK_HOME` and `MNEMO_AGENT` as
+        // `want`: on one line, or on Windows one line each, in order.
+        let saw = |rx: &mpsc::Receiver<Event>, want: [&str; 3], why: &str| {
+            let out = String::from_utf8_lossy(&collect(rx).0).to_string();
+            let marks: Vec<String> = if cfg!(windows) { want.iter().map(|w| format!("[{w}]")).collect() } else { vec![format!("[{}]", want.join("|"))] };
+            let mut at = 0;
+            for mark in &marks {
+                match out[at..].find(mark.as_str()) {
+                    Some(i) => at += i + mark.len(),
+                    None => panic!("{why}: {mark} not in {out:?}"),
+                }
+            }
+        };
+        let home = root.join("home");
+        let (work_dir, side_dir) = (home.join(".claude-work").display().to_string(), home.join(".grok-side").display().to_string());
 
         let (default, rx) = sh(&m, probe);
-        assert!(String::from_utf8_lossy(&collect(&rx).0).contains("[unset]"), "the default account leaves it unset");
+        saw(&rx, ["unset", "unset", "claude"], "the default account leaves it unset");
 
-        place.add("Work").expect("add");
+        place.add("Work", crate::agent_kind::AgentKind::Claude).expect("add");
         let (work, rx) = sh(&m, probe);
-        let want = format!("[{}]", root.join("home").join(".claude-work").display());
-        let out = collect(&rx).0;
-        assert!(String::from_utf8_lossy(&out).contains(&want), "got {:?}", String::from_utf8_lossy(&out));
+        saw(&rx, [&work_dir, "unset", "claude"], "another Claude account");
 
         assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(default, "default".to_string()), (work, "work".to_string())]));
         m.kill(default);
@@ -884,6 +906,19 @@ mod tests {
         m.move_pane(work, "default").unwrap();
         assert_eq!(m.pane_accounts().unwrap(), std::collections::HashMap::from([(work, "default".to_string())]));
         assert_eq!(m.move_pane(default, "work"), Err(format!("no pane {default}")), "an ended pane is not recorded");
+
+        // A Grok account: its own home in GROK_HOME, never the Claude account's dir.
+        place.add("Grok", crate::agent_kind::AgentKind::Grok).expect("add grok");
+        let (grok, rx) = sh(&m, probe);
+        saw(&rx, ["unset", "unset", "grok"], "the Grok account at ~/.grok runs with GROK_HOME unset");
+        place.add("Side", crate::agent_kind::AgentKind::Grok).expect("add side");
+        let (side, rx) = sh(&m, probe);
+        saw(&rx, ["unset", &side_dir, "grok"], "another Grok account");
+        place.switch("work").unwrap();
+        let (back, rx) = sh(&m, probe);
+        saw(&rx, [&work_dir, "unset", "claude"], "and a Claude pane never carries a Grok home");
+        let ids = m.pane_accounts().unwrap();
+        assert_eq!((ids[&grok].as_str(), ids[&side].as_str(), ids[&back].as_str()), ("grok", "side", "work"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect } from 'react'
 import { createStore as createZustand, type StoreApi } from 'zustand/vanilla'
 import { useStore } from 'zustand'
+import { kindOf, type AgentKind } from '../agent/kind'
 import { tauriAccounts, type AccountsClient } from './client'
 import { createFollow, type FollowDeps } from './follow'
 import { appFollow } from './follow-app'
@@ -10,8 +11,18 @@ import { pollWhileShown } from '../shell/while-shown'
 
 /** How often every account's usage is read again while the app is open. */
 export const POLL_MS = 5 * 60_000
-/** What the terminal a new account opens in types: Claude Code, which asks a fresh config dir to log in. */
+/** What the terminal a new Claude account opens in types: Claude Code, which asks a fresh config
+ *  dir to log in. */
 export const LOGIN_CMD = 'claude'
+
+/** What the terminal a new account of `kind` opens in types to log in: Claude Code, or `grok
+ *  login`, which writes the home's `auth.json`. */
+export const loginCommand = (kind: AgentKind): string => (kind === 'grok' ? 'grok login' : LOGIN_CMD)
+
+/** The kind of the active account: which CLI a pane opened now starts, and which one mnemo
+ *  dispatches children on (spec `2026-10-16-grok-accounts-design.md`, decision 3). Claude while the
+ *  active account is not in the list. */
+export const activeKind = (state: AccountsState): AgentKind => kindOf(state.accounts.find((a) => a.id === state.active)?.kind)
 
 /** One account's usage as last read. `usage` stays while a new reading is fetched (`loading`), and
  *  when one fails (`error`, in a sentence). */
@@ -41,9 +52,10 @@ export type Accounts = {
   /** Reads every account's usage. `refresh`: past the reading kept from under a minute ago. */
   readUsage(refresh: boolean): Promise<void>
   switchTo(id: string): Promise<void>
-  /** Adds an account named `label` and opens a terminal on it, where Claude Code asks it to log in.
-   *  The active account stays the one it was. Null when adding failed (`error` says why). */
-  add(label: string): Promise<Account | null>
+  /** Adds an account of `kind` (Claude when not given) named `label` and opens a terminal on it,
+   *  where its CLI logs it in (`loginCommand`). The active account stays the one it was. Null when
+   *  adding failed (`error` says why). */
+  add(label: string, kind?: AgentKind): Promise<Account | null>
   rename(id: string, label: string): Promise<boolean>
   remove(id: string): Promise<boolean>
   /** Puts back what account `id` holds of its own in place of the default account's. */
@@ -56,7 +68,7 @@ export type AccountsStore = StoreApi<Accounts>
 
 /** What moving the open sessions on a switch needs from the rest of the app (`follow.ts`); the
  *  accounts themselves come from the store. */
-export type FollowEnv = Omit<FollowDeps, 'paneAccounts' | 'target' | 'record'>
+export type FollowEnv = Omit<FollowDeps, 'paneAccounts' | 'target' | 'account' | 'record'>
 
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -65,7 +77,8 @@ const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
  *  and nothing went wrong. A command that ran and failed refuses with its `Err`, a string. */
 const noCommands = (e: unknown) => typeof e !== 'string' || /^command \S+ not found$/.test(e)
 
-/** `follow`: open Claude sessions follow a switch (decision 9). None given: they stay.
+/** `follow`: open Claude sessions follow a switch between Claude accounts (decision 9). None
+ *  given: they stay.
  *  `firstUsage`: what the first plan-usage read waits for; none given, nothing. */
 export function createAccountsStore(
   client: AccountsClient,
@@ -87,6 +100,7 @@ export function createAccountsStore(
           const s = get().state
           return s?.accounts.find((a) => a.id === s.active) ?? null
         },
+        account: (id) => get().state?.accounts.find((a) => a.id === id) ?? null,
         record: async (pane, id) => {
           try {
             await client.movePane(pane, id)
@@ -209,7 +223,7 @@ export function createAccountsStore(
           await get().readUsage(true)
         }, undefined),
 
-      add: (label) =>
+      add: (label, kind = 'claude') =>
         attempt(async () => {
           // Read before adding: accounts-core makes the new account active, and its
           // `accounts://changed` may land before `add` answers.
@@ -217,11 +231,11 @@ export function createAccountsStore(
           let account: Account
           adding++
           try {
-            account = await client.add(label)
+            account = await client.add(label, kind)
             // A pane runs on the account active when it spawns: switch for the spawn, then back.
             apply(await client.switchTo(account.id))
             try {
-              await client.openTerminal(LOGIN_CMD)
+              await client.openTerminal(loginCommand(kindOf(account.kind)))
             } finally {
               if (was && was !== account.id) apply(await client.switchTo(was))
             }

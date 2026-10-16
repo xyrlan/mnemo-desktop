@@ -100,11 +100,11 @@ function pane(id: number, screen: Screen = 'idle', sessionId = SID) {
 }
 type Pane = ReturnType<typeof pane>
 
-const states: Record<string, AccountsState> = {
-  default: { active: 'default', accounts: [account('default'), account('work'), account('side')] },
-  work: { active: 'work', accounts: [account('default'), account('work'), account('side')] },
-  side: { active: 'side', accounts: [account('default'), account('work'), account('side')] },
-}
+/** Two Grok accounts beside the three Claude ones: `~/.grok`, and one of its own home. */
+const grok = account('grok', { kind: 'grok', configDir: '/Users/me/.grok' })
+const gside = account('gside', { kind: 'grok', configDir: '/Users/me/.grok-gside' })
+const all = [account('default', { kind: 'claude' }), account('work', { kind: 'claude' }), account('side', { kind: 'claude' }), grok, gside]
+const states: Record<string, AccountsState> = Object.fromEntries(['default', 'work', 'side', 'grok', 'gside'].map((id) => [id, { active: id, accounts: all }]))
 
 function world(panes: Pane[], accounts: Record<number, string>, active = 'default') {
   const w = {
@@ -122,6 +122,7 @@ function world(panes: Pane[], accounts: Record<number, string>, active = 'defaul
     panes: () => w.panes.flatMap((p) => (p.sessionId ? [{ id: p.id, sessionId: p.sessionId }] : [])),
     paneAccounts: async () => ({ ...w.accounts }),
     target: () => states[w.active].accounts.find((a) => a.id === w.active) ?? null,
+    account: (id) => states[w.active].accounts.find((a) => a.id === id) ?? null,
     record: async (pane, id) => {
       w.recorded.push([pane, id])
       w.accounts[pane] = id
@@ -158,6 +159,54 @@ test('an idle session on another account leaves, its shell moves, and it resumes
   expect(w.resumed).toEqual([[3, SID]])
   expect(p.screen).toBe('idle')
   expect(follow.pending()).toEqual([])
+})
+
+test('a switch to a Grok account leaves every Claude session where it is (decision 7)', async () => {
+  const p = pane(3)
+  const { w, follow } = world([p], { 3: 'default' })
+  w.active = 'grok'
+  await follow.switched()
+  await run()
+  expect(p.typed).toEqual([])
+  expect(w.recorded).toEqual([])
+  expect(follow.pending()).toEqual([])
+})
+
+test('a session on a Grok account stays there, whether the switch goes to Claude or to another Grok account', async () => {
+  for (const to of ['work', 'gside']) {
+    const p = pane(3)
+    const { w, follow } = world([p], { 3: 'grok' }, 'grok')
+    w.active = to
+    await follow.switched()
+    await run()
+    expect(p.typed, to).toEqual([])
+    expect(w.recorded, to).toEqual([])
+    expect(follow.pending(), to).toEqual([])
+  }
+})
+
+test('a session waiting to move stays when the next switch goes to Grok', async () => {
+  const p = pane(3, 'working')
+  const { w, follow } = world([p], { 3: 'default' })
+  w.active = 'work'
+  await follow.switched()
+  await run()
+  expect(follow.pending()).toEqual([3])
+  w.active = 'grok'
+  p.screen = 'idle'
+  await run()
+  expect(p.typed).toEqual([])
+  expect(follow.pending()).toEqual([])
+})
+
+test('a switch between two Claude accounts still moves the session while Grok accounts exist', async () => {
+  const p = pane(3)
+  const { w, follow } = world([p], { 3: 'default' })
+  w.active = 'side'
+  await follow.switched()
+  await run()
+  expect(p.typed.at(-2)).toBe(' export CLAUDE_CONFIG_DIR=/Users/me/.claude-side\r')
+  expect(w.recorded).toEqual([[3, 'side']])
 })
 
 test('to the default account the shell unsets CLAUDE_CONFIG_DIR rather than pointing it at ~/.claude', async () => {

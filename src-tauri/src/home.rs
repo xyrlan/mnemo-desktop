@@ -663,9 +663,9 @@ mod tests {
         let mnemo = repos.iter().find(|r| r.name == "mnemo").unwrap();
         let by = |id: &str| mnemo.sessions.iter().chain(&mnemo.children).find(|s| s.id == id).unwrap();
         assert_eq!(by("aaaa-1").account.as_deref(), Some("default"));
-        assert_eq!(by("aaaa-1").account_env, Some(AccountEnv { config_dir: None }));
+        assert_eq!(by("aaaa-1").account_env, Some(AccountEnv { config_dir: None, kind: crate::agent_kind::AgentKind::Claude }));
         assert_eq!(by("iiii-9").account.as_deref(), Some("work"), "live wins over a jobs dir");
-        assert_eq!(by("iiii-9").account_env, Some(AccountEnv { config_dir: Some("/Users/me/.claude-work".into()) }));
+        assert_eq!(by("iiii-9").account_env, Some(AccountEnv { config_dir: Some("/Users/me/.claude-work".into()), kind: crate::agent_kind::AgentKind::Claude }));
         assert_eq!(by("cccc-3").account.as_deref(), Some("work"), "a finished child, by its jobs dir");
         assert_eq!(by("hhhh-8").account, None, "a finished interactive session runs on the active account");
         assert_eq!(by("hhhh-8").account_env, None);

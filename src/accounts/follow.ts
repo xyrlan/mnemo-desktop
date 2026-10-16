@@ -1,3 +1,4 @@
+import { kindOf } from '../agent/kind'
 import { promptOptions } from '../cockpit/prompt'
 import { CONFIG_DIR_VAR, shellWord } from '../mission/account'
 import { shellOf, type Shell } from '../pty/typed'
@@ -11,8 +12,11 @@ import type { Account } from './types'
  *  resumes in the same pane. Silently: no prompt, no count, no toast.
  *
  *  Which panes: every terminal pane that runs a Claude session and was spawned on (or last moved
- *  to) another account than the active one, when the active account changes. Background children
- *  stay on their account (decision 5), and so does a pane attached to one.
+ *  to) another Claude account than the active one, when the active account changes to a Claude
+ *  one. Background children stay on their account (decision 5), and so does a pane attached to
+ *  one. A switch that changes kind, or one between two Grok accounts, moves nothing (spec
+ *  `2026-10-16-grok-accounts-design.md`, decision 7): a Claude session cannot resume on Grok, and
+ *  moving a Grok session between homes is not measured. Only panes opened afterwards change CLI.
  *
  *  When: an idle session moves at once; one that is working or waiting on the maintainer, and one
  *  whose input box holds a draft, waits until it is idle with an empty box. Switching again before
@@ -36,6 +40,8 @@ export type FollowDeps = {
   paneAccounts(): Promise<Record<number, string>>
   /** Where the sessions go: the active account now; null while unknown. */
   target(): Account | null
+  /** Account `id` as the list has it now; null for one not in it. */
+  account(id: string): Account | null
   /** Records pane `pane` on account `id` (`accounts_move_pane`). */
   record(pane: number, id: string): Promise<void>
   /** What the pane's terminal shows; undefined while no view of it is mounted. */
@@ -128,6 +134,8 @@ export function screenState(lines: string[]): 'idle' | 'draft' | 'busy' | 'none'
 
 const still = (lines: string[]) => tail(lines, SCREEN_ROWS).join('\n')
 
+const isClaude = (a: Pick<Account, 'kind'> | null | undefined) => !!a && kindOf(a.kind) === 'claude'
+
 export type Follow = {
   /** The active account changed: every pane on another one that runs Claude is to move. */
   switched(): Promise<void>
@@ -173,7 +181,8 @@ export function createFollow(d: FollowDeps): Follow {
         drop(pane)
         continue
       }
-      if (accounts[pane] === target.id) {
+      // Back on its own account, or the switch went to Grok since: it stays where it is.
+      if (accounts[pane] === target.id || !isClaude(target)) {
         drop(pane)
         continue
       }
@@ -270,9 +279,10 @@ export function createFollow(d: FollowDeps): Follow {
     drop(pane)
     await d.sleep(SHELL_SETTLE_MS)
 
-    // 2. The shell moves to the account active now: a switch since may have changed it.
+    // 2. The shell moves to the account active now: a switch since may have changed it. One to a
+    // Grok account leaves it on its own, where the same session resumes.
     const target = d.target()
-    const moved = !!target && accounts[pane] !== target.id
+    const moved = !!target && isClaude(target) && accounts[pane] !== target.id
     if (target && moved) {
       await d.write(pane, `${accountLine(target, shellOf(screen(), d.windows))}\r`)
       await d.sleep(KEY_GAP_MS)
@@ -297,8 +307,11 @@ export function createFollow(d: FollowDeps): Follow {
       if (!now) return
       for (const p of d.panes()) {
         const of = accounts[p.id]
-        // A pane the core recorded on no account is left alone: nothing says where it runs.
-        if (!of || of === now.id) drop(p.id)
+        // A pane the core recorded on no account is left alone: nothing says where it runs. Nor
+        // does one move between kinds or between Grok accounts. One on an account removed since
+        // moves as before: a Grok TUI never shows the Claude input box a move waits for.
+        const from = of ? d.account(of) : null
+        if (!of || of === now.id || !isClaude(now) || (from && !isClaude(from))) drop(p.id)
         else pending.set(p.id, 0)
         seen.delete(p.id)
       }

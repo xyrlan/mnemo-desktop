@@ -1,4 +1,5 @@
-import { createAccountsStore, LOGIN_CMD } from './store'
+import type { AccountsClient } from './client'
+import { activeKind, createAccountsStore, LOGIN_CMD, loginCommand } from './store'
 import { account, fakeClient, limit, reading, settle } from './testing'
 
 const two = () => ({ active: 'default', accounts: [account('default', { label: 'Personal' }), account('work')] })
@@ -214,4 +215,51 @@ test('sharing applies the state it answers and says where what differed was kept
   fake.refuse.share = 'settings.json could not be linked.'
   expect(await store.getState().share('work')).toBe(false)
   expect(store.getState().error).toBe('settings.json could not be linked.')
+})
+
+test('adding a Grok account passes its kind and opens grok login on it, then switches back', async () => {
+  const { fake, client } = fakeClient({ state: two() })
+  const kinds: unknown[] = []
+  // The fake makes Claude accounts: this one answers a Grok home, as accounts-core does.
+  const grokClient: AccountsClient = {
+    ...client,
+    add: async (label, kind) => {
+      kinds.push(kind)
+      const a = account(label.toLowerCase(), { label, kind: 'grok', configDir: '/Users/me/.grok', email: null, problem: 'Not logged in yet.' })
+      fake.emit({ active: a.id, accounts: [...fake.state.accounts, a] })
+      return a
+    },
+  }
+  const store = createAccountsStore(grokClient)
+  store.getState().start()
+  await settle()
+  fake.calls.length = 0
+  const added = await store.getState().add('Grok', 'grok')
+  expect(added?.kind).toBe('grok')
+  expect(kinds).toEqual(['grok'])
+  expect(fake.calls.filter((c) => c[0] === 'switch' || c[0] === 'terminal')).toEqual([
+    ['switch', 'grok'],
+    ['terminal', 'grok login', 'grok'],
+    ['switch', 'default'],
+  ])
+  expect(store.getState().state?.active).toBe('default')
+})
+
+test('an add that names no kind adds a Claude account, logging in with claude', async () => {
+  const { client } = fakeClient({ state: two() })
+  const kinds: unknown[] = []
+  const store = createAccountsStore({ ...client, add: (label, kind) => (kinds.push(kind), client.add(label)) })
+  store.getState().start()
+  await settle()
+  await store.getState().add('Side')
+  expect(kinds).toEqual(['claude'])
+  expect(loginCommand('claude')).toBe(LOGIN_CMD)
+  expect(loginCommand('grok')).toBe('grok login')
+})
+
+test("the active kind is the active account's, and Claude for one the list does not have", () => {
+  const accounts = [account('default', { kind: 'claude' }), account('grok', { kind: 'grok', configDir: '/Users/me/.grok' })]
+  expect(activeKind({ active: 'grok', accounts })).toBe('grok')
+  expect(activeKind({ active: 'default', accounts })).toBe('claude')
+  expect(activeKind({ active: 'gone', accounts })).toBe('claude')
 })
