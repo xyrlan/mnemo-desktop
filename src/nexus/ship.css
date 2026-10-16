@@ -633,12 +633,7 @@
   border: 2px dashed #26335c;
   border-radius: 4px;
   background: #0b1122cc;
-  opacity: 0.5;
-  filter: saturate(0.6);
-  transition: opacity 0.3s, filter 0.3s;
 }
-.ship-docks:hover,
-.ship-docks:focus-within { opacity: 1; filter: none; }
 .ship-docks > b { margin-right: 6px; font-size: 12px; letter-spacing: 1px; color: var(--ship-dim); }
 .ship-pod { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 2px solid #26335c; border-radius: 10px 10px 2px 2px; background: #10172b; }
 .ship-pod > span { margin-right: 2px; font-size: 11px; font-weight: 700; color: var(--ship-pale); }
@@ -658,6 +653,9 @@
 .ship-docked[data-focus] { border-color: var(--ship-focus); }
 .ship-docked img { width: 64px; height: 64px; max-width: none; }
 .ship-docked[data-pose='offline'] img { opacity: 0.55; filter: grayscale(0.6); }
+/* A sleeping captain's zZ leave its head: (55, 28) on the 96 px console, (37, 19) at 64. */
+.ship-console > .ship-fx[data-fx='zz'] { top: 16px; left: 16px; }
+.ship-docked > .ship-fx[data-fx='zz'] { top: 8px; left: calc(50% - 35px); }
 .ship-docked > span {
   display: -webkit-box;
   max-width: 100%;

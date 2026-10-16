@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test'
 import { loadScenarios } from '../scenario.mjs'
 import { shoot } from '../shot.mjs'
 import { STATE_PROPS } from '../scenarios/nexus-states.mjs'
+import { DOCKED_POSES } from '../scenarios/nexus-docks.mjs'
 
 let dir
 before(async () => {
@@ -405,6 +406,40 @@ test('nexus-levels: each deck shows its own project\'s level, a project with not
     ['deck', 'mnemo-desktop', 'LV7'],
     ['dock', 'site', 'LV0'],
   ])
+})
+
+test('nexus-docks: the docks at full strength, a parent idle over an hour asleep under a zZ', async () => {
+  const out = path.join(dir, 'nexus-docks-1440.png')
+  const { pageErrors, inspected } = await shoot({
+    scenario: 'nexus-docks',
+    out,
+    size: { width: 1440, height: 900 },
+    log: () => {},
+    inspect: async (page) => {
+      await page.waitForFunction((n) => document.querySelectorAll('.ship-docked').length === n, Object.keys(DOCKED_POSES).length, { timeout: 10_000 })
+      return page.evaluate(() => {
+        const docks = getComputedStyle(document.querySelector('.ship-docks'))
+        return {
+          docks: [docks.opacity, docks.filter],
+          docked: [...document.querySelectorAll('.ship-docked')].map((d) => ({
+            id: d.getAttribute('data-ship-id'),
+            pose: d.getAttribute('data-pose'),
+            zz: !!d.querySelector('.ship-fx[data-fx="zz"]'),
+            sprite: d.querySelector('img').getAttribute('src').match(/captain-(\w+)/)?.[1],
+            still: d.title.split('\n').at(-1),
+          })),
+        }
+      })
+    },
+  })
+  assert.deepEqual(pageErrors, [])
+  assert.deepEqual(inspected.docks, ['1', 'none'])
+  assert.deepEqual(Object.fromEntries(inspected.docked.map((d) => [d.id, d.pose])), DOCKED_POSES)
+  for (const d of inspected.docked) {
+    assert.equal(d.zz, d.pose === 'asleep', d.id)
+    assert.equal(d.sprite, d.pose, d.id)
+  }
+  assert.deepEqual(inspected.docked.filter((d) => d.pose === 'asleep' || d.pose === 'idle').map((d) => d.still).sort(), ['asleep for 26 h', 'asleep for 3 h', 'idle for 6 min'])
 })
 
 test('an unknown scenario names the ones there are', async () => {

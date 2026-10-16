@@ -63,7 +63,7 @@ export function robot(id: string, over: Partial<ShipRobot> = {}): ShipRobot {
 export const parent = (session_id: string, over: Partial<ParentSession> = {}): ParentSession => ({ session_id, pid: 1, name: null, status: 'idle', cwd: ROOT, ...over })
 
 export function captain(id: string, name: string, over: Partial<Captain> = {}): Captain {
-  return { id, parent: parent(id), name, emblem: '◆', pose: 'idle', topic: null, action: null, notices: 0, ...over }
+  return { id, parent: parent(id), name, emblem: '◆', pose: 'idle', topic: null, action: null, notices: 0, idleMs: null, ...over }
 }
 
 export const mission = (feature: string, over: Partial<Mission> = {}): Mission => ({ feature, contract_path: `docs/superpowers/contracts/2026-10-15-${feature}.md`, pieces: [], landable: true, ...over })

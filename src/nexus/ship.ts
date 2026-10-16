@@ -42,6 +42,9 @@ export const STRANDED_MS = 15 * 60_000
 export const DONE_AFTER_MS = 60_000
 /** A child without a PR leaves the ship this long after it ended. */
 export const LINGER_MS = 40 * 60_000
+/** A parent idle for longer than this sleeps: a session kept open to come back to, not one that
+ *  just answered. A robot sleeps sooner (`SLEEP_MS`). */
+export const CAPTAIN_SLEEP_MS = 60 * 60_000
 
 /* ------------------------------------------------------------------------------- */
 
@@ -278,11 +281,15 @@ export function buildShip(input: ShipInput): Ship {
     const crew = crewOf.get(id) ?? []
     const view = agents[id]
     const f = parent ? (sessions[id] ?? null) : null
+    const lastAct = latest(f?.activity?.at, f?.said?.at)
+    const idleMs = Number.isFinite(lastAct) ? Math.max(0, now - lastAct) : null
     let pose: CaptainPose
     if (id.startsWith('orphan:')) pose = 'empty'
     else if (!parent) pose = 'offline'
     else if (crew.some((r) => r.state === 'need') || parentNeeds(parent, view)) pose = 'alert'
     else if (view ? view.state === 'working' : parent.status === 'busy') pose = 'busy'
+    // Unknown last action: idle, never asleep for want of a time.
+    else if (idleMs !== null && idleMs > CAPTAIN_SLEEP_MS) pose = 'asleep'
     else pose = 'idle'
     const busy = pose === 'busy' || (pose === 'alert' && (view ? view.state === 'working' : parent?.status === 'busy'))
     return {
@@ -294,6 +301,7 @@ export function buildShip(input: ShipInput): Ship {
       topic: f?.topic ?? null,
       action: busy && f ? captainAction(f) : null,
       notices: crew.filter((r) => r.child.notice === 'held').length,
+      idleMs: pose === 'idle' || pose === 'asleep' ? idleMs : null,
     }
   }
 

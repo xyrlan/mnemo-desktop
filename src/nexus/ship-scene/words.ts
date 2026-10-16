@@ -291,8 +291,10 @@ export function captainTopic(c: Captain): string | null {
   return c.topic ? `“${c.topic.slice(0, 80)}”` : null
 }
 
-/** A captain's hover: its whole name, which the ship cuts after two lines, then its latest prompt. */
+/** A captain's hover: its whole name, which the ship cuts after two lines, then its latest prompt,
+ *  then how long an idle or sleeping one has been still. */
 export function captainHover(c: Captain): string {
   if (c.pose === 'empty') return 'no parent: children with no recorded parent'
-  return c.topic ? `${c.name}\n“${c.topic}”` : c.name
+  const still = c.idleMs === null ? null : `${c.pose === 'asleep' ? 'asleep' : 'idle'} for ${ago(c.idleMs)}`
+  return [c.name, c.topic && `“${c.topic}”`, still].filter(Boolean).join('\n')
 }
