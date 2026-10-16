@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { onTestFailed, vi } from 'vitest'
 import { thenLeave, withEnv } from '../src/pty/typed.ts'
+import { onAccount } from '../src/mission/account.ts'
 
 /** The lines `src/pty/typed.ts` writes for cmd and PowerShell, run by the real shells (#331). Nobody has
  *  a Windows machine here: CI's `windows-latest` job is where these run, and everywhere else they
@@ -28,7 +29,8 @@ function run(shell, line, paneDir = PANE_DIR) {
     const out = join(root, 'calls.jsonl')
     writeFileSync(
       join(bin, 'claude.js'),
-      `require('node:fs').appendFileSync(process.env.MNEMO_TYPED_OUT, JSON.stringify({ args: process.argv.slice(2), dir: process.env.${VAR} ?? null }) + '\\n')\n`,
+      // `agent` and `grok` only when set: JSON drops an undefined value.
+      `require('node:fs').appendFileSync(process.env.MNEMO_TYPED_OUT, JSON.stringify({ args: process.argv.slice(2), dir: process.env.${VAR} ?? null, agent: process.env.MNEMO_AGENT, grok: process.env.GROK_HOME }) + '\\n')\n`,
     )
     writeFileSync(join(bin, 'claude.cmd'), `@"${process.execPath}" "%~dp0claude.js" %*\r\n`)
     const env = { ...process.env, MNEMO_TYPED_OUT: out }
@@ -86,6 +88,25 @@ describe.runIf(windows).each(['cmd', 'powershell'])('%s runs what the app types'
     expect(run(shell, withEnv('claude stop a1a1a1a1', VAR, null, shell), null)).toEqual([
       { args: ['stop', 'a1a1a1a1'], dir: null },
       { args: ['after'], dir: null },
+    ])
+  })
+
+  test.each(DIRS)("a row that knows its kind sets MNEMO_AGENT beside its own variable, and the pane keeps its own: %s", (dir) => {
+    expect(run(shell, onAccount('claude attach b0b0b0b0', { account_env: { config_dir: dir, kind: 'claude' } }, shell))).toEqual([
+      { args: ['attach', 'b0b0b0b0'], dir, agent: 'claude' },
+      { args: ['after'], dir: PANE_DIR },
+    ])
+    // The stand-in answers to `claude`: what reaches it is a Grok account's environment.
+    expect(run(shell, onAccount('claude login', { account_env: { config_dir: dir, kind: 'grok' } }, shell))).toEqual([
+      { args: ['login'], dir: PANE_DIR, agent: 'grok', grok: dir },
+      { args: ['after'], dir: PANE_DIR },
+    ])
+  })
+
+  test('the Grok account at ~/.grok runs with GROK_HOME unset', () => {
+    expect(run(shell, onAccount('claude login', { account_env: { config_dir: null, kind: 'grok' } }, shell))).toEqual([
+      { args: ['login'], dir: PANE_DIR, agent: 'grok' },
+      { args: ['after'], dir: PANE_DIR },
     ])
   })
 

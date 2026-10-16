@@ -8,6 +8,7 @@ export const account = (id: string, more: Partial<Account> = {}): Account => ({
   label: id[0].toUpperCase() + id.slice(1),
   configDir: id === 'default' ? '/Users/me/.claude' : `/Users/me/.claude-${id}`,
   isDefault: id === 'default',
+  kind: 'claude',
   email: `${id}@example.com`,
   problem: null,
   unshared: [],

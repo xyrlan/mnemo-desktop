@@ -137,7 +137,7 @@ test('Sign in opens claude on that account in the drawer, from the home folder, 
   await render(two())
   await act(async () => button(card('work'), 'Sign in to Work').click())
   await act(settle)
-  expect(opened.specs).toEqual([{ kind: 'command', root: '/Users/me', command: 'env CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude', label: 'Sign in: Work' }])
+  expect(opened.specs).toEqual([{ kind: 'command', root: '/Users/me', command: 'env MNEMO_AGENT=claude CLAUDE_CONFIG_DIR=/Users/me/.claude-work claude', label: 'Sign in: Work' }])
   expect(windowStore.getState().open).toBeNull()
 })
 

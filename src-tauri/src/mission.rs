@@ -2566,7 +2566,7 @@ mod account_tests {
         let mut c = parse_sessions(include_str!("../fixtures/sessions.json")).unwrap().remove(0);
         assert_eq!(c.account, account_dirs::DEFAULT_ID);
         c.account = "work".into();
-        c.account_env = Some(AccountEnv { config_dir: Some("/Users/x/.claude-work".into()) });
+        c.account_env = Some(AccountEnv { config_dir: Some("/Users/x/.claude-work".into()), kind: crate::agent_kind::AgentKind::Claude });
         let json = serde_json::to_value(&c).unwrap();
         assert_eq!(json["account"], "work");
         assert_eq!(json["account_env"]["config_dir"], "/Users/x/.claude-work");
