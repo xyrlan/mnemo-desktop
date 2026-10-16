@@ -1,3 +1,4 @@
+import type { Agent } from '../agent/active'
 import type { Issue } from '../github/types'
 import { sessionCommand } from '../agent/command'
 import { attachCmd, kindOfRow, onAccount, stopCmd as stopOn, type AccountEnv } from '../mission/account'
@@ -73,6 +74,15 @@ export function whatClickDoes(s: HomeSession, panes: Record<number, PaneLike>): 
   if (s.live === 'elsewhere') return { kind: 'nothing', why: ELSEWHERE }
   if (!s.transcript) return { kind: 'nothing', why: NO_TRANSCRIPT }
   return { kind: 'command', cmd: onAccount(sessionCommand(kindOfRow(s), { resume: s.id }), s), sessionId: s.id }
+}
+
+/** The account session `id` runs on as Home lists it, its sessions' and its children's: its CLI
+ *  and home. Null when Home does not list it, or does not say (`account_env` null: there is only
+ *  the default account, or no account claims it). */
+export function sessionAgent(snapshot: HomeSnapshot, id: string): Agent | null {
+  for (const r of snapshot.repos)
+    for (const s of [...r.sessions, ...r.children]) if (s.id === id && s.account_env) return { kind: kindOfRow(s), config_dir: s.account_env.config_dir }
+  return null
 }
 
 /** An unresolved repo the list folds away (see `HomeSnapshot.protected`). */

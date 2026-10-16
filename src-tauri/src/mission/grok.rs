@@ -199,15 +199,10 @@ pub fn waiting_on(events: &str) -> &'static str {
 // ----------------------------------------------------------------- disk --
 
 /// `chat_history.jsonl` of `session_id` under the Grok home `home`, in whatever cwd's directory
-/// holds it (the long-cwd `<slug>-<hash>` form included, since the id is looked for in every one).
-///
-/// Stand-in for conversation-grok's `grok_history_path(home, session_id)` until it lands, with the
-/// same signature and rule; then this calls it.
+/// holds it (the long-cwd `<slug>-<hash>` form included, since the id is looked for in every one):
+/// the conversation view's own lookup, `conversation::grok_history_path`.
 pub fn history_path(home: &Path, session_id: &str) -> Option<PathBuf> {
-    if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.starts_with('.') {
-        return None;
-    }
-    std::fs::read_dir(home.join("sessions")).ok()?.flatten().map(|e| e.path().join(session_id).join("chat_history.jsonl")).find(|p| p.is_file())
+    crate::conversation::grok_history_path(home, session_id)
 }
 
 /// The token use of a session under `home`, read through its history's directory.

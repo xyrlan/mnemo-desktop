@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConversationClient } from './client'
 import { applyEarlier, applyEvent, newSegment, TAIL, type Segment } from './stream'
+import type { FollowSource } from './types'
 
 /** Follows `sessionId`'s transcript while mounted. A new id (a `/clear`) opens a new segment
  *  below the others, which stay; `null` stops nothing and adds nothing (the session ended, or
  *  none started yet). The cwd a segment was opened with is the one it keeps: a `cd` in the pane
- *  must not restart the follow. */
-export function useFollow(client: ConversationClient, sessionId: string | null, cwd: string) {
+ *  must not restart the follow. So is its `source`, the CLI and home its file is in (absent, a
+ *  Claude transcript). */
+export function useFollow(client: ConversationClient, sessionId: string | null, cwd: string, source?: FollowSource) {
   const [segments, setSegments] = useState<Segment[]>([])
   const now = useRef(segments)
   now.current = segments
@@ -15,6 +17,9 @@ export function useFollow(client: ConversationClient, sessionId: string | null, 
   const cwds = useRef(new Map<number, string>())
   const cwdNow = useRef(cwd)
   cwdNow.current = cwd
+  const sources = useRef(new Map<number, FollowSource | undefined>())
+  const sourceNow = useRef(source)
+  sourceNow.current = source
   const reading = useRef(new Set<number>())
   const mounted = useRef(true)
   useEffect(() => {
@@ -38,14 +43,21 @@ export function useFollow(client: ConversationClient, sessionId: string | null, 
       key = nextKey.current++
       last.current = { key, sessionId }
       cwds.current.set(key, cwdNow.current)
+      sources.current.set(key, sourceNow.current)
       setSegments((p) => [...p, newSegment(key, sessionId)])
     }
     let live = true
     let stop: (() => void) | null = null
     client
-      .follow(sessionId, cwds.current.get(key) ?? cwdNow.current, TAIL, (e) => {
-        if (live) update(key, (s) => applyEvent(s, e))
-      })
+      .follow(
+        sessionId,
+        cwds.current.get(key) ?? cwdNow.current,
+        TAIL,
+        (e) => {
+          if (live) update(key, (s) => applyEvent(s, e))
+        },
+        sources.current.get(key),
+      )
       .then((fn) => {
         if (live) stop = fn
         else fn()
@@ -70,7 +82,7 @@ export function useFollow(client: ConversationClient, sessionId: string | null, 
       reading.current.add(key)
       update(key, (s) => ({ ...s, loadingEarlier: true }))
       client
-        .earlier(seg.sessionId, cwds.current.get(key) ?? cwdNow.current, start, TAIL)
+        .earlier(seg.sessionId, cwds.current.get(key) ?? cwdNow.current, start, TAIL, sources.current.get(key))
         .then((chunk) => update(key, (s) => applyEarlier(s, chunk, gen, start)))
         .catch((e) => update(key, (s) => ({ ...s, loadingEarlier: false, earlierError: String(e) })))
         .finally(() => reading.current.delete(key))

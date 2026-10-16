@@ -14,8 +14,12 @@ export type ParentSession = {
   /** What `claude agents` says the session is parked on while `status` is `waiting`
    *  (`permission prompt`, `input needed`, `dialog open`); absent in snapshots from before #175. */
   waiting_for?: string | null
-  /** Id of the account (`accounts.json`) whose `claude agents` lists the session. */
+  /** Id of the account (`accounts.json`) whose `claude agents` lists the session, or whose Grok
+   *  leader runs it. */
   account?: string
+  /** What a command needs to reach a Grok session on `account`, kind `grok`; absent for a Claude
+   *  one, which is reached by `account` (`mission::ParentSession`). */
+  account_env?: AccountEnv | null
 }
 export type ChildSession = {
   id: string

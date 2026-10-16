@@ -8,6 +8,7 @@
 
 import { AGENT_ENV_VAR, HOME_VAR, kindOf, type AgentKind } from '../agent/kind'
 import type { Account } from '../accounts/types'
+import type { FollowSource } from '../conversation/types'
 import { paneShell, shellWord, withEnv, type Shell } from '../pty/typed'
 
 /** Mirrors `account_dirs::AccountEnv`: `config_dir` null runs with the kind's variable unset: the
@@ -87,6 +88,13 @@ export function envOfAccount(a: Pick<Account, 'configDir' | 'isDefault' | 'kind'
 
 /** The kind of CLI `s` runs on: Claude for a row that does not say. */
 export const kindOfRow = (s: OnAccount | null | undefined): AgentKind => s?.account_env?.kind ?? 'claude'
+
+/** Where the conversation view finds `s`'s file: a Grok row's history in its own home (null, the
+ *  account at `~/.grok`, is searched for in every Grok home); nothing for a Claude row, whose
+ *  transcript is followed as it always was. */
+export function sourceOfRow(s: OnAccount | null | undefined): FollowSource | undefined {
+  return kindOfRow(s) === 'grok' ? { kind: 'grok', home: s?.account_env?.config_dir ?? null } : undefined
+}
 
 /** The session opened in a pane on its own account. Claude: `claude attach <id>`. Grok: the TUI
  *  resumed on it in leader mode (`--leader`, hidden in `grok --help` but read from

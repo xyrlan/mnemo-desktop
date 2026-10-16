@@ -36,7 +36,7 @@ export type DrawerDeps = {
   /** Draws a terminal: the terminal pane view (`src/terminal/view.tsx`) in the app. */
   terminal: ComponentType<PaneViewProps>
   /** Draws a conversation read-only (`src/conversation/ConversationView.tsx` with no agent). */
-  conversation: ComponentType<Pick<ConversationViewProps, 'sessionId' | 'cwd'>>
+  conversation: ComponentType<Pick<ConversationViewProps, 'sessionId' | 'cwd' | 'source'>>
   diff: DiffClient
   /** The deepest worktree the app knows that holds `cwd`. */
   worktreeOf(cwd: string): string
@@ -246,7 +246,7 @@ function TabPanel({ tab, active, shown, deps, ship, keyed, picked, onPick }: Pan
             <p className="shrink-0 border-b border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground">{tab.readOnly}</p>
             <div className="flex min-h-0 flex-1 flex-col">
               {tab.sessionId && tab.cwd ? (
-                <Conversation sessionId={tab.sessionId} cwd={tab.cwd} />
+                <Conversation sessionId={tab.sessionId} cwd={tab.cwd} source={tab.source} />
               ) : (
                 <p className="p-4 text-center text-sm text-muted-foreground">No transcript is known for this session.</p>
               )}

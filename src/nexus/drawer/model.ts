@@ -1,4 +1,6 @@
 import type { AgentState, RepoNode } from '../../fleet/types'
+import type { FollowSource } from '../../conversation/types'
+import { sourceOfRow } from '../../mission/account'
 import { basename, norm, within } from '../../path/path'
 import type { SessionRef } from '../../session/host'
 import type { Captain, Deck, Dock, Feed, Ship, ShipRobot } from '../ship-types'
@@ -62,7 +64,8 @@ export function openingOf(
   const f = findFigure(ship, id)
   if (!f) return null
   const paneOf = (repos: readonly RepoNode[], sessionId: string | null) => (sessionId ? (inLayout(sessionId) ?? fleetPane(repos, sessionId)) : null)
-  const tab = (key: null, readOnly: string | null): DrawerTab => ({ id, kind: f.kind, key, readOnly, label: labelOf(f), sessionId: sessionIdOf(f), cwd: cwdOf(f) })
+  const source = sourceOf(f)
+  const tab = (key: null, readOnly: string | null): DrawerTab => ({ id, kind: f.kind, key, readOnly, label: labelOf(f), sessionId: sessionIdOf(f), cwd: cwdOf(f), ...(source ? { source } : {}) })
   if (f.kind === 'robot') {
     const { child } = f.robot
     const pane = paneOf(repos, f.robot.sessionId ?? child.session_id)
@@ -163,6 +166,8 @@ export function spriteOf(f: Figure): SpriteSheet {
 /** Where its session runs, and the line under its header. */
 export const cwdOf = (f: Figure) => (f.kind === 'robot' ? f.robot.child.cwd : (f.captain.parent?.cwd ?? null))
 export const sessionIdOf = (f: Figure) => (f.kind === 'robot' ? (f.robot.sessionId ?? f.robot.child.session_id) : (f.captain.parent?.session_id ?? null))
+/** Where its conversation is read from: a Grok session's home (`sourceOfRow`), nothing for Claude. */
+export const sourceOf = (f: Figure): FollowSource | undefined => sourceOfRow(f.kind === 'robot' ? f.robot.child : f.captain.parent)
 export const lineOf = (f: Figure) => (f.kind === 'robot' ? f.robot.line : f.captain.topic ? `“${f.captain.topic}”` : '')
 
 /** The deepest of `known` worktrees holding `cwd`, as the Dispatch tab finds a child's; `cwd`

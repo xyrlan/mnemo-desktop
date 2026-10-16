@@ -48,7 +48,7 @@ import { RuleActionsContext, type RuleActions } from './cards/context'
 import { diffRows } from './cards/diff'
 import type { ConversationClient } from './client'
 import { applyEarlier, applyEvent, clockText, firstIndex, newSegment, pendingCard, streamItems, TAIL, workingSince, STATUS_LAG_MS, type Item } from './stream'
-import type { Card, Chunk, Conversation, FollowEvent, SessionStatus, StatusMarker, ToolOutcome } from './types'
+import type { Card, Chunk, Conversation, FollowEvent, FollowSource, SessionStatus, StatusMarker, ToolOutcome } from './types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -77,7 +77,7 @@ const conv = (sessionId: string, cards: Card[]): Conversation => ({ sessionId, t
 const line = (card: Card, sessionId = 's1') => JSON.stringify({ type: 'card', uuid: card.id, sessionId, card })
 const lines = (start: number, cards: Card[], sessionId = 's1'): FollowEvent => ({ kind: 'lines', start, end: start + 100 * cards.length, lines: cards.map((c) => line(c, sessionId)) })
 
-type Follow = { sessionId: string; cwd: string; tail: number; stopped: boolean; emit(e: FollowEvent): Promise<void> }
+type Follow = { sessionId: string; cwd: string; tail: number; source?: FollowSource; stopped: boolean; emit(e: FollowEvent): Promise<void> }
 
 function fakeClient() {
   const follows: Follow[] = []
@@ -85,8 +85,8 @@ function fakeClient() {
   const earlier = vi.fn(async (_s: string, _c: string, _b: number, _n: number): Promise<Chunk> => chunks.shift() ?? { start: 0, end: 0, lines: [] })
   const logUsage = vi.fn(async () => {})
   const client: ConversationClient = {
-    async follow(sessionId, cwd, tail, onEvent) {
-      const f: Follow = { sessionId, cwd, tail, stopped: false, emit: (e) => act(async () => onEvent(e)) }
+    async follow(sessionId, cwd, tail, onEvent, source) {
+      const f: Follow = { sessionId, cwd, tail, ...(source ? { source } : {}), stopped: false, emit: (e) => act(async () => onEvent(e)) }
       follows.push(f)
       return () => void (f.stopped = true)
     },
@@ -179,6 +179,20 @@ test('a cd in the pane does not restart the follow', async () => {
   expect(follows).toHaveLength(1)
 })
 
+test('a Grok session is followed, and read earlier, in its own Grok home, which a cd or a new home given later does not move', async () => {
+  const { client, follows, chunks, earlier } = fakeClient()
+  const source: FollowSource = { kind: 'grok', home: '/Users/you/.grok-work' }
+  await render(view(client, { source }))
+  expect(follows).toEqual([expect.objectContaining({ sessionId: 's1', cwd: '/repo', tail: TAIL, source })])
+  await follows[0].emit(lines(4000, [user('u3', 30, 'third')]))
+  chunks.push({ start: 0, end: 4000, lines: [line(user('u2', 20, 'second'))] })
+  await render(view(client, { source: { kind: 'grok', home: '/Users/you/.grok-other' }, cwd: '/elsewhere' }))
+  await act(async () => virt.props!.startReached())
+  expect(earlier).toHaveBeenCalledWith('s1', '/repo', 4000, TAIL, source)
+  expect(follows).toHaveLength(1)
+  expect(rowTexts()).toEqual(['second', 'third'])
+})
+
 test('a transcript not written yet says so until its first lines', async () => {
   const { client, follows } = fakeClient()
   await render(view(client))
@@ -238,13 +252,14 @@ test('reaching the top reads the lines before the first one, puts them above wit
 
   chunks.push({ start: 1200, end: 4000, lines: [line(user('u2', 20, 'second')), line(said('a2', 21, 'second answer'))] })
   await act(async () => virt.props!.startReached())
-  expect(earlier).toHaveBeenCalledWith('s1', '/repo', 4000, TAIL)
+  // No source: a Claude transcript, which the client asks the core for as it always did.
+  expect(earlier).toHaveBeenCalledWith('s1', '/repo', 4000, TAIL, undefined)
   expect(rowTexts()).toEqual(['second', 'second answer', 'third'])
   expect(virt.props!.firstItemIndex).toBe(first - 2)
 
   chunks.push({ start: 0, end: 1200, lines: [line(user('u1', 10, 'first'))] })
   await act(async () => virt.props!.startReached())
-  expect(earlier).toHaveBeenLastCalledWith('s1', '/repo', 1200, TAIL)
+  expect(earlier).toHaveBeenLastCalledWith('s1', '/repo', 1200, TAIL, undefined)
   expect(virt.props!.firstItemIndex).toBe(first - 3)
   expect(text()).toContain('Start of the session')
 

@@ -1,4 +1,4 @@
-import { childSession, cloneDest, firstRows, githubError, isFolded, otherErrors, paneForSession, prView, relTime, stopCmd, takeOver, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type Pr } from './types'
+import { childSession, cloneDest, firstRows, githubError, isFolded, otherErrors, paneForSession, prView, relTime, sessionAgent, stopCmd, takeOver, visibleRepos, whatClickDoes, type HomeRepo, type HomeSession, type HomeSnapshot, type Pr } from './types'
 
 const sess = (o: Partial<HomeSession> & { id: string }): HomeSession =>
   ({ title: 't', cwd: '/r', last_at: 0, transcript: true, live: null, kind: 'interactive', agent: null, ...o })
@@ -160,4 +160,22 @@ test("a Grok session resumes in grok's leader on its own home; attach and stop a
     cmd: 'env -u CLAUDE_CONFIG_DIR MNEMO_AGENT=claude claude --resume d',
     sessionId: 'd',
   })
+})
+
+test('sessionAgent: the account Home lists a session or a child on, null when it does not say', () => {
+  const grok = { config_dir: '/Users/me/.grok-work', kind: 'grok' as const }
+  const snapshot: HomeSnapshot = {
+    repos: [
+      repo({ root: '/r/a', sessions: [sess({ id: 'n', account: null, account_env: null }), sess({ id: 'w', account: 'work', account_env: { config_dir: '/Users/me/.claude-work' } })] }),
+      repo({ root: '/r/b', children: [sess({ id: 'g', account: 'gw', account_env: grok })] }),
+    ],
+    clone_base: '',
+    errors: [],
+    protected: 0,
+  }
+  expect(sessionAgent(snapshot, 'g')).toEqual(grok)
+  // A Claude row from before kinds: its config dir, Claude.
+  expect(sessionAgent(snapshot, 'w')).toEqual({ kind: 'claude', config_dir: '/Users/me/.claude-work' })
+  expect(sessionAgent(snapshot, 'n')).toBeNull()
+  expect(sessionAgent(snapshot, 'missing')).toBeNull()
 })

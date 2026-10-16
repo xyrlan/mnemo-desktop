@@ -37,3 +37,28 @@ test('follow hands the core a channel whose messages reach the callback, and unf
   stop()
   expect(calls[1]).toEqual(['conversation_unfollow', { id: 42 }])
 })
+
+test('a Claude follow asks the core exactly as before; a Grok one names its kind and home', async () => {
+  const calls: [string, Record<string, unknown> | undefined][] = []
+  const c = makeConversationClient(
+    async <T,>(cmd: string, args?: Record<string, unknown>) => (calls.push([cmd, args]), 1 as T),
+    () => ({ onmessage: () => {} }),
+  )
+  await c.follow('sid', '/repo', 200, () => {})
+  await c.follow('sid', '/repo', 200, () => {}, { kind: 'claude', home: '/Users/you/.claude-work' })
+  await c.earlier('sid', '/repo', 10, 5)
+  await c.earlier('sid', '/repo', 10, 5, { kind: 'claude' })
+  const keys = calls.map(([, a]) => Object.keys(a!).sort())
+  expect(keys).toEqual([
+    ['cwd', 'onEvent', 'sessionId', 'tail'],
+    ['cwd', 'onEvent', 'sessionId', 'tail'],
+    ['before', 'count', 'cwd', 'sessionId'],
+    ['before', 'count', 'cwd', 'sessionId'],
+  ])
+  calls.length = 0
+  await c.follow('gid', '/repo', 200, () => {}, { kind: 'grok', home: '/Users/you/.grok-work' })
+  await c.earlier('gid', '/repo', 10, 5, { kind: 'grok' })
+  expect(calls[0][1]).toMatchObject({ sessionId: 'gid', cwd: '/repo', tail: 200, kind: 'grok', home: '/Users/you/.grok-work' })
+  // No home: every Grok home is searched (`conversation_earlier`'s `home: None`).
+  expect(calls[1][1]).toEqual({ sessionId: 'gid', cwd: '/repo', before: 10, count: 5, kind: 'grok', home: null })
+})

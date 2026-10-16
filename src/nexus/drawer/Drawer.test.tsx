@@ -6,7 +6,7 @@ import type { PaneViewProps } from '../../panes/registry'
 import type { Ship } from '../ship-types'
 import { nexusStore } from '../store'
 import { NexusDrawer, type DrawerDeps } from './Drawer'
-import { fakeHost, reposFixture, settle, shipFixture } from './fixtures'
+import { captainOf, fakeHost, parent, reposFixture, settle, shipFixture } from './fixtures'
 import { openingOf, OUTSIDE } from './model'
 import { createDrawer, viewName } from './sessions'
 import { readWidth, WIDTH_KEY } from './width'
@@ -49,7 +49,7 @@ function mount(over: { ship?: Ship } = {}) {
     host,
     owners,
     terminal: StubTerminal,
-    conversation: ({ sessionId }) => <div data-stub-conversation={sessionId ?? ''} />,
+    conversation: ({ sessionId, source }) => <div data-stub-conversation={sessionId ?? ''} data-stub-source={source ? JSON.stringify(source) : undefined} />,
     diff,
     worktreeOf: (cwd) => cwd,
     goToRepo: (r) => void repos.push(r),
@@ -205,6 +205,19 @@ test('a captain alive outside the app shows its conversation read-only and says 
   expect($('[data-stub-terminal]')).toBeNull()
   expect($('[data-open-as-tab]')).toBeNull()
   expect(aside().dataset.sessionPty).toBe('')
+  expect(log).toEqual([])
+})
+
+test('a Grok captain outside the app shows its conversation from its own Grok home; a Claude one names no source', async () => {
+  const ship = shipFixture()
+  const grok = { config_dir: '/Users/you/.grok-work', kind: 'grok' as const }
+  ship.decks[0].captains[1] = captainOf({ id: 'cap-2', parent: parent({ session_id: 'cap-2', account: 'gw', account_env: grok }), name: 'triage', emblem: '●', pose: 'idle' })
+  const { open, log } = mount({ ship })
+  open('cap-2')
+  open('cap-3')
+  await act(settle)
+  expect($('[data-stub-conversation="cap-2"]')?.getAttribute('data-stub-source')).toBe(JSON.stringify({ kind: 'grok', home: '/Users/you/.grok-work' }))
+  expect($('[data-stub-conversation="cap-3"]')?.hasAttribute('data-stub-source')).toBe(false)
   expect(log).toEqual([])
 })
 
