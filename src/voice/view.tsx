@@ -17,6 +17,8 @@ import { tauriMission } from '../mission/client'
 import { holdKeys, installChord } from './chord'
 import { mountInSlot } from '../shell/slots'
 import { Indicator } from './Indicator'
+import { fileDrops } from './files'
+import { FileWork } from './FileWork'
 
 const voice = createVoice({
   client: tauriVoice,
@@ -62,10 +64,16 @@ function DictationIndicator() {
   )
 }
 const unmount = mountInSlot('overlay', DictationIndicator)
+// A voice note dropped on a pane (`src/terminal/file-drop.ts`) shows its transcription on it.
+function VoiceFileWork() {
+  return <FileWork store={fileDrops.work} />
+}
+const unmountFiles = mountInSlot('overlay', VoiceFileWork)
 
 import.meta.hot?.dispose(() => {
   uninstallChord()
   void unlistenProgress.then((u) => u())
   void unlistenLost.then((u) => u())
   unmount()
+  unmountFiles()
 })

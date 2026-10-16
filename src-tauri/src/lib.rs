@@ -38,6 +38,8 @@ pub mod mission_commands;
 
 // -- voice (src/voice.rs) --
 pub mod voice;
+// A voice note dropped on a pane (src/voice_file.rs).
+pub mod voice_file;
 
 // -- vault (src/vault.rs) --
 pub mod vault;
@@ -196,6 +198,7 @@ pub fn run() {
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
+        .manage(voice_file::FileState::default())
         // A webview loading a page (a reload) leaves its transcript follows with nobody to
         // unfollow them; end them here.
         .on_page_load(|webview, payload| {
@@ -252,6 +255,7 @@ pub fn run() {
             voice::voice_start,
             voice::voice_stop,
             voice::voice_set_language,
+            voice_file::voice_transcribe_files,
 
             // -- vault commands --
             vault::vault_tree,

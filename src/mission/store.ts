@@ -3,6 +3,7 @@ import type { MissionClient } from './client'
 import { allChildren, type Snapshot } from './types'
 import type { Settings } from '../settings/store'
 import { replyLanguageFooter } from '../settings/store'
+import { translateAround } from '../voice/transcript'
 
 export type MissionState = {
   snapshot: Snapshot
@@ -99,15 +100,9 @@ export function createMissionStore(client: MissionClient, policy: OutgoingPolicy
       try {
         const p = policy()
         let outgoing = text
-        if (p.outgoing === 'en') {
-          // Silent rewrite; on failure the original goes out rather than nothing.
-          try {
-            const t = (await client.translate(text)).trim()
-            if (t) outgoing = t
-          } catch {
-            /* fall through with the original */
-          }
-        }
+        // Silent rewrite; on failure the original goes out rather than nothing. A dropped voice
+        // note's transcript is someone else's words and goes out as it was heard.
+        if (p.outgoing === 'en') outgoing = await translateAround(text, (s) => client.translate(s))
         outgoing += replyLanguageFooter(p.replyLanguage)
         await client.reply(id, outgoing)
         set((s) => ({

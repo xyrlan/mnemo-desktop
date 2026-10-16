@@ -69,8 +69,15 @@ pub struct VoiceState {
     model: Mutex<Option<Arc<WhisperContext>>>,
 }
 
+impl VoiceState {
+    /// What dictation listens for, which a dropped file is heard in too (`voice_file.rs`).
+    pub fn language(&self) -> Language {
+        *lock(&self.language)
+    }
+}
+
 /// A poisoned lock here only means an earlier take panicked; the data is still usable.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -445,7 +452,7 @@ fn model_on_disk(path: &Path) -> bool {
 /// per-read timeout (`timeout_recv_body` is a budget for the whole body, not restarted per
 /// read), so each request gets this long; one that ran out having brought bytes is followed by
 /// a request for the rest, and one that brought none ends the download.
-const STALL: Duration = Duration::from_secs(30);
+pub(crate) const STALL: Duration = Duration::from_secs(30);
 
 /// Returns the model in `dir`, downloading it first if it is missing or truncated.
 /// `progress(downloaded, total)` fires as bytes arrive.
@@ -597,6 +604,17 @@ fn decode_params(language: Language, samples: usize) -> FullParams<'static, 'sta
 
 /// Transcribes 16 kHz mono audio. Silence yields an empty string without running the model.
 pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Result<String, String> {
+    transcribe_with(ctx, audio, language, None::<fn(i32)>)
+}
+
+/// `transcribe`, telling `progress` how far through the audio whisper is, in percent: a dropped
+/// file runs for minutes where a take runs for a second (`voice_file.rs`).
+pub fn transcribe_with<F: FnMut(i32) + 'static>(
+    ctx: &WhisperContext,
+    audio: &[f32],
+    language: Language,
+    progress: Option<F>,
+) -> Result<String, String> {
     if is_silent(audio) {
         return Ok(String::new());
     }
@@ -606,8 +624,12 @@ pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Re
     let mut padded = audio.to_vec();
     padded.resize(padded.len().max(min) + WHISPER_RATE as usize / 4, 0.0);
 
+    let mut params = decode_params(language, audio.len());
+    if let Some(progress) = progress {
+        params.set_progress_callback_safe::<Option<F>, F>(Some(progress));
+    }
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
-    state.full(decode_params(language, audio.len()), &padded).map_err(|e| format!("whisper: {e}"))?;
+    state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
 
     let mut raw = String::new();
     for segment in state.as_iter() {
@@ -764,6 +786,19 @@ pub fn voice_set_language(app: AppHandle, language: String) -> Result<(), String
     let lang = Language::parse(&language).ok_or_else(|| format!("unknown language {language:?}"))?;
     *lock(&app.state::<VoiceState>().language) = lang;
     Ok(())
+}
+
+/// Dictation's model for a test: `$MNEMO_WHISPER_MODEL`, else downloaded once into the system
+/// temp dir (not `$HOME`, which other tests repoint). One download at a time: two tests fetching
+/// into the same `.part` at once, on a runner that has none, rename it from under each other.
+#[cfg(test)]
+pub(crate) fn test_model() -> PathBuf {
+    static ONE: Mutex<()> = Mutex::new(());
+    let _one = lock(&ONE);
+    match std::env::var_os(MODEL_ENV) {
+        Some(p) => PathBuf::from(p),
+        None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
+    }
 }
 
 #[cfg(test)]
@@ -1171,10 +1206,7 @@ mod tests {
     #[ignore]
     fn bench() {
         let dir = PathBuf::from(std::env::var_os("MNEMO_VOICE_BENCH").expect("MNEMO_VOICE_BENCH"));
-        let path = match std::env::var_os(MODEL_ENV) {
-            Some(p) => PathBuf::from(p),
-            None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
-        };
+        let path = test_model();
         let t = std::time::Instant::now();
         let ctx = load_context(&path).expect("load");
         let loaded = t.elapsed().as_secs_f32();
@@ -1214,10 +1246,7 @@ mod tests {
     /// which other tests repoint.
     #[test]
     fn transcribes_the_fixtures() {
-        let path = match std::env::var_os(MODEL_ENV) {
-            Some(p) => PathBuf::from(p),
-            None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
-        };
+        let path = test_model();
         let ctx = load_context(&path).expect("load");
         warm_up(&ctx).expect("warm up");
         let cases = [

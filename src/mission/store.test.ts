@@ -84,6 +84,14 @@ test('outgoing=en translates silently and the reply language adds a footer', asy
   expect(s.getState().sent.x[0].original).toBe('pode seguir')
 })
 
+test("outgoing=en leaves a dropped voice note's transcript as it was heard", async () => {
+  const c = fake()
+  const s = createMissionStore(c, () => ({ outgoing: 'en', replyLanguage: 'unchanged' }))
+  s.getState().setDraft('x', '[transcript: a.opus] oi, tudo bem \nresume isso')
+  await s.getState().sendReply('x')
+  expect(c.replies[0][1]).toBe('[transcript: a.opus] oi, tudo bem \nEN(resume isso)')
+})
+
 test('a failed translation sends the original instead of nothing', async () => {
   const c = fake()
   c.translate = async () => { throw new Error('claude missing') }

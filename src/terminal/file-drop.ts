@@ -4,7 +4,9 @@ import { store } from '../layout/app-store'
 import { paneRects } from '../layout/rects'
 import type { PaneId } from '../layout/tree'
 import { tauriPty } from '../pty/client'
-import { dropTargetIn, dropText, fileDropStore, type DropTarget } from './drop'
+import { fileDrops, type DropSink, type FileDrops } from '../voice/files'
+import { isVoiceNote } from '../voice/transcript'
+import { dropTargetIn, dropTargetLive, dropText, fileDropStore, type DropTarget } from './drop'
 
 /** The live terminal pane under a point in CSS pixels, or null (another view, a divider, a
  *  broken or exited terminal). Uses each pane's real rect rather than
@@ -37,10 +39,37 @@ function dropAt(x: number, y: number): { pane: PaneId; chat: DropTarget | null }
   return terminal === null ? null : { pane: terminal, chat: null }
 }
 
+/** A terminal that takes a drop's text, now or when a voice note's transcript is ready: gone once
+ *  its pane exits or closes, or (a popup's, the drawer's PTY, in no pane) once a write to it fails. */
+function ptySink(pty: PaneId, el: HTMLElement | null): DropSink {
+  const known = store.getState().panes[pty] !== undefined
+  return {
+    el,
+    alive: () => {
+      const pane = store.getState().panes[pty]
+      return known ? !!pane && pane.exitCode === undefined && !pane.error : pane?.exitCode === undefined
+    },
+    put: (text) => tauriPty.write(pty, text),
+  }
+}
+
+function chatSink(chat: DropTarget): DropSink {
+  return { el: chat.el, alive: () => dropTargetLive(chat), put: (text) => chat.insert(text) }
+}
+
+/** Puts a drop into `sink`: every path but a voice note's typed at once, as Terminal.app types
+ *  them; each voice note's transcript after, in drop order, as it is ready (`../voice/files`). */
+function dropInto(sink: DropSink, paths: string[], files: Pick<FileDrops, 'transcribe'>): void {
+  const notes = paths.filter(isVoiceNote)
+  const text = dropText(paths.filter((p) => !isVoiceNote(p)))
+  if (text) void sink.put(text)
+  if (notes.length) void files.transcribe(notes, sink)
+}
+
 /** The session host's presentation on top at a point (a popup, a drawer tab), as it marks its root
  *  with `data-session-pty`: the PTY it shows, null while it has none; undefined where none is. A
  *  pane under one never gets what is dropped on it. */
-function presentationAt(x: number, y: number): PaneId | null | undefined {
+function presentationAt(x: number, y: number): { pty: PaneId | null; el: HTMLElement } | undefined {
   let top: { el: HTMLElement; z: number } | null = null
   for (const el of document.querySelectorAll<HTMLElement>('[data-session-pty]')) {
     const r = el.getBoundingClientRect()
@@ -52,7 +81,7 @@ function presentationAt(x: number, y: number): PaneId | null | undefined {
   }
   if (!top) return undefined
   const id = Number(top.el.dataset.sessionPty)
-  return id > 0 ? id : null
+  return { pty: id > 0 ? id : null, el: top.el }
 }
 
 type DropEvent = { type: 'enter' | 'over'; position: { x: number; y: number } } | { type: 'drop'; paths: string[]; position: { x: number; y: number } } | { type: 'leave' }
@@ -67,8 +96,9 @@ export function dropScale(platform = navigator.platform, dpr = window.devicePixe
 }
 
 /** Tauri's drag-drop payload applied to the panes: `over` names the pane to highlight, a drop
- *  puts the files' paths into its chat, else types them into its terminal, and focuses it. */
-export function onFileDrag(e: DropEvent, scale = dropScale()): void {
+ *  puts the files' paths into its chat, else types them into its terminal, and focuses it. A voice
+ *  note puts its transcript there instead of its path, once it is heard (`dropInto`). */
+export function onFileDrag(e: DropEvent, scale = dropScale(), files: Pick<FileDrops, 'transcribe'> = fileDrops): void {
   if (e.type === 'leave') return fileDropStore.setState({ over: null })
   const x = e.position.x / scale
   const y = e.position.y / scale
@@ -77,8 +107,7 @@ export function onFileDrag(e: DropEvent, scale = dropScale()): void {
     // Over a popup or the drawer: its session takes the paths, typed as into a pane.
     fileDropStore.setState({ over: null })
     if (e.type !== 'drop') return
-    const text = dropText(e.paths)
-    if (shown !== null && text && store.getState().panes[shown]?.exitCode === undefined) void tauriPty.write(shown, text)
+    if (shown.pty !== null && store.getState().panes[shown.pty]?.exitCode === undefined) dropInto(ptySink(shown.pty, shown.el), e.paths, files)
     return
   }
   const at = dropAt(x, y)
@@ -88,11 +117,10 @@ export function onFileDrag(e: DropEvent, scale = dropScale()): void {
     return
   }
   fileDropStore.setState({ over: null })
-  const text = dropText(e.paths)
-  if (at === null || !text) return
+  if (at === null || !e.paths.some((p) => p.length > 0)) return
   store.getState().focusPane(at.pane)
-  if (at.chat) at.chat.insert(text)
-  else void tauriPty.write(at.pane, text)
+  const el = document.querySelector<HTMLElement>(`.pane[data-pane="${at.pane}"]`)
+  dropInto(at.chat ? chatSink(at.chat) : ptySink(at.pane, el), e.paths, files)
 }
 
 let users = 0
