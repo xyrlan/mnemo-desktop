@@ -120,7 +120,11 @@ export function createFileDrops(deps: FileDropDeps) {
       switch (e.kind) {
         case 'download':
           update(id, {
-            label: `Downloading the speech model for files: ${e.total > 0 ? Math.floor((e.downloaded / e.total) * 100) : 0}%`,
+            // Once it is all here, its hash is checked and it loads: seconds with no bytes moving.
+            label:
+              e.total > 0 && e.downloaded >= e.total
+                ? 'Loading the speech model for files…'
+                : `Downloading the speech model for files: ${e.total > 0 ? Math.floor((e.downloaded / e.total) * 100) : 0}%`,
             download: e.total > 0 && e.downloaded < e.total ? e.downloaded / e.total : null,
           })
           return

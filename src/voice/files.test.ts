@@ -56,6 +56,7 @@ function deps(client: ReturnType<typeof backend>['client'], copy: (t: string) =>
 test('each transcript is typed in drop order, one line, and the work is shown until the last', async () => {
   const b = backend([
     { kind: 'download', downloaded: 287, total: 574 },
+    { kind: 'download', downloaded: 574, total: 574 },
     { kind: 'transcribing', index: 0, percent: 0 },
     { kind: 'transcribing', index: 0, percent: 40 },
     { kind: 'done', index: 0, text: 'primeiro' },
@@ -72,7 +73,7 @@ test('each transcript is typed in drop order, one line, and the work is shown un
   await done
   expect(s.typed).toEqual(['[transcript: a.opus] primeiro ', '[transcript: b.ogg] segundo linha '])
   expect(s.typed.join('')).not.toMatch(/[\r\n]/)
-  expect(labels).toEqual(['Preparing a.opus…', 'Downloading the speech model for files: 50%', 'Transcribing a.opus…', 'Transcribing a.opus 40%', 'Transcribing b.ogg…'])
+  expect(labels).toEqual(['Preparing a.opus…', 'Downloading the speech model for files: 50%', 'Loading the speech model for files…', 'Transcribing a.opus…', 'Transcribing a.opus 40%', 'Transcribing b.ogg…'])
   expect(files.work.getState().work).toEqual([])
   expect(d.said).toEqual([])
 })
