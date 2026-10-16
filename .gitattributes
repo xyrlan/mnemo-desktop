@@ -1,2 +1,4 @@
 # Fixtures are compared byte-for-byte and hashed; never let git rewrite their line endings.
 src-tauri/fixtures/** -text
+# Vendored C/C++ sources, kept byte for byte as upstream ships them.
+src-tauri/vendor/** -text linguist-vendored
