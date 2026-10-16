@@ -55,6 +55,14 @@ test.each(STATES)('%s: its pose, prop, motion, particles and halo (#473)', (_, o
   expect(doingOf(r)).toBe(doing)
 })
 
+test('an ended robot whose briefing mnemo is writing scans it, pages off it, its state halo kept', () => {
+  const r = robot('1', { state: 'done', action: null, ci: 'green', pr: pr(382), line: '', briefing: true })
+  expect(lookOf(r)).toEqual({ ...lookOf({ ...r, briefing: false }), prop: 'read', motion: 'scan', particles: 'pages' })
+  expect(lookOf(r).halo).toBe('done')
+  expect(doingOf(r)).toBe('finished, CI green, writing its briefing')
+  expect(robotLine(r)).toEqual({ say: '✓ PR #382 · CI green · waiting for merge', act: '✎ writing its briefing' })
+})
+
 test('the rest of the states fall where their nearest row does', () => {
   // CI queued reads as CI running; a finished robot with no CI as CI green.
   expect(lookOf(robot('1', { state: 'done', action: null, ci: 'wait' }))).toMatchObject({ prop: 'run', motion: 'flip-slow', halo: 'working' })

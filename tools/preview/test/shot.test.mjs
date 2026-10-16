@@ -8,6 +8,7 @@ import { loadScenarios } from '../scenario.mjs'
 import { shoot } from '../shot.mjs'
 import { STATE_PROPS } from '../scenarios/nexus-states.mjs'
 import { DOCKED_POSES } from '../scenarios/nexus-docks.mjs'
+import { BRIEFING } from '../scenarios/nexus-briefing.mjs'
 
 let dir
 before(async () => {
@@ -406,6 +407,28 @@ test('nexus-levels: each deck shows its own project\'s level, a project with not
     ['deck', 'mnemo-desktop', 'LV7'],
     ['dock', 'site', 'LV0'],
   ])
+})
+
+test('nexus-briefing: the child whose briefing mnemo writes scans it, and no captain stands for the helper', async () => {
+  const out = path.join(dir, 'nexus-briefing.png')
+  const { pageErrors, inspected } = await shoot({
+    scenario: 'nexus-briefing',
+    out,
+    log: () => {},
+    inspect: async (page) => ({
+      robots: await figures(page),
+      captains: await page.evaluate(() => document.querySelectorAll('.ship-captain, .ship-chip-captain, .ship-docked').length),
+      act: await page.evaluate(() => [...document.querySelectorAll('.ship-bubble')].map((b) => b.textContent).join('\n')),
+    }),
+  })
+  assert.deepEqual(pageErrors, [])
+  assert.equal(inspected.captains, 1)
+  const drawn = Object.fromEntries(inspected.robots.map((f) => [f.label, f]))
+  assert.deepEqual(drawn[BRIEFING.writing].props, ['read'])
+  assert.ok(drawn[BRIEFING.writing].drawn)
+  assert.match(drawn[BRIEFING.writing].name, /writing its briefing$/)
+  for (const label of BRIEFING.not) assert.doesNotMatch(drawn[label].name, /briefing/, label)
+  assert.match(inspected.act, /✎ writing its briefing/)
 })
 
 test('nexus-docks: the docks at full strength, a parent idle over an hour asleep under a zZ', async () => {

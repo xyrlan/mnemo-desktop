@@ -64,6 +64,14 @@ feet for CI red; none when idle, stranded or stopped), with a motion on the prop
 state colour, and its **speech bubble**. No badge. A room shows as many bubbles at once as its width allows, roughly one per 240 px. The
 freshest lines speak first and the rest take turns every ~4.5 s.
 
+An ended child **whose briefing mnemo is writing** keeps its state's pose and halo but holds the
+scanner over its transcript, with pages coming off, and says *"✎ writing its briefing"*. mnemo's
+SessionEnd hook writes the briefing with a headless `claude --print` started in the child's
+worktree. `claude agents` lists that process as an `interactive` session named `<dir>-NN`, with a
+session id that never gets a transcript. Only its `sessions/<pid>.json` tells it apart
+(`entrypoint: "sdk-cli"`). The snapshot keeps such processes out of `parents` and lists them as
+`helpers`, so none of them draws as a captain.
+
 ## Where it sits in the app
 
 The app keeps its two places:
