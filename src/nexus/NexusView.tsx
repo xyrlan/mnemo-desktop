@@ -30,6 +30,7 @@ import { menuFor, type MenuItem, type MenuTarget } from './ui/menus'
 import { WindowHost } from './ui/Window'
 import { ConfirmHost } from './ui/confirm'
 import { closeWindow, openWindow, windowsIn } from './ui/windows'
+import { useVaultLevel } from './windows/memory/Level'
 
 /** The SYSTEMS menu: every window registered in that group, in its order. */
 const systemsItems = (): MenuItem[] => windowsIn('systems').map((d) => ({ id: d.id, label: d.title, run: () => openWindow(d.id) }))
@@ -127,6 +128,12 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
 
   const agents = useMemo(() => agentsOf(repos), [repos])
   const events: PulseEvent[] = useMemo(() => pulse.map((p) => p.event), [pulse])
+  // The vault's level beside each archive, read again as soon as the vault learns a rule.
+  const learned = useMemo(() => {
+    for (let i = pulse.length - 1; i >= 0; i--) if (pulse[i].event.kind === 'learned') return pulse[i].id
+    return 0
+  }, [pulse])
+  const level = useVaultLevel(undefined, undefined, undefined, learned)
   const ship = useMemo(() => buildShip({ snapshot, feed, agents, events, firstSeen: { ...firstSeen.current }, now }), [snapshot, feed, agents, events, now])
 
   const shipRef = useRef(ship)
@@ -209,6 +216,8 @@ function ShipBody({ client, usage, onOpen, onShip }: BodyProps) {
         command={<FleetPrompt ship={ship} repos={known} run={run} open={command} onClose={() => setCommand(false)} />}
         reducedMotion={reducedMotion}
         visible={visible}
+        pulses={pulse}
+        level={level}
       />
       <Triage ship={ship} open={triage} onClose={() => s.setTriage(false)} onOpen={onOpen} run={run} />
       <SelectionBar ship={ship} selection={selection} onClear={s.clearSelection} run={run} />

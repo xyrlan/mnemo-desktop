@@ -7,6 +7,8 @@ import type { AgentState, WaitingFor } from '../fleet/types'
 import type { ErrorSource } from '../mission/errors'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
+import type { Pulse } from '../pulse/store'
+import type { Progress } from '../vaultlevel/level'
 import type { MenuTarget } from './ui/menus'
 
 // ------------------------------------------------------------------ the feed --
@@ -252,6 +254,11 @@ export type ShipSceneProps = {
   onCommand(): void
   reducedMotion: boolean
   visible: boolean
+  /** mnemo's events as the app received them (`pulseStore`): each new one flies as a packet
+   *  between its deck's archive and its session's figure. */
+  pulses?: readonly Pulse[]
+  /** The vault's level, beside each archive: null until read, `'none'` with no vault. */
+  level?: Progress | 'none' | null
 }
 
 export type FleetPromptProps = {

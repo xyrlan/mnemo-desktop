@@ -5,7 +5,9 @@ import { SceneContext, type SceneCtx } from './ship-scene/context'
 import { Deck } from './ship-scene/Deck'
 import { DockedCaptain, px, type Hover } from './ship-scene/figures'
 import { columns, G } from './ship-scene/geometry'
+import { Archive, MemoryLayer, useMemory } from './ship-scene/Memory'
 import { useArrivals } from './ship-scene/motion'
+import type { Session } from './ship-scene/packets'
 import { ShipLog } from './ship-scene/Log'
 import { TURN_MS } from './ship-scene/voices'
 import { emptyText, rateChip } from './ship-scene/words'
@@ -75,14 +77,26 @@ function useDecks(decks: DeckT[], reducedMotion: boolean): { decks: Drawn[]; set
   return { decks: out, settled }
 }
 
+/** Every figure on the ship with a session: robots, and captains with a parent. */
+function sessionsOf(ship: Ship, robots: ShipRobot[]): Session[] {
+  const out: Session[] = robots.flatMap((r) => (r.sessionId ? [{ sessionId: r.sessionId, cwd: r.child.cwd || null }] : []))
+  for (const c of [...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)]) {
+    if (c.parent) out.push({ sessionId: c.parent.session_id, cwd: c.parent.cwd || null })
+  }
+  return out
+}
+
+const NO_PULSES: readonly never[] = []
+
 const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
 
 /** The ship drawn (v2 spec "What it is"): the top bar's rate chip, the account the app runs on and
  *  PROJECTS, MISSIONS and SYSTEMS, the bridge with what waits for you, a deck per repo with live
  *  children, the docks, and the ship's log; over the bridge's top edge, the command line while open. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
  *  and while the window is hidden all of it pauses. */
-export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onCommand, onMenu, command, reducedMotion, visible }: ShipSceneProps): JSX.Element {
+export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onCommand, onMenu, command, reducedMotion, visible, pulses = NO_PULSES, level = null }: ShipSceneProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
   const box = useWidth(scroller)
   const width = Math.max(G.minWidth, (box ?? UNMEASURED) - 2 * G.pad)
 
@@ -99,6 +113,8 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
   const { arriving, arrived } = useArrivals(ids, reducedMotion)
   const merged = useMemo(() => new Set(log.flatMap((e) => (e.kind === 'merged' && e.robotId ? [e.robotId] : []))), [log])
   const { decks, settled } = useDecks(ship.decks, reducedMotion)
+  const sessions = useMemo(() => sessionsOf(ship, robots), [ship, robots])
+  const { memory, layer } = useMemory({ pulses, sessions, stage, reducedMotion, visible, level })
 
   const [hover, setHover] = useState<Hover | null>(null)
   const dark = useDarkLayer()
@@ -140,6 +156,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
     onAction,
     onTriage,
     onCommand,
+    memory,
   }
   const rate = rateChip(ship.rate)
   const cols = columns(width)
@@ -186,7 +203,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
         </header>
         <div ref={scroller} className="ship-space">
           {drawn && (
-            <div className="ship-stage" style={{ width: px(width + 2 * G.pad) }}>
+            <div ref={stage} className="ship-stage" style={{ width: px(width + 2 * G.pad) }}>
               <Bridge ship={ship} />
               {decks.length > 0 && (
                 <div className="ship-colhead" aria-hidden>
@@ -209,6 +226,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                   {ship.docks.map((d) => (
                     <div key={d.root} className="ship-pod" data-dock={d.root}>
                       <span>{d.name}</span>
+                      <Archive root={d.root} name={d.name} />
                       {d.captains.map((cap) => (
                         <DockedCaptain key={cap.id} captain={cap} focused={focusId === cap.id} onOpen={onOpen} />
                       ))}
@@ -217,6 +235,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
                 </section>
               )}
               {!decks.length && !ship.docks.length && <p className="ship-empty">{emptyText(ship)}</p>}
+              <MemoryLayer {...layer} />
             </div>
           )}
         </div>

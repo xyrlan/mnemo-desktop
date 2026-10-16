@@ -10,8 +10,9 @@ const liveClient = makeLevelClient(invoke)
 
 /** The vault's level (spec Q11: it moves here from the status bar), read now and every
  *  `pollMs`, and not while the window is hidden. The best xp ever recorded is what it reads, so it
- *  never falls. Null until the first read; `'none'` when the vault cannot be read. */
-export function useVaultLevel(client: LevelClient = liveClient, pollMs = LEVEL_POLL_MS, shown?: Shown): Progress | 'none' | null {
+ *  never falls. Null until the first read; `'none'` when the vault cannot be read. A new `again`
+ *  reads it at once (the ship's: the vault just learned a rule). */
+export function useVaultLevel(client: LevelClient = liveClient, pollMs = LEVEL_POLL_MS, shown?: Shown, again?: unknown): Progress | 'none' | null {
   const [level, setLevel] = useState<Progress | 'none' | null>(null)
   useEffect(() => {
     let live = true
@@ -31,7 +32,7 @@ export function useVaultLevel(client: LevelClient = liveClient, pollMs = LEVEL_P
       live = false
       stop()
     }
-  }, [client, pollMs, shown])
+  }, [client, pollMs, shown, again])
   return level
 }
 

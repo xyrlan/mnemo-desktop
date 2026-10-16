@@ -292,7 +292,8 @@
   border-right: 3px solid var(--ship-edge);
   background: linear-gradient(90deg, #151c38, #111831);
 }
-.ship-dlabel { position: absolute; top: 4px; left: 8px; margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--ship-pale); }
+.ship-dlabel { position: absolute; top: 4px; right: 8px; left: 8px; display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--ship-pale); }
+.ship-dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Quiet chips start at the y the deck's layout gives them (`quietY`), below the captains: hung from
    the deck's floor, a row more than the layout counted would push them up over the captains. */
 .ship-quiet { position: absolute; right: 6px; left: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
@@ -594,6 +595,43 @@
 .ship-tether [data-tether='relation'] line { stroke: #94a3b8; stroke-dasharray: 2 6; }
 .ship-tether text { fill: #cbd5e1; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; paint-order: stroke; stroke: #000; stroke-width: 3px; }
 
+/* ---------- mnemo's memory (#472): the archive, packets, counts ---------- */
+/* A deck's archive, after its name: the 24 px tower overhangs the name's line (4 px up, 2 px down,
+   to the captains' top) rather than growing it, so the label row is as tall as the name alone. Its
+   own lights do not survive at 1×: five 1-px LEDs over it. The level is the vault's, in the ship's
+   cyan. */
+.ship-scene .ship-archive { position: relative; display: inline-flex; flex: none; align-items: center; gap: 3px; height: 18px; font-size: 10px; letter-spacing: 0.5px; }
+.ship-tower { position: relative; width: 24px; height: 18px; }
+.ship-tower img { position: absolute; top: -4px; left: 0; width: 24px; height: 24px; }
+.ship-tower i { position: absolute; width: 1px; height: 1px; margin-top: -4px; pointer-events: none; }
+.ship-lv { color: #5fe3ff; font-weight: 700; line-height: 1; }
+.ship-archive[data-glow] .ship-tower img { filter: brightness(1.7) drop-shadow(0 0 3px #ab97e4); }
+.ship-archive[data-glow='long'] .ship-tower img { filter: brightness(1.9) drop-shadow(0 0 6px #ab97e4) drop-shadow(0 0 2px #fff); }
+
+/* Packets fly over the whole stage; only they and a packet's card take clicks. A packet is a 26 px
+   square framed in its direction's colour (none is a state colour): out of the archive cyan, into
+   it violet, enforcement's guard white. The outer box flies sideways, the inner one up and down,
+   so together they arc. */
+.ship-memory { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+.ship-scene .ship-pk { position: absolute; top: -13px; left: -13px; width: 26px; height: 26px; pointer-events: auto; translate: var(--x1) 0; }
+.ship-pk[data-dir='out'] { --pk: #5fe3ff; }
+.ship-pk[data-dir='in'] { --pk: #ab97e4; }
+.ship-pk[data-dir='guard'] { --pk: #f7f7fc; }
+.ship-pk-y { position: relative; display: block; width: 26px; height: 26px; translate: 0 var(--y1); }
+.ship-pk-box { display: grid; place-items: center; box-sizing: border-box; width: 26px; height: 26px; border: 2px solid var(--pk); border-radius: 3px; background: #090822; box-shadow: 0 0 6px var(--pk); }
+.ship-pk-ico { display: block; }
+.ship-pk-n { position: absolute; top: -9px; left: 22px; color: #ebe3f9; font-size: 11px; font-weight: 700; text-shadow: 1px 1px 0 #000; white-space: nowrap; }
+.ship-pk-say { position: absolute; translate: -50% 0; color: #5fe3ff; font-size: 10px; font-weight: 700; text-shadow: 1px 1px 0 #000; white-space: nowrap; opacity: 0; }
+.ship-pk-card { position: absolute; z-index: 1; max-width: 280px; padding: 6px 8px; border: 2px solid var(--ship-edge); border-radius: 3px; background: #0b1130; box-shadow: 3px 3px 0 #000; color: var(--ship-ink); font-size: 10.5px; pointer-events: auto; }
+.ship-pk-card b { display: flex; align-items: center; gap: 4px; }
+.ship-pk-card ul { margin: 4px 0 0; padding-left: 14px; }
+.ship-pk-card p { margin: 4px 0 0; color: var(--ship-dim); }
+/* A figure's rules from mnemo, ◈N, in its top-left corner once it has any; hover lists them. */
+.ship-rc { position: absolute; top: 2px; left: -6px; z-index: 3; display: flex; align-items: center; gap: 2px; padding: 0 2px; border-radius: 2px; background: #090822cc; color: #5fe3ff; font-size: 9px; font-weight: 700; line-height: 11px; }
+.ship-console .ship-rc { top: 8px; left: 4px; }
+.ship-scene .ship-docked { position: relative; }
+.ship-docked > .ship-rc { top: 0; left: calc(50% - 38px); display: flex; max-width: none; overflow: visible; line-height: 11px; white-space: nowrap; }
+
 /* ---------- docks ---------- */
 .ship-docks {
   display: flex;
@@ -712,6 +750,16 @@
 .ship-scene:not([data-reduced]) .ship-walk-off .ship-body { animation: ship-walk 0.35s steps(2) infinite; }
 .ship-scene:not([data-reduced]) .ship-tick { animation: ship-new 1.6s ease-out; }
 
+.ship-scene:not([data-reduced]) .ship-tower i { animation: ship-led 1.6s steps(1) infinite; }
+.ship-scene:not([data-reduced]) .ship-pk { animation: ship-pk-x var(--ms) ease-in-out forwards; }
+.ship-scene:not([data-reduced]) .ship-pk-y { animation: ship-pk-y var(--ms) linear forwards; }
+.ship-scene:not([data-reduced]) .ship-pk[data-dir='guard'] .ship-pk-box { animation: ship-pk-blink 0.18s steps(1) infinite; }
+.ship-scene:not([data-reduced]) .ship-pk-say { animation: ship-pk-say 1.5s ease-out forwards; }
+.ship-scene:not([data-reduced]) .ship-robot[data-shake] .ship-figure,
+.ship-scene:not([data-reduced]) .ship-captain[data-shake] .ship-console,
+.ship-scene:not([data-reduced]) .ship-docked[data-shake] img,
+.ship-scene:not([data-reduced]) .ship-chip-captain[data-shake] .ship-window { animation: ship-shake 0.45s ease-out; }
+
 /* Reduced motion: ◈ shows where it flashed, still, for as long as a flash would have taken. */
 .ship-scene[data-reduced] .ship-fx { display: none; }
 .ship-scene[data-reduced] .ship-rule { animation: ship-hold 1.6s steps(1) forwards; }
@@ -743,6 +791,12 @@
 @keyframes ship-walk-off { 0% { translate: 0 0; opacity: 1; } 80% { opacity: 1; } 100% { translate: var(--off) 0; opacity: 0; } }
 @keyframes ship-new { 0% { background: #4338ca88; } 100% { background: transparent; } }
 @keyframes ship-hold { 0% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes ship-led { 50% { opacity: 0.15; } }
+@keyframes ship-pk-x { from { translate: var(--x0) 0; } to { translate: var(--x1) 0; } }
+@keyframes ship-pk-y { 0% { translate: 0 var(--y0); animation-timing-function: ease-out; } 50% { translate: 0 var(--top); animation-timing-function: ease-in; } 100% { translate: 0 var(--y1); } }
+@keyframes ship-pk-blink { 50% { opacity: 0.55; } }
+@keyframes ship-pk-say { 0% { translate: -50% 0; opacity: 0; } 15% { opacity: 1; } 75% { opacity: 1; } 100% { translate: -50% -20px; opacity: 0; } }
+@keyframes ship-shake { 0%, 100% { translate: 0 0; } 20% { translate: -4px 0; } 40% { translate: 3px 0; } 60% { translate: -2px 0; } 80% { translate: 1px 0; } }
 
 /* ---------- the bar's PROJECTS · MISSIONS · SYSTEMS (Nexus is the app) ---------- */
 .ship-nav { display: flex; gap: 6px; margin-left: 8px; }

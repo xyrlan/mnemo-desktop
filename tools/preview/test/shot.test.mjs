@@ -281,6 +281,74 @@ test('nexus-drawer at the narrowest drawer (380 px): two rows, then +N, whose me
   assert.ok(picked.drawn)
 })
 
+/** The deck's label row and the dock pod on main before the archive (b287659, 1440 and 1024 wide):
+ *  the name's line, 18.19 px, and the pod, 106 px. The archive must not make either taller (#472). */
+const MAIN_LABEL_H = 18.1875
+const MAIN_POD_H = 106
+
+/** The archives, the label rows and pods they sit in, what flew, and each figure's count once
+ *  every packet has landed. */
+const memory = async (page) => {
+  const drawn = await page.evaluate(() => ({ flying: document.querySelectorAll('.ship-pk').length, coalesced: [...document.querySelectorAll('.ship-pk-n')].map((e) => e.textContent) }))
+  await page.waitForFunction(() => !document.querySelector('.ship-pk'), null, { timeout: 10_000 })
+  const landed = await page.evaluate(() => {
+    const box = (e) => {
+      const r = e.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }
+    }
+    const archive = (a) => ({
+      where: a.closest('[data-deck]') ? 'deck' : a.closest('[data-dock]') ? 'dock' : 'other',
+      lv: a.querySelector('.ship-lv')?.textContent ?? null,
+      tower: box(a.querySelector('.ship-tower img')),
+      src: a.querySelector('.ship-tower img').getAttribute('src'),
+      leds: a.querySelectorAll('.ship-tower i').length,
+    })
+    return {
+      archives: [...document.querySelectorAll('[data-archive]')].map(archive),
+      labels: [...document.querySelectorAll('.ship-dlabel')].map((l) => ({ ...box(l), name: box(l.querySelector('.ship-dname')), captains: [...l.closest('[data-deck]').querySelectorAll('.ship-captain')].map(box) })),
+      pods: [...document.querySelectorAll('.ship-pod')].map(box),
+      flown: window.__flown,
+      sent: window.__pulses.map((p) => p.kind),
+      rules: Object.fromEntries([...document.querySelectorAll('[data-rules]')].map((e) => [e.closest('[data-ship-id]').getAttribute('data-ship-id').slice(0, 8), +e.getAttribute('data-rules')])),
+    }
+  })
+  return { drawn, ...landed }
+}
+
+for (const size of [
+  { width: 1440, height: 900 },
+  { width: 1024, height: 768 },
+]) {
+  test(`nexus-memory at ${size.width}x${size.height}: the archive on the deck and the dock, every kind's packet flown, the label row no taller than on main (#472)`, async () => {
+    const out = path.join(dir, `nexus-memory-${size.width}.png`)
+    const { pageErrors, inspected: m } = await shoot({ scenario: 'nexus-memory', out, size, log: () => {}, inspect: memory })
+    assert.deepEqual(pageErrors, [])
+    // The tower and the vault's level, on the deck and in the dock pod.
+    assert.deepEqual(m.archives.map((a) => [a.where, a.lv, a.leds, a.tower.height]), [
+      ['deck', 'LV49', 5, 24],
+      ['dock', 'LV49', 5, 24],
+    ])
+    for (const a of m.archives) assert.match(a.src, /archive/)
+    // The guard: the label row as tall as on main, the tower beside the name and above the captains.
+    for (const l of m.labels) {
+      assert.ok(l.height <= MAIN_LABEL_H + 0.01, `the deck label row grew: ${l.height} px`)
+      const tower = m.archives.find((a) => a.where === 'deck').tower
+      assert.ok(tower.left >= l.name.right, 'the tower comes after the name')
+      for (const c of l.captains) assert.ok(tower.bottom <= c.top + 0.5, 'the tower stays above the captains')
+    }
+    for (const p of m.pods) assert.ok(p.height <= MAIN_POD_H + 0.01, `the dock pod grew: ${p.height} px`)
+    // Packets were in the air at the shot, one ×2; every kind that flies flew, learned did not.
+    assert.ok(m.drawn.flying > 0)
+    assert.deepEqual(m.drawn.coalesced, ['×2'])
+    for (const k of ['catchup', 'friction', 'briefing', 'enrich', 'tool', 'enforce', 'reflex']) assert.ok(m.flown.includes(k), `no ${k} packet flew`)
+    assert.ok(!m.flown.includes('learned'))
+    assert.ok(m.sent.includes('learned'))
+    // Landed: the enrichment and both reflexes on #682 (one of them joined), the read on #690·a,
+    // the reflex on the docked captain.
+    assert.deepEqual(m.rules, { d0000001: 3, d0000007: 2, cccccccc: 1 })
+  })
+}
+
 test('an unknown scenario names the ones there are', async () => {
   await assert.rejects(shoot({ scenario: 'nope', out: path.join(dir, 'x.png') }), /no scenario named nope \(have: .*empty-workspace/)
 })
