@@ -6,6 +6,7 @@ import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { loadScenarios } from '../scenario.mjs'
 import { shoot } from '../shot.mjs'
+import { STATE_PROPS } from '../scenarios/nexus-states.mjs'
 
 let dir
 before(async () => {
@@ -185,6 +186,41 @@ for (const [scenario, size] of [
     assert.deepEqual(inspected.out, [])
   })
 }
+
+/** Each robot as drawn (#473): its label, the prop it holds (`data-prop`, and whether its image is
+ *  drawn), any old badge, and any text on the figure besides its tag. */
+const figures = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.ship-robot')].map((r) => {
+      const tag = r.querySelector('.ship-tag')
+      const props = [...r.querySelectorAll('.ship-prop')]
+      const img = r.querySelector('.ship-prop img')
+      return {
+        label: tag.textContent.replace(/^\S+\s/, '').trim(),
+        props: props.map((p) => p.getAttribute('data-prop')),
+        drawn: !!img && img.complete && img.naturalWidth === 24 && img.getBoundingClientRect().width > 0,
+        badge: !!r.querySelector('.ship-ab'),
+        extra: r.querySelector('.ship-figure').textContent.replace(tag.textContent, '').trim(),
+        name: r.querySelector('.ship-figure').getAttribute('aria-label'),
+      }
+    }),
+  )
+
+test('nexus-states: every robot holds its state\'s prop (or none) and wears no badge (#473)', async () => {
+  const out = path.join(dir, 'nexus-states.png')
+  const { pageErrors, inspected } = await shoot({ scenario: 'nexus-states', out, log: () => {}, inspect: figures })
+  assert.deepEqual(pageErrors, [])
+  const drawn = Object.fromEntries(inspected.map((f) => [f.label, f]))
+  assert.deepEqual(Object.keys(drawn).sort(), Object.keys(STATE_PROPS).sort())
+  for (const [label, prop] of Object.entries(STATE_PROPS)) {
+    const f = drawn[label]
+    assert.deepEqual(f.props, prop ? [prop] : [], `${label}: props`)
+    if (prop) assert.ok(f.drawn, `${label}: its ${prop} drawn`)
+    assert.equal(f.badge, false, `${label}: no badge`)
+    assert.equal(f.extra, '', `${label}: no glyph on the figure`)
+    assert.match(f.name, new RegExp(`^${label}, \\w`), `${label}: its name says its state`)
+  }
+})
 
 /** The drawer's header as drawn (#467): its pills (each with its label's box and whether it
  *  overflows it), the `+N` pill, the shown session's line, and any name line inside the panel. */

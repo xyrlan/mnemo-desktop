@@ -16,6 +16,7 @@ import type { MenuTarget } from './ui/menus'
 import { openWindow } from './ui/windows'
 import { ShipAccounts } from './accounts/ShipAccounts'
 import './ship.css'
+import markUrl from '../brand/mark.svg?url'
 
 /** The scroll box's inner width where nothing is laid out (jsdom). */
 const UNMEASURED = 1200
@@ -176,7 +177,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
         }}
       >
         <header className="ship-top">
-          <span className="ship-brand">NEXUS</span>
+          <img className="ship-brand" src={markUrl} alt="mnemo" title="mnemo" width={21} height={28} draggable={false} />
           <span className="ship-chip" data-chip="rate" title={rate.title}>
             {rate.text}
           </span>

@@ -78,7 +78,7 @@ export function firstSentence(text: string, n = 160): string {
 /** `⌘ Bash · pnpm test`. */
 export const toolLine = (a: Pick<Activity, 'tool' | 'target'>) => `${ICON[a.tool] ?? '⚙'} ${a.tool}${a.target ? ` · ${a.target}` : ''}`
 
-/** The action badge for a tool call. */
+/** What a tool call does, as the robot's action. */
 export function actionOf(a: Pick<Activity, 'tool' | 'target'>): ActionKind {
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(a.tool)) return 'edit'
   if (a.tool === 'Bash' || a.tool === 'Monitor') {
