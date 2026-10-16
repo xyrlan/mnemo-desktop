@@ -137,6 +137,8 @@ export function stateOf(f: Figure): { text: string; tone: AgentState } {
       return { text: 'a child needs you', tone: 'needs-you' }
     case 'offline':
       return { text: 'ended', tone: 'idle' }
+    case 'asleep':
+      return { text: 'asleep', tone: 'idle' }
     default:
       return { text: 'idle', tone: 'idle' }
   }

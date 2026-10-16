@@ -68,6 +68,7 @@ export function captain(id: string, over: Partial<Captain> = {}): Captain {
     topic: 'tidy the docs',
     action: 'Bash · pnpm test',
     notices: 0,
+    idleMs: null,
     ...over,
   }
 }

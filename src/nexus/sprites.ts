@@ -33,7 +33,7 @@ export const SPRITES: SpriteManifest = {
   accessories: Array.from({ length: ACCESSORIES }, (_, i) => still(`accessory-${i}`, 64)),
 }
 
-export type CaptainSprite = 'busy' | 'idle' | 'alert' | 'offline'
+export type CaptainSprite = 'busy' | 'idle' | 'asleep' | 'alert' | 'offline'
 
 /** v2's art (set 2, same palette and licence): a parent is a captain robot at its console, 96×96 per
  *  pose; a child with no recorded parent stands by an empty command chair (64); a finished child's
@@ -57,7 +57,13 @@ export type PropKind = 'read' | 'edit' | 'test' | 'ship' | 'run' | 'need' | 'gre
 const PROPS: PropKind[] = ['read', 'edit', 'test', 'ship', 'run', 'need', 'green', 'red']
 
 export const SHIP_SPRITES: ShipSpriteManifest = {
-  captain: { busy: still('captain-busy', 96), idle: still('captain-idle', 96), alert: still('captain-alert', 96), offline: still('captain-offline', 96) },
+  captain: {
+    busy: still('captain-busy', 96),
+    idle: still('captain-idle', 96),
+    asleep: still('captain-asleep', 96),
+    alert: still('captain-alert', 96),
+    offline: still('captain-offline', 96),
+  },
   chair: still('chair', 64),
   shuttle: { docked: still('ship-docked', 64), launch: still('ship-launch', 64, 96) },
   teleport: still('teleport', 64, 96),

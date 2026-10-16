@@ -1,4 +1,4 @@
-import { reposFixture, shipFixture } from './fixtures'
+import { captainOf, reposFixture, shipFixture } from './fixtures'
 import { crumbsOf, deepestWorktree, findFigure, labelOf, OUTSIDE, openingOf, repoOf, stateOf, tokens } from './model'
 
 test('a robot’s breadcrumbs: repo, its captain (opens it), itself with its twin suffix', () => {
@@ -25,6 +25,7 @@ test('the state in words, its colour a state colour', () => {
   expect(stateOf(findFigure(ship, 'r-live')!)).toEqual({ text: 'working', tone: 'working' })
   expect(stateOf(findFigure(ship, 'r-done')!)).toEqual({ text: 'ready', tone: 'done' })
   expect(stateOf(findFigure(ship, 'cap-3')!)).toEqual({ text: 'ended', tone: 'idle' })
+  expect(stateOf({ kind: 'captain', captain: captainOf({ pose: 'asleep', idleMs: 3 * 3_600_000 }), place: null })).toEqual({ text: 'asleep', tone: 'idle' })
 })
 
 test('context sizes read short', () => {

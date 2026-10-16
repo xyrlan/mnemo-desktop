@@ -191,12 +191,13 @@ export function LeaverFigure({ leaver, exit, emblem, off, onGone }: { leaver: Le
   )
 }
 
-const CAPTAIN: Record<Exclude<CaptainPose, 'empty'>, CaptainSprite> = { busy: 'busy', idle: 'idle', alert: 'alert', offline: 'offline' }
+const CAPTAIN: Record<Exclude<CaptainPose, 'empty'>, CaptainSprite> = { busy: 'busy', idle: 'idle', asleep: 'asleep', alert: 'alert', offline: 'offline' }
 
 export const captainSrc = (pose: CaptainPose) => (pose === 'empty' ? SHIP_SPRITES.chair.src : SHIP_SPRITES.captain[CAPTAIN[pose]].src)
 
-/** A parent at its console (busy types, idle crosses its arms, alert stands and points, offline
- *  slumps), or the empty chair. `big`: with its topic and action under it. */
+/** A parent at its console (busy types, idle crosses its arms, asleep lays its head on the console
+ *  under a zZ, alert stands and points, offline slumps), or the empty chair. `big`: with its topic
+ *  and action under it. */
 export function CaptainFigure({
   captain: c,
   pos,
@@ -232,6 +233,7 @@ export function CaptainFigure({
       <span className="ship-floor" aria-hidden />
       <span className="ship-console">
         <img className="ship-px" data-sprite={c.pose === 'empty' ? 'chair' : c.pose} src={captainSrc(c.pose)} alt="" draggable={false} />
+        {c.pose === 'asleep' && <span className="ship-fx" data-fx="zz" aria-hidden />}
         <RuleCount sessionId={sid} />
       </span>
       {c.notices > 0 && (
@@ -255,6 +257,7 @@ export function DockedCaptain({ captain: c, focused, onOpen }: { captain: Captai
   return (
     <button type="button" className="ship-docked" data-ship-id={c.id} data-pose={c.pose} data-focus={on(focused)} data-shake={on(shaking)} title={captainHover(c)} onClick={() => c.parent && onOpen(c.id)}>
       <img className="ship-px" src={captainSrc(c.pose)} alt="" draggable={false} />
+      {c.pose === 'asleep' && <span className="ship-fx" data-fx="zz" aria-hidden />}
       <RuleCount sessionId={sid} />
       <span>
         <span className="ship-em">{c.emblem}</span> {c.name}

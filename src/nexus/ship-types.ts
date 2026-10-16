@@ -114,8 +114,9 @@ export type ShipRobot = {
   injected: string[]
 }
 
-/** `empty`: no recorded parent; drawn as an empty command chair. */
-export type CaptainPose = 'busy' | 'idle' | 'alert' | 'offline' | 'empty'
+/** `asleep`: idle for longer than `CAPTAIN_SLEEP_MS`, a session kept open to come back to.
+ *  `empty`: no recorded parent; drawn as an empty command chair. */
+export type CaptainPose = 'busy' | 'idle' | 'asleep' | 'alert' | 'offline' | 'empty'
 
 export type Captain = {
   /** The parent's session id, or `orphanCaptainId(root)`. */
@@ -133,6 +134,8 @@ export type Captain = {
   action: string | null
   /** Children whose finish notice waits for its next prompt (`notice: 'held'`). */
   notices: number
+  /** Idle or asleep: how long since its last action, if the feed dates it. Null otherwise. */
+  idleMs: number | null
 }
 
 export const orphanCaptainId = (root: string) => `orphan:${root}`

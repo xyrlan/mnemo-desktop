@@ -3,7 +3,7 @@ import { child, parent } from '../mission/fixtures'
 import type { ChildSession, Mission, ParentSession, Pr, RepoGroup, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
 import { explainError } from '../mission/errors'
-import { actionOf, ago, buildShip, ciAt, departuresOf, firstSentence, LINGER_MS, RUNNING_MAX_MS, snapshotExceptions, STRANDED_MS, WORK_GAP_MS } from './ship'
+import { actionOf, ago, buildShip, CAPTAIN_SLEEP_MS, ciAt, departuresOf, firstSentence, LINGER_MS, RUNNING_MAX_MS, snapshotExceptions, STRANDED_MS, WORK_GAP_MS } from './ship'
 import { orphanCaptainId, type AgentView, type CheckRun, type Feed, type PrFate, type SessionFeed, type Ship, type ShipInput, type ShipRobot } from './ship-types'
 
 const NOW = Date.parse('2026-10-15T12:00:00Z')
@@ -321,6 +321,28 @@ describe('buildShip: captains', () => {
     expect(busy.decks[0].captains[0].pose).toBe('busy')
     expect(ship(snap(repo({ parents: [boss({ status: 'busy' })], children: [kid('a1')] }))).decks[0].captains[0].pose).toBe('busy')
     expect(ship(snap(repo({ parents: [boss()], children: [kid('a1')] }))).decks[0].captains[0].pose).toBe('idle')
+  })
+
+  it('sleeps a captain idle for over an hour since its last action, and dates how long', () => {
+    const still = (ago: number, at: 'activity' | 'said' = 'said') =>
+      feedOf({ [P1]: sf(at === 'said' ? { said: { text: 'Done.', at: NOW - ago } } : { activity: { tool: 'Read', target: 'a.ts', at: NOW - ago, running: false } }) })
+    const docked = (over: Partial<ShipInput>) => ship(snap(repo({ parents: [boss()] })), over).docks[0].captains[0]
+    expect([docked({ feed: still(CAPTAIN_SLEEP_MS - SEC) }).pose, docked({ feed: still(CAPTAIN_SLEEP_MS - SEC) }).idleMs]).toEqual(['idle', CAPTAIN_SLEEP_MS - SEC])
+    expect([docked({ feed: still(CAPTAIN_SLEEP_MS + SEC) }).pose, docked({ feed: still(CAPTAIN_SLEEP_MS + SEC) }).idleMs]).toEqual(['asleep', CAPTAIN_SLEEP_MS + SEC])
+    expect(docked({ feed: still(3 * HOUR, 'activity') }).pose).toBe('asleep')
+    // Its newest action wakes it: an old sentence and a fresh tool call.
+    const both = feedOf({ [P1]: sf({ said: { text: 'Done.', at: NOW - 3 * HOUR }, activity: { tool: 'Read', target: 'a.ts', at: NOW - MIN, running: false } }) })
+    expect(docked({ feed: both }).pose).toBe('idle')
+    // No dated action: idle, never asleep for want of a time.
+    expect([docked({}).pose, docked({}).idleMs]).toEqual(['idle', null])
+  })
+
+  it('never sleeps a captain that works or waits on you, however long its last line is', () => {
+    const old = feedOf({ [P1]: sf({ said: { text: 'Done.', at: NOW - 5 * HOUR } }) })
+    const busy = ship(snap(repo({ parents: [boss()] })), { feed: old, agents: { [P1]: working('t') } }).docks[0].captains[0]
+    expect([busy.pose, busy.idleMs]).toEqual(['busy', null])
+    const asks = { [P1]: { state: 'needs-you' as const, waitingFor: 'permission' as const, title: 't' } }
+    expect(ship(snap(repo({ parents: [boss()] })), { feed: old, agents: asks }).docks[0].captains[0].pose).toBe('alert')
   })
 
   it('gives a captain its topic, its action while busy, and its held notices', () => {

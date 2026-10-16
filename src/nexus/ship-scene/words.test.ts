@@ -163,3 +163,8 @@ test("a captain's hover: its whole name, then its latest prompt", () => {
   expect(captainHover(captain('c', { name: 'Subscriber cohort analysis', topic: null }))).toBe('Subscriber cohort analysis')
   expect(captainHover(captain('c', { pose: 'empty' }))).toMatch(/^no parent/)
 })
+
+test("an idle or sleeping captain's hover says how long it has been still", () => {
+  expect(captainHover(captain('c', { name: 'Checkout', topic: 'ship it', pose: 'asleep', idleMs: 5.1 * 3_600_000 }))).toBe('Checkout\n“ship it”\nasleep for 5.1 h')
+  expect(captainHover(captain('c', { name: 'Checkout', topic: null, pose: 'idle', idleMs: 12 * 60_000 }))).toBe('Checkout\nidle for 12 min')
+})

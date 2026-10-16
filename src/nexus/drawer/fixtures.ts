@@ -75,6 +75,7 @@ export const captainOf = (over: Partial<Captain> = {}): Captain => ({
   topic: 'build the drawer',
   action: null,
   notices: 0,
+  idleMs: null,
   ...over,
 })
 

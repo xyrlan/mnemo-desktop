@@ -10,7 +10,7 @@ test('every class, pose and accessory has a sprite, at 64 px', () => {
 })
 
 test('v2: a captain per pose at 96 px, the empty chair, the shuttle docked and launching, the teleport pad', () => {
-  expect(Object.keys(SHIP_SPRITES.captain).sort()).toEqual(['alert', 'busy', 'idle', 'offline'])
+  expect(Object.keys(SHIP_SPRITES.captain).sort()).toEqual(['alert', 'asleep', 'busy', 'idle', 'offline'])
   for (const s of Object.values(SHIP_SPRITES.captain)) expect(s).toMatchObject({ w: 96, h: 96 })
   expect(SHIP_SPRITES.chair).toMatchObject({ w: 64, h: 64 })
   expect(SHIP_SPRITES.shuttle.docked).toMatchObject({ w: 64, h: 64 })

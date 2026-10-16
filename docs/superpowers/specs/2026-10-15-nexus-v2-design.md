@@ -35,6 +35,8 @@ you can be done from it, and the position of every figure says whether it needs 
   - **COMMAND:** the parents. Each parent is a **captain robot at a console** (art set 2):
     - busy: typing, blue screen;
     - idle: arms crossed;
+    - asleep (idle for over an hour, a session kept open to come back to): head down on the
+      console, screen dim, zZ rising;
     - a child needs you: standing, pointing, pink screen;
     - ended: slumped, screen off.
 
@@ -44,8 +46,9 @@ you can be done from it, and the position of every figure says whether it needs 
     the rest fold into a stack (*"7 PRs waiting for merge · 5 green"*). The room glows green while a
     green PR waits.
   - **STRANDED:** children idle for more than 15 minutes with no command running.
-- **Docks (bottom):** repos with no live child, as small pods of idle captains. They are dimmed until
-  hovered.
+- **Docks (bottom):** repos with no live child, as small pods of captains. They are drawn at full
+  strength: small work runs in a parent alone, so a dock is often where the work is. A captain
+  kept open for later says so itself, asleep.
 - **mnemo's memory is visible.** When mnemo injects a rule into a session (the pulse names the
   session and the slug), its figure flashes ◈. The log records *"◈ #682 got
   `merge-requires-admin`"*, and the hover lists every rule the session got. Without this the view
