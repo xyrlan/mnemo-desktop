@@ -9,6 +9,10 @@ import { closeWindow, registerWindow, windowStore } from '../ui/windows'
 import { repoChoice } from '../windows/memory/repo'
 import { captain, deck, dock, ROOT, robot, ship } from './fixtures'
 import { LEDS } from './packets'
+import type { Progress } from '../../vaultlevel/level'
+
+/** Project levels by name, as `useProjectLevels` gives them. */
+const levels = (by: Record<string, number>) => new Map<string, Progress>(Object.entries(by).map(([name, level]) => [name, { level, into: 0, fraction: 0 }]))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -41,7 +45,7 @@ function draw(over: Partial<ShipSceneProps> = {}) {
     reducedMotion: false,
     visible: true,
     pulses,
-    level: { level: 7, into: 40, fraction: 0.4 },
+    levels: new Map([['mnemo-desktop', { level: 7, into: 40, fraction: 0.4 }], ['mnemo', { level: 3, into: 10, fraction: 0.1 }]]),
     ...over,
   }
   return act(async () => {
@@ -81,7 +85,7 @@ const landed = (el: Element) =>
     el.dispatchEvent(e)
   })
 
-test('each deck and each dock pod shows its archive: the tower at 1×, its five LEDs, then the vault’s LV', async () => {
+test('each deck and each dock pod shows its archive: the tower at 1×, its five LEDs, then its own project’s LV', async () => {
   await draw()
   const onDeck = $(`[data-deck="${ROOT}"] .ship-dlabel [data-archive]`)!
   const onDock = $('[data-dock="/home/dev/mnemo"] [data-archive]')!
@@ -90,13 +94,24 @@ test('each deck and each dock pod shows its archive: the tower at 1×, its five 
     expect(img.getAttribute('src')).toBe(SHIP_SPRITES.archive.src)
     expect(img.classList.contains('ship-px')).toBe(true)
     expect([...a.querySelectorAll<HTMLElement>('.ship-tower i')].map((i) => [i.style.left, i.style.top])).toEqual(LEDS.map(([x, y]) => [`${x}px`, `${y}px`]))
-    expect(a.querySelector('.ship-lv')!.textContent).toBe('LV7')
   }
+  // Each its own project's level, not the vault's (#478).
+  expect(onDeck.querySelector('.ship-lv')!.textContent).toBe('LV7')
+  expect(onDock.querySelector('.ship-lv')!.textContent).toBe('LV3')
+  expect(onDeck.title).toContain('its level 7, 40/100 xp to 8')
   // The name comes first, the tower right after it.
   expect($('.ship-dlabel')!.firstElementChild!.textContent).toBe('mnemo-desktop')
-  await draw({ level: null })
+  await draw({ levels: null })
   expect($$('.ship-lv')).toEqual([])
   expect($$('[data-archive]')).toHaveLength(2)
+  await draw({ levels: 'none' })
+  expect($$('.ship-lv')).toEqual([])
+})
+
+test('a deck whose project has no pages and no fires shows LV0, not another project’s level', async () => {
+  await draw({ levels: levels({ 'mnemo-desktop': 12 }) })
+  expect($(`[data-deck="${ROOT}"] .ship-lv`)!.textContent).toBe('LV12')
+  expect($('[data-dock="/home/dev/mnemo"] .ship-lv')!.textContent).toBe('LV0')
 })
 
 test('a click on the tower opens the Memory window on that repo', async () => {
@@ -232,11 +247,17 @@ test('a click on a packet in flight opens its card: its kind and its rules; Esc 
   expect($('[data-packet-card]')).toBeNull()
 })
 
-test('the LV flashes when the level goes up, not when it is first read', async () => {
-  await draw({ level: null })
-  await draw({ level: { level: 7, into: 0, fraction: 0 } })
-  expect($('.ship-lv')!.classList.contains('ship-tick')).toBe(false)
-  await draw({ level: { level: 8, into: 0, fraction: 0 } })
-  expect($('.ship-lv')!.classList.contains('ship-tick')).toBe(true)
-  expect($('.ship-lv')!.textContent).toBe('LV8')
+test('the LV flashes when its project’s level goes up, not when it is first read, and only on that deck', async () => {
+  const deckLv = () => $(`[data-deck="${ROOT}"] .ship-lv`)!
+  const dockLv = () => $('[data-dock="/home/dev/mnemo"] .ship-lv')!
+  await draw({ levels: null })
+  await draw({ levels: levels({ 'mnemo-desktop': 7, mnemo: 3 }) })
+  expect(deckLv().classList.contains('ship-tick')).toBe(false)
+  expect(dockLv().classList.contains('ship-tick')).toBe(false)
+  // mnemo learned a rule: its level ticks, mnemo-desktop's does not.
+  await draw({ levels: levels({ 'mnemo-desktop': 7, mnemo: 4 }) })
+  expect(dockLv().classList.contains('ship-tick')).toBe(true)
+  expect(dockLv().textContent).toBe('LV4')
+  expect(deckLv().classList.contains('ship-tick')).toBe(false)
+  expect(deckLv().textContent).toBe('LV7')
 })

@@ -36,6 +36,38 @@ export function useVaultLevel(client: LevelClient = liveClient, pollMs = LEVEL_P
   return level
 }
 
+/** Each project's level by name, best xp ever recorded per project; a project not in it is LV0. */
+export type ProjectProgress = ReadonlyMap<string, Progress>
+
+/** Every project's level (issue #478), what each deck's `LV` reads: one read for all of them, as
+ *  often as `useVaultLevel` and not while hidden. Each reads its project's best xp, so it never
+ *  falls. Null until the first read; `'none'` when the vault cannot be read. A new `again` reads
+ *  them at once. */
+export function useProjectLevels(client: LevelClient = liveClient, pollMs = LEVEL_POLL_MS, shown?: Shown, again?: unknown): ProjectProgress | 'none' | null {
+  const [levels, setLevels] = useState<ProjectProgress | 'none' | null>(null)
+  useEffect(() => {
+    let live = true
+    const tick = async () => {
+      try {
+        const v = await client.projects()
+        if (!live) return
+        if (!v || v.error) return setLevels('none')
+        const xp = Object.fromEntries(Object.entries(v.projects).map(([name, p]) => [name, xpOf(p)]))
+        const best = await client.projectsBest(xp)
+        if (live) setLevels(new Map(Object.entries(best).map(([name, b]) => [name, levelOf(b)])))
+      } catch (e) {
+        console.warn('memory: project levels not read', e)
+      }
+    }
+    const stop = pollWhileShown(tick, pollMs, { shown })
+    return () => {
+      live = false
+      stop()
+    }
+  }, [client, pollMs, shown, again])
+  return levels
+}
+
 /** `lv 3` in the window's head, how far into the next level on hover; `no vault` when there is
  *  none to read. Nothing before the first read. */
 export function VaultLevel({ client }: { client?: LevelClient }): JSX.Element | null {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type JSX, type RefObject } from 'react'
 import type { Pulse } from '../../pulse/store'
 import type { Progress } from '../../vaultlevel/level'
-import { XP_PER_LEVEL } from '../../vaultlevel/level'
+import { levelOf, XP_PER_LEVEL } from '../../vaultlevel/level'
 import { SHIP_SPRITES } from '../sprites'
 import { openWindow } from '../ui/windows'
 import { chooseRepo } from '../windows/memory/repo'
@@ -30,7 +30,14 @@ import {
  *  counts change and the tower glows. */
 
 export type Glow = 'short' | 'long'
-export type Level = Progress | 'none' | null
+/** Each project's level by name (issue #478): null until read, `'none'` with no vault. */
+export type Levels = ReadonlyMap<string, Progress> | 'none' | null
+
+/** Project `name`'s level: LV0 when its project has no pages and no fires on record. */
+export function levelFor(levels: Levels, name: string): Progress | null {
+  if (!levels || levels === 'none') return null
+  return levels.get(name) ?? levelOf(0)
+}
 
 /** What the figures and the archives read from the scene's memory. */
 export type MemoryCtx = {
@@ -38,7 +45,7 @@ export type MemoryCtx = {
   rules(sessionId: string | null): string[]
   shaking(sessionId: string | null): boolean
   glow(root: string): Glow | undefined
-  level: Level
+  levels: Levels
 }
 
 type Point = { x: number; y: number }
@@ -90,14 +97,14 @@ export function useMemory({
   stage,
   reducedMotion,
   visible,
-  level,
+  levels,
 }: {
   pulses: readonly Pulse[]
   sessions: readonly Session[]
   stage: RefObject<HTMLElement | null>
   reducedMotion: boolean
   visible: boolean
-  level: Level
+  levels: Levels
 }): { memory: MemoryCtx; layer: LayerProps } {
   const [flying, setFlying] = useState<Flight[]>([])
   const flyingRef = useRef<Flight[]>([])
@@ -249,7 +256,7 @@ export function useMemory({
     rules: (sid) => (sid ? (got.get(sid) ?? []) : []),
     shaking: (sid) => !!sid && shaken.has(sid),
     glow: (root) => glows[root],
-    level,
+    levels,
   }
   return { memory, layer: { flying, floats, card, onLeg: legEnded, onCard: setCard } }
 }
@@ -379,19 +386,20 @@ export function RuleCount({ sessionId }: { sessionId: string | null }): JSX.Elem
   )
 }
 
-/** A deck's or a dock's archive: its repo's memory, the 24×24 tower with its LEDs, then the vault's
- *  level. Click or Enter opens the Memory window on that repo. */
+/** A deck's or a dock's archive: its repo's memory, the 24×24 tower with its LEDs, then its
+ *  project's level (#478; the project is the repo's name, as the logs and the pulses name it).
+ *  Click or Enter opens the Memory window on that repo. */
 export function Archive({ root, name }: { root: string; name: string }): JSX.Element {
   const { memory } = useScene()
-  const level = memory.level
-  const n = level && level !== 'none' ? level.level : null
+  const level = levelFor(memory.levels, name)
+  const n = level ? level.level : null
   // The level ticks (its LV flashes) when it goes up, not when it is first read.
   const was = useRef<number | null>(n)
   const up = n !== null && was.current !== null && n > was.current
   useEffect(() => {
     if (n !== null) was.current = n
   }, [n])
-  const title = level && level !== 'none' ? `${name}'s memory · the vault's level ${level.level}, ${level.into}/${XP_PER_LEVEL} xp to ${level.level + 1} · open Memory` : `${name}'s memory · open Memory`
+  const title = level ? `${name}'s memory · its level ${level.level}, ${level.into}/${XP_PER_LEVEL} xp to ${level.level + 1} · open Memory` : `${name}'s memory · open Memory`
   return (
     <button
       type="button"

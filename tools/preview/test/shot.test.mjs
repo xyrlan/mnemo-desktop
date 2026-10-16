@@ -359,10 +359,10 @@ for (const size of [
     const out = path.join(dir, `nexus-memory-${size.width}.png`)
     const { pageErrors, inspected: m } = await shoot({ scenario: 'nexus-memory', out, size, log: () => {}, inspect: memory })
     assert.deepEqual(pageErrors, [])
-    // The tower and the vault's level, on the deck and in the dock pod.
+    // The tower and its own project's level (#478), on the deck and in the dock pod.
     assert.deepEqual(m.archives.map((a) => [a.where, a.lv, a.leds, a.tower.height]), [
-      ['deck', 'LV49', 5, 24],
-      ['dock', 'LV49', 5, 24],
+      ['deck', 'LV7', 5, 24],
+      ['dock', 'LV2', 5, 24],
     ])
     for (const a of m.archives) assert.match(a.src, /archive/)
     // The guard: the label row as tall as on main, the tower beside the name and above the captains.
@@ -384,6 +384,28 @@ for (const size of [
     assert.deepEqual(m.rules, { d0000001: 3, d0000007: 2, cccccccc: 1 })
   })
 }
+
+test('nexus-levels: each deck shows its own project\'s level, a project with nothing on record LV0 (#478)', async () => {
+  const out = path.join(dir, 'nexus-levels-1440.png')
+  const { pageErrors, inspected } = await shoot({
+    scenario: 'nexus-levels',
+    out,
+    size: { width: 1440, height: 900 },
+    log: () => {},
+    inspect: async (page) => {
+      await page.waitForFunction(() => document.querySelectorAll('.ship-lv').length === 3, null, { timeout: 10_000 })
+      return page.evaluate(() =>
+        [...document.querySelectorAll('[data-archive]')].map((a) => [a.closest('[data-deck]') ? 'deck' : 'dock', a.getAttribute('data-archive-name'), a.querySelector('.ship-lv').textContent]),
+      )
+    },
+  })
+  assert.deepEqual(pageErrors, [])
+  assert.deepEqual(inspected, [
+    ['deck', 'mnemo', 'LV2'],
+    ['deck', 'mnemo-desktop', 'LV7'],
+    ['dock', 'site', 'LV0'],
+  ])
+})
 
 test('an unknown scenario names the ones there are', async () => {
   await assert.rejects(shoot({ scenario: 'nope', out: path.join(dir, 'x.png') }), /no scenario named nope \(have: .*empty-workspace/)
