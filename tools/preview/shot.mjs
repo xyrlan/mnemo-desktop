@@ -155,6 +155,11 @@ export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs
     await page.waitForFunction(() => window.__previewEventsDone === true)
     await page.evaluate(() => document.fonts.ready)
     await page.waitForLoadState('networkidle')
+    // What a user did before the shot (a key, a click), once the app is up.
+    if (setup.drive) {
+      await page.waitForTimeout(settleMs)
+      await setup.drive(page)
+    }
     await page.waitForTimeout(settleMs)
 
     await mkdir(path.dirname(path.resolve(out)), { recursive: true })

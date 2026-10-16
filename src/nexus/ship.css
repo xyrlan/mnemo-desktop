@@ -154,11 +154,27 @@
 .ship-lights i:nth-child(2) { background: #0ea5e9; }
 .ship-lights i:nth-child(3) { background: #22c55e; }
 .ship-bridge[data-tone='red'] .ship-lights i { background: var(--ship-rose); }
-/* The prompt sits right under the label, the exceptions under it; blocked robots stand at the
-   bottom right however tall their questions make the bridge. */
+/* Nothing waits: the bridge is its head alone, one line, and the board gains the room. */
+.ship-bridge[data-quiet] { padding-top: 6px; padding-bottom: 6px; }
+.ship-bridge[data-quiet] .ship-bridge-head { margin-bottom: 0; }
+/* What opens the command line, as `/` does: small, so it takes no room of its own. */
+.ship-scene .ship-line-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid var(--ship-edge);
+  border-radius: 2px;
+  color: var(--ship-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ship-scene .ship-line-hint:hover { border-color: var(--ship-lilac); color: var(--ship-pale); }
+.ship-line-hint kbd { padding: 0 3px; border: 1px solid #4b5563; border-radius: 2px; background: #000; color: var(--ship-pale); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* The exceptions right under the head; blocked robots stand at the bottom right however tall
+   their questions make the bridge. */
 .ship-bridge-body { display: flex; align-items: flex-end; gap: 24px; }
 .ship-bridge-main { flex: 1 1 auto; align-self: flex-start; min-width: 0; }
-.ship-exceptions { margin-top: 8px; }
 .ship-xhead {
   display: flex;
   align-items: center;

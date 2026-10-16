@@ -42,7 +42,7 @@ vi.mock('./drawer/app', async () => {
   }
 })
 // What each build and each log call was given, and the scene's props.
-const seen = vi.hoisted(() => ({ feeds: [] as unknown[], logged: 0, scene: null as unknown, ship: null as null | (() => unknown) }))
+const seen = vi.hoisted(() => ({ feeds: [] as unknown[], logged: 0, scene: null as unknown, ship: null as null | (() => unknown), ran: [] as unknown[] }))
 vi.mock('./ship', async (importOriginal) => {
   const { shipFixture } = await import('./drawer/fixtures')
   return {
@@ -66,7 +66,7 @@ vi.mock('./ShipScene', async (importOriginal) => {
 })
 vi.mock('./command/actions', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  runAction: async () => ({ ok: false, say: 'merge refused: checks are red', log: [] }),
+  runAction: async (a: unknown) => (seen.ran.push(a), { ok: false, say: 'merge refused: checks are red', log: [] }),
 }))
 vi.mock('@/ui', async (importOriginal) => ({ ...(await importOriginal<object>()), toast: { error: vi.fn() } }))
 vi.mock('../fleet/store', async () => {
@@ -105,6 +105,7 @@ afterEach(async () => {
   seen.ship = null
   seen.feeds.length = 0
   seen.logged = 0
+  seen.ran.length = 0
   document.body.innerHTML = ''
 })
 const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
@@ -321,6 +322,92 @@ const blockedShip = (): Ship => {
   return { ...s, bridge: { exceptions: [{ kind: 'need', robotId: r.id, need: r.need }], blocked: [r] }, counts: { ...s.counts, need: 1 } }
 }
 
+// ---------- #469: the fleet's command line ----------
+
+const line = () => document.querySelector<HTMLInputElement>('[data-fleet-prompt] input')
+async function order(text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(line(), text)
+    line()!.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => line()!.form!.requestSubmit())
+}
+
+test('the bridge holds no input while the line is closed; `/` opens the line with / typed, Esc closes it', async () => {
+  await mount()
+  expect(line()).toBeNull()
+  expect(document.querySelector('.ship-bridge input')).toBeNull()
+  press({ key: '/' })
+  expect(line()).not.toBeNull()
+  expect(document.activeElement).toBe(line())
+  expect(line()!.value).toBe('/')
+  expect(document.querySelector('.ship-bridge')!.contains(line())).toBe(false)
+  expect(document.querySelectorAll('[data-fleet-verbs] [role="option"]').length).toBeGreaterThan(0)
+  press({ key: 'Escape' }, line()!)
+  expect(line()).toBeNull()
+  // The bridge's `/ commands` opens it too; a click outside it closes it.
+  await act(async () => document.querySelector<HTMLButtonElement>('.ship-line-hint')!.click())
+  expect(line()).not.toBeNull()
+  act(() => void document.querySelector('[data-ship-scene]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+  expect(line()).toBeNull()
+})
+
+test('a typed order runs through the parser and the ship’s runner: /msg all waits for /yes', async () => {
+  await mount()
+  press({ key: '/' })
+  await order('/msg all rebase on main')
+  expect(seen.ran).toEqual([])
+  expect(document.querySelector('[data-fleet-out]')!.textContent).toMatch(/^message \d+ child(ren)?: .* — type \/yes within 20 s to confirm$/)
+  await order('/yes')
+  expect(seen.ran).toHaveLength(1)
+  expect(seen.ran[0]).toMatchObject({ kind: 'message', text: 'rebase on main' })
+  expect((seen.ran[0] as { ids: string[] }).ids).toContain('r-live')
+  // What the runner said, under the line.
+  expect(document.querySelector('[data-fleet-out]')!.textContent).toBe('merge refused: checks are red')
+})
+
+test('the line’s keys are its own: Esc in it neither drops the selection nor collapses the drawer, Tab does not triage', async () => {
+  seen.ship = blockedShip
+  await mount()
+  await withDrawer()
+  await act(async () => nexusStore.getState().toggleSelect('r-live'))
+  press({ key: '/' })
+  press({ key: 'Tab' }, line()!)
+  expect(nexusStore.getState().triage).toBe(false)
+  press({ key: 'Escape' }, line()!)
+  expect(line()).toBeNull()
+  expect(nexusStore.getState().selection.size).toBe(1)
+  expect(nexusStore.getState().collapsed).toBe(false)
+  await act(async () => nexusStore.getState().clearSelection())
+})
+
+test('`/` does not open the line while a terminal, an input or a window has the focus', async () => {
+  await mount()
+  await withDrawer()
+  press({ key: '/' }, document.querySelector('[data-stub-terminal] textarea')!)
+  expect(line()).toBeNull()
+  const field = document.body.appendChild(document.createElement('input'))
+  press({ key: '/' }, field)
+  expect(line()).toBeNull()
+  field.remove()
+  const go = await openTestWindow()
+  go.focus()
+  press({ key: '/' }, go)
+  expect(line()).toBeNull()
+  act(() => closeWindow())
+  press({ key: '/' })
+  expect(line()).not.toBeNull()
+})
+
+test('Triage takes the line’s place', async () => {
+  seen.ship = blockedShip
+  await mount()
+  press({ key: '/' })
+  expect(line()).not.toBeNull()
+  await act(async () => nexusStore.getState().setTriage(true))
+  expect(line()).toBeNull()
+})
+
 test('with a window or a confirmation open, Tab, `/` and ⌥1–9 are not the ship’s', async () => {
   mac()
   seen.ship = blockedShip
@@ -331,6 +418,7 @@ test('with a window or a confirmation open, Tab, `/` and ⌥1–9 are not the sh
   expect(nexusStore.getState().triage).toBe(false)
   press({ key: '/' }, go)
   expect(document.activeElement).toBe(go)
+  expect(line()).toBeNull()
   press({ key: '1', code: 'Digit1', altKey: true }, go)
   expect(nexusStore.getState().tabs).toEqual([])
   act(() => closeWindow())

@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
 /** @typedef {{ event: string; payload: unknown; afterMs?: number }} ScenarioEvent */
-/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[]; storage?: Record<string, string> }} ScenarioSetup */
+/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[]; storage?: Record<string, string>; drive?: (page: import('playwright').Page) => Promise<void> }} ScenarioSetup */
 
 /** @type {Map<string, ScenarioSetup>} */
 const registry = new Map()
@@ -37,8 +37,9 @@ export function scenario(name, setup) {
   for (const [k, v] of Object.entries(setup.storage ?? {})) {
     if (typeof v !== 'string') throw new Error(`scenario ${name}: storage values are strings, as localStorage keeps them (${k})`)
   }
+  if (setup.drive !== undefined && typeof setup.drive !== 'function') throw new Error(`scenario ${name}: drive must be a function of the page`)
   if (registry.has(name)) throw new Error(`scenario ${name} is registered twice`)
-  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [], storage: setup.storage ?? {} })
+  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [], storage: setup.storage ?? {}, drive: setup.drive })
 }
 
 /** @returns {ScenarioSetup | undefined} */

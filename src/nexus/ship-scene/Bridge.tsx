@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import type { Captain, Ship, ShipAction, ShipRobot } from '../ship-types'
 import { isFocused, useScene } from './context'
 import { RobotFigure, Tag } from './figures'
@@ -67,19 +67,21 @@ const CONFIRM: Record<ShipAction['kind'], (a: ShipAction) => string> = {
   open: () => 'confirm?',
 }
 
-/** The bridge: you. The exceptions, each with what settles it; the fleet prompt; and every blocked
- *  child, climbed up here with its question and an inline answer. Red for a question or a red CI,
- *  lilac when only a merge waits, calm when nothing does. */
-export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
+/** The bridge: you. Only what waits for you: the exceptions, each with what settles it, and every
+ *  blocked child, climbed up here with its question and an inline answer. Red for a question or a
+ *  red CI, lilac when only a merge waits, calm when nothing does; with nothing at all, one line,
+ *  and the board below gains the room. Its head's `/ commands` opens the command line, as `/` does. */
+export function Bridge({ ship }: { ship: Ship }) {
   const s = useScene()
   const rows = useRows(ship)
   const ready = ship.bridge.exceptions.flatMap((x) => (x.kind === 'ready' ? [x.robotId] : []))
   const blocked = ship.bridge.blocked
   const mac = altDigits()
   const captains = new Map([...ship.decks.flatMap((d) => [...d.captains, ...d.quiet]), ...ship.docks.flatMap((d) => d.captains)].map((c) => [c.id, c]))
+  const quiet = rows.length === 0 && blocked.length === 0
 
   return (
-    <section className="ship-bridge" data-tone={toneOf(ship)} aria-label="bridge">
+    <section className="ship-bridge" data-tone={toneOf(ship)} data-quiet={quiet ? '' : undefined} aria-label="bridge">
       <header className="ship-bridge-head">
         <span className="ship-blabel">BRIDGE · exceptions</span>
         <span className="ship-bstatus">{bridgeStatus(ship)}</span>
@@ -88,49 +90,53 @@ export function Bridge({ ship, prompt }: { ship: Ship; prompt: ReactNode }) {
             attend · Tab
           </button>
         )}
+        <button type="button" className="ship-line-hint" title="Orders for the whole fleet: / anywhere on the ship" onClick={s.onCommand}>
+          <kbd>/</kbd> commands
+        </button>
         <span className="ship-lights" aria-hidden>
           <i />
           <i />
           <i />
         </span>
       </header>
-      <div className="ship-bridge-body">
-        <div className="ship-bridge-main">
-          <div className="ship-prompt-slot">{prompt}</div>
-          {rows.length > 0 && (
-            <div className="ship-exceptions">
-              <div className="ship-xhead">
-                <span>EXCEPTIONS</span> <small>— everything else flies itself</small>
-                {ready.length > 1 && (
-                  <Armed go x="merge-all" label={`✈ merge all green (${ready.length})`} confirm={`confirm merge of ${ready.length}?`} action={() => ({ kind: 'merge', robotIds: ready })} />
-                )}
+      {!quiet && (
+        <div className="ship-bridge-body">
+          <div className="ship-bridge-main">
+            {rows.length > 0 && (
+              <div className="ship-exceptions">
+                <div className="ship-xhead">
+                  <span>EXCEPTIONS</span> <small>— everything else flies itself</small>
+                  {ready.length > 1 && (
+                    <Armed go x="merge-all" label={`✈ merge all green (${ready.length})`} confirm={`confirm merge of ${ready.length}?`} action={() => ({ kind: 'merge', robotIds: ready })} />
+                  )}
+                </div>
+                {rows.slice(0, ROWS).map((row, k) => (
+                  <ExceptionRow
+                    key={row.key}
+                    row={row}
+                    n={mac && (row.robotId || row.captainId) ? k + 1 : null}
+                    robot={row.robotId ? s.robots.get(row.robotId) : undefined}
+                    captain={row.captainId ? captains.get(row.captainId) : undefined}
+                  />
+                ))}
+                {rows.length > ROWS && <div className="ship-xmore">+{rows.length - ROWS} exceptions</div>}
               </div>
-              {rows.slice(0, ROWS).map((row, k) => (
-                <ExceptionRow
-                  key={row.key}
-                  row={row}
-                  n={mac && (row.robotId || row.captainId) ? k + 1 : null}
-                  robot={row.robotId ? s.robots.get(row.robotId) : undefined}
-                  captain={row.captainId ? captains.get(row.captainId) : undefined}
-                />
+            )}
+          </div>
+          {blocked.length > 0 && (
+            <div className="ship-blocked">
+              {blocked.slice(0, BLOCKED).map((r) => (
+                <Blocked key={r.id} robot={r} />
               ))}
-              {rows.length > ROWS && <div className="ship-xmore">+{rows.length - ROWS} exceptions</div>}
+              {blocked.length > BLOCKED && (
+                <button type="button" className="ship-more-blocked" onClick={s.onTriage}>
+                  +{blocked.length - BLOCKED} blocked · triage
+                </button>
+              )}
             </div>
           )}
         </div>
-        {blocked.length > 0 && (
-          <div className="ship-blocked">
-            {blocked.slice(0, BLOCKED).map((r) => (
-              <Blocked key={r.id} robot={r} />
-            ))}
-            {blocked.length > BLOCKED && (
-              <button type="button" className="ship-more-blocked" onClick={s.onTriage}>
-                +{blocked.length - BLOCKED} blocked · triage
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      )}
     </section>
   )
 }

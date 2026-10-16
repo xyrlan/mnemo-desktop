@@ -1,0 +1,56 @@
+/* The fleet's command line (`FleetPrompt.tsx`): small, over the bridge's top edge, under the top
+   bar; it stays there however far the ship is scrolled. Its own class names: the scene's unlayered
+   rules would beat utilities. */
+.ship-line {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  z-index: 20;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(560px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 6px;
+  border: 2px solid var(--ship-lilac);
+  border-radius: 4px;
+  background: #0b0d22f2;
+  box-shadow: 0 0 0 3px #0b0d22, 0 10px 30px #000a, 0 0 18px #6366f155;
+  font-size: 12px;
+}
+.ship-line-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
+.ship-line-mark { font-weight: 700; color: var(--ship-lilac); }
+.ship-line-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+}
+.ship-line-row input::placeholder { color: #a5b4fc80; }
+.ship-line kbd {
+  padding: 0 4px;
+  border: 1px solid #4b5563;
+  border-radius: 2px;
+  background: #000;
+  color: var(--ship-dim);
+  font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ship-line-verbs { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--ship-edge-dim); padding-top: 4px; }
+.ship-line-verbs li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 6px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+.ship-line-verbs li[aria-selected='true'] { border-left-color: var(--ship-lilac); background: #18213f; }
+.ship-line-verbs code { flex: none; color: var(--ship-pale); font: inherit; white-space: nowrap; }
+.ship-line-verbs span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ship-dim); font-size: 11px; }
+.ship-line-out { padding: 2px 6px; font-size: 11px; color: #86efac; overflow-wrap: anywhere; }
+.ship-line-out[data-err] { color: #fda4af; }
+.ship-line-out:empty { display: none; }

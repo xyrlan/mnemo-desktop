@@ -74,6 +74,85 @@ test('terminal-pane: a saved workspace’s pane comes back as a drawer session, 
   assert.deepEqual(await pngSize(out), { width: 1440, height: 900 })
 })
 
+/** The bridge and the fleet's command line as drawn (#469). */
+const bridge = (page) =>
+  page.evaluate(() => {
+    const box = (e) => {
+      if (!e) return null
+      const r = e.getBoundingClientRect()
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height }
+    }
+    const b = document.querySelector('.ship-bridge')
+    const line = document.querySelector('[data-fleet-prompt]')
+    const input = line?.querySelector('input')
+    const lb = box(line)
+    const hit = lb && document.elementFromPoint((lb.left + lb.right) / 2, lb.top + 12)
+    return {
+      bridge: box(b),
+      quiet: b.hasAttribute('data-quiet'),
+      // A blocked child's own answer is not the prompt.
+      inputs: [...b.querySelectorAll('input')].filter((i) => !i.closest('.ship-blocked')).length,
+      hint: b.querySelector('.ship-line-hint')?.textContent ?? null,
+      line: lb,
+      focused: !!input && document.activeElement === input,
+      typed: input?.value ?? null,
+      verbs: [...document.querySelectorAll('[data-fleet-verbs] [role="option"] code')].map((c) => c.textContent),
+      onTop: !!hit && !!line?.contains(hit),
+      // The deck's COMMAND column (`.ship-cmd`), and the deck it stands in.
+      column: box(document.querySelector('[data-deck] .ship-cmd')),
+      deck: box(document.querySelector('[data-deck]')),
+    }
+  })
+
+test('nexus: the bridge holds no input, only what waits and the `/ commands` hint (#469)', async () => {
+  const { pageErrors, inspected: b } = await shoot({ scenario: 'nexus', out: path.join(dir, 'nexus-bridge.png'), log: () => {}, inspect: bridge })
+  assert.deepEqual(pageErrors, [])
+  assert.equal(b.inputs, 0)
+  assert.equal(b.line, null)
+  assert.equal(b.quiet, false)
+  assert.equal(b.hint, '/ commands')
+})
+
+test('empty-workspace: with nothing waiting the bridge is one line (#469)', async () => {
+  const { pageErrors, inspected: b } = await shoot({ scenario: 'empty-workspace', out: path.join(dir, 'empty-bridge.png'), size: { width: 1024, height: 640 }, log: () => {}, inspect: bridge })
+  assert.deepEqual(pageErrors, [])
+  assert.equal(b.quiet, true)
+  assert.equal(b.inputs, 0)
+  assert.ok(b.bridge.height <= 40, `the quiet bridge is ${b.bridge.height} px tall`)
+})
+
+test('nexus-command: `/` opens the command line over the bridge’s top edge, focused, every verb suggested (#469)', async () => {
+  const out = path.join(dir, 'nexus-command.png')
+  const typing = async (page) => {
+    const value = () => page.$eval('[data-fleet-prompt] input', (i) => i.value)
+    await page.keyboard.press('Escape')
+    // Typed straight after `/`, with no wait: it lands after the `/` the line opens with.
+    await page.keyboard.press('/')
+    await page.keyboard.type('me')
+    const typed = await value()
+    await page.keyboard.press('Tab')
+    const tab = await value()
+    await page.keyboard.press('Enter')
+    const out = await page.$eval('[data-fleet-out]', (o) => o.textContent)
+    await page.keyboard.press('Escape')
+    return { typed, tab, out, closed: !(await page.$('[data-fleet-prompt]')) }
+  }
+  const { pageErrors, inspected } = await shoot({ scenario: 'nexus-command', out, log: () => {}, inspect: async (page) => ({ b: await bridge(page), keys: await typing(page) }) })
+  const { b, keys } = inspected
+  assert.deepEqual(pageErrors, [])
+  assert.deepEqual(keys, { typed: '/me', tab: '/merge green', out: 'merge 1 green PR: #684 — type /yes within 20 s to confirm', closed: true })
+  assert.ok(b.line, 'the line is open')
+  assert.equal(b.focused, true)
+  assert.equal(b.typed, '/')
+  assert.deepEqual(b.verbs, ['/msg all <text>', '/msg <#issue | captain> <text>', '/dispatch <repo> #<issue>', '/new <repo>', '/merge green', '/stop all', '/land <feature>'])
+  assert.ok(b.line.top < b.bridge.top && b.bridge.top < b.line.bottom, `the line (${b.line.top}–${b.line.bottom}) floats over the bridge's top edge (${b.bridge.top})`)
+  assert.equal(b.onTop, true, 'nothing is drawn over the line')
+  assert.equal(b.inputs, 0, 'the line is not inside the bridge')
+  // The line's styles are its own: the deck's COMMAND column still stands in its deck.
+  assert.ok(b.column.left >= b.deck.left - 0.5 && b.column.top >= b.deck.top - 0.5, 'the COMMAND column is inside its deck')
+  assert.deepEqual(await pngSize(out), { width: 1440, height: 900 })
+})
+
 /** Every quiet captain's chip that covers a captain's sprite or name, or a docked captain (#465):
  *  `[chip, figure]` pairs, by name. */
 const overlaps = (page) =>

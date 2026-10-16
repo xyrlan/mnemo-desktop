@@ -1,5 +1,5 @@
 import { MNEMO, ROOT, ship } from './fixtures'
-import { HINT, parseCommand, parseNew } from './parse'
+import { parseCommand, parseNew, suggest, VERBS } from './parse'
 
 const s = ship()
 const err = (line: string) => {
@@ -85,5 +85,25 @@ test('/new names a repo on the ship as /dispatch does; any other line is not it'
   expect(parseNew('/new notes', s, known)).toEqual({ root: '/Users/you/code/notes', name: 'notes' })
   expect(parseNew('/new mnemo', s, known)).toEqual({ root: MNEMO, name: 'mnemo' })
   expect(parseNew('/new elsewhere', s, known)).toEqual({ error: 'no repo called elsewhere — open PROJECTS to add it' })
-  expect(HINT.startsWith('/new <repo> · ')).toBe(true)
+})
+
+test('every verb the command line suggests is one the parser takes', () => {
+  const s = ship()
+  for (const v of VERBS) {
+    const p = parseNew(v.fill, s) ?? parseCommand(v.fill, s)
+    expect('error' in p ? p.error : '').not.toMatch(/^unknown|^start with/)
+  }
+})
+
+test('suggest: the verbs a line is the start of, then, inside one, that verb alone', () => {
+  const syntax = (t: string) => suggest(t).map((v) => v.syntax)
+  expect(syntax('/')).toHaveLength(VERBS.length)
+  expect(syntax('/M')).toEqual(['/msg all <text>', '/msg <#issue | captain> <text>', '/merge green'])
+  expect(syntax('/msg all')).toEqual(['/msg all <text>', '/msg <#issue | captain> <text>'])
+  expect(syntax('/msg all hi')).toEqual(['/msg all <text>'])
+  expect(syntax('/msg #12 hi')).toEqual(['/msg <#issue | captain> <text>'])
+  expect(syntax('/dispatch mnemo #1')).toEqual(['/dispatch <repo> #<issue>'])
+  expect(syntax('/x')).toEqual([])
+  expect(syntax('')).toEqual([])
+  expect(syntax('msg')).toEqual([])
 })

@@ -78,10 +78,10 @@ function useDecks(decks: DeckT[], reducedMotion: boolean): { decks: Drawn[]; set
 const robotsOf = (ship: Ship): ShipRobot[] => [...ship.bridge.blocked, ...ship.decks.flatMap((d) => [...d.flight, ...d.hangar, ...d.stranded])]
 
 /** The ship drawn (v2 spec "What it is"): the top bar's rate chip, the account the app runs on and
- *  PROJECTS, MISSIONS and SYSTEMS, the bridge with what waits for you and the fleet prompt, a deck per repo with live children, the docks, and the
- *  ship's log. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
+ *  PROJECTS, MISSIONS and SYSTEMS, the bridge with what waits for you, a deck per repo with live
+ *  children, the docks, and the ship's log; over the bridge's top edge, the command line while open. Every motion is CSS (`ship.css`): with reduced motion nothing walks, flies or loops,
  *  and while the window is hidden all of it pauses. */
-export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onMenu, bridge, reducedMotion, visible }: ShipSceneProps): JSX.Element {
+export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onAction, onTriage, onCommand, onMenu, command, reducedMotion, visible }: ShipSceneProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const box = useWidth(scroller)
   const width = Math.max(G.minWidth, (box ?? UNMEASURED) - 2 * G.pad)
@@ -139,6 +139,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
     onSelect,
     onAction,
     onTriage,
+    onCommand,
   }
   const rate = rateChip(ship.rate)
   const cols = columns(width)
@@ -186,7 +187,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
         <div ref={scroller} className="ship-space">
           {drawn && (
             <div className="ship-stage" style={{ width: px(width + 2 * G.pad) }}>
-              <Bridge ship={ship} prompt={bridge} />
+              <Bridge ship={ship} />
               {decks.length > 0 && (
                 <div className="ship-colhead" aria-hidden>
                   <div style={{ width: px(cols.cmdW) }}>
@@ -219,6 +220,7 @@ export function ShipScene({ ship, log, focusId, selection, onOpen, onSelect, onA
             </div>
           )}
         </div>
+        {command}
         <ShipLog log={log} />
       </div>
     </SceneContext.Provider>

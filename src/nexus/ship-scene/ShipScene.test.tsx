@@ -44,11 +44,12 @@ function fleet(): Ship {
 
 let root: Root | null = null
 let host: HTMLElement
-const calls: { open: string[]; select: string[]; action: ShipAction[]; triage: number; menu: { target: MenuTarget; x: number; y: number }[] } = {
+const calls: { open: string[]; select: string[]; action: ShipAction[]; triage: number; command: number; menu: { target: MenuTarget; x: number; y: number }[] } = {
   open: [],
   select: [],
   action: [],
   triage: 0,
+  command: 0,
   menu: [],
 }
 
@@ -62,12 +63,9 @@ function draw(over: Partial<ShipSceneProps> = {}) {
     onSelect: (id) => void calls.select.push(id),
     onAction: (a) => void calls.action.push(a),
     onTriage: () => void calls.triage++,
+    onCommand: () => void calls.command++,
     onMenu: (target, x, y) => void calls.menu.push({ target, x, y }),
-    bridge: (
-      <div data-fleet-prompt="">
-        <input />
-      </div>
-    ),
+    command: null,
     reducedMotion: false,
     visible: true,
     ...over,
@@ -86,6 +84,7 @@ beforeEach(() => {
   calls.select = []
   calls.action = []
   calls.triage = 0
+  calls.command = 0
   calls.menu = []
 })
 /** `navigator.platform`, for ⌥1–9 (macOS only). */
@@ -125,12 +124,13 @@ test('the bridge’s attend button opens Triage', async () => {
   expect(calls.triage).toBe(1)
 })
 
-test('the bridge holds the fleet prompt, a row per exception labelled ⌥N on macOS, and is red while a question waits', async () => {
+test('the bridge holds a row per exception labelled ⌥N on macOS, no input, and is red while a question waits', async () => {
   platform('MacIntel')
   await draw()
   const bridge = $('.ship-bridge')!
   expect(bridge.dataset.tone).toBe('red')
-  expect(bridge.querySelector('[data-fleet-prompt] input')).not.toBeNull()
+  expect(bridge.querySelector('input:not([aria-label^="answer"])')).toBeNull()
+  expect(bridge.hasAttribute('data-quiet')).toBe(false)
   expect($('.ship-bstatus')!.textContent).toBe('3 things wait for you')
   const rows = $$('.ship-xrow')
   expect(rows.map((r) => r.querySelector('.ship-xn')!.textContent)).toEqual(['⌥1', '⌥2', '⌥3'])
@@ -141,6 +141,26 @@ test('the bridge holds the fleet prompt, a row per exception labelled ⌥N on ma
   expect($('.ship-bridge')!.dataset.tone).toBe('calm')
   expect($('.ship-bstatus')!.textContent).toBe('nothing needs you — the fleet flies itself')
   expect($('.ship-exceptions')).toBeNull()
+})
+
+test('with nothing waiting the bridge is one line, its head alone, with no input', async () => {
+  await draw({ ship: ship() })
+  const bridge = $('.ship-bridge')!
+  expect(bridge.hasAttribute('data-quiet')).toBe(true)
+  expect(bridge.querySelector('.ship-bridge-body')).toBeNull()
+  expect(bridge.querySelector('input')).toBeNull()
+  expect([...bridge.children].map((c) => c.className)).toEqual(['ship-bridge-head'])
+})
+
+test('the bridge’s `/ commands` opens the command line, which the scene draws over the bridge while it is given', async () => {
+  await draw()
+  expect($('.ship-line-hint')!.textContent).toBe('/ commands')
+  await click($('.ship-line-hint'))
+  expect(calls.command).toBe(1)
+  expect($('[data-zz-line]')).toBeNull()
+  await draw({ command: <div data-zz-line="" /> })
+  expect($('[data-zz-line]')).not.toBeNull()
+  expect($('.ship-bridge')!.contains($('[data-zz-line]'))).toBe(false)
 })
 
 test('off macOS the rows carry no ⌥N: Alt+digit is the workbench’s', async () => {
