@@ -43,6 +43,11 @@ export function registerDropTarget(t: DropTarget): () => void {
   return () => void targets.delete(t)
 }
 
+/** Whether `t` still takes text: registered, and on the page. */
+export function dropTargetLive(t: DropTarget): boolean {
+  return targets.has(t) && t.el.isConnected
+}
+
 /** The composer inside pane element `pane`, if one is mounted there. A chat mounts only while it
  *  shows (a terminal's conversation face, a child's chat), so being inside a pane on screen is
  *  being on screen. */

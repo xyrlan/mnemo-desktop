@@ -69,8 +69,15 @@ pub struct VoiceState {
     model: Mutex<Option<Arc<WhisperContext>>>,
 }
 
+impl VoiceState {
+    /// What dictation listens for, which a dropped file is heard in too (`voice_file.rs`).
+    pub fn language(&self) -> Language {
+        *lock(&self.language)
+    }
+}
+
 /// A poisoned lock here only means an earlier take panicked; the data is still usable.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -445,7 +452,7 @@ fn model_on_disk(path: &Path) -> bool {
 /// per-read timeout (`timeout_recv_body` is a budget for the whole body, not restarted per
 /// read), so each request gets this long; one that ran out having brought bytes is followed by
 /// a request for the rest, and one that brought none ends the download.
-const STALL: Duration = Duration::from_secs(30);
+pub(crate) const STALL: Duration = Duration::from_secs(30);
 
 /// Returns the model in `dir`, downloading it first if it is missing or truncated.
 /// `progress(downloaded, total)` fires as bytes arrive.
@@ -597,6 +604,17 @@ fn decode_params(language: Language, samples: usize) -> FullParams<'static, 'sta
 
 /// Transcribes 16 kHz mono audio. Silence yields an empty string without running the model.
 pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Result<String, String> {
+    transcribe_with(ctx, audio, language, None::<fn(i32)>)
+}
+
+/// `transcribe`, telling `progress` how far through the audio whisper is, in percent: a dropped
+/// file runs for minutes where a take runs for a second (`voice_file.rs`).
+pub fn transcribe_with<F: FnMut(i32) + 'static>(
+    ctx: &WhisperContext,
+    audio: &[f32],
+    language: Language,
+    progress: Option<F>,
+) -> Result<String, String> {
     if is_silent(audio) {
         return Ok(String::new());
     }
@@ -606,8 +624,12 @@ pub fn transcribe(ctx: &WhisperContext, audio: &[f32], language: Language) -> Re
     let mut padded = audio.to_vec();
     padded.resize(padded.len().max(min) + WHISPER_RATE as usize / 4, 0.0);
 
+    let mut params = decode_params(language, audio.len());
+    if let Some(progress) = progress {
+        params.set_progress_callback_safe::<Option<F>, F>(Some(progress));
+    }
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
-    state.full(decode_params(language, audio.len()), &padded).map_err(|e| format!("whisper: {e}"))?;
+    state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
 
     let mut raw = String::new();
     for segment in state.as_iter() {

@@ -52,6 +52,14 @@ env_logger = "0.11"
 whisper-rs = { version = "0.16", features = ["log_backend"] }
 cpal = "0.18"
 ureq = "3"
+# A voice note dropped on a pane (voice_file.rs): the Ogg container, and libopus, built from its
+# vendored source with the cmake whisper-rs already needs, so no ffmpeg runs on any OS.
+ogg = "0.9"
+opus = "0.4"
+# Plain C, no SIMD intrinsics: a note decodes in a tenth of a second without them, and an MSVC
+# build that cmake-rs leaves unoptimized (#312) would otherwise put spilling 256-bit code in the
+# executable for portable-build.mjs to count.
+opusic-sys = { version = "0.7", features = ["no-simd"] }
 tauri-plugin-dialog = "2"
 # Vault map (vaultmap.rs): wakes the born watcher when pages appear, change or go.
 notify = "8"

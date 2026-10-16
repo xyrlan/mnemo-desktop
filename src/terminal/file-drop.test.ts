@@ -187,3 +187,77 @@ test('a drop on a popup (or a drawer tab) goes to the session it shows, never to
   expect(invoke).toHaveBeenCalledWith('pty_write', { id: 8, data: '/tmp/c.png ' })
   focus.mockRestore()
 })
+
+/** A stand-in for the voice-note transcriber: what each drop handed it. */
+function transcriber() {
+  const drops: { paths: string[]; sink: import('../voice/files').DropSink }[] = []
+  return { drops, transcribe: async (paths: string[], sink: import('../voice/files').DropSink) => void drops.push({ paths, sink }) }
+}
+
+test('a mixed drop types its other paths at once and hands its voice notes over, in order', async () => {
+  const files = transcriber()
+  const focus = vi.spyOn(store.getState(), 'focusPane').mockImplementation(() => {})
+  onFileDrag({ type: 'drop', paths: ['/d/a.opus', '/d/shot.png', '/d/b.OGG', '/d/c.oga', '/d/notes.txt'], position: { x: 20, y: 5 } }, 1, files)
+  // Only the other paths are typed now; no transcript, and so no path of a note, goes before them.
+  expect(invoke.mock.calls).toEqual([['pty_write', { id: 7, data: '/d/shot.png /d/notes.txt ' }]])
+  expect(files.drops.map((d) => d.paths)).toEqual([['/d/a.opus', '/d/b.OGG', '/d/c.oga']])
+  // The transcript, when it comes, is typed into the terminal dropped on, with no Enter after it.
+  const { sink } = files.drops[0]
+  expect(sink.alive()).toBe(true)
+  await sink.put('[transcript: a.opus] oi ')
+  expect(invoke).toHaveBeenLastCalledWith('pty_write', { id: 7, data: '[transcript: a.opus] oi ' })
+  expect(sink.el?.dataset.pane).toBe('7')
+  focus.mockRestore()
+})
+
+test('a drop of only voice notes types nothing at once', () => {
+  const files = transcriber()
+  onFileDrag({ type: 'drop', paths: ['/d/a.opus'], position: { x: 250, y: 5 } }, 1, files)
+  expect(invoke).not.toHaveBeenCalled()
+  expect(files.drops).toHaveLength(1)
+})
+
+test('the target is fixed at the drop: a terminal that exits or closes after it is gone', () => {
+  const files = transcriber()
+  onFileDrag({ type: 'drop', paths: ['/d/a.opus'], position: { x: 250, y: 5 } }, 1, files)
+  const { sink } = files.drops[0]
+  // A drop elsewhere later does not move it.
+  onFileDrag({ type: 'drop', paths: ['/d/b.opus'], position: { x: 20, y: 5 } }, 1, files)
+  expect(files.drops[1].sink.el?.dataset.pane).toBe('7')
+  expect(sink.el?.dataset.pane).toBe('8')
+  store.setState({ panes: { ...store.getState().panes, 8: { id: 8, view: 'terminal', exitCode: 0 } } })
+  expect(sink.alive()).toBe(false)
+  const { [8]: _closed, ...rest } = store.getState().panes
+  store.setState({ panes: rest })
+  expect(sink.alive()).toBe(false)
+  expect(files.drops[1].sink.alive()).toBe(true)
+})
+
+test("a chat's voice notes go into its draft, and a chat that unmounted is gone", () => {
+  const files = transcriber()
+  const chat = composerIn(7)
+  onFileDrag({ type: 'drop', paths: ['/d/a.opus', '/d/x.png'], position: { x: 20, y: 5 } }, 1, files)
+  expect(chat.got).toEqual(['/d/x.png '])
+  const { sink } = files.drops[0]
+  void sink.put('[transcript: a.opus] oi ')
+  expect(chat.got).toEqual(['/d/x.png ', '[transcript: a.opus] oi '])
+  expect(invoke).not.toHaveBeenCalled()
+  expect(sink.alive()).toBe(true)
+  chat.off()
+  expect(sink.alive()).toBe(false)
+})
+
+test("a popup's voice notes go to its session, shown on the popup", () => {
+  const files = transcriber()
+  const popup = document.body.appendChild(document.createElement('div'))
+  popup.dataset.sessionPty = '60'
+  popup.getBoundingClientRect = () => ({ left: 0, top: 0, width: 150, height: 50, right: 150, bottom: 50, x: 0, y: 0, toJSON: () => ({}) })
+  onFileDrag({ type: 'drop', paths: ['/d/a.opus'], position: { x: 20, y: 5 } }, 1, files)
+  const { sink } = files.drops[0]
+  expect(sink.el).toBe(popup)
+  // A session in no pane stays a target until a write to it fails (`../voice/files`).
+  expect(sink.alive()).toBe(true)
+  void sink.put('t ')
+  expect(invoke).toHaveBeenCalledWith('pty_write', { id: 60, data: 't ' })
+  popup.remove()
+})
