@@ -2,14 +2,13 @@
 // used by `pnpm icons` as the source for `tauri icon`. The 2048 viewBox art
 // itself is untouched; this only crops+centers it so it fills the icon's
 // safe area instead of sitting tiny in the middle of the 2048 canvas (the
-// mark's own viewBox has a lot of empty margin baked in for the wordmark
-// layout, which app icons don't need).
+// mark's viewBox may carry margin that app icons don't need).
 import { Resvg } from '@resvg/resvg-js'
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const SIZE = 1024
 const SAFE_AREA = 0.82
-const CONTENT_PADDING = 1.04 // small breathing room around the octopus's own bbox
+const CONTENT_PADDING = 1.04 // small breathing room around the mark's own bbox
 
 const svg = readFileSync('src/brand/mark.svg', 'utf8')
 const inner = svg.match(/<svg[^>]*>([\s\S]*)<\/svg>/)[1]
