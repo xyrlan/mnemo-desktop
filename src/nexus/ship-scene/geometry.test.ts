@@ -1,4 +1,4 @@
-import { bubblesOf, columns, deckLayout, G, hangarFloor, quietRows } from './geometry'
+import { bubblesOf, columns, deckLayout, G, hangarFloor, QUIET_ROW, quietRows } from './geometry'
 import { captain, deck, robot } from './fixtures'
 
 const many = (n: number, prefix: string, over = {}) => Array.from({ length: n }, (_, i) => robot(`${prefix}${i}`, over))
@@ -81,5 +81,23 @@ test('quiet captains take as many chip rows as COMMAND needs, and the deck is ta
   const quiet = Array.from({ length: 7 }, (_, i) => captain(`q${i}`))
   const one = deckLayout(deck({ captains: [captain('a')], quiet: quiet.slice(0, 1) }), 1400, false)
   const seven = deckLayout(deck({ captains: [captain('a')], quiet }), 1400, false)
-  expect(seven.height - one.height).toBe((quietRows(7, seven.cmdW) - 1) * 34)
+  expect(seven.height - one.height).toBe((quietRows(7, seven.cmdW) - 1) * QUIET_ROW)
+})
+
+test('quiet chips start below every captain: its console, two-line name, topic and pill (#465)', () => {
+  const quiet = Array.from({ length: 8 }, (_, i) => captain(`q${i}`))
+  // Two small captains in the narrow COMMAND (the drawer open): console 96, name 2 × 13.
+  const narrow = deckLayout(deck({ captains: [captain('a'), captain('b')], quiet }), 860, false)
+  expect(narrow.captains.map((c) => c.big)).toEqual([false, false])
+  expect(narrow.quietY).toBeGreaterThanOrEqual(Math.max(...narrow.captains.map((c) => c.y)) + G.captain + 26)
+  // COMMAND holds every row of chips: one a row, 44 px each.
+  expect(narrow.height).toBeGreaterThanOrEqual(narrow.quietY + 8 * QUIET_ROW - 4)
+  // Two big ones: and under the name a two-line topic and the action pill.
+  const wide = deckLayout(deck({ captains: [captain('a'), captain('b')], quiet }), 1400, false)
+  expect(wide.captains.map((c) => c.big)).toEqual([true, true])
+  expect(wide.quietY).toBeGreaterThanOrEqual(wide.captains[0].y + G.captain + 26 + 26 + 23)
+  // Robots that make the deck taller than COMMAND leave the chips where they are.
+  const tall = deckLayout(deck({ captains: [captain('a'), captain('b')], quiet, flight: many(40, 'f') }), 860, false)
+  expect(tall.height).toBeGreaterThan(narrow.height)
+  expect(tall.quietY).toBe(narrow.quietY)
 })

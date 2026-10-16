@@ -277,7 +277,9 @@
   background: linear-gradient(90deg, #151c38, #111831);
 }
 .ship-dlabel { position: absolute; top: 4px; left: 8px; margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--ship-pale); }
-.ship-quiet { position: absolute; right: 6px; bottom: 10px; left: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* Quiet chips start at the y the deck's layout gives them (`quietY`), below the captains: hung from
+   the deck's floor, a row more than the layout counted would push them up over the captains. */
+.ship-quiet { position: absolute; right: 6px; left: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .ship-room {
   position: absolute;
   top: 0;

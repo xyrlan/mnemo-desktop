@@ -66,6 +66,8 @@ export type DeckLayout = {
   /** Every robot drawn on the floor, by id: its top-left corner. */
   robots: Map<string, Point & { zone: RoomZone }>
   stack: Stack | null
+  /** Where the first row of quiet chips starts in COMMAND: below every captain's whole figure. */
+  quietY: number
 }
 
 /** Room for this many big captains (topic and action under each) in COMMAND; past it they stand two
@@ -74,9 +76,12 @@ export const bigCaptains = (cmdW: number) => (cmdW >= 250 ? 2 : 1)
 /** A captain's name takes up to two lines under its console. */
 const BIG_H = 186
 const SMALL_ROW = 138
-const QUIET_H = 34
-/** Between the captains' topics and action pills and the first row of quiet chips. */
-const QUIET_GAP = 36
+/** One row of quiet chips: a chip is 44 px tall (its 40-px window and border), 4 px to the next. */
+export const QUIET_ROW = 48
+/** Below the captains' room (console, name, topic, action pill) to the first row of quiet chips. */
+const QUIET_GAP = 12
+/** Under the last row of quiet chips. */
+const QUIET_PAD = 10
 /** A quiet captain's chip, its gap included: as many sit on one row as COMMAND is wide. */
 export const QUIET_CHIP = 124
 
@@ -118,10 +123,11 @@ export function deckLayout(deck: Deck, width: number, open: boolean): DeckLayout
 
   const big = deck.captains.length <= bigCaptains(cmdW)
   const captains: CaptainSpot[] = deck.captains.map((captain, k) => (big ? { captain, big, x: 14 + k * 122, y: 26 } : { captain, big, x: 6 + (k % 2) * 100, y: 24 + Math.floor(k / 2) * SMALL_ROW }))
-  const cmdH = 28 + (big ? BIG_H : Math.ceil(deck.captains.length / 2) * SMALL_ROW) + (deck.quiet.length ? QUIET_GAP + quietRows(deck.quiet.length, cmdW) * QUIET_H : 0)
+  const quietY = 28 + (big ? BIG_H : Math.ceil(deck.captains.length / 2) * SMALL_ROW) + QUIET_GAP
+  const cmdH = deck.quiet.length ? quietY + quietRows(deck.quiet.length, cmdW) * QUIET_ROW - 4 + QUIET_PAD : quietY
   const rows = Math.max(1, ...rooms.map((r, i) => Math.ceil(slots[i] / r.perRow)))
   const height = Math.max(G.labelH + G.bubbleH + rows * G.rowH + 4, cmdH)
-  return { width, height, cmdW, rooms, captains, robots, stack }
+  return { width, height, cmdW, rooms, captains, robots, stack, quietY }
 }
 
 /** A room's speech bubbles, left to right, under the robots that speak: `speakers` in any order.

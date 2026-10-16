@@ -55,7 +55,8 @@ scenario('job-running', {
 `fixtures/app.mjs` is the launch state with nothing going on. `empty-workspace` is the app as a
 fresh boot opens it: the Nexus, empty. `terminal-pane` restores a saved tab through
 `workspace_read` and shows it as a drawer session, so a change to the saved workspace format means
-updating that fixture.
+updating that fixture. `nexus-quiet` is a crowded COMMAND column with the drawer open: two
+captains with two-line names over eight quiet captains' chips (#465).
 
 ## Tests
 
@@ -63,6 +64,6 @@ updating that fixture.
 pnpm --dir tools/preview test
 ```
 
-The last of them shoot `nexus`, `empty-workspace` and `terminal-pane` through the real vite and
-look at the page they drew (no workbench element, the drawer's tabs), so they need the repo's deps
-too.
+The last of them shoot `nexus`, `nexus-quiet`, `empty-workspace` and `terminal-pane` through the
+real vite and look at the page they drew (no workbench element, the drawer's tabs, no quiet
+captain's chip over a captain), so they need the repo's deps too.

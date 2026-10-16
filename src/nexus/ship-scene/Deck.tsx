@@ -94,7 +94,7 @@ export function Deck({ deck, width, alive, ghost = false, onSettled }: { deck: D
       <div className="ship-cmd" style={{ width: px(layout.cmdW) }}>
         <h3 className="ship-dlabel">{deck.name}</h3>
         {deck.quiet.length > 0 && (
-          <div className="ship-quiet">
+          <div className="ship-quiet" style={{ top: px(layout.quietY) }}>
             {deck.quiet.map((c) => (
               <CaptainChip key={c.id} captain={c} focused={s.focusId === c.id} onOpen={s.onOpen} />
             ))}
