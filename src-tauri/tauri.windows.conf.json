@@ -1,6 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["nsis"]
+    "targets": ["nsis"],
+    "resources": {
+      "vendor/conpty/conpty.dll": "conpty.dll",
+      "vendor/conpty/x64/OpenConsole.exe": "x64/OpenConsole.exe",
+      "vendor/conpty/LICENSE": "conpty-LICENSE"
+    }
   }
 }
