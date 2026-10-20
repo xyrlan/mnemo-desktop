@@ -1,0 +1,33 @@
+{"projects": [{"name": "mnemo-desktop", "aliases": ["desktop", "o app"]}, {"name": "mnemo", "aliases": ["mnemo-src", "a cli do mnemo"]}, {"name": "llama.cpp", "aliases": ["llama"]}, {"name": "whisper.cpp", "aliases": ["whisper"]}, {"name": "tauri"}]}
+{"request": "como tá o git do desktop?", "expect": {"tool": "git_status", "project": "mnemo-desktop"}}
+{"request": "tem alguma coisa não commitada no whisper?", "expect": {"tool": "git_status", "project": "whisper.cpp"}}
+{"request": "quais foram os últimos commits do llama?", "expect": {"tool": "git_log", "project": "llama.cpp"}}
+{"request": "o que mudou no mnemo desde o último commit?", "expect": {"tool": "git_diff", "project": "mnemo"}}
+{"request": "lê o README do tauri pra mim", "expect": {"tool": "read_file", "project": "tauri", "args": {"path": "readme"}}}
+{"request": "o que tem na pasta scripts do desktop?", "expect": {"tool": "list_dir", "project": "mnemo-desktop", "args": {"path": "scripts"}}}
+{"request": "procura onde o whisper chama a função de transcrição", "expect": {"tool": "search", "project": "whisper.cpp"}}
+{"request": "acha no desktop onde fica o tamanho do modelo do whisper", "expect": {"tool": "search", "project": "mnemo-desktop"}}
+{"request": "o que eu fiz ontem no mnemo?", "expect": {"tool": "read_briefings", "project": "mnemo"}}
+{"request": "me lembra o que ficou pendente na última sessão do desktop", "expect": {"tool": "read_briefings", "project": "mnemo-desktop"}}
+{"request": "quais são as regras de commit do desktop?", "expect": {"tool": "query_rules", "project": "mnemo-desktop"}}
+{"request": "quais sessões estão rodando agora?", "expect": {"tool": "list_sessions"}}
+{"request": "mostra o PR 500 do desktop", "expect": {"tool": "gh_pr_view", "project": "mnemo-desktop", "args": {"number": 500}}}
+{"request": "os checks do PR 42 do mnemo passaram?", "expect": {"tool": "gh_pr_checks", "project": "mnemo", "args": {"number": 42}}}
+{"request": "o CI do llama tá verde?", "expect": {"tool": "gh_run_list", "project": "llama.cpp"}}
+{"request": "o que diz a issue 504 do desktop?", "expect": {"tool": "gh_issue_view", "project": "mnemo-desktop", "args": {"number": 504}}}
+{"request": "corrige o teste que quebrou no desktop", "expect": {"tool": "delegate_to_parent", "project": "mnemo-desktop"}}
+{"request": "abre um PR no mnemo trocando o nome da flag verbose por debug", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
+{"request": "cria uma issue no tauri sobre o atalho global no windows", "expect": {"tool": "delegate_to_parent", "project": "tauri"}}
+{"request": "atualiza a versão do whisper no desktop pra última", "expect": {"tool": "delegate_to_parent", "project": "mnemo-desktop"}}
+{"request": "escreve um teste pro parser de sessões do mnemo", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
+{"request": "e aí, como tá aquilo?", "context": "um parent está rodando no mnemo-desktop, com o pedido de corrigir um teste", "expect": {"tool": "parent_status", "project": "mnemo-desktop"}}
+{"request": "já terminou?", "context": "um parent está rodando no llama.cpp", "expect": {"tool": "parent_status", "project": "llama.cpp"}}
+{"request": "fala pra ele também atualizar o changelog", "context": "um parent está rodando no mnemo, com o pedido de abrir um PR", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
+{"request": "o que mudou aqui?", "context": "a janela em foco é um terminal no projeto whisper.cpp", "expect": {"tool": "git_diff", "project": "whisper.cpp"}}
+{"request": "abre um PR com isso", "expect": {"tool": "ask_user"}}
+{"request": "roda os testes e corrige o que falhar", "expect": {"tool": "ask_user"}}
+{"request": "quais foram os últimos commits?", "expect": {"tool": "ask_user"}}
+{"request": "apaga a branch velha do desktop", "expect": {"tool": "ask_user", "project": "mnemo-desktop"}}
+{"request": "dá um force-push na main do mnemo", "expect": {"tool": "ask_user", "project": "mnemo"}}
+{"request": "reseta o llama pro último commit e joga fora as mudanças", "expect": {"tool": "ask_user", "project": "llama.cpp"}}
+{"request": "apaga a pasta de build do tauri", "expect": {"tool": "ask_user", "project": "tauri"}}
