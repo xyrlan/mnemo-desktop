@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { relative } from 'node:path'
 import {
+  NAME,
+  NO_TOOL,
   REAL_SET,
   REPO_SET,
   setName,
@@ -107,6 +109,16 @@ test('asking: counted where the row wants it, and a text-only reply is not an as
   expect(score(unknown, null, projects)).toMatchObject({ toolOk: false, asked: false })
 })
 
+test('a request that wants words: a text reply is right, a tool call or a failed request is not', () => {
+  const greeting = { request: 'Bom dia, James!', expect: { tool: NO_TOOL } }
+  expect(score(greeting, { content: 'Bom dia! Pode mandar.' }, projects)).toMatchObject({ toolOk: true, argsOk: true, textOnly: false, projectOk: null })
+  expect(score(greeting, call('list_sessions', {}), projects)).toMatchObject({ toolOk: false, argsOk: false })
+  expect(score(greeting, call('ask_user', { question: '?', reason: 'ambiguous' }), projects)).toMatchObject({ toolOk: false, asked: true, shouldAsk: false })
+  expect(score(greeting, null, projects)).toMatchObject({ toolOk: false, textOnly: false })
+  // Text where a tool was due is still counted against the model.
+  expect(score({ request: 'x', expect: { tool: 'git_log', project: 'mnemo' } }, { content: 'Não sei.' }, projects).textOnly).toBe(true)
+})
+
 test('the summary counts hits, needless asks and errors, with nearest-rank percentiles', () => {
   const s = summarize([
     { toolOk: true, argsOk: true, shouldAsk: false, asked: false, ttftMs: 100, totalMs: 300 },
@@ -153,10 +165,11 @@ test('the repo set is well formed, names only its listed projects, and covers ev
   const names = new Set(projects.map((p) => p.name))
   const tools = new Set(TOOLS.map((t) => t.function.name))
   for (const r of requests) {
-    expect(tools.has(r.expect.tool)).toBe(true)
+    expect(tools.has(r.expect.tool) || r.expect.tool === NO_TOOL).toBe(true)
     if (r.expect.project) expect(names.has(r.expect.project)).toBe(true)
   }
-  expect(new Set(requests.map((r) => r.expect.tool))).toEqual(tools)
+  expect(new Set(requests.map((r) => r.expect.tool))).toEqual(new Set([...tools, NO_TOOL]))
+  expect(requests.filter((r) => r.expect.tool === 'gh_pr_list' && !r.expect.project).length).toBeGreaterThan(0)
   expect(requests.filter((r) => r.expect.tool === 'ask_user' && !r.expect.project).length).toBeGreaterThan(0)
   expect(requests.filter((r) => r.expect.tool === 'ask_user' && r.expect.project).length).toBeGreaterThan(0)
 })
@@ -179,6 +192,8 @@ test('the request body: tools, the known projects and the context; reasoning off
   expect(b.messages[0].content).toContain('- mnemo-desktop (também: desktop)')
   expect(b.messages[0].content).toContain('Estado atual: um parent roda no mnemo')
   expect(b.messages[0].content.startsWith('/no_think')).toBe(true)
+  expect(b.messages[0].content).toContain(`Você é o ${NAME},`)
+  expect(NAME).toBe('James')
   const on = chatBody({ request: 'oi' }, projects, { reasoning: true })
   expect(on.chat_template_kwargs.enable_thinking).toBe(true)
   expect(on.messages[0].content).not.toContain('/no_think')
