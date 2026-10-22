@@ -8,7 +8,8 @@
  *  A set is JSONL, one request per line:
  *    {"request": "o CI do mnemo passou?", "context": "...", "expect": {"tool": "gh_run_list", "project": "mnemo"}}
  *  `context` is what Jarvis would know besides the words (a running parent, the focused window).
- *  `expect.args` names other arguments to check. A line `{"projects": [{"name", "aliases"}]}`
+ *  `expect.args` names other arguments to check. `"tool": "none"` expects a reply in words and no
+ *  tool call (a greeting, "I'll pass you the tasks"). A line `{"projects": [{"name", "aliases"}]}`
  *  lists the projects Jarvis knows; without one they are the projects the set expects.
  *
  *  The repo's set is `scripts/jarvis-bench.jsonl` (public names only). The maintainer's real set
@@ -24,6 +25,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const REPO_SET = join(dirname(fileURLToPath(import.meta.url)), 'jarvis-bench.jsonl')
 export const REAL_SET = join(homedir(), 'mnemo', '.mnemo', 'jarvis-bench.jsonl')
+
+/** What the maintainer calls the assistant out loud; "Jarvis" is only the project's name. */
+export const NAME = 'James'
+
+/** `expect.tool` for a request that wants a reply in words and no tool call. */
+export const NO_TOOL = 'none'
 
 /** A set's name in the report: only the repo's own set is not `real`, which is never echoed. */
 export const setName = (file) => (resolve(file) === REPO_SET ? 'repo (synthetic)' : 'real')
@@ -46,6 +53,7 @@ export const TOOLS = [
   fn('read_briefings', 'Read the briefings of past work sessions in a project: what was done, decided, left open.', { project: project(), since: { type: 'string', description: 'e.g. "yesterday", "2026-10-01"' } }, ['project']),
   fn('query_rules', 'Look up the rules and conventions mnemo learned for a project.', { project: project(), query: { type: 'string' } }, ['query']),
   fn('list_sessions', 'List agent sessions (running and recent), optionally of one project.', { project: project() }, []),
+  fn('gh_pr_list', 'Open pull requests of a project, or of every known project when none is named.', { project: project() }, []),
   fn('gh_pr_view', 'Show a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_pr_checks', 'CI checks of a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_run_list', 'Recent CI (GitHub Actions) runs of a project.', { project: project() }),
@@ -64,11 +72,11 @@ export function systemPrompt(projects, context, reasoning = false) {
   const list = projects.map((p) => `- ${p.name}${p.aliases?.length ? ` (também: ${p.aliases.join(', ')})` : ''}`).join('\n')
   return [
     reasoning ? '' : '/no_think',
-    'Você é o Jarvis, um assistente de voz no desktop do usuário. O usuário fala em português.',
+    `Você é o ${NAME}, um assistente de voz no desktop do usuário. O usuário fala em português.`,
     'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas.',
     'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
-    'Pergunte com ask_user, antes de qualquer outra ferramenta, quando não der para saber o projeto, ou quando o pedido for destrutivo (apagar, force-push, reset).',
-    'Responda sempre chamando exatamente uma ferramenta.',
+    'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
+    'Quando houver o que ler, fazer ou perguntar, chame exatamente uma ferramenta. Quando não houver (um bom-dia, um aviso de que o usuário ainda vai passar as tarefas), responda só com uma frase curta, sem ferramenta.',
     '',
     'Projetos conhecidos:',
     list,
@@ -168,16 +176,18 @@ export function canonicalProject(value, projects) {
 }
 
 /** Scores one reply `message` against `row.expect`:
- *  - `tool`: the first call is the expected tool;
+ *  - `tool`: the first call is the expected tool, or there is none when `NO_TOOL` is expected;
  *  - `args`: the right tool, and the project (when expected) and every `expect.args` value match;
  *  - `project`: the call names the expected project, whichever tool it is (null when none is);
  *  - `shouldAsk`/`asked`: whether the row wants `ask_user`, and whether the model called it;
+ *  - `textOnly`: the model only wrote text where a tool was due;
  *  - `reasoned`: the reply carried reasoning, which a reasoning-off run should not. */
 export function score(row, message, projects) {
   const { tool, args } = firstCall(message)
   const e = row.expect
-  const toolOk = tool === e.tool
-  let argsOk = toolOk && args !== null
+  const want = e.tool === NO_TOOL ? null : e.tool
+  const toolOk = !!message && tool === want
+  let argsOk = toolOk && (want === null || args !== null)
   if (argsOk && e.project) argsOk = canonicalProject(args.project, projects) === canonicalProject(e.project, projects)
   for (const [k, want] of Object.entries(e.args ?? {})) {
     if (!argsOk) break
@@ -186,7 +196,7 @@ export function score(row, message, projects) {
   }
   const projectOk = e.project ? canonicalProject(args?.project, projects) === canonicalProject(e.project, projects) : null
   const reasoned = !!message?.reasoning_content?.trim()
-  return { tool, toolOk, argsOk, projectOk, shouldAsk: e.tool === 'ask_user', asked: tool === 'ask_user', textOnly: tool === null, reasoned }
+  return { tool, toolOk, argsOk, projectOk, shouldAsk: e.tool === 'ask_user', asked: tool === 'ask_user', textOnly: !!message && tool === null && want !== null, reasoned }
 }
 
 /** The `p`th percentile (0–1) of `xs`, nearest rank; null for none. */
@@ -227,7 +237,7 @@ const msCell = (p) => (p.p50 === null ? '—' : `${Math.round(p.p50)} / ${Math.r
  *  or null. Names no request and no project. */
 export function table(rows) {
   const out = [
-    '| candidate | right tool | right arguments | right project | asked when it should | asked needlessly | text, no tool | TTFT p50 / p95 (ms) | total p50 / p95 (ms) | peak VRAM (MiB) |',
+    '| candidate | right tool | right arguments | right project | asked when it should | asked needlessly | text where a tool was due | TTFT p50 / p95 (ms) | total p50 / p95 (ms) | peak VRAM (MiB) |',
     '|---|---|---|---|---|---|---|---|---|---|',
   ]
   for (const { candidate, summary: s, vram } of rows) {
