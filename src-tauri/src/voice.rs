@@ -134,8 +134,8 @@ pub struct Opened {
 pub type Input = Box<dyn FnOnce(Sink) -> Result<Opened, String> + Send>;
 
 /// A live take. The cpal stream is not `Send`, so it lives on its own thread until the
-/// stop sender drops.
-struct Recording {
+/// stop sender drops. Jarvis's push-to-talk key records through it too (`jarvis_voice.rs`).
+pub(crate) struct Recording {
     stop: mpsc::Sender<()>,
     thread: JoinHandle<Result<Captured, String>>,
     lost: Arc<Mutex<Option<String>>>,
@@ -144,7 +144,7 @@ struct Recording {
 
 impl Recording {
     /// `on_lost` hears a failure that ends the take as it happens, from the input's thread.
-    fn start(input: Input, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
+    pub(crate) fn start(input: Input, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<String, String>>();
         let (stop, stop_rx) = mpsc::channel::<()>();
         let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost: Arc::new(on_lost) };
@@ -177,7 +177,7 @@ impl Recording {
 
     /// The take, or why the microphone stopped partway: what it heard before then is not
     /// transcribed, since a take cut short reads as a sentence that was never said.
-    fn finish(self) -> Result<Captured, String> {
+    pub(crate) fn finish(self) -> Result<Captured, String> {
         drop(self.stop);
         let take = self.thread.join().map_err(|_| "voice: capture thread panicked".to_string())??;
         match lock(&self.lost).take() {
@@ -201,7 +201,7 @@ fn ends_take(kind: cpal::ErrorKind) -> bool {
 }
 
 /// The default input device, as cpal opens it.
-fn default_input(sink: Sink) -> Result<Opened, String> {
+pub(crate) fn default_input(sink: Sink) -> Result<Opened, String> {
     let device = cpal::default_host().default_input_device().ok_or("no microphone found")?;
     let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default microphone".into());
     let supported = device.default_input_config().map_err(|e| format!("microphone {name}: {e}"))?;
@@ -615,8 +615,70 @@ pub fn transcribe_with<F: FnMut(i32) + 'static>(
     language: Language,
     progress: Option<F>,
 ) -> Result<String, String> {
-    if is_silent(audio) {
+    let Some(state) = decode(ctx, audio, language, &Shape::default(), progress)? else {
         return Ok(String::new());
+    };
+    let mut raw = String::new();
+    for segment in state.as_iter() {
+        raw.push_str(&segment.to_str_lossy().map_err(|e| format!("whisper: {e}"))?);
+        raw.push(' ');
+    }
+    Ok(clean_transcript(&raw))
+}
+
+/// `transcribe`, with how sure the decoder was of what it wrote: the geometric mean of the
+/// probabilities it gave the text's own tokens (timestamps and other special tokens left out),
+/// 0–1, and 0 when it heard nothing. Jarvis asks before acting on a take it was unsure of (#506).
+pub fn transcribe_scored(ctx: &WhisperContext, audio: &[f32], language: Language, shape: &Shape) -> Result<(String, f32), String> {
+    let Some(state) = decode(ctx, audio, language, shape, None::<fn(i32)>)? else {
+        return Ok((String::new(), 0.0));
+    };
+    let special = ctx.token_eot();
+    let mut raw = String::new();
+    let mut probabilities = vec![];
+    for segment in state.as_iter() {
+        raw.push_str(&segment.to_str_lossy().map_err(|e| format!("whisper: {e}"))?);
+        raw.push(' ');
+        probabilities.extend(
+            (0..segment.n_tokens())
+                .filter_map(|i| segment.get_token(i))
+                .filter(|t| t.token_id() < special)
+                .map(|t| t.token_probability()),
+        );
+    }
+    let text = clean_transcript(&raw);
+    let confidence = if text.is_empty() { 0.0 } else { geometric_mean(&probabilities) };
+    Ok((text, confidence))
+}
+
+/// The geometric mean of probabilities, clamped to 0–1; 0 for none.
+pub fn geometric_mean(probabilities: &[f32]) -> f32 {
+    if probabilities.is_empty() {
+        return 0.0;
+    }
+    let logs: f64 = probabilities.iter().map(|&p| (p.clamp(1e-6, 1.0) as f64).ln()).sum();
+    ((logs / probabilities.len() as f64).exp() as f32).clamp(0.0, 1.0)
+}
+
+/// How a caller other than dictation runs whisper over a take; the default is dictation's run.
+#[derive(Clone, Debug, Default)]
+pub struct Shape<'a> {
+    /// Text whisper reads as what came before the take: the names it should expect.
+    pub prompt: Option<&'a str>,
+    /// Threads instead of dictation's (at most 8).
+    pub threads: Option<usize>,
+}
+
+/// Whisper's run over a take, `None` for silence, which it is not given.
+fn decode<F: FnMut(i32) + 'static>(
+    ctx: &WhisperContext,
+    audio: &[f32],
+    language: Language,
+    shape: &Shape,
+    progress: Option<F>,
+) -> Result<Option<whisper_rs::WhisperState>, String> {
+    if is_silent(audio) {
+        return Ok(None);
     }
     // whisper.cpp rejects takes under a second; a quarter second of tail also keeps it
     // from clipping the last word.
@@ -628,15 +690,16 @@ pub fn transcribe_with<F: FnMut(i32) + 'static>(
     if let Some(progress) = progress {
         params.set_progress_callback_safe::<Option<F>, F>(Some(progress));
     }
+    // whisper-rs keeps the prompt as a C string it never frees: under 500 bytes a take.
+    if let Some(prompt) = shape.prompt.filter(|p| !p.is_empty()) {
+        params.set_initial_prompt(&prompt.replace('\0', " "));
+    }
+    if let Some(threads) = shape.threads {
+        params.set_n_threads(threads.max(1) as _);
+    }
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
     state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
-
-    let mut raw = String::new();
-    for segment in state.as_iter() {
-        raw.push_str(&segment.to_str_lossy().map_err(|e| format!("whisper: {e}"))?);
-        raw.push(' ');
-    }
-    Ok(clean_transcript(&raw))
+    Ok(Some(state))
 }
 
 /// Runs the model once on a made-up take, so the process has built its GPU pipelines before a
