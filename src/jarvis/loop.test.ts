@@ -45,6 +45,7 @@ function fakeClient(replies: Chunk[][], over: Partial<JarvisClient> = {}) {
     hush: async () => {},
     onVoice: async () => () => {},
     onHeard: async () => () => {},
+    onVoiceError: async () => () => {},
     screenshot: async () => SHOT,
     apps: async () => apps,
     openApp: async (app, project) => (opened.push(['app', app, project]), project ? `${app} no ${project}` : app),
@@ -375,6 +376,21 @@ describe('voice', () => {
     await s.jarvis.ask('não')
     expect(s.bodies).toEqual([])
     expect(s.last()).toBe('Tudo bem, não fiz nada.')
+  })
+
+  test('a new request stops what James was saying, before he answers it', async () => {
+    const order: string[] = []
+    const hush = async () => void order.push('(hush)')
+    const say = async (t: string) => void order.push(t)
+    const s = setup([said('Está verde.'), said('Nada mudou.')], { client: { hush, say } })
+    await s.jarvis.heard({ text: 'e o CI?', confidence: 0.9, window: null })
+    expect(order).toEqual(['(hush)', 'Está verde.'])
+    // Typed too: the old answer is not read over the new one.
+    await s.jarvis.ask('e o git?')
+    expect(order).toEqual(['(hush)', 'Está verde.', '(hush)'])
+    // A take with nothing said in it is not a request, and leaves James talking.
+    await s.jarvis.heard({ text: '  ', confidence: 0, window: null })
+    expect(order).toHaveLength(3)
   })
 
   test("the take's window names the project, not the window in front now", async () => {

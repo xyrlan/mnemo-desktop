@@ -35,17 +35,18 @@ const KEYS: [key: string, code: string][] = [
 
 const says = (m: Mods) => (['ctrlKey', 'metaKey', 'altKey', 'shiftKey'] as const).filter((k) => m[k]).map((k) => k.replace('Key', '')).join('+') || 'none'
 
-/** What a Mac binds now (#459): ⌘W and ⇧⌘W close what is on top of the Nexus, ⌘E dictates. The
- *  workbench's chords went with it. */
+/** What a Mac binds now (#459): ⌘W and ⇧⌘W close what is on top of the Nexus, ⌘E dictates, ⌘J
+ *  opens James (#503). The workbench's chords went with it. */
 function expected(e: Ev): string | null {
   if (!e.metaKey || e.altKey) return null
   const k = e.key.toLowerCase()
   if (k === 'w') return e.shiftKey ? 'tab.close' : 'pane.close'
   if (k === 'e' && !e.shiftKey) return 'dictation.toggle'
+  if (k === 'j' && !e.shiftKey) return 'jarvis.toggle'
   return null
 }
 
-test('a Mac binds ⌘W, ⇧⌘W and ⌘E, and nothing else: every key under every set of modifiers', () => {
+test('a Mac binds ⌘W, ⇧⌘W, ⌘E and ⌘J, and nothing else: every key under every set of modifiers', () => {
   const now: string[] = []
   const want: string[] = []
   for (const mods of ALL_MODS)
@@ -60,7 +61,7 @@ test('a Mac binds ⌘W, ⇧⌘W and ⌘E, and nothing else: every key under ever
 
 test('a Mac prints them', () => {
   const printed = Object.fromEntries(boundActions().map((id) => [id, shortcutLabel(id, 'mac')]))
-  expect(printed).toEqual({ 'pane.close': '⌘W', 'tab.close': '⌘⇧W', 'dictation.toggle': '⌘E' })
+  expect(printed).toEqual({ 'pane.close': '⌘W', 'tab.close': '⌘⇧W', 'dictation.toggle': '⌘E', 'jarvis.toggle': '⌘J' })
 })
 
 describe('off a Mac', () => {
@@ -93,6 +94,7 @@ describe('off a Mac', () => {
       // ⌘ key → Ctrl+Shift+key.
       'pane.close': 'Ctrl+Shift+W',
       'dictation.toggle': 'Ctrl+Shift+E',
+      'jarvis.toggle': 'Ctrl+Shift+J',
       // ⌘⇧ key → Alt+Shift+key where Ctrl+Shift+key is taken.
       'tab.close': 'Alt+Shift+W',
     })
@@ -123,7 +125,7 @@ function pressed(label: string[], platform: Platform): Ev {
 
 describe.each(['mac', 'other'] as const)('on %s', (platform) => {
   test('pressing what an action’s label prints runs that action', () => {
-    expect(boundActions()).toHaveLength(3)
+    expect(boundActions()).toHaveLength(4)
     for (const id of boundActions()) {
       const label = shortcutKeys(id, platform)
       expect([id, label.join(' '), actionForChord(pressed(label, platform), platform)]).toEqual([id, label.join(' '), id])

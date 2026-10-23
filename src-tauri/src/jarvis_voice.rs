@@ -15,7 +15,8 @@
 //!   first of those that is true, in that order of precedence from `listening` down.
 //!   `jarvis://voice-error` says what went wrong where no command was there to return it.
 //!
-//! Files are fetched on first use, each checked against its sha256 (`files.rs`).
+//! Files are fetched at launch once the key is on, else on first use, each checked against its
+//! sha256 (`files.rs`).
 
 mod files;
 mod hear;
@@ -141,6 +142,12 @@ pub trait Backend: Send + Sync + 'static {
     fn warm(&self);
     /// The text of a take and the decoder's confidence; empty when nothing was said.
     fn hear(&self, take: &Captured) -> Result<(String, f32), String>;
+    /// After a take, heard or not (the microphone may have failed before anything was): what
+    /// `warm` set up for it may go.
+    fn done(&self) {}
+    /// At launch, once the key is on, on its own thread: fetches what the first take and the
+    /// first `say` would otherwise wait on. Nothing is loaded.
+    fn prefetch(&self) {}
     /// A speaker, started. Nothing plays while `held` is true.
     fn speaker(
         &self,
@@ -268,6 +275,7 @@ impl JarvisVoice {
     pub fn finish(&self, take: Take) {
         let released = std::time::Instant::now();
         let heard = take.recording.finish().and_then(|c| self.backend.hear(&c));
+        self.backend.done();
         match heard {
             Ok((text, confidence)) if !text.is_empty() => {
                 // The latency, never the words: the log is not Jarvis's conversation log.
@@ -281,6 +289,11 @@ impl JarvisVoice {
             }
         }
         self.phases.update(|f| f.transcribing = f.transcribing.saturating_sub(1));
+    }
+
+    /// Fetches what the voice needs ahead of its first use (`Backend::prefetch`).
+    pub fn prefetch(&self) {
+        self.backend.prefetch()
     }
 
     /// Queues `text` to be said. The first call sets the speaker up, fetching what it needs.
@@ -330,11 +343,32 @@ pub struct Local {
     model: Mutex<Option<Arc<WhisperContext>>>,
     /// Whisper's prompt (`hear::prompt`), made again from the projects at each press.
     prompt: Mutex<String>,
+    /// Held while whisper's model is fetched, and while Piper's files are: dictation's `download`
+    /// resumes a `.part` file, and the launch's `prefetch` and a first take or `say` must not
+    /// write the same one at once.
+    fetching_model: Mutex<()>,
+    fetching_piper: Mutex<()>,
 }
 
 impl Local {
     pub fn new(config: Config) -> Self {
-        Local { config, model: Mutex::new(None), prompt: Mutex::new(hear::prompt(&[])) }
+        Local {
+            config,
+            model: Mutex::new(None),
+            prompt: Mutex::new(hear::prompt(&[])),
+            fetching_model: Mutex::new(()),
+            fetching_piper: Mutex::new(()),
+        }
+    }
+
+    fn fetch_model(&self) -> Result<PathBuf, String> {
+        let _one = lock(&self.fetching_model);
+        hear::fetch(self.config.whisper.clone())
+    }
+
+    fn fetch_piper(&self) -> Result<speech::PiperFiles, String> {
+        let _one = lock(&self.fetching_piper);
+        speech::ensure_files(self.config.piper.clone())
     }
 
     fn model(&self) -> Result<Arc<WhisperContext>, String> {
@@ -344,7 +378,7 @@ impl Local {
             return Ok(m.clone());
         }
         let started = std::time::Instant::now();
-        let m = Arc::new(hear::load(self.config.whisper.clone())?);
+        let m = Arc::new(voice::load_context(&self.fetch_model()?)?);
         log::info!("jarvis voice: model ready in {:.1}s", started.elapsed().as_secs_f32());
         *slot = Some(m.clone());
         Ok(m)
@@ -361,17 +395,29 @@ impl Backend for Local {
     }
 
     fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
-        let heard = (|| {
-            let audio = hear::to_whisper(&take.samples, take.rate);
-            if voice::is_silent(&audio) {
-                return Ok((String::new(), 0.0));
-            }
-            let model = self.model()?;
-            let prompt = lock(&self.prompt).clone();
-            hear::hear(&model, &audio, &prompt)
-        })();
+        let audio = hear::to_whisper(&take.samples, take.rate);
+        if voice::is_silent(&audio) {
+            return Ok((String::new(), 0.0));
+        }
+        let model = self.model()?;
+        let prompt = lock(&self.prompt).clone();
+        hear::hear(&model, &audio, &prompt)
+    }
+
+    fn done(&self) {
         app_full_speed(false);
-        heard
+    }
+
+    fn prefetch(&self) {
+        let started = std::time::Instant::now();
+        // What fails here fails again, said to the panel, when the key or a reply needs the file.
+        let errors: Vec<String> = [self.fetch_model().map(drop), self.fetch_piper().map(drop)].into_iter().filter_map(Result::err).collect();
+        if errors.is_empty() {
+            log::info!("jarvis voice: its files are ready ({:.1}s)", started.elapsed().as_secs_f32());
+        }
+        for e in errors {
+            log::warn!("jarvis voice: fetching its files: {e}");
+        }
     }
 
     fn speaker(
@@ -380,7 +426,7 @@ impl Backend for Local {
         on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
         on_error: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<speech::Speaker, String> {
-        let files = speech::ensure_files(self.config.piper.clone())?;
+        let files = self.fetch_piper()?;
         let piper = speech::Piper::new(&files);
         speech::Speaker::start(files.rate, held, piper.into_synth(), speech::default_output(), on_speaking, on_error)
     }
@@ -485,8 +531,12 @@ pub fn start(app: &AppHandle) {
     let voice = Arc::new(JarvisVoice::new(Box::new(Local::new(config)), emit));
     app.manage(voice.clone());
     if let Some(key) = key {
-        match listen(app, &key, voice) {
-            Ok(()) => log::info!("jarvis voice: push-to-talk on {key}"),
+        match listen(app, &key, voice.clone()) {
+            Ok(()) => {
+                log::info!("jarvis voice: push-to-talk on {key}");
+                // The first take and the first reply would otherwise wait on some 280 MB.
+                std::thread::spawn(move || voice.prefetch());
+            }
             Err(e) => log::warn!("jarvis voice: the push-to-talk key {key}: {e}"),
         }
     }
@@ -660,6 +710,46 @@ mod tests {
         assert_eq!(serde_json::to_value(VoicePhase::Transcribing).unwrap(), json!("transcribing"));
         let h = Heard { text: "oi".into(), confidence: 0.5, window: None };
         assert_eq!(serde_json::to_value(h).unwrap(), json!({ "text": "oi", "confidence": 0.5, "window": null }));
+    }
+
+    #[test]
+    fn a_take_ends_with_done_even_when_the_microphone_was_lost() {
+        use std::sync::atomic::AtomicUsize;
+        struct Counting(Arc<AtomicUsize>);
+        impl Backend for Counting {
+            fn warm(&self) {}
+            fn hear(&self, _: &Captured) -> Result<(String, f32), String> {
+                Ok((String::new(), 0.0))
+            }
+            fn done(&self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            fn speaker(
+                &self,
+                _: Arc<AtomicBool>,
+                _: Arc<dyn Fn(bool) + Send + Sync>,
+                _: Arc<dyn Fn(String) + Send + Sync>,
+            ) -> Result<speech::Speaker, String> {
+                Err("no speaker".into())
+            }
+        }
+        let done = Arc::new(AtomicUsize::new(0));
+        let events = Arc::new(Mutex::new(vec![]));
+        let into = events.clone();
+        let voice = Arc::new(JarvisVoice::new(Box::new(Counting(done.clone())), Arc::new(move |e| lock(&into).push(e))));
+        // A microphone unplugged partway: the take is an error and is never heard.
+        let unplugged: voice::Input = Box::new(|sink: voice::Sink| {
+            sink.push(&vec![0.1f32; 4_800], 1, usize::MAX);
+            sink.lose("device unplugged");
+            Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into() })
+        });
+        voice.press(unplugged, None).unwrap();
+        voice.finish(voice.release().unwrap());
+        assert_eq!(done.load(Ordering::SeqCst), 1, "what warm set up for the take is let go");
+        assert!(lock(&events).iter().any(|e| matches!(e, Event::Error(_))), "{:?}", lock(&events));
+        voice.press(mic(), None).unwrap();
+        voice.finish(voice.release().unwrap());
+        assert_eq!(done.load(Ordering::SeqCst), 2);
     }
 
     /// The latencies the PR reports, on this machine's speaker with the real files (fetched into

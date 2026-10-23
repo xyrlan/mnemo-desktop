@@ -1,6 +1,7 @@
 /** James, Jarvis's assistant (#503, #505): `App.tsx` imports every `src/<dir>/view.tsx`, and this
  *  one starts the loop (`./loop`) over the Rust client and the parents, registers
- *  `jarvis.toggle`, hears `jarvis://heard`, and mounts the panel in the shell's overlay slot. */
+ *  `jarvis.toggle`, hears `jarvis://heard` and the voice's errors, and mounts the panel in the
+ *  shell's overlay slot. */
 import { notifyAgent } from '../agents/notify'
 import { shortcutLabel } from '../actions/chords'
 import { register } from '../actions/registry'
@@ -9,7 +10,7 @@ import { tauriJarvis } from './client'
 import { createJarvis } from './loop'
 import { JarvisPanel } from './panel/Panel'
 import { createParents } from './parent'
-import { createJarvisStore } from './store'
+import { addLine, createJarvisStore } from './store'
 
 const store = createJarvisStore()
 
@@ -39,6 +40,14 @@ const unlistenHeard = listening(() =>
   }),
 )
 const unlistenVoice = listening(() => tauriJarvis.onVoice((voice) => store.setState({ voice })))
+// No microphone, a model that would not download, a speaker that would not open: said in the
+// panel, which opens for it as it does for a take.
+const unlistenVoiceError = listening(() =>
+  tauriJarvis.onVoiceError((message) => {
+    store.setState({ open: true })
+    addLine(store, { who: 'note', text: `Voz: ${message}`, error: true })
+  }),
+)
 
 function Jarvis() {
   return <JarvisPanel store={store} jarvis={jarvis} shortcut={shortcutLabel('jarvis.toggle')} />
@@ -51,5 +60,6 @@ import.meta.hot?.dispose(() => {
   window.removeEventListener('blur', onBlur)
   void unlistenHeard.then((u) => u?.())
   void unlistenVoice.then((u) => u?.())
+  void unlistenVoiceError.then((u) => u?.())
   unmount()
 })

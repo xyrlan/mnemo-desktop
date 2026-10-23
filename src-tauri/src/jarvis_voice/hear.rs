@@ -43,23 +43,23 @@ macro_rules! whisper {
 /// time by four and made every model loop on a phrase, confidently: it is not used.
 pub const MODEL: Pinned = whisper!("ggml-small-q5_1.bin", 190_085_487, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb");
 
-/// Jarvis's model, loaded: the config's `voice.whisper` (a ggml model already on disk), else
-/// `MODEL`, fetched once into dictation's models dir.
-pub fn load(configured: Option<PathBuf>) -> Result<WhisperContext, String> {
+/// Jarvis's model on disk, for `voice::load_context`: the config's `voice.whisper` (a ggml model
+/// already there), else `MODEL`, fetched once into dictation's models dir. Nothing is fetched for
+/// a CPU whisper cannot run on.
+pub fn fetch(configured: Option<PathBuf>) -> Result<PathBuf, String> {
     voice::cpu_check()?;
     let mut said = u64::MAX;
-    let path = match configured {
-        Some(p) if p.is_file() => p,
-        Some(p) => return Err(format!("voice.whisper in jarvis.json: {} is not a file", p.display())),
-        // Said in the log every 64 MB: nothing on screen waits on it but the take.
+    match configured {
+        Some(p) if p.is_file() => Ok(p),
+        Some(p) => Err(format!("voice.whisper in jarvis.json: {} is not a file", p.display())),
+        // Said in the log every 64 MB: nothing on screen shows it.
         None => files::ensure(&files::models_dir(), &MODEL, |done, total| {
             if done >> 26 != said >> 26 || done == total {
                 said = done;
                 log::info!("jarvis voice: {} {done} of {total} bytes", MODEL.file);
             }
-        })?,
-    };
-    voice::load_context(&path)
+        }),
+    }
 }
 
 /// What Jarvis heard in a take at 16 kHz mono: the text and the decoder's confidence, 0–1. An

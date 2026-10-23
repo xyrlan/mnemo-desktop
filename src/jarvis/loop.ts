@@ -380,6 +380,12 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
         set({ busy: false })
       }
     }))
+  // A new request is the one to answer: what James is still saying stops, so a question asked
+  // over him is not followed by the rest of the old answer (#506).
+  const request = (req: Request) => {
+    void client.hush().catch(() => {})
+    return enqueue(req)
+  }
 
   // ---- the parents' events ----
   set({ parents: parents.running().map((ref) => ({ ref, state: 'working' as const, summary: null, question: null })) })
@@ -392,8 +398,8 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   })
 
   return {
-    ask: (text) => (text.trim() ? enqueue({ text: text.trim(), spoken: false }) : Promise.resolve()),
-    heard: (h) => (h.text.trim() ? enqueue({ text: h.text.trim(), spoken: true, confidence: h.confidence, window: h.window }) : Promise.resolve()),
+    ask: (text) => (text.trim() ? request({ text: text.trim(), spoken: false }) : Promise.resolve()),
+    heard: (h) => (h.text.trim() ? request({ text: h.text.trim(), spoken: true, confidence: h.confidence, window: h.window }) : Promise.resolve()),
     async answer(sessionId, allow) {
       try {
         await parents.answer(sessionId, allow)

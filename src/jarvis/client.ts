@@ -82,6 +82,9 @@ export interface JarvisClient {
   hush(): Promise<void>
   onVoice(cb: (phase: VoicePhase) => void): Promise<() => void>
   onHeard(cb: (heard: Heard) => void): Promise<() => void>
+  /** `jarvis://voice-error`: what went wrong with the key, the microphone, whisper or the speaker
+   *  where no command was there to return it (jarvis-voice). */
+  onVoiceError(cb: (message: string) => void): Promise<() => void>
 
   /** `jarvis_screenshot() -> Result<String, String>`: the screen in front as a `data:image/…`
    *  URL, held in memory only (jarvis-screen). */
@@ -117,6 +120,7 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     hush: () => invoke('jarvis_hush'),
     onVoice: (cb) => listen<VoicePhase>('jarvis://voice', cb),
     onHeard: (cb) => listen<Heard>('jarvis://heard', cb),
+    onVoiceError: (cb) => listen<string>('jarvis://voice-error', cb),
     screenshot: () => invoke('jarvis_screenshot'),
     apps: () => invoke('jarvis_apps'),
     openApp: (app, project) => invoke('jarvis_open_app', { app, project: project ?? null }),

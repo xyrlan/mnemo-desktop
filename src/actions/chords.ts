@@ -21,11 +21,13 @@ const mod = (key: string): Binding => ({ mac: { meta: true, key }, other: { ctrl
 const modShift = (key: string, other: Chord): Binding => ({ mac: { meta: true, shift: true, key }, other })
 
 /** The app's chords: ⌘W and ⇧⌘W close what is on top of the Nexus (the drawer claims them), ⌘E
- *  dictates. The Nexus's own keys (⌥1–9, Tab, `/`, Esc, ⌘\) are bound inside it. */
+ *  dictates, ⌘J opens and closes James (#503). The Nexus's own keys (⌥1–9, Tab, `/`, Esc, ⌘\)
+ *  are bound inside it. */
 const BINDINGS: Record<string, Binding> = {
   'pane.close': mod('w'),
   'dictation.toggle': mod('e'),
   'tab.close': modShift('w', { alt: true, shift: true, key: 'w' }),
+  'jarvis.toggle': mod('j'),
 }
 
 type KeyEvent = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
