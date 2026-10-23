@@ -57,7 +57,9 @@ pub fn find<'a>(projects: &'a [JarvisProject], name: &str) -> Option<&'a JarvisP
 ///   case; a dispatch worktree's bot (`x-wt-…`) never is;
 /// - `projects.<name>.root` sets or overrides the root (`~` is the home dir), and makes a project
 ///   of a name mnemo has no bot for;
-/// - `projects.<name>.aliases` are what the maintainer also calls it.
+/// - `projects.<name>.aliases` are what the maintainer also calls it. An alias wins over a name
+///   that only discovery found: with `mnemo-src` aliased `mnemo`, a bot `mnemo` (the vault, say)
+///   is not a project, so "mnemo" means what the maintainer means by it.
 ///
 /// Sorted by name.
 pub fn resolve(bots: &[String], folders: &[String], config: &serde_json::Value, home: &Path, is_repo: &dyn Fn(&Path) -> bool) -> Vec<JarvisProject> {
@@ -97,6 +99,9 @@ pub fn resolve(bots: &[String], folders: &[String], config: &serde_json::Value, 
             (None, None) => {}
         }
     }
+    let configured = |n: &String| config.get(n).is_some();
+    let claimed: Vec<String> = out.values().filter(|p| configured(&p.name)).flat_map(|p| p.aliases.iter().map(|a| a.to_lowercase())).collect();
+    out.retain(|n, _| configured(n) || !claimed.contains(&n.to_lowercase()));
     let mut v: Vec<JarvisProject> = out.into_values().collect();
     v.sort_by(|a, b| a.name.cmp(&b.name));
     v
@@ -212,6 +217,18 @@ mod tests {
         assert_eq!(got[0].aliases, ["o app", "desktop"]);
         assert_eq!(got[1].name, "tool");
         assert_eq!(Path::new(&got[1].root), dir.join("elsewhere"));
+    }
+
+    #[test]
+    fn a_configured_alias_wins_over_a_name_only_discovery_found() {
+        let dir = crate::testutil::temp_dir("jarvis-alias");
+        let folders = repos(&dir, &["mnemo", "cli"]);
+        let bots = s(&["mnemo", "cli"]);
+        let got = resolve(&bots, &folders, &json!({ "cli": { "aliases": ["MNEMO"] } }), &dir, &is_repo);
+        assert_eq!(got.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["cli"]);
+        assert_eq!(find(&got, "mnemo").map(|p| p.name.as_str()), Some("cli"));
+        let both = json!({ "cli": { "aliases": ["mnemo"] }, "mnemo": { "aliases": ["o vault"] } });
+        assert_eq!(resolve(&bots, &folders, &both, &dir, &is_repo).len(), 2, "a project the config names is kept");
     }
 
     #[test]
