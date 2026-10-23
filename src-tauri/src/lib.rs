@@ -126,6 +126,9 @@ pub mod single_instance;
 // -- newer release (src/newer_release.rs) --
 pub mod newer_release;
 
+// -- jarvis (src/jarvis.rs): its config and the projects it knows (#503) --
+pub mod jarvis;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -346,6 +349,10 @@ pub fn run() {
 
             // -- plan-usage commands --
             plan_usage::plan_usage,
+
+            // -- jarvis commands --
+            jarvis::jarvis_projects,
+            jarvis::jarvis_log_append,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {

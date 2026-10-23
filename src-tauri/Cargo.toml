@@ -71,6 +71,9 @@ flate2 = "1"
 sha2 = "0.10"
 # Native OS notifications for agents (agent_hooks.rs), sent from Rust: the front calls a command.
 tauri-plugin-notification = "2"
+# Jarvis's push-to-talk key works with the window unfocused or minimized (#506). 2.4 needs tauri
+# 2.12, which moves webview2-com under browser_keys.rs and mcp.rs.
+tauri-plugin-global-shortcut = "~2.3"
 
 # The terminal daemon (src/bin/mnemo-desktop-ptyd.rs) leaves the app's session and holds a lock on
 # its socket.
@@ -83,7 +86,9 @@ libc = "0.2"
 # read in (memory_feed.rs). `--version` prints into the terminal's console (console.rs), and a
 # start that fails says so in a message box (crash.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
+# Win32_Graphics_Gdi: Jarvis's screenshot on request (#507). Win32_System_JobObjects: Jarvis's
+# llama-server dies with the app, a crash included (#505).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects"] }
 # WebView2's own interfaces, at the versions wry uses, so the controller Tauri hands over is these
 # crates' type: the app webview's browser keys (browser_keys.rs), and the app's snapshot through
 # CapturePreview into a memory stream (mcp.rs).

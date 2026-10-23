@@ -22,76 +22,25 @@ import { createReadStream, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { NAME, NO_TOOL, TOOLS, canonicalProject, chatBody, firstCall, foldChunks, isOutput, sseEvents, systemPrompt } from '../src/jarvis/routing.ts'
+
+// James's name, tools, prompt and wire format are the app's own (`src/jarvis/routing.ts`), so the
+// benchmark measures what ships.
+export { NAME, NO_TOOL, TOOLS, canonicalProject, chatBody, firstCall, foldChunks, isOutput, sseEvents, systemPrompt }
 
 export const REPO_SET = join(dirname(fileURLToPath(import.meta.url)), 'jarvis-bench.jsonl')
 export const REAL_SET = join(homedir(), 'mnemo', '.mnemo', 'jarvis-bench.jsonl')
 
-/** What the maintainer calls the assistant out loud; "Jarvis" is only the project's name. */
-export const NAME = 'James'
-
-/** `expect.tool` for a request that wants a reply in words and no tool call. */
-export const NO_TOOL = 'none'
-
 /** A set's name in the report: only the repo's own set is not `real`, which is never echoed. */
 export const setName = (file) => (resolve(file) === REPO_SET ? 'repo (synthetic)' : 'real')
 
-const project = (what = 'the project') => ({ type: 'string', description: `${what}: one of the known projects' names, exactly as listed` })
-const fn = (name, description, properties, required = Object.keys(properties)) => ({
-  type: 'function',
-  function: { name, description, parameters: { type: 'object', properties, required } },
-})
-
-/** Step 2's (#505) closed set of read tools, plus following a running parent, handing a write to
- *  a parent, and asking. Never a shell. */
-export const TOOLS = [
-  fn('git_status', 'git status of a project.', { project: project() }),
-  fn('git_log', 'Recent commits of a project.', { project: project(), limit: { type: 'integer' } }, ['project']),
-  fn('git_diff', 'Uncommitted changes in a project, optionally of one path.', { project: project(), path: { type: 'string' } }, ['project']),
-  fn('read_file', 'Read a file in a project.', { project: project(), path: { type: 'string' } }),
-  fn('list_dir', 'List a folder in a project.', { project: project(), path: { type: 'string' } }, ['project']),
-  fn('search', 'Search a project\'s files for text (ripgrep).', { project: project(), query: { type: 'string' } }),
-  fn('read_briefings', 'Read the briefings of past work sessions in a project: what was done, decided, left open.', { project: project(), since: { type: 'string', description: 'e.g. "yesterday", "2026-10-01"' } }, ['project']),
-  fn('query_rules', 'Look up the rules and conventions mnemo learned for a project.', { project: project(), query: { type: 'string' } }, ['query']),
-  fn('list_sessions', 'List agent sessions (running and recent), optionally of one project.', { project: project() }, []),
-  fn('gh_pr_list', 'Open pull requests of a project, or of every known project when none is named.', { project: project() }, []),
-  fn('gh_pr_view', 'Show a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
-  fn('gh_pr_checks', 'CI checks of a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
-  fn('gh_run_list', 'Recent CI (GitHub Actions) runs of a project.', { project: project() }),
-  fn('gh_issue_view', 'Show an issue.', { project: project(), number: { type: 'integer' } }),
-  fn('parent_status', 'How a parent session already working on an earlier request is doing.', { project: project('the project the parent runs in') }),
-  fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the request, verbatim' } }),
-  fn('ask_user', 'Ask the user before acting: when the project cannot be told, or the request is destructive (delete, force-push, reset).', {
-    question: { type: 'string' },
-    reason: { type: 'string', enum: ['project_unknown', 'destructive', 'ambiguous'] },
-    project: project('the project, when it is known'),
-  }, ['question', 'reason']),
-]
-
-/** Jarvis's system prompt over the known `projects` and what it knows besides the words. */
-export function systemPrompt(projects, context, reasoning = false) {
-  const list = projects.map((p) => `- ${p.name}${p.aliases?.length ? ` (também: ${p.aliases.join(', ')})` : ''}`).join('\n')
-  return [
-    reasoning ? '' : '/no_think',
-    `Você é o ${NAME}, um assistente de voz no desktop do usuário. O usuário fala em português.`,
-    'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas.',
-    'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
-    'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
-    'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
-    'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',
-    'Quando houver o que ler, fazer ou perguntar, chame exatamente uma ferramenta. Quando não houver (um bom-dia, um aviso de que o usuário ainda vai passar as tarefas), responda só com uma frase curta, sem ferramenta.',
-    '',
-    'Projetos conhecidos:',
-    list,
-    '',
-    `Estado atual: ${context || 'nenhum parent rodando, nenhuma janela em foco.'}`,
-  ].filter((l, i) => i > 0 || l).join('\n')
-}
-
-/** The requests and known projects of a set's JSONL text. A line that is not a request (no
- *  `request` and `expect.tool`, or marked `example`) is skipped, unless it is the `projects` line. */
+/** The requests, known projects and apps of a set's JSONL text. A line that is not a request (no
+ *  `request` and `expect.tool`, or marked `example`) is skipped, unless it is the `projects` line,
+ *  which may also list the `apps` James can open (`[{"name", "project"}]`). */
 export function parseSet(text) {
   const requests = []
   let projects = null
+  let apps = []
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     let r
@@ -100,82 +49,18 @@ export function parseSet(text) {
     } catch {
       continue
     }
-    if (Array.isArray(r?.projects)) projects = r.projects.map((p) => (typeof p === 'string' ? { name: p } : p))
+    if (Array.isArray(r?.projects)) {
+      projects = r.projects.map((p) => (typeof p === 'string' ? { name: p } : p))
+      if (Array.isArray(r.apps)) apps = r.apps.map((a) => (typeof a === 'string' ? { name: a } : a))
+    }
     // A request marked `example` is a template for the file's format, not part of the set.
     else if (typeof r?.request === 'string' && typeof r.expect?.tool === 'string' && !r.example) requests.push(r)
   }
   if (!projects) projects = [...new Set(requests.map((r) => r.expect.project).filter(Boolean))].map((name) => ({ name }))
-  return { requests, projects }
-}
-
-/** The body of the chat request for `row`. */
-export function chatBody(row, projects, { reasoning = false, stream = true } = {}) {
-  return {
-    messages: [
-      { role: 'system', content: systemPrompt(projects, row.context, reasoning) },
-      { role: 'user', content: row.request },
-    ],
-    tools: TOOLS,
-    tool_choice: 'auto',
-    temperature: 0,
-    max_tokens: reasoning ? 2048 : 384,
-    stream,
-    chat_template_kwargs: { enable_thinking: reasoning, thinking: reasoning },
-  }
-}
-
-/** Folds an OpenAI-style stream of chat chunks (already JSON-parsed) into one reply message.
- *  Tool calls arrive in pieces keyed by `index`. */
-export function foldChunks(chunks) {
-  const msg = { content: '', reasoning_content: '', tool_calls: [] }
-  for (const c of chunks) {
-    const d = c?.choices?.[0]?.delta
-    if (!d) continue
-    if (d.content) msg.content += d.content
-    if (d.reasoning_content) msg.reasoning_content += d.reasoning_content
-    for (const t of d.tool_calls ?? []) {
-      const i = t.index ?? msg.tool_calls.length
-      const slot = (msg.tool_calls[i] ??= { function: { name: '', arguments: '' } })
-      if (t.function?.name) slot.function.name += t.function.name
-      if (t.function?.arguments) slot.function.arguments += t.function.arguments
-    }
-  }
-  msg.tool_calls = msg.tool_calls.filter(Boolean)
-  return msg
-}
-
-/** Whether a chunk is the model's first output: text, reasoning or a tool call. */
-export const isOutput = (c) => {
-  const d = c?.choices?.[0]?.delta
-  return !!(d && (d.content || d.reasoning_content || d.tool_calls?.length))
+  return { requests, projects, apps }
 }
 
 const norm = (v) => String(v ?? '').trim().toLowerCase()
-
-/** The first tool call of a reply `message`: `{tool, args}`, `tool` null when the model only wrote
- *  text, `args` null when they are not JSON. */
-export function firstCall(message) {
-  const call = message?.tool_calls?.[0]
-  if (!call) return { tool: null, args: null }
-  const raw = call.function?.arguments
-  let args = null
-  if (raw && typeof raw === 'object') args = raw
-  else
-    try {
-      args = JSON.parse(raw || '{}')
-    } catch {
-      args = null
-    }
-  return { tool: call.function?.name ?? null, args }
-}
-
-/** The project named by `value`: its canonical name if `value` is one of `projects`' names or
- *  aliases, else `value` itself, normalized. */
-export function canonicalProject(value, projects) {
-  const v = norm(value)
-  const p = projects.find((p) => norm(p.name) === v || (p.aliases ?? []).some((a) => norm(a) === v))
-  return p ? norm(p.name) : v
-}
 
 /** Scores one reply `message` against `row.expect`:
  *  - `expected`: the tool the row expects (`NO_TOOL` for a reply in words);
@@ -266,22 +151,6 @@ export function toolTable(summary) {
   const tools = Object.entries(summary.byTool ?? {}).sort(([a, x], [b, y]) => y.n - x.n || a.localeCompare(b))
   for (const [tool, t] of tools) out.push(`| ${tool} | ${frac(t.args, t.n)} |`)
   return out.join('\n')
-}
-
-/** Splits an SSE body's text into its `data:` payloads, JSON-parsed, stopping at `[DONE]`. */
-export function sseEvents(text) {
-  const events = []
-  for (const line of text.split('\n')) {
-    const m = /^data:\s?(.*)$/.exec(line.trimEnd())
-    if (!m) continue
-    if (m[1] === '[DONE]') break
-    try {
-      events.push(JSON.parse(m[1]))
-    } catch {
-      // A keep-alive or a torn line.
-    }
-  }
-  return events
 }
 
 /** Sends `row` to the server at `url` and times it: `{message, ttftMs, totalMs}`. */
@@ -415,10 +284,10 @@ async function main(argv) {
     for (const set of sets) {
       const results = []
       // One unscored warm-up: the first request also pays for loading weights into caches.
-      await ask(o.url, set.requests[0], set.projects, o).catch(() => {})
+      await ask(o.url, set.requests[0], set.projects, { ...o, apps: set.apps }).catch(() => {})
       for (const row of set.requests) {
         try {
-          const r = await ask(o.url, row, set.projects, o)
+          const r = await ask(o.url, row, set.projects, { ...o, apps: set.apps })
           results.push({ ...score(row, r.message, set.projects), ttftMs: r.ttftMs, totalMs: r.totalMs })
           // Only the repo's set may be echoed: the real one names private projects.
           if (o.verbose && set.name !== 'real') console.error(JSON.stringify({ request: row.request, expect: row.expect, got: firstCall(r.message) }))

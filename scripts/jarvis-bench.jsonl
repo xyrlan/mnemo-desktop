@@ -1,4 +1,4 @@
-{"projects": [{"name": "mnemo-desktop", "aliases": ["desktop", "o app"]}, {"name": "mnemo", "aliases": ["mnemo-src", "a cli do mnemo"]}, {"name": "llama.cpp", "aliases": ["llama"]}, {"name": "whisper.cpp", "aliases": ["whisper"]}, {"name": "tauri"}]}
+{"projects": [{"name": "mnemo-desktop", "aliases": ["desktop", "o app"]}, {"name": "mnemo", "aliases": ["mnemo-src", "a cli do mnemo"]}, {"name": "llama.cpp", "aliases": ["llama"]}, {"name": "whisper.cpp", "aliases": ["whisper"]}, {"name": "tauri"}], "apps": [{"name": "VS Code", "project": true}, {"name": "Spotify"}, {"name": "Obsidian"}]}
 {"request": "como tá o git do desktop?", "expect": {"tool": "git_status", "project": "mnemo-desktop"}}
 {"request": "tem alguma coisa não commitada no whisper?", "expect": {"tool": "git_status", "project": "whisper.cpp"}}
 {"request": "quais foram os últimos commits do llama?", "expect": {"tool": "git_log", "project": "llama.cpp"}}
@@ -37,3 +37,11 @@
 {"request": "Bom dia, James!", "expect": {"tool": "none"}}
 {"request": "Bom dia, James. Hoje o dia vai ser cheio, já já eu te passo as tarefas.", "expect": {"tool": "none"}}
 {"request": "valeu, James, era só isso", "expect": {"tool": "none"}}
+{"request": "James, olha minha tela e me fala que erro é esse", "expect": {"tool": "look_at_screen"}}
+{"request": "dá uma olhada no que tá aparecendo aqui na tela", "expect": {"tool": "look_at_screen"}}
+{"request": "abre o VS Code no desktop", "expect": {"tool": "open_app", "project": "mnemo-desktop", "args": {"app": "vs code"}}}
+{"request": "James, abre o Spotify aí", "expect": {"tool": "open_app", "args": {"app": "spotify"}}}
+{"request": "abre o PR 511 do desktop no navegador", "expect": {"tool": "open_in_browser", "project": "mnemo-desktop", "args": {"page": "pr", "number": 511}}}
+{"request": "me mostra as actions do mnemo no navegador", "expect": {"tool": "open_in_browser", "project": "mnemo", "args": {"page": "actions"}}}
+{"request": "abre o github.com/ggml-org/llama.cpp pra mim", "expect": {"tool": "open_url", "args": {"url": "github.com/ggml-org/llama.cpp"}}}
+{"request": "James, abre o site huggingface.co", "expect": {"tool": "open_url", "args": {"url": "huggingface.co"}}}
