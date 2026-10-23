@@ -129,6 +129,9 @@ pub mod newer_release;
 // -- jarvis (src/jarvis.rs): its config and the projects it knows (#503) --
 pub mod jarvis;
 
+// -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
+pub mod jarvis_llm;
+
 // -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
 pub mod jarvis_voice;
 
@@ -201,6 +204,9 @@ pub fn run() {
     };
     let ran = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // -- jarvis llm --
+        // Its llama-server stops when the app exits (src/jarvis_llm.rs).
+        .plugin(jarvis_llm::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -356,6 +362,11 @@ pub fn run() {
             // -- jarvis commands --
             jarvis::jarvis_projects,
             jarvis::jarvis_log_append,
+
+            // -- jarvis llm commands --
+            jarvis_llm::jarvis_llm_ensure,
+            jarvis_llm::jarvis_llm_chat,
+            jarvis_llm::jarvis_llm_stop,
 
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
