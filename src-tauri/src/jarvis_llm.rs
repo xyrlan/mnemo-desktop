@@ -22,7 +22,7 @@
 //! the config or the PATH.
 
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::{Mutex, MutexGuard};
@@ -609,7 +609,7 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::sync::{Arc, Mutex};
 
     #[test]
