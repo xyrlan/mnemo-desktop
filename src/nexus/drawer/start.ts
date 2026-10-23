@@ -157,10 +157,11 @@ export function createSessions(d: StartDeps): Sessions {
         // (`Pane.agent`), else the active one. A Claude row's resumes on the active account while
         // that is a Claude one, as it always did: switching Claude accounts moves its sessions
         // (decision 7).
-        const row = spec.resume && spec.agent && (spec.agent.kind === 'grok' || spec.agent.kind !== active.kind) ? spec.agent : undefined
+        // A new session given an account (a Jarvis parent on its host) runs on that one.
+        const row = spec.agent && (!spec.resume || spec.agent.kind === 'grok' || spec.agent.kind !== active.kind) ? spec.agent : undefined
         const own = row || (spec.resume && Object.values(panes()).find((p) => p.sessionId === spec.resume && p.agent)?.agent) || active
         const label = labelFor(spec, own.kind)
-        const id = spec.resume ?? d.newId()
+        const id = spec.resume ?? spec.sessionId ?? d.newId()
         const tab: DrawerTab = { id, kind: 'captain', key: null, readOnly: null, label, sessionId: id, cwd: spec.root }
         if (spec.resume) {
           // A session one of the app's panes runs already is shown, never started a second time:
@@ -178,9 +179,10 @@ export function createSessions(d: StartDeps): Sessions {
           for (const p of Object.values(panes())) if (p.sessionId === spec.resume) d.layout.getState().setSessionId(p.id, undefined)
         }
         // *Launch agent*'s words on the session's CLI: skipping its permission prompts unless
-        // Settings say not to; then the session to resume, or the id to start under, so its tab is
-        // its captain's from the first moment.
-        const words = sessionCommand(own.kind, { skipPermissions: d.skipPermissions(), ...(spec.resume ? { resume: spec.resume } : { sessionId: id }) })
+        // Settings say not to, or the spec asks for them (`ask`); then the session to resume, or
+        // the id to start under, so its tab is its captain's from the first moment.
+        const skipPermissions = !spec.ask && d.skipPermissions()
+        const words = sessionCommand(own.kind, { skipPermissions, ...(spec.resume ? { resume: spec.resume } : { sessionId: id }) })
         const cmd = sameAgent(own, active) ? words : onAccount(words, { account_env: own })
         let pane: PaneId
         try {

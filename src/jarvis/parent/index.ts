@@ -2,9 +2,13 @@
  *  in a project for a request that writes, the handoff typed into it, and following it until it
  *  is done. The panel calls only `ParentsApi`.
  *
- *  This file is the seam's placeholder: the `jarvis-parent` piece of
- *  `docs/superpowers/contracts/2026-10-23-jarvis-wave-b.md` replaces its body and keeps these
- *  signatures. */
+ *  - `./handoff`: the three-part text typed into a parent;
+ *  - `./follow`: its state, from its `claude agents` row and its transcript (pure);
+ *  - `./parents`: the API over what it needs of the app; `./live`, that, as the app runs it. */
+
+import { makeParents } from './parents'
+
+export { handoff } from './handoff'
 
 export type Host = 'claude' | 'grok'
 
@@ -57,16 +61,8 @@ export interface ParentsApi {
   subscribe(cb: (e: ParentEvent) => void): () => void
 }
 
-const missing = () => Promise.reject(new Error('jarvis: parents arrive with the jarvis-parent piece'))
-
+/** The app's parents. Nothing of the app loads until a call needs it: the types and a fresh
+ *  `running()` cost nothing. */
 export function createParents(): ParentsApi {
-  return {
-    open: missing,
-    send: missing,
-    status: missing,
-    answer: missing,
-    cancel: missing,
-    running: () => [],
-    subscribe: () => () => {},
-  }
+  return makeParents(() => import('./live').then((m) => m.liveDeps))
 }
