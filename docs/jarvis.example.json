@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "mnemo-desktop": { "aliases": ["desktop", "o app do mnemo"] },
+    "mnemo-src": { "aliases": ["mnemo", "a cli do mnemo"] },
+    "my-site": { "root": "~/code/my-site", "aliases": ["o site"] }
+  },
+  "host": "claude",
+  "apps": [
+    { "name": "VS Code", "aliases": ["code", "o editor"], "exe": "code", "project": true },
+    { "name": "Spotify", "exe": "~/AppData/Roaming/Spotify/Spotify.exe" },
+    { "name": "Obsidian", "exe": "~/AppData/Local/Programs/Obsidian/Obsidian.exe" }
+  ],
+  "voice": { "key": "CommandOrControl+Shift+Space" },
+  "model": {
+    "llamaServer": "~/.cache/jarvis-bench/llama/llama-server.exe",
+    "model": "~/.cache/jarvis-bench/models/Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf"
+  }
+}
