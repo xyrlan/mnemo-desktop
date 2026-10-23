@@ -7,9 +7,14 @@ import { liveSessions } from './app'
  *  screen (the layout store stays the session registry) and opens in a drawer tab. `claude` is the
  *  agent CLI, whichever kind: `agent`, given with `resume`, is the account the session itself runs
  *  on, so it resumes there (spec `2026-10-16-grok-accounts-design.md`, decision 6); without it, the
- *  account a pane of the app ran it on, else the active one. */
+ *  account a pane of the app ran it on, else the active one.
+ *
+ *  A new session Jarvis opens as a parent (#505, decision 3) names the rest: `sessionId`, the id it
+ *  starts under, which the caller follows; `agent`, the account it runs on (the active one when
+ *  absent); and `ask`, set, never skips its permission prompts, whatever Settings say: they are the
+ *  only guard between a misheard sentence and a write. */
 export type SessionSpec =
-  | { kind: 'claude'; root: string; resume?: string; agent?: Agent }
+  | { kind: 'claude'; root: string; resume?: string; agent?: Agent; sessionId?: string; ask?: boolean }
   | { kind: 'shell'; root: string }
   | { kind: 'command'; root: string; command: string; label: string }
 

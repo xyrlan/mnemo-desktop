@@ -132,6 +132,12 @@ pub mod jarvis;
 // -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
 pub mod jarvis_llm;
 
+// -- jarvis screen (src/jarvis_screen.rs): the screen in front, on request (#507) --
+pub mod jarvis_screen;
+
+// -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
+pub mod jarvis_apps;
+
 // -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
 pub mod jarvis_voice;
 
@@ -367,6 +373,15 @@ pub fn run() {
             jarvis_llm::jarvis_llm_ensure,
             jarvis_llm::jarvis_llm_chat,
             jarvis_llm::jarvis_llm_stop,
+
+            // -- jarvis screen commands --
+            jarvis_screen::jarvis_screenshot,
+
+            // -- jarvis apps commands --
+            jarvis_apps::jarvis_apps,
+            jarvis_apps::jarvis_open_app,
+            jarvis_apps::jarvis_open_in_browser,
+            jarvis_apps::jarvis_open_url,
 
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
