@@ -132,6 +132,9 @@ pub mod jarvis;
 // -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
 pub mod jarvis_llm;
 
+// -- jarvis tools (src/jarvis_tools.rs): the read tools and the window in front (#505) --
+pub mod jarvis_tools;
+
 // -- jarvis screen (src/jarvis_screen.rs): the screen in front, on request (#507) --
 pub mod jarvis_screen;
 
@@ -370,6 +373,10 @@ pub fn run() {
             jarvis_llm::jarvis_llm_ensure,
             jarvis_llm::jarvis_llm_chat,
             jarvis_llm::jarvis_llm_stop,
+
+            // -- jarvis tools commands --
+            jarvis_tools::jarvis_tool,
+            jarvis_tools::jarvis_focused_window,
 
             // -- jarvis screen commands --
             jarvis_screen::jarvis_screenshot,
