@@ -76,6 +76,8 @@ export function systemPrompt(projects, context, reasoning = false) {
     'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas.',
     'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
     'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
+    'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
+    'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',
     'Quando houver o que ler, fazer ou perguntar, chame exatamente uma ferramenta. Quando não houver (um bom-dia, um aviso de que o usuário ainda vai passar as tarefas), responda só com uma frase curta, sem ferramenta.',
     '',
     'Projetos conhecidos:',
@@ -176,6 +178,7 @@ export function canonicalProject(value, projects) {
 }
 
 /** Scores one reply `message` against `row.expect`:
+ *  - `expected`: the tool the row expects (`NO_TOOL` for a reply in words);
  *  - `tool`: the first call is the expected tool, or there is none when `NO_TOOL` is expected;
  *  - `args`: the right tool, and the project (when expected) and every `expect.args` value match;
  *  - `project`: the call names the expected project, whichever tool it is (null when none is);
@@ -196,7 +199,7 @@ export function score(row, message, projects) {
   }
   const projectOk = e.project ? canonicalProject(args?.project, projects) === canonicalProject(e.project, projects) : null
   const reasoned = !!message?.reasoning_content?.trim()
-  return { tool, toolOk, argsOk, projectOk, shouldAsk: e.tool === 'ask_user', asked: tool === 'ask_user', textOnly: !!message && tool === null && want !== null, reasoned }
+  return { expected: e.tool, tool, toolOk, argsOk, projectOk, shouldAsk: e.tool === 'ask_user', asked: tool === 'ask_user', textOnly: !!message && tool === null && want !== null, reasoned }
 }
 
 /** The `p`th percentile (0–1) of `xs`, nearest rank; null for none. */
@@ -206,13 +209,20 @@ export function percentile(xs, p) {
   return s[Math.min(s.length - 1, Math.max(0, Math.ceil(p * s.length) - 1))]
 }
 
-/** One table row's figures from per-request `results` ({...score, ttftMs, totalMs, error}). */
+/** One table row's figures from per-request `results` ({...score, ttftMs, totalMs, error}).
+ *  `byTool` is, per expected tool, its rows and how many got the right arguments. */
 export function summarize(results) {
   const n = results.length
   const ok = results.filter((r) => !r.error)
   const ask = results.filter((r) => r.shouldAsk)
   const noAsk = results.filter((r) => !r.shouldAsk)
   const ms = (k) => ok.map((r) => r[k]).filter((x) => typeof x === 'number')
+  const byTool = {}
+  for (const r of results.filter((r) => r.expected)) {
+    const t = (byTool[r.expected] ??= { n: 0, args: 0 })
+    t.n++
+    if (r.argsOk) t.args++
+  }
   return {
     n,
     errors: n - ok.length,
@@ -227,6 +237,7 @@ export function summarize(results) {
     reasoned: results.filter((r) => r.reasoned).length,
     ttft: { p50: percentile(ms('ttftMs'), 0.5), p95: percentile(ms('ttftMs'), 0.95) },
     total: { p50: percentile(ms('totalMs'), 0.5), p95: percentile(ms('totalMs'), 0.95) },
+    byTool,
   }
 }
 
@@ -245,6 +256,15 @@ export function table(rows) {
     const notes = (s.errors ? ` · ${s.errors} errors` : '') + (s.reasoned ? ` · reasoned on ${s.reasoned}` : '')
     out.push(`| ${candidate}${notes} | ${frac(s.tool, s.n)} | ${frac(s.args, s.n)} | ${frac(s.project, s.withProject)} | ${frac(s.asked, s.shouldAsk)} | ${s.askedNeedlessly} | ${s.textOnly} | ${msCell(s.ttft)} | ${msCell(s.total)} | ${v} |`)
   }
+  return out.join('\n')
+}
+
+/** The Markdown table of a summary's `byTool`: right arguments per expected tool, the tools with
+ *  the most rows first. Names tools only. */
+export function toolTable(summary) {
+  const out = ['| expected tool | right arguments |', '|---|---|']
+  const tools = Object.entries(summary.byTool ?? {}).sort(([a, x], [b, y]) => y.n - x.n || a.localeCompare(b))
+  for (const [tool, t] of tools) out.push(`| ${tool} | ${frac(t.args, t.n)} |`)
   return out.join('\n')
 }
 
@@ -416,6 +436,7 @@ async function main(argv) {
   for (const s of report.sets) {
     console.log(`\n### ${s.name} set\n`)
     console.log(table([{ candidate, summary: s.summary, vram: report.vram }]))
+    console.log(`\n${toolTable(s.summary)}`)
   }
   if (gguf) console.log(`\n${gguf.file} sha256 ${gguf.sha256}`)
   if (o.json) (await import('node:fs')).writeFileSync(o.json, JSON.stringify(report, null, 2))
