@@ -115,6 +115,31 @@ test('a Grok account active starts grok in leader mode under the id, approving e
   }
 })
 
+test('a parent (`ask`) never skips its permission prompts with the setting on, under the id it names, on the account it names', async () => {
+  vi.useFakeTimers()
+  try {
+    const w = world({ skip: true, agent: () => ({ kind: 'claude', config_dir: null }) })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', sessionId: 'parent-1', ask: true })
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo', sessionId: 'parent-2', ask: true, agent: GROK_WORK })
+    // The same setting, a session without `ask`: Launch agent's, skipping them.
+    await w.sessions.openSession({ kind: 'claude', root: '/work/mnemo' })
+    vi.advanceTimersByTime(PROMPT_DELAY_MS)
+    expect(w.writes).toEqual([
+      [1, 'claude --session-id parent-1\n'],
+      [2, 'env MNEMO_AGENT=grok GROK_HOME=/Users/me/.grok-work grok --leader -s parent-2\n'],
+      [3, `claude --dangerously-skip-permissions --session-id ${ID1}\n`],
+    ])
+    expect(tabs().slice(0, 2)).toEqual([
+      { id: 'parent-1', kind: 'captain', key: 'pane:1', label: 'claude · mnemo' },
+      { id: 'parent-2', kind: 'captain', key: 'pane:2', label: 'grok · mnemo' },
+    ])
+    expect(w.layout.getState().panes[2]).toMatchObject({ sessionId: 'parent-2', agent: GROK_WORK })
+    expect(w.sessions.paneOf('parent-1')).toBe(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('a Grok session resumes on its own account and CLI whatever is active now; one the app never ran resumes on the active one', async () => {
   vi.useFakeTimers()
   try {
