@@ -141,6 +141,9 @@ pub mod jarvis_screen;
 // -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
 pub mod jarvis_apps;
 
+// -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
+pub mod jarvis_voice;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -386,6 +389,10 @@ pub fn run() {
             jarvis_apps::jarvis_open_app,
             jarvis_apps::jarvis_open_in_browser,
             jarvis_apps::jarvis_open_url,
+
+            // -- jarvis voice commands --
+            jarvis_voice::jarvis_say,
+            jarvis_voice::jarvis_hush,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
@@ -406,6 +413,10 @@ pub fn run() {
             // -- voice --
             // Loads the dictation model in the background if it is on disk (src/voice.rs).
             voice::warm(app.handle());
+
+            // -- jarvis voice --
+            // Jarvis's push-to-talk key, once jarvis.json exists, and its speaker (src/jarvis_voice.rs).
+            jarvis_voice::start(app.handle());
 
             // -- app webview --
             // The app, not a web page: on Windows F5 does not reload it (src/browser_keys.rs).
