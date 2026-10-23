@@ -20,6 +20,7 @@ import {
   summarize,
   systemPrompt,
   table,
+  toolTable,
   vramSampler,
 } from './jarvis-bench.mjs'
 
@@ -145,6 +146,29 @@ test('the table has one row per candidate and names no request or project', () =
   expect(t).not.toMatch(/segredo|privado/)
 })
 
+test('per expected tool: its rows and the right arguments, most rows first, naming tools only', () => {
+  const status = { request: 'segredo', expect: { tool: 'parent_status', project: 'mnemo' } }
+  const s = summarize([
+    score(status, call('parent_status', { project: 'mnemo' }), projects),
+    score(status, call('ask_user', { question: '?', reason: 'ambiguous', project: 'mnemo' }), projects),
+    score(status, null, projects),
+    score({ request: 'bom dia', expect: { tool: NO_TOOL } }, { content: 'Bom dia!' }, projects),
+    score({ request: 'x', expect: { tool: 'list_sessions' } }, call('list_sessions', {}), projects),
+    { toolOk: true, argsOk: true },
+  ])
+  expect(s.byTool).toEqual({ parent_status: { n: 3, args: 1 }, [NO_TOOL]: { n: 1, args: 1 }, list_sessions: { n: 1, args: 1 } })
+  const t = toolTable(s)
+  expect(t.split('\n')).toEqual([
+    '| expected tool | right arguments |',
+    '|---|---|',
+    '| parent_status | 1/3 (33%) |',
+    '| list_sessions | 1/1 (100%) |',
+    `| ${NO_TOOL} | 1/1 (100%) |`,
+  ])
+  expect(t).not.toMatch(/segredo|mnemo/)
+  expect(toolTable(summarize([]))).toBe('| expected tool | right arguments |\n|---|---|')
+})
+
 test('a set: the projects line, example rows skipped, and projects drawn from the set without one', () => {
   const text = [
     '{"example": true, "request": "modelo", "expect": {"tool": "git_status", "project": "a"}}',
@@ -198,6 +222,8 @@ test('the request body: tools, the known projects and the context; reasoning off
   expect(on.chat_template_kwargs.enable_thinking).toBe(true)
   expect(on.messages[0].content).not.toContain('/no_think')
   expect(systemPrompt(projects)).toContain('nenhum parent rodando')
+  expect(systemPrompt(projects)).toMatch(/não são destrutivos .* vão direto para delegate_to_parent, sem pedir confirmação/)
+  expect(systemPrompt(projects)).toContain('use parent_status nesse projeto')
 })
 
 test('canonical project: names and aliases, case and spaces aside; an unknown name stays itself', () => {
