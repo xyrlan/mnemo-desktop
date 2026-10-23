@@ -1,0 +1,93 @@
+/* James's panel in the ship's look (`src/nexus/ui/ui.css`, whose `.nx` tokens and kit it uses):
+   docked on the right under the ship's bar (44px and its 2px edge), over the ship and the drawer
+   and under a Nexus window (60), the notification cards (75) and the dictation indicator (85).
+   Colour means state only. Every rule is under `.nx.jv-…` or `.nx .jv-…`, so it beats the kit's
+   `.nx button`. */
+
+.nx.jv-panel {
+  position: fixed;
+  top: 54px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 58;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  border: 2px solid var(--nx-edge-hi);
+  border-radius: 4px;
+  background: var(--nx-hull);
+  box-shadow: 0 0 0 3px #000, 8px 8px 0 #000, 0 0 40px #6366f133;
+}
+.nx.jv-panel[data-voice='listening'] { border-color: var(--state-working, #60a5fa); }
+
+.nx.jv-launcher {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 58;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid var(--nx-edge);
+  border-radius: 3px;
+  background: var(--nx-hull-2);
+  box-shadow: 3px 3px 0 #000;
+  color: var(--nx-pale);
+  font-weight: 700;
+}
+.nx.jv-launcher:hover { border-color: var(--nx-edge-hi); color: #fff; }
+.nx.jv-launcher[data-waiting] { border-color: var(--nx-danger); }
+.nx .jv-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--nx-danger);
+  color: #000;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+/* The model's setup. */
+.nx .jv-setup { flex: none; padding: 8px 12px; border-bottom: 2px solid var(--nx-edge); }
+.nx .jv-setup p { margin: 0 0 6px; }
+.nx .jv-setup[data-kind='error'] { color: var(--nx-danger); }
+.nx .jv-bar { height: 4px; overflow: hidden; border-radius: 2px; background: #000; }
+.nx .jv-bar > div { height: 100%; background: var(--nx-edge-hi); }
+.nx .jv-bar[data-indeterminate] > div { width: 30%; animation: jv-sweep 1.2s ease-in-out infinite alternate; }
+@keyframes jv-sweep { from { margin-left: 0; } to { margin-left: 70%; } }
+@media (prefers-reduced-motion: reduce) { .nx .jv-bar[data-indeterminate] > div { width: 100%; animation: none; opacity: 0.5; } }
+
+/* A parent's waiting approval. */
+.nx .jv-approval { flex: none; margin: 8px 12px 0; padding: 6px 8px; border: 2px solid var(--nx-danger); border-radius: 3px; background: #1a0f1f; }
+.nx .jv-approval-q { margin: 4px 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nx .jv-approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* The parents Jarvis opened. */
+.nx .jv-parents { flex: none; padding: 8px 12px 0; }
+.nx .jv-parent { min-width: 0; }
+.nx .jv-parent[data-state='working'],
+.nx .jv-parent[data-state='starting'] { border-left-color: var(--state-working, #60a5fa); }
+.nx .jv-parent[data-state='asking'],
+.nx .jv-parent[data-state='approval'] { border-left-color: var(--nx-danger); }
+.nx .jv-parent[data-state='idle'] { border-left-color: var(--nx-ok); }
+.nx .jv-parent-state { flex: none; color: var(--nx-dim); }
+.nx .jv-parent-req { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-faint); text-overflow: ellipsis; white-space: nowrap; }
+
+/* The conversation. */
+.nx .jv-lines { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; list-style: none; }
+.nx .jv-line { display: flex; flex-direction: column; gap: 1px; padding: 3px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.nx .jv-line + .jv-line { margin-top: 4px; }
+.nx .jv-who { color: var(--nx-faint); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.nx .jv-line[data-who='you'] .jv-text { color: var(--nx-pale); }
+.nx .jv-line[data-who='parent'] { padding-left: 6px; border-left: 3px solid var(--nx-edge); }
+.nx .jv-line[data-who='note'] .jv-text { color: var(--nx-dim); font-style: italic; }
+.nx .jv-line[data-error] .jv-text { color: var(--nx-danger); font-style: normal; }
+.nx .jv-empty { padding: 12px 0; }
+
+/* The field. */
+.nx .jv-compose { display: flex; flex: none; align-items: flex-end; gap: 8px; padding: 8px 12px; border-top: 2px solid var(--nx-edge); }
+.nx .jv-field { flex: 1; min-width: 0; resize: none; }

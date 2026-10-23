@@ -13,7 +13,8 @@ test('every folder that mounts a screen in a shell slot has a view.tsx for App t
     if (dir === 'shell' || /\.test\.tsx?$/.test(path)) continue
     if (/mountInSlot\??\.?\(\s*['"]/.test(src)) mounting.add(dir)
   }
-  // The Nexus (and, from its start, its toaster), the notification stack, the dictation indicator.
-  expect([...mounting].sort()).toEqual(['nexus', 'notify', 'voice'])
+  // James's panel, the Nexus (and, from its start, its toaster), the notification stack, the
+  // dictation indicator.
+  expect([...mounting].sort()).toEqual(['jarvis', 'nexus', 'notify', 'voice'])
   expect([...mounting].filter((d) => !views.has(d)).sort()).toEqual([])
 })
