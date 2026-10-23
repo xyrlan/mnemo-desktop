@@ -135,6 +135,9 @@ pub mod jarvis_llm;
 // -- jarvis screen (src/jarvis_screen.rs): the screen in front, on request (#507) --
 pub mod jarvis_screen;
 
+// -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
+pub mod jarvis_apps;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -370,6 +373,12 @@ pub fn run() {
 
             // -- jarvis screen commands --
             jarvis_screen::jarvis_screenshot,
+
+            // -- jarvis apps commands --
+            jarvis_apps::jarvis_apps,
+            jarvis_apps::jarvis_open_app,
+            jarvis_apps::jarvis_open_in_browser,
+            jarvis_apps::jarvis_open_url,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
