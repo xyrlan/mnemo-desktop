@@ -522,7 +522,9 @@ impl Speaker {
                         }
                     }
                     let st = lock(&s.st);
-                    if !st.speaking() && stream.is_none() && !st.closed {
+                    // `said` too: a hush between the read above and this one has left nothing to say,
+                    // and no one to wake the player for it to say so.
+                    if !st.speaking() && !said && stream.is_none() && !st.closed {
                         // Nothing to say and nothing open: sleep until there is. While there is,
                         // the tick also notices the key coming up.
                         drop(s.cv.wait(st).unwrap_or_else(|e| e.into_inner()));
