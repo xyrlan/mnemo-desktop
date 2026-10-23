@@ -132,6 +132,9 @@ pub mod jarvis;
 // -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
 pub mod jarvis_llm;
 
+// -- jarvis screen (src/jarvis_screen.rs): the screen in front, on request (#507) --
+pub mod jarvis_screen;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -364,6 +367,9 @@ pub fn run() {
             jarvis_llm::jarvis_llm_ensure,
             jarvis_llm::jarvis_llm_chat,
             jarvis_llm::jarvis_llm_stop,
+
+            // -- jarvis screen commands --
+            jarvis_screen::jarvis_screenshot,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
