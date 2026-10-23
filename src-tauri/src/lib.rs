@@ -129,8 +129,17 @@ pub mod newer_release;
 // -- jarvis (src/jarvis.rs): its config and the projects it knows (#503) --
 pub mod jarvis;
 
+// -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
+pub mod jarvis_llm;
+
 // -- jarvis tools (src/jarvis_tools.rs): the read tools and the window in front (#505) --
 pub mod jarvis_tools;
+
+// -- jarvis screen (src/jarvis_screen.rs): the screen in front, on request (#507) --
+pub mod jarvis_screen;
+
+// -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
+pub mod jarvis_apps;
 
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
@@ -201,6 +210,9 @@ pub fn run() {
     };
     let ran = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // -- jarvis llm --
+        // Its llama-server stops when the app exits (src/jarvis_llm.rs).
+        .plugin(jarvis_llm::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -357,9 +369,23 @@ pub fn run() {
             jarvis::jarvis_projects,
             jarvis::jarvis_log_append,
 
+            // -- jarvis llm commands --
+            jarvis_llm::jarvis_llm_ensure,
+            jarvis_llm::jarvis_llm_chat,
+            jarvis_llm::jarvis_llm_stop,
+
             // -- jarvis tools commands --
             jarvis_tools::jarvis_tool,
             jarvis_tools::jarvis_focused_window,
+
+            // -- jarvis screen commands --
+            jarvis_screen::jarvis_screenshot,
+
+            // -- jarvis apps commands --
+            jarvis_apps::jarvis_apps,
+            jarvis_apps::jarvis_open_app,
+            jarvis_apps::jarvis_open_in_browser,
+            jarvis_apps::jarvis_open_url,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
