@@ -449,7 +449,7 @@ impl JarvisVoice {
         let me = self.clone();
         let phases = self.phases.clone();
         let meter: voice::Tap = Arc::new(move |mono: &[f32]| phases.levels.mic.store(voice::rms(mono).to_bits(), Ordering::Relaxed));
-        let recording = Recording::tapped(input, meter, true, move |why| me.emit(Event::Error(voice::lost_message("microphone", why))));
+        let recording = Recording::tapped(input, meter, true, false, move |why| me.emit(Event::Error(voice::lost_message("microphone", why))));
         match recording {
             Ok(recording) => {
                 *take = Some(Take { recording, window });
@@ -595,7 +595,7 @@ impl JarvisVoice {
             let _ = tx.send((mono.to_vec(), phases.levels.out()));
         });
         let me = Arc::downgrade(self);
-        let recording = Recording::tapped((self.mic)(), tap, false, move |why| lost(&me, era, why))?;
+        let recording = Recording::tapped((self.mic)(), tap, false, true, move |why| lost(&me, era, why))?;
         let wired = Wired { voice: self.clone(), era };
         let (rate, follow) = (recording.rate, self.follow_ms);
         std::thread::Builder::new()
@@ -1197,6 +1197,79 @@ mod tests {
     use serde_json::json;
     use std::time::Duration;
 
+    /// The default microphone and speaker open in a process where the system's thread pool has
+    /// threads made single-threaded apartments, as cpal's notification client made one when a
+    /// headset was unplugged (`voice::as_itself`). A pool made so stays so: the test runs in a
+    /// process of its own, this test binary again running only `opens_with_the_pool_made_sta`.
+    #[cfg(windows)]
+    #[test]
+    fn the_microphone_and_speaker_open_after_the_pool_was_made_sta() {
+        let out = crate::proc::command(std::env::current_exe().unwrap())
+            .args(["--exact", "jarvis_voice::tests::opens_with_the_pool_made_sta", "--ignored", "--test-threads=1", "--nocapture"])
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && said.contains("1 passed"), "{said}");
+    }
+
+    /// Run by `the_microphone_and_speaker_open_after_the_pool_was_made_sta`. A machine with no
+    /// microphone or no speaker (CI) has nothing to open. The speaker is asked for its format,
+    /// which is where opening it failed, and never played.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn opens_with_the_pool_made_sta() {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let host = cpal::default_host();
+        if host.default_input_device().is_none() || host.default_output_device().is_none() {
+            return eprintln!("no microphone or no speaker here: nothing to open");
+        }
+        let open = || {
+            let rec = voice::Recording::start(Box::new(voice::default_input), |_| {}).expect("the default microphone opens");
+            let _ = rec.finish();
+            let (speaker, name) = speech::speaker().expect("a speaker");
+            speaker.default_output_config().unwrap_or_else(|e| panic!("the speaker {name} opens: {e}"));
+        };
+        // Once first, as the app does at launch: the pool's threads that activation runs on are
+        // then among those made single-threaded.
+        open();
+        assert!(make_pool_sta() > 0, "no pool thread was made single-threaded");
+        for _ in 0..3 {
+            open();
+        }
+    }
+
+    /// Runs `CoInitializeEx` for a single-threaded apartment on as many of the system thread
+    /// pool's threads as 400 callbacks reach, as cpal's `OnDeviceStateChanged` does on the one it
+    /// is called on. Returns how many it made so.
+    #[cfg(windows)]
+    fn make_pool_sta() -> usize {
+        use std::sync::atomic::AtomicUsize;
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+        use windows_sys::Win32::System::Threading::{TrySubmitThreadpoolCallback, PTP_CALLBACK_INSTANCE};
+        const CALLS: usize = 400;
+        // (ran, made single-threaded)
+        static COUNTS: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
+        unsafe extern "system" fn sta(_: PTP_CALLBACK_INSTANCE, _: *mut std::ffi::c_void) {
+            // SAFETY: COM initialised for this thread, and left so, as cpal leaves it.
+            if unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.0 == 0 {
+                COUNTS[1].fetch_add(1, Ordering::SeqCst);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            COUNTS[0].fetch_add(1, Ordering::SeqCst);
+        }
+        for _ in 0..CALLS {
+            // SAFETY: a callback that takes no context, on the process's default pool.
+            assert!(unsafe { TrySubmitThreadpoolCallback(Some(sta), std::ptr::null_mut(), std::ptr::null()) } != 0);
+        }
+        let until = Instant::now() + Duration::from_secs(30);
+        while COUNTS[0].load(Ordering::SeqCst) < CALLS && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        COUNTS[1].load(Ordering::SeqCst)
+    }
+
+
     #[test]
     fn the_key_is_the_configs_or_the_default_and_none_without_a_config() {
         let home = Path::new("/home/you");
@@ -1633,7 +1706,7 @@ mod tests {
         let unplugged: voice::Input = Box::new(|sink: voice::Sink| {
             sink.push(&vec![0.1f32; 4_800], 1, usize::MAX);
             sink.lose("device unplugged");
-            Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into() })
+            Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into(), watch: None })
         });
         voice.press(unplugged, None).unwrap();
         voice.finish(voice.release().unwrap());
@@ -1698,7 +1771,7 @@ mod tests {
     fn mic() -> voice::Input {
         Box::new(|sink: voice::Sink| {
             sink.push(&vec![0.1f32; 4_800], 1, usize::MAX);
-            Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into() })
+            Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into(), watch: None })
         })
     }
 

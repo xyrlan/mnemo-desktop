@@ -443,7 +443,7 @@ fn the_key_wins_over_hands_free() {
     // The key goes down partway: the hands-free take is dropped, and the key's is the take.
     let silent: voice::Input = Box::new(|sink: voice::Sink| {
         sink.push(&vec![0.0f32; 4_800], 1, usize::MAX);
-        Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into() })
+        Ok(voice::Opened { keep: Box::new(()), rate: 48_000, device: "test mic".into(), watch: None })
     });
     r.voice.press(silent, None).unwrap();
     r.play(&mut ears, &wired, &audio[half..]);
@@ -488,7 +488,7 @@ impl TestMic {
                     self.0.fetch_add(1, Ordering::SeqCst);
                 }
             }
-            Ok(voice::Opened { keep: Box::new(Close(me.closed.clone())), rate: RATE as u32, device: "test mic".into() })
+            Ok(voice::Opened { keep: Box::new(Close(me.closed.clone())), rate: RATE as u32, device: "test mic".into(), watch: None })
         })
     }
 
@@ -532,6 +532,58 @@ fn jarvis_listen_turns_hands_free_on_and_off() {
     let r = rig_with(8_000, |v| v.mic(|| Box::new(|_| Err("no microphone found".into()))));
     assert_eq!(r.voice.listen(Some(true)), Err("no microphone found".into()));
     assert_eq!(r.voice.listen(None), Ok(false));
+}
+
+/// A microphone opened as the system's default is now, watched as the app watches one
+/// (`voice::Watch`): it sends a piece of a quiet room every 5 ms until it closes.
+fn watched(default: &Arc<Mutex<String>>, opened: &Arc<AtomicUsize>) -> voice::Input {
+    let (default, opened) = (default.clone(), opened.clone());
+    Box::new(move |sink: voice::Sink| {
+        opened.fetch_add(1, Ordering::SeqCst);
+        let on = Arc::new(AtomicBool::new(true));
+        let feeding = on.clone();
+        std::thread::spawn(move || {
+            while feeding.load(Ordering::SeqCst) {
+                sink.push(&[0.0005f32; RATE / 200], 1, usize::MAX);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        struct Close(Arc<AtomicBool>);
+        impl Drop for Close {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let id = lock(&default).clone();
+        let now = default.clone();
+        let watch = voice::Watch { id, default: Box::new(move || Some(lock(&now).clone())) };
+        Ok(voice::Opened { keep: Box::new(Close(on)), rate: RATE as u32, device: "test mic".into(), watch: Some(watch) })
+    })
+}
+
+#[test]
+fn hands_free_moves_to_a_new_default_microphone_and_a_held_key_stays() {
+    let default = Arc::new(Mutex::new("headset".to_string()));
+    let opened = Arc::new(AtomicUsize::new(0));
+    let (d, o) = (default.clone(), opened.clone());
+    let r = rig_with(8_000, move |v| v.mic(move || watched(&d, &o)));
+    r.voice.listen(Some(true)).unwrap();
+    *lock(&default) = "usb".into();
+    r.until("opened again on the new default", |_| opened.load(Ordering::SeqCst) == 2);
+    r.until("on again", |r| r.voice.listen(None) == Ok(true));
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(opened.load(Ordering::SeqCst), 2, "the new default is kept");
+    r.voice.listen(Some(false)).unwrap();
+
+    // The key's take stays on the microphone it began on.
+    let held = Arc::new(AtomicUsize::new(0));
+    r.voice.press(watched(&default, &held), None).unwrap();
+    *lock(&default) = "headset".into();
+    std::thread::sleep(Duration::from_millis(100));
+    let take = r.voice.release().expect("a take");
+    r.voice.finish(take);
+    let events = lock(&r.events).clone();
+    assert!(!events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
 }
 
 #[test]
@@ -676,7 +728,7 @@ impl Room {
                     self.0.store(true, Ordering::SeqCst);
                 }
             }
-            Ok(voice::Opened { keep: Box::new(Stop(stop)), rate: RATE as u32, device: "the room".into() })
+            Ok(voice::Opened { keep: Box::new(Stop(stop)), rate: RATE as u32, device: "the room".into(), watch: None })
         })
     }
 
