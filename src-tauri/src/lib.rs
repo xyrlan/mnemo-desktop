@@ -149,6 +149,8 @@ pub mod jarvis_voice;
 
 // -- jarvis orb (src/jarvis_orb.rs): James on screen while a conversation is on (#503, #506) --
 pub mod jarvis_orb;
+// -- jarvis research (src/jarvis_research.rs): the web, at two speeds (#503) --
+pub mod jarvis_research;
 
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
@@ -225,6 +227,9 @@ pub fn run() {
         // -- jarvis brain --
         // Its `claude` stops when the app exits (src/jarvis_brain.rs).
         .plugin(jarvis_brain::plugin())
+        // -- jarvis research --
+        // Its searches stop when the app exits (src/jarvis_research.rs).
+        .plugin(jarvis_research::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -415,6 +420,8 @@ pub fn run() {
             // -- jarvis wake commands --
             // Hands-free listening on and off (src/jarvis_voice.rs, src/jarvis_voice/wake.rs).
             jarvis_voice::jarvis_listen,
+            // -- jarvis research commands --
+            jarvis_research::jarvis_research,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {

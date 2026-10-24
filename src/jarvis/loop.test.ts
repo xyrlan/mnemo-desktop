@@ -1,6 +1,6 @@
 import { PAUSE_MS } from './brain'
-import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup } from './client'
-import { CANCEL_MS, createJarvis, isBareOpen, isFollowUp, isNo, isStopParent, isYes, MAX_STEPS } from './loop'
+import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup, Research } from './client'
+import { CANCEL_MS, createJarvis, FROM_WEB, isBareOpen, isFollowUp, isNo, isResearchStatus, isStopParent, isYes, LOOKING, MAX_STEPS } from './loop'
 import type { OpenParent, ParentEvent, ParentRef, ParentsApi, ParentStatus } from './parent'
 import type { Message } from './routing'
 import { createJarvisStore, type JarvisStore } from './store'
@@ -97,7 +97,7 @@ const ref = (sessionId: string, project: string, request = 'corrige o login'): P
 })
 
 let t = 1_000_000
-function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true } = {}) {
+function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true, wait = async (_ms: number) => {} } = {}) {
   const c = fakeClient(replies, over)
   const p = fakeParents(live)
   const store: JarvisStore = createJarvisStore()
@@ -109,6 +109,7 @@ function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {}
     now: () => t,
     focused: () => focused,
     notify: async (title, body) => void notes.push([title, body]),
+    wait,
   })
   const lines = () => store.getState().lines.map((l) => `${l.who}: ${l.text}`)
   const last = () => store.getState().lines.at(-1)?.text
@@ -948,4 +949,239 @@ test('what asks for a parent with nothing to do', () => {
     expect([t, isBareOpen(t, known)]).toEqual([t, true])
   for (const t of ['abre um parent no tasklist pra corrigir o teste', 'abre um PR no tasklist', 'abre o tasklist', 'fecha o parent', 'e o parent do tasklist?', 'Pode abrir um parent no bloco de notas.\nver o Google Ads'])
     expect([t, isBareOpen(t, known)]).toEqual([t, false])
+})
+
+describe('the web', () => {
+  const found: Research = { summary: 'É a 2.12.5.', details: 'O crate tauri está na 2.12.5, de 21 de outubro.', sources: [{ title: 'Releases', url: 'https://github.com/tauri-apps/tauri/releases' }] }
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void
+    let reject!: (e: unknown) => void
+    const promise = new Promise<T>((a, b) => ((resolve = a), (reject = b)))
+    return { promise, resolve, reject }
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+  /** A `research` that answers quick searches with `found` at once and holds each deep one until
+   *  the test ends it; `asked` lists every call. */
+  const web = () => {
+    const asked: [string, boolean][] = []
+    const deep: ReturnType<typeof deferred<Research>>[] = []
+    const research = async (question: string, isDeep: boolean) => {
+      asked.push([question, isDeep])
+      if (!isDeep) return found
+      const d = deferred<Research>()
+      deep.push(d)
+      return d.promise
+    }
+    return { asked, deep, research }
+  }
+
+  describe('a quick search', () => {
+    test('is a read: what it found goes back to the brain as text from the web, and its sources to the panel', async () => {
+      const w = web()
+      const s = setup([calls('web_search', { query: 'versão estável do Tauri' }), said('É a 2.12.5, de outubro.')], { client: { research: w.research } })
+      await s.jarvis.heard({ text: 'qual é a versão mais nova do Tauri?', confidence: 0.9, window: null })
+      expect(w.asked).toEqual([['versão estável do Tauri', false]])
+      const out = s.bodies[1].messages.at(-1)!
+      expect(out).toMatchObject({ role: 'tool' })
+      expect(String(out.content).split('\n')).toEqual([FROM_WEB, found.details, 'Fontes:', '- Releases: https://github.com/tauri-apps/tauri/releases'])
+      // The brain wrote nothing before it: James says he is looking, then the answer.
+      expect(s.spoken).toEqual([LOOKING, 'É a 2.12.5, de outubro.'])
+      expect(s.store.getState().lines.find((l) => l.who === 'web')).toMatchObject({ text: 'versão estável do Tauri', sources: found.sources })
+    })
+
+    test("with Claude, its words before the search are said at once, and the output is marked as the web's", async () => {
+      const w = web()
+      const s = withClaude(['Peraí, vou ver.\n{"tool": "web_search", "args": {"query": "dólar hoje"}}', 'Está em cinco e dez.'], { client: { research: w.research } })
+      await s.jarvis.heard({ text: 'James, quanto tá o dólar hoje?', confidence: 0.9, window: null })
+      expect(s.spoken).toEqual(['Peraí, vou ver.', 'Está em cinco e dez.'])
+      expect(s.asks[1].text.split('\n').slice(0, 2)).toEqual(['Saída de web_search:', FROM_WEB])
+    })
+
+    test('a failure goes back to the brain as text, which says so', async () => {
+      const s = setup([calls('web_search', { query: 'x' }), said('Não consegui olhar agora.')], { client: { research: async () => Promise.reject(new Error('claude could not start')) } })
+      await s.jarvis.ask('qual a cotação do dólar?')
+      expect(s.bodies[1].messages.at(-1)).toMatchObject({ role: 'tool', content: 'Erro: claude could not start' })
+      expect(s.last()).toBe('Não consegui olhar agora.')
+    })
+  })
+
+  describe('a research', () => {
+    test('runs in the background: James says he is on it, the conversation goes on, and he tells what it found', async () => {
+      const w = web()
+      const s = withClaude(['{"tool": "research", "args": {"question": "modelos de voz em português que rodam local"}}', 'Bom dia!', 'O Piper, então.'], { client: { research: w.research } })
+      await s.jarvis.heard({ text: 'pesquisa a fundo quais modelos de voz em português rodam local e me avisa', confidence: 0.9, window: null })
+      expect(s.last()).toBe('Vou pesquisar isso com calma; te conto quando terminar.')
+      expect(s.spoken).toEqual(['Vou pesquisar isso com calma; te conto quando terminar.'])
+      expect(w.asked).toEqual([['modelos de voz em português que rodam local', true]])
+      expect(s.store.getState().researches).toMatchObject([{ state: 'running', question: 'modelos de voz em português que rodam local', spoken: true }])
+
+      // Asked something else meanwhile, James answers, and the brain knows a research runs.
+      await s.jarvis.heard({ text: 'bom dia', confidence: 0.9, window: null })
+      expect(s.last()).toBe('Bom dia!')
+      expect(s.asks[1].text).toContain('pesquisa rodando há menos de um minuto sobre «modelos de voz em português que rodam local»')
+
+      w.deep[0].resolve({ summary: 'O Piper é o mais leve.', details: 'Piper roda em CPU.', sources: [] })
+      await flush()
+      expect(s.store.getState().researches).toMatchObject([{ state: 'done', result: { summary: 'O Piper é o mais leve.' } }])
+      expect(s.last()).toBe('Terminei a pesquisa sobre «modelos de voz em português que rodam local»: O Piper é o mais leve.')
+      expect(s.spoken.at(-1)).toBe('Terminei a pesquisa. O Piper é o mais leve.')
+
+      // Claude is told what it found, as text from the web.
+      await s.jarvis.ask('e qual você usaria?')
+      expect(s.asks[2].text).toContain('James, ao terminar a pesquisa sobre «modelos de voz em português que rodam local»: O Piper é o mais leve.')
+      expect(s.asks[2].text).toContain(`${FROM_WEB}\nPiper roda em CPU.`)
+    })
+
+    test('its outcome waits until James is neither speaking nor listening', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research } })
+      await s.jarvis.heard({ text: 'pesquisa a fundo q', confidence: 0.9, window: null })
+      s.store.setState({ voice: 'speaking' })
+      w.deep[0].resolve(found)
+      await flush()
+      expect(s.last()).toBe('Terminei a pesquisa sobre «q»: É a 2.12.5.')
+      expect(s.spoken).not.toContain('Terminei a pesquisa. É a 2.12.5.')
+      s.store.setState({ voice: 'listening' })
+      await flush()
+      s.store.setState({ voice: 'idle', busy: true })
+      await flush()
+      expect(s.spoken).not.toContain('Terminei a pesquisa. É a 2.12.5.')
+      s.store.setState({ busy: false })
+      await flush()
+      expect(s.spoken.at(-1)).toBe('Terminei a pesquisa. É a 2.12.5.')
+    })
+
+    test('its outcome waits for 1.5 s of quiet, and waits again when James is spoken to meanwhile', async () => {
+      const w = web()
+      const waits: ReturnType<typeof deferred<void>>[] = []
+      const asked: number[] = []
+      const wait = (ms: number) => {
+        asked.push(ms)
+        const d = deferred<void>()
+        waits.push(d)
+        return d.promise
+      }
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research }, wait })
+      await s.jarvis.heard({ text: 'pesquisa a fundo q', confidence: 0.9, window: null })
+      w.deep[0].resolve(found)
+      await flush()
+      expect(asked).toEqual([1500])
+      // The maintainer presses the key before the quiet is out: James does not speak over them.
+      s.store.setState({ voice: 'listening' })
+      waits[0].resolve()
+      await flush()
+      expect(s.spoken).not.toContain('Terminei a pesquisa. É a 2.12.5.')
+      s.store.setState({ voice: 'idle' })
+      await flush()
+      expect(asked).toEqual([1500, 1500])
+      waits[1].resolve()
+      await flush()
+      expect(s.spoken.at(-1)).toBe('Terminei a pesquisa. É a 2.12.5.')
+    })
+
+    test('typed, its failure is not said aloud either', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research } })
+      await s.jarvis.ask('pesquisa a fundo q')
+      w.deep[0].reject(new Error('claude could not start'))
+      await flush()
+      expect(s.store.getState().researches).toMatchObject([{ state: 'failed' }])
+      expect(s.spoken).toEqual([])
+    })
+
+    test('typed, its outcome is not said, and with the app in the back it is a notification', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research }, focused: false })
+      await s.jarvis.ask('pesquisa a fundo q')
+      w.deep[0].resolve(found)
+      await flush()
+      expect(s.spoken).toEqual([])
+      expect(s.notes).toEqual([['James · pesquisa', 'É a 2.12.5.']])
+    })
+
+    test('a second one waits for the first; the same question is not asked twice', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'modelos de voz' }), calls('research', { question: 'Modelos de voz' }), calls('research', { question: 'placas de vídeo' })], {
+        client: { research: w.research },
+      })
+      await s.jarvis.ask('pesquisa a fundo modelos de voz')
+      await s.jarvis.ask('pesquisa modelos de voz')
+      expect(s.last()).toBe('Já estou pesquisando isso; te conto quando terminar.')
+      await s.jarvis.ask('pesquisa também placas de vídeo')
+      expect(s.last()).toBe('Vou pesquisar depois da que está rodando, sobre «modelos de voz»; te conto quando terminar.')
+      expect(s.store.getState().researches.map((r) => [r.question, r.state])).toEqual([
+        ['placas de vídeo', 'queued'],
+        ['modelos de voz', 'running'],
+      ])
+      expect(w.asked).toEqual([['modelos de voz', true]])
+      w.deep[0].resolve(found)
+      await flush()
+      expect(w.asked).toEqual([
+        ['modelos de voz', true],
+        ['placas de vídeo', true],
+      ])
+      expect(s.store.getState().researches.map((r) => r.state)).toEqual(['running', 'done'])
+    })
+
+    test('a failure is said, and the panel opens on why', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research } })
+      await s.jarvis.heard({ text: 'pesquisa a fundo q', confidence: 0.9, window: null })
+      s.store.setState({ open: false })
+      expect(w.deep).toHaveLength(1)
+      w.deep[0].reject(new Error('the web search gave no answer within 600 s, so it was stopped'))
+      await flush()
+      expect(s.store.getState().researches).toMatchObject([{ state: 'failed', error: 'the web search gave no answer within 600 s, so it was stopped' }])
+      expect(s.store.getState().lines.at(-1)).toMatchObject({ who: 'note', error: true, text: 'A pesquisa sobre «q» não deu: the web search gave no answer within 600 s, so it was stopped' })
+      expect(s.store.getState().open).toBe(true)
+      expect(s.spoken.at(-1)).toBe('A pesquisa não deu certo; o erro está no painel.')
+    })
+
+    test('asked how it is going, James says so without asking the brain', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'modelos de voz' })], { client: { research: w.research } })
+      await s.jarvis.ask('como está a pesquisa?')
+      expect(s.last()).toBe('Não tenho nenhuma pesquisa rodando.')
+      await s.jarvis.ask('pesquisa a fundo modelos de voz')
+      t += 3 * 60_000
+      await s.jarvis.ask('e a pesquisa?')
+      expect(s.last()).toBe('Ainda estou pesquisando «modelos de voz»; começou há 3 min.')
+      w.deep[0].resolve(found)
+      await flush()
+      await s.jarvis.ask('a pesquisa já terminou?')
+      expect(s.last()).toBe('A pesquisa sobre «modelos de voz» terminou: É a 2.12.5.')
+      // Only the request that started it reached the model.
+      expect(s.bodies).toHaveLength(1)
+    })
+  })
+
+  test('heard low, a research waits for a yes: a take heard wrong does not start minutes of searching', async () => {
+    const w = web()
+    const s = setup([calls('research', { question: 'modelos de voz' })], { client: { research: w.research } })
+    await s.jarvis.heard({ text: 'pesquisa a fundo modelos de voz', confidence: 0.4, window: null })
+    expect(s.last()).toBe('Ouvi «pesquisa a fundo modelos de voz». É isso?')
+    expect(w.asked).toEqual([])
+    await s.jarvis.heard({ text: 'isso', confidence: 0.9, window: null })
+    expect(w.asked).toEqual([['modelos de voz', true]])
+    expect(s.last()).toBe('Vou pesquisar isso com calma; te conto quando terminar.')
+  })
+
+  test('which words ask how a research is going', () => {
+    for (const t of ['como está a pesquisa?', 'e a pesquisa?', 'E aí, a pesquisa já terminou?', 'terminou a pesquisa?', 'como anda aquela pesquisa?', 'alguma novidade da pesquisa?'])
+      expect([t, isResearchStatus(t)]).toEqual([t, true])
+    for (const t of [
+      'pesquisa a fundo modelos de voz',
+      'faz uma pesquisa sobre placas de vídeo',
+      'pesquisa como funciona o whisper',
+      'qual o dólar hoje?',
+      'me explica como a pesquisa de mercado que o parent do desktop fez ontem chegou naquele número',
+    ])
+      expect([t, isResearchStatus(t)]).toEqual([t, false])
+  })
+
+  test('a source opens in the browser', async () => {
+    const s = setup([])
+    await s.jarvis.openUrl('https://github.com/tauri-apps/tauri/releases')
+    expect(s.opened).toEqual([['url', 'https://github.com/tauri-apps/tauri/releases']])
+  })
 })

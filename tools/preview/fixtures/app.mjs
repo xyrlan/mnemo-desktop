@@ -60,6 +60,12 @@ export const BASE = {
   usage_log: () => null,
   // James's brain (#503): the local model, as with no `brain` in jarvis.json.
   jarvis_brain: () => ({ kind: 'local' }),
+  // A search of the web (jarvis-research), at either speed: one made-up answer and its source.
+  jarvis_research: ({ question, deep }) => ({
+    summary: deep ? 'Pesquisei com calma: há duas opções boas.' : 'Achei a resposta.',
+    details: `O que a web diz sobre «${question}», em detalhe.`,
+    sources: [{ title: 'Example', url: 'https://example.com/' }],
+  }),
 }
 
 /**
