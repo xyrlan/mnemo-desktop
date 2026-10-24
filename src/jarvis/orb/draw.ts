@@ -58,7 +58,7 @@ export function frame(ctx: CanvasRenderingContext2D, size: number, m: Motion, t:
   for (let k = 0; k < 3; k++) {
     const phase = spin * (k % 2 ? -1 : 1) + (k * Math.PI * 2) / 3
     ctx.beginPath()
-    const steps = 96
+    const steps = 64
     for (let i = 0; i <= steps; i++) {
       const a = (i / steps) * Math.PI * 2
       const wave = Math.sin(a * (3 + k) + phase) * 0.6 + Math.sin(a * (5 + k) - phase * 1.3) * 0.4

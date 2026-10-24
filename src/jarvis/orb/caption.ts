@@ -8,7 +8,7 @@ import type { Caption } from './show'
 export const HOLD_MS = 6000
 export const FADE_MS = 1000
 /** What was heard, once James answers: it steps back behind his words. */
-export const BEHIND = 0.5
+export const BEHIND = 0.7
 /** A caption is one line under a small orb: past this it ends in "…". */
 export const CAPTION_MAX = 140
 

@@ -44,7 +44,15 @@ const orbAlpha = (now: number) => (fadingFrom === null ? 1 : Math.max(0, 1 - (no
 
 /** The look last shown, drawn while the orb fades out. */
 let last: OrbLook = 'waiting'
+/** A soft orb reads as smooth at 30 frames a second, at a fraction of the display's rate. */
+const FRAME_MS = 1000 / 30
+let drawn = -Infinity
 const tick = (t: number) => {
+  if (t - drawn < FRAME_MS - 2) {
+    requestAnimationFrame(tick)
+    return
+  }
+  drawn = t
   const now = Date.now()
   const alpha = orbAlpha(now)
   const want = look === 'listening' ? target.mic : look === 'speaking' ? target.out : 0
