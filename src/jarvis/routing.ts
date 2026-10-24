@@ -45,6 +45,7 @@ export const TOOLS: Tool[] = [
   fn('gh_pr_view', 'Show a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_pr_checks', 'CI checks of a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_run_list', 'Recent CI (GitHub Actions) runs of a project.', { project: project() }),
+  fn('gh_issue_list', 'Open issues of a project, or of every known project when none is named.', { project: project() }, []),
   fn('gh_issue_view', 'Show an issue.', { project: project(), number: { type: 'integer' } }),
   fn('parent_status', 'How a parent session already working on an earlier request is doing.', { project: project('the project the parent runs in') }),
   fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the request, verbatim' } }),
@@ -80,7 +81,8 @@ export const RULES: string[] = [
   'A voz chega transcrita, e a transcrição erra nomes: "Games" ou "Jaime" é você, e um projeto pode chegar deformado ou partido em palavras. Fique com o projeto conhecido de som mais parecido.',
   'Você lembra a conversa: "esse", "o mesmo", "aquele PR" falam do que já foi dito.',
   'Converse de verdade. Quando pedirem sua opinião, uma ideia ou o que fazer primeiro, responda com uma posição concreta e o porquê, a partir do que leu e do que sabe; nunca só "tudo bem" ou "entendido".',
-  'Suas respostas são faladas: no máximo três frases curtas, sem markdown, listas, hashes de commit, ids de sessão ou endereços. Resuma o que leu; o painel mostra o resto.',
+  'Suas respostas são faladas: uma ou duas frases curtas, de conversa, sem markdown, listas, hashes de commit, ids de sessão ou endereços. Diga o que importa do que leu e ofereça o resto; o painel mostra tudo.',
+  'Você não navega na web nem acompanha notícias: quando perguntarem do mundo lá fora, diga isso numa frase, sem falar de modelo, treino ou data de corte.',
 ]
 
 /** James's system prompt over the known `projects`, the `apps` he may open, and what he knows

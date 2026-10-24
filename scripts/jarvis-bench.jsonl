@@ -18,6 +18,8 @@
 {"request": "os checks do PR 42 do mnemo passaram?", "expect": {"tool": "gh_pr_checks", "project": "mnemo", "args": {"number": 42}}}
 {"request": "o CI do llama tá verde?", "expect": {"tool": "gh_run_list", "project": "llama.cpp"}}
 {"request": "o que diz a issue 504 do desktop?", "expect": {"tool": "gh_issue_view", "project": "mnemo-desktop", "args": {"number": 504}}}
+{"request": "quais issues estão abertas no whisper?", "expect": {"tool": "gh_issue_list", "project": "whisper.cpp"}}
+{"request": "James, tem alguma issue aberta pra eu pegar?", "expect": {"tool": "gh_issue_list"}}
 {"request": "corrige o teste que quebrou no desktop", "expect": {"tool": "delegate_to_parent", "project": "mnemo-desktop"}}
 {"request": "abre um PR no mnemo trocando o nome da flag verbose por debug", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "cria uma issue no tauri sobre o atalho global no windows", "expect": {"tool": "delegate_to_parent", "project": "tauri"}}
