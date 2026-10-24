@@ -147,6 +147,9 @@ pub mod jarvis_apps;
 // -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
 pub mod jarvis_voice;
 
+// -- jarvis research (src/jarvis_research.rs): the web, at two speeds (#503) --
+pub mod jarvis_research;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -222,6 +225,9 @@ pub fn run() {
         // -- jarvis brain --
         // Its `claude` stops when the app exits (src/jarvis_brain.rs).
         .plugin(jarvis_brain::plugin())
+        // -- jarvis research --
+        // Its searches stop when the app exits (src/jarvis_research.rs).
+        .plugin(jarvis_research::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -404,6 +410,9 @@ pub fn run() {
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
             jarvis_voice::jarvis_hush,
+
+            // -- jarvis research commands --
+            jarvis_research::jarvis_research,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
