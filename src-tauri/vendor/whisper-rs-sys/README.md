@@ -37,9 +37,15 @@ temperature fallback and `suppress_nst`. Each change stayed within run-to-run no
 - `whisper.cpp/`: upstream tag `v1.9.5` (commit `d1be6fde11ac6e0407606b4e42fe72d34add8037`),
   verbatim. It holds the same paths the crate's `include` list ships. Of
   `ggml/src/ggml-*/`, only the backends this app can build are kept: `ggml-cpu` (every
-  platform), `ggml-metal` (macOS) and `ggml-blas` (on by default on Apple). ggml adds a backend's
-  directory only when that backend is enabled, so the others are never read. To build one, put
-  its directory back first (cuda, vulkan, …).
+  platform), `ggml-metal` (macOS), `ggml-blas` (on by default on Apple) and `ggml-vulkan`
+  (Windows). ggml adds a backend's directory only when that backend is enabled, so the others are
+  never read. To build one, put its directory back first (cuda, …).
+- One line of `whisper.cpp/` is not upstream's: `ggml/src/ggml-vulkan/CMakeLists.txt` builds its
+  shader generator in `<build>/vsg` (`BINARY_DIR`). In the default
+  `<build>/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build`, under
+  a Cargo `OUT_DIR`, the paths MSBuild writes for its compiler check pass Windows' 260
+  characters (271 in `~/.cache/<target>`, 277 on the CI runner), and the build stops at
+  `FTK1011`.
 
 ## Updating
 
@@ -50,8 +56,11 @@ rm -rf "$V" && mkdir -p "$V/ggml/src"
 (cd /tmp/w && rsync -a --relative bindings/javascript/package-tmpl.json bindings/CMakeLists.txt \
   CMakeLists.txt cmake src include ggml/cmake ggml/CMakeLists.txt ggml/include LICENSE "$OLDPWD/$V/")
 rsync -a --exclude='ggml-*/' /tmp/w/ggml/src/ "$V/ggml/src/"
-for b in ggml-cpu ggml-metal ggml-blas; do rsync -a "/tmp/w/ggml/src/$b" "$V/ggml/src/"; done
+for b in ggml-cpu ggml-metal ggml-blas ggml-vulkan; do rsync -a "/tmp/w/ggml/src/$b" "$V/ggml/src/"; done
 ```
+
+Then put back the `BINARY_DIR ${CMAKE_BINARY_DIR}/vsg` line in `vulkan-shaders-gen`'s
+`ExternalProject_Add` (`ggml/src/ggml-vulkan/CMakeLists.txt`).
 
 Then run `cargo test --lib` and `voice::tests::bench`. A Cargo target that already built this
 crate keeps its old copy of the sources in `OUT_DIR`, because `build.rs` copies them only when

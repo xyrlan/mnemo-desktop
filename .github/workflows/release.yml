@@ -50,6 +50,20 @@ jobs:
         run: |
           echo "CMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG" >> "$GITHUB_ENV"
           echo "CMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG" >> "$GITHUB_ENV"
+      # Whisper on the GPU through Vulkan (voice.rs): the SDK that builds it, as in ci.yml.
+      - name: Vulkan SDK
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          VULKAN_SDK_VERSION: 1.4.363.0
+          VULKAN_SDK_SHA256: 94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/vulkansdk.exe" "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/windows/vulkansdk-windows-X64-$VULKAN_SDK_VERSION.exe"
+          echo "$VULKAN_SDK_SHA256  $RUNNER_TEMP/vulkansdk.exe" | sha256sum -c -
+          sdk="C:\\VulkanSDK\\$VULKAN_SDK_VERSION"
+          "$RUNNER_TEMP/vulkansdk.exe" --root "$sdk" --accept-licenses --default-answer --confirm-command install copy_only=1
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk\\Bin" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - uses: tauri-apps/tauri-action@v0
         env:

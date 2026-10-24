@@ -87,14 +87,20 @@ libc = "0.2"
 # start that fails says so in a message box (crash.rs).
 [target.'cfg(windows)'.dependencies]
 # Win32_Graphics_Gdi: Jarvis's screenshot on request (#507). Win32_System_JobObjects: Jarvis's
-# llama-server dies with the app, a crash included (#505).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects"] }
+# llama-server dies with the app, a crash included (#505). Win32_System_LibraryLoader: whether
+# Vulkan's loader is there before whisper may use it (voice.rs).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_LibraryLoader"] }
 # WebView2's own interfaces, at the versions wry uses, so the controller Tauri hands over is these
 # crates' type: the app webview's browser keys (browser_keys.rs), and the app's snapshot through
 # CapturePreview into a memory stream (mcp.rs).
 webview2-com = "0.38"
 windows-core = "0.61"
 windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+# Dictation, voice notes and Jarvis on the GPU through Vulkan, whose loader every vendor's driver
+# installs. Building needs the Vulkan SDK (its glslc compiles ggml's shaders). vulkan-1.dll is
+# delay-loaded (build.rs), so a machine without it still starts, and transcribes on the CPU
+# (voice.rs). raw-api: ggml's device registry, which says whether Vulkan found a GPU.
+whisper-rs = { version = "0.16", features = ["log_backend", "vulkan", "raw-api"] }
 
 # The app's snapshot through WebKitGTK's own, encoded by gdk-pixbuf (mcp.rs). The versions wry uses.
 [target.'cfg(target_os = "linux")'.dependencies]
