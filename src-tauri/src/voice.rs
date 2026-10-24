@@ -8,6 +8,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, TryLockError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -61,6 +62,14 @@ impl Language {
     }
 }
 
+/// Dictation is recording: Jarvis's hands-free listening takes nothing meanwhile.
+static DICTATING: AtomicBool = AtomicBool::new(false);
+
+/// Whether dictation is recording a take now.
+pub fn dictating() -> bool {
+    DICTATING.load(Ordering::SeqCst)
+}
+
 #[derive(Default)]
 pub struct VoiceState {
     recording: Mutex<Option<Recording>>,
@@ -90,6 +99,9 @@ pub struct Captured {
     pub rate: u32,
 }
 
+/// Sees each piece of a take as it arrives, mono, at the input's rate (`Recording::tapped`).
+pub type Tap = Arc<dyn Fn(&[f32]) + Send + Sync>;
+
 /// What a take listens to, handed to an `Input` as it opens: where samples go, and where a
 /// failure that ends the take is reported.
 #[derive(Clone)]
@@ -97,19 +109,35 @@ pub struct Sink {
     samples: Arc<Mutex<Vec<f32>>>,
     lost: Arc<Mutex<Option<String>>>,
     on_lost: Arc<dyn Fn(&str) + Send + Sync>,
+    tap: Option<Tap>,
+    /// Whether the take keeps what it hears for `finish`: not when only the tap listens.
+    keep: bool,
 }
 
 impl Sink {
-    /// Appends interleaved `channels`-wide frames, up to `cap` mono samples.
+    /// Appends interleaved `channels`-wide frames, up to `cap` mono samples, and hands them to the
+    /// tap.
     pub fn push<T>(&self, data: &[T], channels: usize, cap: usize)
     where
         T: Copy,
         f32: FromSample<T>,
     {
-        let mut b = lock(&self.samples);
-        if b.len() < cap {
-            mix_to_mono(data, channels, &mut b);
+        let Some(tap) = &self.tap else {
+            let mut b = lock(&self.samples);
+            if b.len() < cap {
+                mix_to_mono(data, channels, &mut b);
+            }
+            return;
+        };
+        let mut mono = Vec::with_capacity(data.len() / channels.max(1));
+        mix_to_mono(data, channels, &mut mono);
+        if self.keep {
+            let mut b = lock(&self.samples);
+            if b.len() < cap {
+                b.extend_from_slice(&mono);
+            }
         }
+        tap(&mono);
     }
 
     /// The input stopped delivering: kept for `finish`, and said at once through `on_lost`.
@@ -134,20 +162,33 @@ pub struct Opened {
 pub type Input = Box<dyn FnOnce(Sink) -> Result<Opened, String> + Send>;
 
 /// A live take. The cpal stream is not `Send`, so it lives on its own thread until the
-/// stop sender drops. Jarvis's push-to-talk key records through it too (`jarvis_voice.rs`).
+/// stop sender drops, as it does when the take is finished or dropped. Jarvis's push-to-talk key
+/// and its hands-free listening record through it too (`jarvis_voice.rs`).
 pub(crate) struct Recording {
     stop: mpsc::Sender<()>,
     thread: JoinHandle<Result<Captured, String>>,
     lost: Arc<Mutex<Option<String>>>,
     device: String,
+    /// The input's sample rate.
+    pub(crate) rate: u32,
 }
 
 impl Recording {
     /// `on_lost` hears a failure that ends the take as it happens, from the input's thread.
     pub(crate) fn start(input: Input, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<String, String>>();
+        Self::open(input, None, true, Arc::new(on_lost))
+    }
+
+    /// `start`, with `tap` seeing each piece as it comes. With `keep` false the take keeps
+    /// nothing: the tap is all that hears it, for as long as it runs.
+    pub(crate) fn tapped(input: Input, tap: Tap, keep: bool, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
+        Self::open(input, Some(tap), keep, Arc::new(on_lost))
+    }
+
+    fn open(input: Input, tap: Option<Tap>, keep: bool, on_lost: Arc<dyn Fn(&str) + Send + Sync>) -> Result<Self, String> {
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(String, u32), String>>();
         let (stop, stop_rx) = mpsc::channel::<()>();
-        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost: Arc::new(on_lost) };
+        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost, tap, keep };
         let lost = sink.lost.clone();
         let thread = std::thread::Builder::new()
             .name("voice-capture".into())
@@ -160,7 +201,7 @@ impl Recording {
                         return Err(e);
                     }
                 };
-                let _ = ready_tx.send(Ok(opened.device));
+                let _ = ready_tx.send(Ok((opened.device, opened.rate)));
                 // Returns once `stop` is dropped.
                 let _ = stop_rx.recv();
                 drop(opened.keep);
@@ -169,7 +210,7 @@ impl Recording {
             })
             .map_err(|e| format!("voice: {e}"))?;
         match ready_rx.recv() {
-            Ok(Ok(device)) => Ok(Self { stop, thread, lost, device }),
+            Ok(Ok((device, rate))) => Ok(Self { stop, thread, lost, device, rate }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err("voice: capture thread died".into()),
         }
@@ -362,6 +403,14 @@ pub fn is_silent(audio: &[f32]) -> bool {
         let rms = (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt();
         rms > FLOOR
     })
+}
+
+/// The root mean square of `samples`, 0 for none.
+pub fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
 /// Joins segment texts, dropping whisper's non-speech annotations (`[BLANK_AUDIO]`,
@@ -667,6 +716,22 @@ pub struct Shape<'a> {
     pub prompt: Option<&'a str>,
     /// Threads instead of dictation's (at most 8).
     pub threads: Option<usize>,
+    /// Only the first words, at most this many tokens, of audio a second or two long: whisper
+    /// encodes only as much of its 30 s window as the audio fills, writes one segment with no
+    /// timestamps, and never retries at a higher temperature. Jarvis's hands-free listening asks
+    /// this of an utterance's start, to hear whether it began with James's name
+    /// (`jarvis_voice/wake.rs`). Encoding part of the window makes whisper loop on a long take; a
+    /// few tokens cannot.
+    pub head: Option<i32>,
+}
+
+/// The part of whisper's 30 s window that `samples` of 16 kHz audio fill, in its encoder's
+/// positions (1500 for the window, 50 a second), rounded up to a multiple of 16. The encoder's
+/// time follows it: rounded to 64, 1.5 s of audio took 128 positions and a quarter more time than
+/// its 80.
+pub fn audio_ctx(samples: usize) -> i32 {
+    let positions = samples.div_ceil(WHISPER_RATE as usize / 50);
+    (positions.div_ceil(16) * 16).min(1500) as i32
 }
 
 /// Whisper's run over a take, `None` for silence, which it is not given.
@@ -696,6 +761,13 @@ fn decode<F: FnMut(i32) + 'static>(
     }
     if let Some(threads) = shape.threads {
         params.set_n_threads(threads.max(1) as _);
+    }
+    if let Some(tokens) = shape.head {
+        params.set_max_tokens(tokens);
+        params.set_single_segment(true);
+        params.set_no_timestamps(true);
+        params.set_temperature_inc(0.0);
+        params.set_audio_ctx(audio_ctx(padded.len()));
     }
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
     state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
@@ -804,6 +876,7 @@ pub async fn voice_start(app: AppHandle) -> Result<String, String> {
             })?;
             device = recording.device.clone();
             *slot = Some(recording);
+            DICTATING.store(true, Ordering::SeqCst);
         }
         let cold = match state.model.try_lock() {
             Ok(m) => m.is_none(),
@@ -831,6 +904,7 @@ pub async fn voice_stop(app: AppHandle) -> Result<String, String> {
     blocking(move || {
         let state = app.state::<VoiceState>();
         let recording = lock(&state.recording).take().ok_or("not recording")?;
+        DICTATING.store(false, Ordering::SeqCst);
         let take = recording.finish()?;
         let audio = resample(&take.samples, take.rate, WHISPER_RATE);
         if is_silent(&audio) {
@@ -998,6 +1072,14 @@ mod tests {
         assert_eq!(token_budget(8 * WHISPER_RATE as usize), 80);
         assert_eq!(token_budget(30 * WHISPER_RATE as usize), 256);
         assert_eq!(token_budget(300 * WHISPER_RATE as usize), 256);
+    }
+
+    #[test]
+    fn a_head_decode_encodes_only_what_the_audio_fills() {
+        // 1.5 s fills 75 of the window's 1500 positions: 80, rounded up to a multiple of 16.
+        assert_eq!(audio_ctx(WHISPER_RATE as usize * 3 / 2), 80);
+        assert_eq!(audio_ctx(1), 16);
+        assert_eq!(audio_ctx(40 * WHISPER_RATE as usize), 1500);
     }
 
     #[test]

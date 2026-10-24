@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -365,13 +365,25 @@ pub struct Shared {
     cv: Condvar,
     /// The push-to-talk key is down: nothing is played. Set by the key's owner, read here.
     held: Arc<AtomicBool>,
+    /// How loud the last piece handed to the device was, its RMS as `f32` bits: the orb moves with
+    /// it, and hands-free listening weighs the microphone against it (`wake.rs`).
+    level: Arc<AtomicU32>,
 }
 
 impl Shared {
+    fn new(held: Arc<AtomicBool>) -> Self {
+        Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held, level: Arc::default() }
+    }
+
     /// Fills `out` with the next mono samples, `step` voice samples per output sample (1 when the
     /// output runs at the voice's rate), and silence for what is not there yet. While the key is
     /// held it is all silence, and nothing is taken.
     pub fn pull(&self, out: &mut [f32], step: f64) {
+        self.fill(out, step);
+        self.level.store(crate::voice::rms(out).to_bits(), Ordering::Relaxed);
+    }
+
+    fn fill(&self, out: &mut [f32], step: f64) {
         if self.held.load(Ordering::SeqCst) {
             out.fill(0.0);
             return;
@@ -435,7 +447,7 @@ impl Speaker {
         on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
         on_error: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<Self, String> {
-        let shared = Arc::new(Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held });
+        let shared = Arc::new(Shared::new(held));
 
         let s = shared.clone();
         let failed = on_error.clone();
@@ -551,6 +563,11 @@ impl Speaker {
         st.queue.push_back(text);
         drop(st);
         self.shared.cv.notify_all();
+    }
+
+    /// How loud the device is being fed: the RMS of the last piece it was handed, as `f32` bits.
+    pub fn level(&self) -> Arc<AtomicU32> {
+        self.shared.level.clone()
     }
 
     /// From the last `say` that found nothing being said to its first sample on the device, once:
@@ -763,7 +780,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_key_going_down_mid_sentence_pauses_it_where_it_was() {
-        let shared = Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held: Arc::default() };
+        let shared = Shared::new(Arc::default());
         lock(&shared.st).audio.extend([1.0, 2.0, 3.0, 4.0]);
         let mut out = [0.0; 2];
         shared.pull(&mut out, 1.0);
@@ -796,7 +813,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_output_at_another_rate_steps_between_samples() {
-        let shared = Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held: Arc::default() };
+        let shared = Shared::new(Arc::default());
         lock(&shared.st).audio.extend([0.0, 1.0, 2.0, 3.0]);
         // The voice at half the output's rate: each sample, then the midpoint to the next.
         let mut out = [9.0; 6];
