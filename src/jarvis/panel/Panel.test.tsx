@@ -125,6 +125,32 @@ describe("the model's setup", () => {
   })
 })
 
+describe('the brain', () => {
+  const word = () => $('[data-testid="jv-setup-word"]')!
+
+  test('with Claude, the bar names it and its model, and no setup card shows', () => {
+    store.setState({ open: true, brain: { kind: 'claude', model: 'sonnet', effort: 'low' }, voice: 'speaking' })
+    draw()
+    expect(word().textContent).toBe('claude · sonnet · speaking')
+    expect(word().getAttribute('data-brain')).toBe('claude')
+    expect($('.jv-setup')).toBeNull()
+  })
+
+  test('with Claude, the local model\'s card shows once the screen starts it', () => {
+    store.setState({ open: true, brain: { kind: 'claude', model: 'haiku', effort: 'low' }, setup: { kind: 'starting' } })
+    draw()
+    expect(word().textContent).toBe('claude · haiku')
+    expect($('.jv-setup')!.textContent).toBe('Starting the model')
+  })
+
+  test('local, the bar is the local model\'s state, as before it is known', () => {
+    store.setState({ open: true, brain: { kind: 'local' }, setup: { kind: 'ready', vision: false } })
+    draw()
+    expect(word().textContent).toBe('ready')
+    expect(word().getAttribute('data-brain')).toBe('local')
+  })
+})
+
 test("the parents, and a parent's approval answered from the panel", () => {
   let parents = foldParent([], { kind: 'opened', parent: ref('a', 'mnemo-desktop') })
   parents = foldParent(parents, { kind: 'approval', parent: ref('b', 'tasklist'), question: 'Rodar git push origin fix?' })

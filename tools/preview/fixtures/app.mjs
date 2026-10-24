@@ -56,6 +56,8 @@ export const BASE = {
   // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
   nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
   usage_log: () => null,
+  // James's brain (#503): the local model, as with no `brain` in jarvis.json.
+  jarvis_brain: () => ({ kind: 'local' }),
 }
 
 /**
