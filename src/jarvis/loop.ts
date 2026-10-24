@@ -63,9 +63,33 @@ const isCancel = (t: string) => /^(cancela|cancelar|cancele|esquece|para tudo)\b
  *  "e" is not "é": it starts a new question ("e o CI?"). */
 export const isNo = (t: string) => /^(nao|errado|negativo|nada disso)\b/.test(fold(t))
 export const isYes = (t: string) => !isNo(t) && /^(sim|isso|exato|pode|certo|correto|confirmo|ok|aham|claro|beleza|e isso|e esse)\b/.test(fold(t))
-/** A write that refers to a parent already running: "diz pra ele também…", "manda pro parent…". */
-const FOLLOW_UP = /\b(tambem|alem disso|continua|continue|(pra|para|pro|ao|no|o|esse|mesmo) parent|(manda|diz|fala|avisa|pede|pergunta|lembra)( pra| para| a)? (ele|ela)|(pra|para) (ele|ela))\b/
+/** A write that refers to a parent already running: "diz pra ele também…", "manda pro parent…",
+ *  "a sessão do parent", "o parent que você abriu". */
+const FOLLOW_UP =
+  /\b(tambem|alem disso|continua|continue|(pra|para|pro|ao|no|o|do|esse|este|aquele|desse|deste|daquele|nesse|neste|naquele|mesmo) parent|(a|essa|esta|aquela|da|dessa|nessa|naquela) sessao|que (voce|vc|a gente) (acabou de |acabamos de )?(abriu|abrir|abrimos|despachou|despachar|despachamos|mandou|mandar|criou|criar)|(manda|diz|fala|avisa|pede|pergunta|lembra)( pra| para| a)? (ele|ela)|(pra|para) (ele|ela))\b/
 export const isFollowUp = (t: string) => FOLLOW_UP.test(fold(t))
+/** Asks to end a parent: "fecha aquele parent", "pare esse parent", "encerra a sessão do parent".
+ *  "Para" is not here: "manda para o parent…" is a follow-up. */
+const STOP_PARENT =
+  /\b(fecha|feche|fechar|pare|parar|encerra|encerre|encerrar|mata|mate|matar|derruba|derrube|derrubar|desliga|desligue|desligar|cancela|cancele|cancelar)\s+((a|o|um|uma|esse|essa|este|esta|aquele|aquela)\s+)?(parent|sessao)\b/
+/** Words handed on to a parent: "diz pro parent parar a sessão de testes" is its task, not his. */
+const RELAYED = /\b(diz|diga|fala|fale|pede|peca|manda|mande|avisa|avise|lembra|lembre|pergunta|pergunte)\b/
+export const isStopParent = (t: string) => {
+  const at = fold(t).search(STOP_PARENT)
+  return at >= 0 && !RELAYED.test(fold(t).slice(0, at))
+}
+/** The words of a request for a parent with nothing for it to do: "pode abrir um parent no
+ *  tasklist pra mim". A word not here, nor of a project's name, is a task. */
+const OPENING = new Set(
+  'james ei oi ok entao e ai la aqui agora so tipo pode podia poderia consegue voce vc preciso quero queria gostaria que me mim pra para pro por favor um uma o a outro outra mais novo nova no na do da de em abre abra abrir abri cria crie criar inicia inicie iniciar sobe suba subir levanta levante levantar parent sessao'.split(' '),
+)
+const OPENS = /\b(abre|abra|abrir|abri|cria|crie|criar|inicia|inicie|iniciar|sobe|suba|subir|levanta|levante|levantar)\b/
+const tokens = (t: string) => fold(t).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+export const isBareOpen = (t: string, projects: JarvisProject[]) => {
+  if (!OPENS.test(fold(t)) || !/\b(parent|sessao)\b/.test(fold(t))) return false
+  const named = new Set(projects.flatMap((p) => [p.name, ...p.aliases, p.root.split(/[\\/]/).filter(Boolean).pop() ?? ''].flatMap(tokens)))
+  return tokens(t).every((w) => OPENING.has(w) || named.has(w))
+}
 
 const hostIn = (t: string): Host | undefined => (/\bgrok\b/.test(fold(t)) ? 'grok' : /\bclaude\b/.test(fold(t)) ? 'claude' : undefined)
 const quote = (s: string, n = 60) => `«${s.length > n ? `${s.slice(0, n - 1)}…` : s}»`
@@ -73,7 +97,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const needsProject = new Set(TOOLS.filter((t) => ((t.function.parameters.required as string[]) ?? []).includes('project')).map((t) => t.function.name))
 const isRead = (name: string): name is ReadTool => (READ_TOOLS as readonly string[]).includes(name)
 /** The calls that do something rather than read or ask: a low-confidence take holds these. */
-const ACTS = new Set(['delegate_to_parent', 'open_app', 'open_in_browser', 'open_url'])
+const ACTS = new Set(['delegate_to_parent', 'stop_parent', 'open_app', 'open_in_browser', 'open_url'])
 
 const STATE_WORDS: Record<ParentStatus['state'], string> = {
   starting: 'está começando',
@@ -281,6 +305,14 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     ask(turn, `Qual parent: ${pool.map((p) => `o do ${p.project} (${quote(p.request, 40)})`).join(' ou ')}?`)
 
   const delegate = async (turn: Turn, args: Record<string, unknown>) => {
+    // Ending a parent is never another parent's task, whichever tool the brain named.
+    if (isStopParent(turn.verbatim)) return stop(turn, args)
+    // A parent with nothing to do is asked what for first; the answer is joined onto this request.
+    if (isBareOpen(turn.verbatim, turn.projects)) {
+      const project = projectFor(turn, args.project, false)
+      if (project) ask(turn, `Pra fazer o quê no ${project}?`)
+      return
+    }
     const live = running()
     if (live.length && isFollowUp(turn.verbatim)) {
       const named = projectsIn(turn.words, turn.projects)
@@ -325,6 +357,24 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     return typeof state === 'string' ? reply(turn, state) : pickParent(turn, state)
   }
 
+  /** Ends a parent James opened ("fecha aquele parent"): the one in the project the words name,
+   *  else the brain's pick, else the only one. Only his own: a session he did not open is not his
+   *  to end. */
+  const stop = async (turn: Turn, args: Record<string, unknown>) => {
+    const live = running()
+    const named = projectsIn(turn.words, turn.projects)
+    const want = named.length === 1 ? named[0] : knownProject(args.project, turn.projects)
+    const pool = want ? live.filter((p) => p.project === want) : live
+    if (!pool.length) return reply(turn, want ? `Não abri nenhum parent no ${want}.` : 'Não abri nenhum parent.')
+    if (pool.length > 1) return pickParent(turn, pool)
+    const p = pool[0]
+    turn.project = p.project
+    await parents.cancel(p.sessionId)
+    if (store.getState().delegated?.sessionId === p.sessionId) set({ delegated: null })
+    set({ recent: { project: p.project, at: now() } })
+    return reply(turn, `Fechei o parent do ${p.project}.`)
+  }
+
   /** The call a low-confidence take was held on, for the yes that runs it. */
   let held: { turn: Turn; tool: string; args: Record<string, unknown> } | null = null
 
@@ -340,6 +390,8 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     switch (name) {
       case 'delegate_to_parent':
         return delegate(turn, args)
+      case 'stop_parent':
+        return stop(turn, args)
       case 'parent_status':
         return status(turn, args)
       case 'ask_user':

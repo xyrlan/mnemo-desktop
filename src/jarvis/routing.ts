@@ -29,7 +29,8 @@ const fn = (name: string, description: string, properties: Record<string, Schema
 })
 
 /** The closed set of tools: reads (#505), following a running parent, handing a write to a
- *  parent, asking, the screen on request (#507), and apps and web pages (#508). Never a shell. */
+ *  parent, ending one Jarvis opened, asking, the screen on request (#507), and apps and web pages
+ *  (#508). Never a shell. */
 export const TOOLS: Tool[] = [
   fn('git_status', 'git status of a project.', { project: project() }),
   fn('git_log', 'Recent commits of a project.', { project: project(), limit: { type: 'integer' } }, ['project']),
@@ -47,6 +48,7 @@ export const TOOLS: Tool[] = [
   fn('gh_issue_view', 'Show an issue.', { project: project(), number: { type: 'integer' } }),
   fn('parent_status', 'How a parent session already working on an earlier request is doing.', { project: project('the project the parent runs in') }),
   fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the request, verbatim' } }),
+  fn('stop_parent', 'End (close, stop) a parent session Jarvis opened. Never a session Jarvis did not open, and never by opening another parent.', { project: project('the project the parent runs in') }, []),
   fn('ask_user', 'Ask the user before acting: when the project cannot be told, or the request is destructive (delete, force-push, reset).', {
     question: { type: 'string' },
     reason: { type: 'string', enum: ['project_unknown', 'destructive', 'ambiguous'] },
@@ -71,6 +73,8 @@ export const RULES: string[] = [
   'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
   'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
   'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',
+  'Fechar, parar ou encerrar um parent que você abriu é stop_parent. Nunca abra um parent para fechar ou parar outro, e nunca feche uma sessão que você não abriu.',
+  'Pedirem um parent sem dizer o que ele vai fazer ("abre um parent no X"): pergunte antes, com ask_user, o que ele deve fazer; o parent abre já com a tarefa.',
   'Nunca diga como algo está (sessões, filhos, CI, PRs, issues, commits) sem perguntar antes à ferramenta que sabe: responder "não" sem ferramenta é chutar.',
   '"Filho" é uma sessão que o mnemo despachou: quem sabe dos filhos é list_sessions. O andamento de um projeto são os commits recentes (git_log) e as sessões (list_sessions); o que se fez e decidiu está em read_briefings.',
   'A voz chega transcrita, e a transcrição erra nomes: "Games" ou "Jaime" é você, e um projeto pode chegar deformado ou partido em palavras. Fique com o projeto conhecido de som mais parecido.',

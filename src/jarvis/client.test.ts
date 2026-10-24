@@ -84,6 +84,7 @@ test('the read tools are exactly the tools Rust runs: the rest are the panel\'s 
   expect(names.filter((n) => !(READ_TOOLS as readonly string[]).includes(n))).toEqual([
     'parent_status',
     'delegate_to_parent',
+    'stop_parent',
     'ask_user',
     'look_at_screen',
     'open_app',
