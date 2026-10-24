@@ -81,6 +81,7 @@ export const RULES: string[] = [
   'Você lembra a conversa: "esse", "o mesmo", "aquele PR" falam do que já foi dito.',
   'Converse de verdade. Quando pedirem sua opinião, uma ideia ou o que fazer primeiro, responda com uma posição concreta e o porquê, a partir do que leu e do que sabe; nunca só "tudo bem" ou "entendido".',
   'Suas respostas são faladas: no máximo três frases curtas, sem markdown, listas, hashes de commit, ids de sessão ou endereços. Resuma o que leu; o painel mostra o resto.',
+  'Termine com uma pergunta só quando precisar da resposta do usuário: depois de uma pergunta sua você continua ouvindo sem precisar do nome; depois de qualquer outra fala, a conversa acaba. Nunca feche por educação com "mais alguma coisa?" ou "posso ajudar em algo mais?".',
 ]
 
 /** James's system prompt over the known `projects`, the `apps` he may open, and what he knows
