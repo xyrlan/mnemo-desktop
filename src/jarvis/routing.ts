@@ -47,7 +47,7 @@ export const TOOLS: Tool[] = [
   fn('gh_run_list', 'Recent CI (GitHub Actions) runs of a project.', { project: project() }),
   fn('gh_issue_view', 'Show an issue.', { project: project(), number: { type: 'integer' } }),
   fn('parent_status', 'How a parent session already working on an earlier request is doing.', { project: project('the project the parent runs in') }),
-  fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the request, verbatim' } }),
+  fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the task for the parent, whole: what to do, where, and what the conversation settled (names, numbers, choices). The parent sees nothing of the conversation but this, the user\'s last words and a few lines before them, so a "yes, send it" is never the task.' } }),
   fn('stop_parent', 'End (close, stop) a parent session Jarvis opened. Never a session Jarvis did not open, and never by opening another parent.', { project: project('the project the parent runs in') }, []),
   fn('ask_user', 'Ask the user before acting: when the project cannot be told, or the request is destructive (delete, force-push, reset).', {
     question: { type: 'string' },
@@ -69,7 +69,7 @@ export const TOOLS: Tool[] = [
 export const RULES: string[] = [
   `Você é o ${NAME}, um assistente de voz no desktop do usuário. O usuário fala em português.`,
   'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas. Quando pedirem, também olha a tela e abre apps da lista e páginas web.',
-  'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
+  'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent. Em request, escreva a tarefa inteira para o parent agir sozinho: o que fazer, onde, e o que se combinou na conversa (nomes, números, escolhas). O parent não vê a conversa, só isso, as últimas palavras do usuário e poucas falas antes; um "sim, pode mandar" nunca é a tarefa.',
   'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
   'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
   'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',

@@ -86,20 +86,28 @@ function app(over: { config?: Host | null; accounts?: Partial<Record<Host, Agent
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0))
-const OPEN = { project: 'mnemo-desktop', root: '/work/mnemo-desktop', request: 'corrige o teste', gathered: 'git status: clean' }
+const OPEN = { project: 'mnemo-desktop', root: '/work/mnemo-desktop', request: 'corrige o teste', task: '', conversation: '', gathered: 'git status: clean' }
 
-test('a parent opens as New session does, never skipping its prompts, and gets the three-part handoff once its prompt is up', async () => {
+test('a parent opens as New session does, never skipping its prompts, and gets the handoff once its prompt is up', async () => {
   const a = app()
   const before = a.clock()
   const ref = await a.parents.open(OPEN)
   expect(a.opened).toEqual([{ kind: 'claude', root: '/work/mnemo-desktop', sessionId: 'parent-1', agent: CLAUDE, ask: true }])
-  expect(a.typed).toEqual([[1, handoff('corrige o teste', 'git status: clean')]])
+  expect(a.typed).toEqual([[1, handoff({ task: '', words: 'corrige o teste', conversation: '', gathered: 'git status: clean' })]])
   // Typed only after the TUI was given time to draw.
   expect(a.clock() - before).toBeGreaterThanOrEqual(SETTLE_MS)
   expect(ref).toEqual({ sessionId: 'parent-1', project: 'mnemo-desktop', root: '/work/mnemo-desktop', request: 'corrige o teste', host: 'claude', startedAt: before })
   expect(a.events).toEqual([{ kind: 'opened', parent: ref }])
   expect(a.parents.running()).toEqual([ref])
   expect(await a.parents.status('parent-1')).toEqual({ state: 'working', summary: null, question: null })
+})
+
+test("a parent given the brain's task is handed it with the words and the conversation, and is known by it", async () => {
+  const a = app()
+  const o = { ...OPEN, request: 'sim, manda', task: 'Fix the flaky upload test and open a PR.', conversation: 'Maintainer: o teste de upload falha\nJarvis: Quer que eu mande para um parent?' }
+  const ref = await a.parents.open(o)
+  expect(a.typed).toEqual([[1, handoff({ task: o.task, words: 'sim, manda', conversation: o.conversation, gathered: 'git status: clean' })]])
+  expect(ref.request).toBe('Fix the flaky upload test and open a PR.')
 })
 
 test('the host is the request’s, else the config’s, else Claude; one with no account refuses, and nothing opens', async () => {
