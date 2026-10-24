@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useStore } from 'zustand'
+import type { BrainConfig } from '../client'
 import type { Jarvis } from '../loop'
 import type { ParentState } from '../parent'
 import { approvals, type JarvisStore, type Line, type Parent, type Setup } from '../store'
@@ -34,6 +35,9 @@ function setupWord(s: Setup): string {
       return 'model failed'
   }
 }
+
+/** Who answers, for the bar: Claude and its model, or the local model's state. */
+const brainWord = (brain: BrainConfig | null, setup: Setup) => (brain?.kind === 'claude' ? `claude · ${brain.model}` : setupWord(setup))
 
 const STATE: Record<ParentState, string> = {
   starting: 'starting',
@@ -116,6 +120,7 @@ function LineRow({ line }: { line: Line }) {
  *  and under a Nexus window. */
 export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   const open = useStore(store, (s) => s.open)
+  const brain = useStore(store, (s) => s.brain)
   const setup = useStore(store, (s) => s.setup)
   const lines = useStore(store, (s) => s.lines)
   const parents = useStore(store, (s) => s.parents)
@@ -161,15 +166,16 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
     <section className="nx jv-panel" role="complementary" aria-label="James" data-voice={voice}>
       <div className="nx-window-bar">
         <h2 className="nx-window-title">James</h2>
-        <span className="nx-window-sub" data-testid="jv-setup-word">
-          {setupWord(setup)}
+        <span className="nx-window-sub" data-testid="jv-setup-word" data-brain={brain?.kind ?? 'local'}>
+          {brainWord(brain, setup)}
           {voice !== 'idle' ? ` · ${voice}` : ''}
         </span>
         <button type="button" className="nx-window-close" aria-label="Close" title="Close (Esc)" onClick={close}>
           ×
         </button>
       </div>
-      <SetupCard setup={setup} onStart={() => void jarvis.ensure()} />
+      {/* With Claude the local model only sees the screen: its card shows once a look starts it. */}
+      {!(brain?.kind === 'claude' && setup.kind === 'idle') && <SetupCard setup={setup} onStart={() => void jarvis.ensure()} />}
       {waiting.map((p) => (
         <Approval key={p.ref.sessionId} parent={p} onAnswer={(allow) => void jarvis.answer(p.ref.sessionId, allow)} />
       ))}

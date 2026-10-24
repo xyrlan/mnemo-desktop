@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import type { Heard, LlmSetup, VoicePhase } from './client'
+import type { BrainConfig, Heard, LlmSetup, VoicePhase } from './client'
 import type { Recent } from './infer'
 import type { ParentEvent, ParentRef, ParentState } from './parent'
 
@@ -21,13 +21,17 @@ export type Parent = { ref: ParentRef; state: ParentState; summary: string | nul
 
 /** What the next request answers. `ask`: a question Jarvis asked (the project, which parent, or
  *  the model's `ask_user`); the answer goes with the request that raised it. `confirm`: a take
- *  heard with low confidence, repeated back before anything acts (#506). */
+ *  heard with low confidence whose call acts, repeated back before it runs (#506); a yes runs
+ *  `tool`. */
 export type Pending =
   | { kind: 'ask'; request: string; question: string }
-  | { kind: 'confirm'; heard: Heard }
+  | { kind: 'confirm'; heard: Heard; tool: string }
 
 export type JarvisState = {
   open: boolean
+  /** Who answers requests, as `jarvis_brain` last said; null until it has. */
+  brain: BrainConfig | null
+  /** The local model's setup. With Claude it starts only for the screen. */
   setup: Setup
   lines: Line[]
   /** A request is being worked on. */
@@ -50,6 +54,7 @@ export const MAX_LINES = 200
 export const createJarvisStore = (): JarvisStore =>
   createStore<JarvisState>(() => ({
     open: false,
+    brain: null,
     setup: { kind: 'idle' },
     lines: [],
     busy: false,
