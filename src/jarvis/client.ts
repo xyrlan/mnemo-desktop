@@ -40,11 +40,20 @@ export const READ_TOOLS = [
 ] as const
 export type ReadTool = (typeof READ_TOOLS)[number]
 
-/** `jarvis://voice`: what the push-to-talk key and the speaker are doing (jarvis-voice). */
-export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'speaking'
-/** `jarvis://heard`: a take, once the key is released. `confidence` is 0–1; `window` is the title
- *  of the window that was in front when the key went down, null when unknown. */
-export type Heard = { text: string; confidence: number; window: string | null }
+/** `jarvis://voice`: what the voice is doing (jarvis-voice). `listening`: the key is held, or a
+ *  take is being said hands-free (it began with James's name, or came in the follow-up window).
+ *  `waiting`: James has answered, and the follow-up window is open: whatever is said next is a
+ *  take, no name needed. `idle` with hands-free on is still listening for the name. */
+export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'speaking' | 'waiting'
+/** How a take began: the push-to-talk key, James's name said hands-free, or the follow-up window. */
+export type HeardVia = 'key' | 'wake' | 'follow'
+/** `jarvis://heard`: a take, once it ended. `confidence` is 0–1; `window` is the title of the
+ *  window that was in front when it began, null when unknown. A hands-free take comes without the
+ *  name it began with. `via` is absent from a voice that predates hands-free: it was the key. */
+export type Heard = { text: string; confidence: number; window: string | null; via?: HeardVia }
+/** `jarvis://level`: how loud the microphone and the speaker are, each 0–1, some 20 times a second
+ *  while a conversation is on (not `idle`), for the orb to move with; none while `idle`. */
+export type VoiceLevel = { mic: number; out: number }
 
 /** `jarvis_brain` (jarvis-brain): who answers James's requests, from the config's `brain`.
  *  `local`: the model under llama-server (`jarvis_llm_*`), the default. `claude`: Claude Code's
@@ -102,6 +111,11 @@ export interface JarvisClient {
   /** `jarvis://voice-error`: what went wrong with the key, the microphone, whisper or the speaker
    *  where no command was there to return it (jarvis-voice). */
   onVoiceError(cb: (message: string) => void): Promise<() => void>
+  onLevel(cb: (level: VoiceLevel) => void): Promise<() => void>
+  /** `jarvis_listen(enabled: Option<bool>) -> Result<bool, String>`: turns hands-free listening on or
+   *  off, or with none only reads it; resolves with whether it is on. Off when the config's
+   *  `voice.wake` is unset, until turned on (jarvis-voice). */
+  listen(on?: boolean): Promise<boolean>
 
   /** `jarvis_screenshot() -> Result<String, String>`: the screen in front as a `data:image/…`
    *  URL, held in memory only (jarvis-screen). */
@@ -141,6 +155,8 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     onVoice: (cb) => listen<VoicePhase>('jarvis://voice', cb),
     onHeard: (cb) => listen<Heard>('jarvis://heard', cb),
     onVoiceError: (cb) => listen<string>('jarvis://voice-error', cb),
+    onLevel: (cb) => listen<VoiceLevel>('jarvis://level', cb),
+    listen: (on) => invoke('jarvis_listen', { enabled: on ?? null }),
     screenshot: () => invoke('jarvis_screenshot'),
     apps: () => invoke('jarvis_apps'),
     openApp: (app, project) => invoke('jarvis_open_app', { app, project: project ?? null }),

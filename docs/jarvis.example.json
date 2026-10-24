@@ -10,7 +10,7 @@
     { "name": "Spotify", "exe": "~/AppData/Roaming/Spotify/Spotify.exe" },
     { "name": "Obsidian", "exe": "~/AppData/Local/Programs/Obsidian/Obsidian.exe" }
   ],
-  "voice": { "key": "CommandOrControl+Shift+Space" },
+  "voice": { "key": "CommandOrControl+Shift+Space", "wake": { "followMs": 8000 }, "orb": true },
   "brain": { "kind": "claude", "model": "sonnet", "effort": "low" },
   "model": {
     "llamaServer": "~/.cache/jarvis-bench/llama/llama-server.exe",
