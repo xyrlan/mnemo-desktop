@@ -32,6 +32,14 @@ describe("Claude's reply", () => {
     expect(readReply('{"tool": "list_sessions", "args": [1]}').args).toEqual({})
   })
 
+  test("a call in Claude's own markup is a call, and the markup is never words", () => {
+    const markup = '<function_calls>\n<invoke name="read_file">\n<parameter name="project">tasklist</parameter>\n<parameter name="path">README.md</parameter>\n</invoke>\n</function_calls>'
+    expect(readReply(`Vou ler o README.\n${markup}`)).toEqual({ words: 'Vou ler o README.', tool: 'read_file', args: { project: 'tasklist', path: 'README.md' } })
+    expect(readReply('<invoke name="gh_pr_view"><parameter name="number">12</parameter></invoke>').args).toEqual({ number: 12 })
+    // Markup before a JSON call goes; the JSON is the call.
+    expect(readReply(`${markup}\n{"tool": "git_log", "args": {"project": "x"}}`)).toEqual({ words: '', tool: 'git_log', args: { project: 'x' } })
+  })
+
   test('braces that are no call are words', () => {
     expect(readReply('Use {chave} no template.')).toEqual({ words: 'Use {chave} no template.', tool: null, args: {} })
     expect(readReply('O config é {"a": 1}.')).toEqual({ words: 'O config é {"a": 1}.', tool: null, args: {} })

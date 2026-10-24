@@ -81,8 +81,28 @@ export type ClaudeReply = {
   args: Record<string, unknown>
 }
 
-/** Claude's reply, read: its words, and the first JSON object in it naming a `tool`, with `args`.
- *  A fence around the object is dropped with it; anything after it is not Claude's to say. */
+/** A call in Claude's own tool-use markup, which it sometimes writes as text with no tool to call:
+ *  `<invoke name="read_file"><parameter name="path">x</parameter></invoke>`, in `<function_calls>`. */
+const INVOKE = /<invoke name="([A-Za-z_]+)">([\s\S]*?)<\/invoke>/
+const PARAMETER = /<parameter name="([A-Za-z_]+)">([\s\S]*?)<\/parameter>/g
+const MARKUP = /<\/?function_calls>|<invoke name="[^"]*">[\s\S]*?<\/invoke>/g
+
+/** Claude's words, without its tool-use markup: none of it is said aloud. */
+const spoken = (text: string) => text.replace(MARKUP, '').trim()
+
+/** The arguments of an `<invoke>`: a number written as one is a number. */
+function parameters(body: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {}
+  for (const [, name, value] of body.matchAll(PARAMETER)) {
+    const v = value.trim()
+    args[name] = /^-?\d+$/.test(v) ? Number(v) : v
+  }
+  return args
+}
+
+/** Claude's reply, read: its words, and the first JSON object in it naming a `tool`, with `args`,
+ *  or else a call in its own markup. A fence around the object is dropped with it; anything after
+ *  it is not Claude's to say, and neither is markup. */
 export function readReply(text: string): ClaudeReply {
   for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
     const end = closing(text, i)
@@ -96,8 +116,10 @@ export function readReply(text: string): ClaudeReply {
     const call = value as { tool?: unknown; args?: unknown }
     if (!call || typeof call.tool !== 'string') continue
     const args = call.args && typeof call.args === 'object' && !Array.isArray(call.args) ? (call.args as Record<string, unknown>) : {}
-    const words = text.slice(0, i).replace(/```[a-z]*\s*$/i, '').trim()
+    const words = spoken(text.slice(0, i).replace(/```[a-z]*\s*$/i, ''))
     return { words, tool: call.tool, args }
   }
-  return { words: text.trim(), tool: null, args: {} }
+  const invoke = INVOKE.exec(text)
+  if (invoke) return { words: spoken(text.slice(0, invoke.index)), tool: invoke[1], args: parameters(invoke[2]) }
+  return { words: spoken(text), tool: null, args: {} }
 }
