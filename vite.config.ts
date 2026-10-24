@@ -10,6 +10,16 @@ export default defineConfig({
   // `@/…` is `src/…` here, in vitest (which reads this file) and in tsc (tsconfig `paths`).
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   clearScreen: false,
+  // James's orb is a window of its own, with a page of its own that loads none of the app
+  // (src-tauri/src/jarvis_orb.rs).
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        orb: fileURLToPath(new URL('./orb.html', import.meta.url)),
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>James</title>
+    <!-- James's orb (src/jarvis/orb/main.ts): its own entry, with none of the app. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+        cursor: default;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font: 500 12px/1.3 system-ui, 'Segoe UI', sans-serif;
+      }
+      #orb {
+        width: 168px;
+        height: 168px;
+      }
+      #caption {
+        width: 208px;
+        text-align: center;
+        color: #f2f4ff;
+        text-shadow: 0 1px 3px rgb(0 0 0 / 0.9), 0 0 8px rgb(0 0 0 / 0.6);
+      }
+      #caption div {
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      #caption .you {
+        font-style: italic;
+        color: #c8d2ff;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="orb"></canvas>
+    <div id="caption" aria-live="polite"></div>
+    <script type="module" src="/src/jarvis/orb/main.ts"></script>
+  </body>
+</html>

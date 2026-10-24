@@ -144,6 +144,9 @@ pub mod jarvis_apps;
 // -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
 pub mod jarvis_voice;
 
+// -- jarvis orb (src/jarvis_orb.rs): James on screen while a conversation is on (#503, #506) --
+pub mod jarvis_orb;
+
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
 mod testutil;
@@ -393,6 +396,10 @@ pub fn run() {
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
             jarvis_voice::jarvis_hush,
+
+            // -- jarvis orb commands --
+            jarvis_orb::jarvis_orb,
+            jarvis_orb::jarvis_orb_enabled,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
@@ -505,6 +512,9 @@ pub fn run() {
         // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
         // Only terminals the app held itself, with no daemon to hand them to, end here.
         .on_window_event(|window, event| match event {
+            // -- jarvis orb --
+            // The orb's window is not the app's: closing it asks nothing and ends no terminal.
+            _ if window.label() != "main" => {}
             // Where they do end with the window, it asks first when one is running something (#338).
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 if let Some(question) = pty::closing::question(&window.state::<PtyState>().0.busy()) {
@@ -512,7 +522,10 @@ pub fn run() {
                     ask_to_close(window, question);
                 }
             }
-            tauri::WindowEvent::Destroyed => window.state::<PtyState>().0.release(),
+            tauri::WindowEvent::Destroyed => {
+                window.state::<PtyState>().0.release();
+                jarvis_orb::main_closed(window.app_handle());
+            }
             _ => {}
         })
         .run(tauri::generate_context!());
