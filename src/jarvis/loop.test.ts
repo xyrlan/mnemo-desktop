@@ -1,7 +1,7 @@
 import { PAUSE_MS } from './brain'
 import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup } from './client'
 import { CANCEL_MS, createJarvis, isBareOpen, isFollowUp, isNo, isStopParent, isYes, MAX_STEPS } from './loop'
-import type { OpenParent, ParentEvent, ParentRef, ParentsApi, ParentStatus } from './parent'
+import { followUp, type OpenParent, type ParentEvent, type ParentRef, type ParentsApi, type ParentStatus } from './parent'
 import type { Message } from './routing'
 import { createJarvisStore, type JarvisStore } from './store'
 
@@ -223,6 +223,8 @@ describe('delegating', () => {
         project: 'tasklist',
         root: '/Users/you/code/tasklist',
         request: 'corrige o teste quebrado do tasklist',
+        task: 'fix it',
+        conversation: '',
         gathered: 'git_status (tasklist):\ngit_status output',
         host: undefined,
       },
@@ -242,7 +244,7 @@ describe('delegating', () => {
     const live = [ref('a', 'mnemo-desktop'), ref('b', 'tasklist')]
     const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })], { live })
     await s.jarvis.ask('diz pra ele também corrigir o lint no tasklist')
-    expect(s.parents.sent).toEqual([['b', 'diz pra ele também corrigir o lint no tasklist']])
+    expect(s.parents.sent).toEqual([['b', followUp({ task: 'x', words: 'diz pra ele também corrigir o lint no tasklist', conversation: '' })]])
     expect(s.parents.opened).toEqual([])
     expect(s.last()).toBe('Mandei para o parent do tasklist.')
   })
@@ -250,7 +252,7 @@ describe('delegating', () => {
   test('a follow-up with one parent running goes to it', async () => {
     const s = setup([calls('delegate_to_parent', { project: 'mnemo-desktop', request: 'x' })], { live: [ref('a', 'tasklist')] })
     await s.jarvis.ask('fala pra ele rodar os testes de novo')
-    expect(s.parents.sent).toEqual([['a', 'fala pra ele rodar os testes de novo']])
+    expect(s.parents.sent).toEqual([['a', followUp({ task: 'x', words: 'fala pra ele rodar os testes de novo', conversation: '' })]])
   })
 
   test('a follow-up with two running and none named asks which', async () => {
@@ -312,7 +314,30 @@ describe('delegating', () => {
     const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })], { live: [ref('a', 'tasklist')] })
     await s.jarvis.ask('Eu preciso que esse parent que você abriu agora veja o Google Ads')
     expect(s.parents.opened).toEqual([])
-    expect(s.parents.sent).toEqual([['a', 'Eu preciso que esse parent que você abriu agora veja o Google Ads']])
+    expect(s.parents.sent).toEqual([['a', followUp({ task: 'x', words: 'Eu preciso que esse parent que você abriu agora veja o Google Ads', conversation: '' })]])
+  })
+
+  test('a task that only says the words again is none: the conversation carries it', async () => {
+    const s = setup([said('Falha no Windows. Quer que eu mande corrigir?'), calls('delegate_to_parent', { project: 'tasklist', request: 'Sim, pode mandar pro parent!' })])
+    await s.jarvis.ask('o teste de upload do tasklist falha')
+    await s.jarvis.ask('sim, pode mandar pro parent')
+    expect(s.parents.opened).toHaveLength(1)
+    expect(s.parents.opened[0]).toMatchObject({
+      request: 'sim, pode mandar pro parent',
+      task: '',
+      conversation: 'Maintainer: o teste de upload do tasklist falha\nJarvis: Falha no Windows. Quer que eu mande corrigir?',
+    })
+  })
+
+  test("the conversation a parent is handed is the last eight exchanges", async () => {
+    const replies = Array.from({ length: 10 }, (_, i) => said(`a${i + 1}`))
+    const s = setup([...replies, calls('delegate_to_parent', { project: 'tasklist', request: 'Corrigir o teste de upload do tasklist.' })])
+    for (let i = 1; i <= 10; i++) await s.jarvis.ask(`r${i}`)
+    await s.jarvis.ask('manda corrigir isso no tasklist')
+    const lines = s.parents.opened[0].conversation.split('\n')
+    expect(lines).toHaveLength(16)
+    expect(lines[0]).toBe('Maintainer: r3')
+    expect(lines.at(-1)).toBe('Jarvis: a10')
   })
 })
 
@@ -724,6 +749,33 @@ function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as
 }
 
 describe('with Claude', () => {
+  test('a yes to what was discussed hands the parent the task Claude wrote, the words and the conversation', async () => {
+    const task = 'No tasklist, corrigir o teste de upload que falha no Windows: o servidor falso responde depois de 5 s. Aumentar o tempo limite do teste e abrir um PR.'
+    const s = withClaude([
+      'Falha no Windows: o servidor falso responde depois de 5 s. Quer que eu mande para um parent corrigir?',
+      `{"tool": "delegate_to_parent", "args": {"project": "tasklist", "request": ${JSON.stringify(task)}}}`,
+    ])
+    await s.jarvis.heard({ text: 'por que o teste de upload do tasklist falha?', confidence: 0.9, window: null })
+    await s.jarvis.heard({ text: 'sim, pode mandar pro parent', confidence: 0.9, window: null })
+    expect(s.parents.opened).toHaveLength(1)
+    expect(s.parents.opened[0]).toMatchObject({
+      project: 'tasklist',
+      request: 'sim, pode mandar pro parent',
+      task,
+      conversation: 'Maintainer: por que o teste de upload do tasklist falha?\nJarvis: Falha no Windows: o servidor falso responde depois de 5 s. Quer que eu mande para um parent corrigir?',
+    })
+  })
+
+  test('a follow-up hands the running parent the task and the conversation too', async () => {
+    const task = 'Corrigir também o erro de lint em upload.ts.'
+    const s = withClaude(['Tem um erro de lint no upload.ts.', `{"tool": "delegate_to_parent", "args": {"project": "tasklist", "request": ${JSON.stringify(task)}}}`], {
+      live: [ref('a', 'tasklist')],
+    })
+    await s.jarvis.ask('tem algum erro de lint no tasklist?')
+    await s.jarvis.ask('manda pra ele também')
+    expect(s.parents.sent).toEqual([['a', followUp({ task, words: 'manda pra ele também', conversation: 'Maintainer: tem algum erro de lint no tasklist?\nJarvis: Tem um erro de lint no upload.ts.' })]])
+  })
+
   test('Claude failing a spoken request is said, and the panel opens on the error', async () => {
     const s = withClaude([], { client: { brainAsk: async () => Promise.reject(new Error('claude: not logged in')) } })
     await s.jarvis.heard({ text: 'como está o mnemo?', confidence: 0.9, window: null })
