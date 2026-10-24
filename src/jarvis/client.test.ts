@@ -30,6 +30,7 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
   await client.brainReset()
   await client.tool('git_log', { project: 'mnemo', limit: 5 })
   await client.focusedWindow()
+  await client.research('qual a última versão do Tauri?', false)
   await client.say('pronto')
   await client.hush()
   await client.screenshot()
@@ -54,6 +55,7 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
     ['jarvis_brain_reset', undefined],
     ['jarvis_tool', { name: 'git_log', args: { project: 'mnemo', limit: 5 } }],
     ['jarvis_focused_window', undefined],
+    ['jarvis_research', { question: 'qual a última versão do Tauri?', deep: false }],
     ['jarvis_say', { text: 'pronto' }],
     ['jarvis_hush', undefined],
     ['jarvis_screenshot', undefined],
@@ -91,6 +93,8 @@ test('the read tools are exactly the tools Rust runs: the rest are the panel\'s 
     'delegate_to_parent',
     'stop_parent',
     'ask_user',
+    'web_search',
+    'research',
     'look_at_screen',
     'open_app',
     'open_in_browser',

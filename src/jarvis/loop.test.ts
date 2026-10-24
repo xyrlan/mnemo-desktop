@@ -45,6 +45,7 @@ function fakeClient(replies: Chunk[][], over: Partial<JarvisClient> = {}) {
       return `${name} output`
     },
     focusedWindow: async () => null,
+    research: async () => Promise.reject(new Error('the web was not expected to be searched')),
     say: async (t) => void spoken.push(t),
     hush: async () => {},
     onVoice: async () => () => {},

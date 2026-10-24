@@ -49,3 +49,8 @@
 {"request": "me mostra as actions do mnemo no navegador", "expect": {"tool": "open_in_browser", "project": "mnemo", "args": {"page": "actions"}}}
 {"request": "abre o github.com/ggml-org/llama.cpp pra mim", "expect": {"tool": "open_url", "args": {"url": "github.com/ggml-org/llama.cpp"}}}
 {"request": "James, abre o site huggingface.co", "expect": {"tool": "open_url", "args": {"url": "huggingface.co"}}}
+{"request": "quando foi que a gente mexeu no atalho do push-to-talk no desktop?", "expect": {"tool": "search_vault", "project": "mnemo-desktop"}}
+{"request": "o que a gente decidiu sobre o modelo do whisper no mnemo?", "expect": {"tool": "search_vault", "project": "mnemo"}}
+{"request": "qual é a versão mais nova do Tauri que saiu?", "expect": {"tool": "web_search"}}
+{"request": "James, quanto tá o dólar hoje?", "expect": {"tool": "web_search"}}
+{"request": "pesquisa a fundo quais modelos de voz em português rodam local e me avisa", "expect": {"tool": "research"}}
