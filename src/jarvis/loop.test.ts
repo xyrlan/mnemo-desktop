@@ -36,6 +36,9 @@ function fakeClient(replies: Chunk[][], over: Partial<JarvisClient> = {}) {
       next.forEach(cb)
     },
     stopModel: async () => {},
+    brain: async () => ({ kind: 'local' }),
+    brainAsk: async () => Promise.reject(new Error('Claude was not expected to be asked')),
+    brainReset: async () => {},
     tool: async (name, args) => {
       tools.push([name, args])
       return `${name} output`

@@ -46,6 +46,11 @@ export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'speaking'
  *  of the window that was in front when the key went down, null when unknown. */
 export type Heard = { text: string; confidence: number; window: string | null }
 
+/** `jarvis_brain` (jarvis-brain): who answers James's requests, from the config's `brain`.
+ *  `local`: the model under llama-server (`jarvis_llm_*`), the default. `claude`: Claude Code's
+ *  CLI on the maintainer's own subscription, one conversation at a time (`jarvis_brain_ask`). */
+export type BrainConfig = { kind: 'local' } | { kind: 'claude'; model: string; effort: string }
+
 /** `jarvis_apps` (jarvis-apps): the apps of the config, by name. */
 export type AppEntry = { name: string; project: boolean }
 export type BrowserPage = 'repo' | 'pr' | 'issue' | 'actions'
@@ -66,6 +71,18 @@ export interface JarvisClient {
   chat(body: unknown, onChunk: (chunk: unknown) => void): Promise<void>
   /** `jarvis_llm_stop() -> ()`: stops llama-server, freeing its VRAM. */
   stopModel(): Promise<void>
+
+  /** `jarvis_brain() -> Result<BrainConfig, String>`: the config's `brain`, read now; `local` when
+   *  it names none, an error naming `jarvis.json` when it is malformed (jarvis-brain). */
+  brain(): Promise<BrainConfig>
+  /** `jarvis_brain_ask(system: String, text: String) -> Result<String, String>`: `text` as the next
+   *  user message of the conversation with Claude, which is started under `system` when none runs,
+   *  or when `system`, the model or the effort changed; resolves with Claude's reply, whole. Claude
+   *  has no tool of its own: it answers in words (jarvis-brain). */
+  brainAsk(system: string, text: string): Promise<string>
+  /** `jarvis_brain_reset() -> ()`: ends the conversation with Claude; the next ask starts a new
+   *  one (jarvis-brain). */
+  brainReset(): Promise<void>
 
   /** `jarvis_tool(name: String, args: serde_json::Value) -> Result<String, String>`: runs one read
    *  tool and returns its output as text for the model; refusals and failures are errors
@@ -114,6 +131,9 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     ensureModel: (cb) => streamed('jarvis_llm_ensure', {}, cb),
     chat: (body, cb) => streamed('jarvis_llm_chat', { body }, cb),
     stopModel: () => invoke('jarvis_llm_stop'),
+    brain: () => invoke('jarvis_brain'),
+    brainAsk: (system, text) => invoke('jarvis_brain_ask', { system, text }),
+    brainReset: () => invoke('jarvis_brain_reset'),
     tool: (name, args) => invoke('jarvis_tool', { name, args }),
     focusedWindow: () => invoke('jarvis_focused_window'),
     say: (text) => invoke('jarvis_say', { text }),

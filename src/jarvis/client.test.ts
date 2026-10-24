@@ -25,6 +25,9 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
   await client.projects()
   await client.log({ said: 'oi' })
   await client.stopModel()
+  await client.brain()
+  await client.brainAsk('Você é o James.', 'bom dia')
+  await client.brainReset()
   await client.tool('git_log', { project: 'mnemo', limit: 5 })
   await client.focusedWindow()
   await client.say('pronto')
@@ -43,6 +46,9 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
     ['jarvis_projects', undefined],
     ['jarvis_log_append', { row: { said: 'oi' } }],
     ['jarvis_llm_stop', undefined],
+    ['jarvis_brain', undefined],
+    ['jarvis_brain_ask', { system: 'Você é o James.', text: 'bom dia' }],
+    ['jarvis_brain_reset', undefined],
     ['jarvis_tool', { name: 'git_log', args: { project: 'mnemo', limit: 5 } }],
     ['jarvis_focused_window', undefined],
     ['jarvis_say', { text: 'pronto' }],

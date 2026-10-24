@@ -62,27 +62,41 @@ export const TOOLS: Tool[] = [
   fn('open_url', 'Open a web address (http or https) in the browser.', { url: { type: 'string' } }),
 ]
 
+/** Who James is and how he works, whichever model plays him: the local one (`systemPrompt`) or
+ *  Claude (`./brain`). */
+export const RULES: string[] = [
+  `Você é o ${NAME}, um assistente de voz no desktop do usuário. O usuário fala em português.`,
+  'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas. Quando pedirem, também olha a tela e abre apps da lista e páginas web.',
+  'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
+  'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
+  'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
+  'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',
+  'Nunca diga como algo está (sessões, filhos, CI, PRs, issues, commits) sem perguntar antes à ferramenta que sabe: responder "não" sem ferramenta é chutar.',
+  '"Filho" é uma sessão que o mnemo despachou: quem sabe dos filhos é list_sessions. O andamento de um projeto são os commits recentes (git_log) e as sessões (list_sessions); o que se fez e decidiu está em read_briefings.',
+  'A voz chega transcrita, e a transcrição erra nomes: "Games" ou "Jaime" é você, e um projeto pode chegar deformado ou partido em palavras. Fique com o projeto conhecido de som mais parecido.',
+  'Você lembra a conversa: "esse", "o mesmo", "aquele PR" falam do que já foi dito.',
+  'Converse de verdade. Quando pedirem sua opinião, uma ideia ou o que fazer primeiro, responda com uma posição concreta e o porquê, a partir do que leu e do que sabe; nunca só "tudo bem" ou "entendido".',
+  'Suas respostas são faladas: no máximo três frases curtas, sem markdown, listas, hashes de commit, ids de sessão ou endereços. Resuma o que leu; o painel mostra o resto.',
+]
+
 /** James's system prompt over the known `projects`, the `apps` he may open, and what he knows
- *  besides the words (`context`: a running parent, the focused window). */
+ *  besides the words (`context`: the moment, a running parent, the focused window). */
 export function systemPrompt(projects: Project[], context?: string, reasoning = false, apps: App[] = []): string {
-  const list = projects.map((p) => `- ${p.name}${p.aliases?.length ? ` (também: ${p.aliases.join(', ')})` : ''}`).join('\n')
-  const appList = apps.map((a) => `- ${a.name}${a.project ? ' (aceita um projeto)' : ''}`).join('\n')
   return [
     reasoning ? '' : '/no_think',
-    `Você é o ${NAME}, um assistente de voz no desktop do usuário. O usuário fala em português.`,
-    'Você só lê: git, arquivos, briefings, regras, sessões e o gh somente-leitura, pelas ferramentas. Quando pedirem, também olha a tela e abre apps da lista e páginas web.',
-    'Tudo que escreve (código, commits, PRs, issues, apagar algo, instruções a um parent já rodando) vai para delegate_to_parent, com o pedido literal.',
-    'Pergunte com ask_user, antes de qualquer outra ferramenta, quando o pedido precisar de um projeto e não der para saber qual, ou quando for destrutivo (apagar, force-push, reset).',
-    'Pedidos que escrevem e não são destrutivos (corrigir, criar issue, abrir PR, mergear, despachar, subir release, escrever testes) vão direto para delegate_to_parent, sem pedir confirmação: o parent confirma o que precisar.',
-    'Quando o Estado atual diz que um parent está rodando e o usuário pergunta como está ou se terminou, use parent_status nesse projeto.',
-    'Quando houver o que ler, fazer ou perguntar, chame exatamente uma ferramenta. Quando não houver (um bom-dia, um aviso de que o usuário ainda vai passar as tarefas), responda só com uma frase curta, sem ferramenta.',
-    '',
-    'Projetos conhecidos:',
-    list,
-    ...(apps.length ? ['', 'Apps que você pode abrir:', appList] : []),
+    ...RULES,
+    'Quando houver o que ler, fazer ou perguntar, chame exatamente uma ferramenta. Quando não houver (um bom-dia, uma conversa, uma opinião sobre o que já foi lido), responda em palavras, sem ferramenta.',
+    ...listed(projects, apps),
     '',
     `Estado atual: ${context || 'nenhum parent rodando, nenhuma janela em foco.'}`,
   ].filter((l, i) => i > 0 || l).join('\n')
+}
+
+/** The projects and apps James knows, as the prompts list them. */
+export function listed(projects: Project[], apps: App[] = []): string[] {
+  const list = projects.map((p) => `- ${p.name}${p.aliases?.length ? ` (também: ${p.aliases.join(', ')})` : ''}`).join('\n')
+  const appList = apps.map((a) => `- ${a.name}${a.project ? ' (aceita um projeto)' : ''}`).join('\n')
+  return ['', 'Projetos conhecidos:', list, ...(apps.length ? ['', 'Apps que você pode abrir:', appList] : [])]
 }
 
 export type Message =

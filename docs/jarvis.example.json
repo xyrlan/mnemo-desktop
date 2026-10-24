@@ -11,6 +11,7 @@
     { "name": "Obsidian", "exe": "~/AppData/Local/Programs/Obsidian/Obsidian.exe" }
   ],
   "voice": { "key": "CommandOrControl+Shift+Space" },
+  "brain": { "kind": "claude", "model": "sonnet", "effort": "low" },
   "model": {
     "llamaServer": "~/.cache/jarvis-bench/llama/llama-server.exe",
     "model": "~/.cache/jarvis-bench/models/Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf"
