@@ -95,7 +95,7 @@ const ref = (sessionId: string, project: string, request = 'corrige o login'): P
 })
 
 let t = 1_000_000
-function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true } = {}) {
+function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true, wait = async (_ms: number) => {} } = {}) {
   const c = fakeClient(replies, over)
   const p = fakeParents(live)
   const store: JarvisStore = createJarvisStore()
@@ -107,7 +107,7 @@ function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {}
     now: () => t,
     focused: () => focused,
     notify: async (title, body) => void notes.push([title, body]),
-    wait: async () => {},
+    wait,
   })
   const lines = () => store.getState().lines.map((l) => `${l.who}: ${l.text}`)
   const last = () => store.getState().lines.at(-1)?.text
@@ -1049,6 +1049,44 @@ describe('the web', () => {
       expect(s.spoken.at(-1)).toBe('Terminei a pesquisa. É a 2.12.5.')
     })
 
+    test('its outcome waits for 1.5 s of quiet, and waits again when James is spoken to meanwhile', async () => {
+      const w = web()
+      const waits: ReturnType<typeof deferred<void>>[] = []
+      const asked: number[] = []
+      const wait = (ms: number) => {
+        asked.push(ms)
+        const d = deferred<void>()
+        waits.push(d)
+        return d.promise
+      }
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research }, wait })
+      await s.jarvis.heard({ text: 'pesquisa a fundo q', confidence: 0.9, window: null })
+      w.deep[0].resolve(found)
+      await flush()
+      expect(asked).toEqual([1500])
+      // The maintainer presses the key before the quiet is out: James does not speak over them.
+      s.store.setState({ voice: 'listening' })
+      waits[0].resolve()
+      await flush()
+      expect(s.spoken).not.toContain('Terminei a pesquisa. É a 2.12.5.')
+      s.store.setState({ voice: 'idle' })
+      await flush()
+      expect(asked).toEqual([1500, 1500])
+      waits[1].resolve()
+      await flush()
+      expect(s.spoken.at(-1)).toBe('Terminei a pesquisa. É a 2.12.5.')
+    })
+
+    test('typed, its failure is not said aloud either', async () => {
+      const w = web()
+      const s = setup([calls('research', { question: 'q' })], { client: { research: w.research } })
+      await s.jarvis.ask('pesquisa a fundo q')
+      w.deep[0].reject(new Error('claude could not start'))
+      await flush()
+      expect(s.store.getState().researches).toMatchObject([{ state: 'failed' }])
+      expect(s.spoken).toEqual([])
+    })
+
     test('typed, its outcome is not said, and with the app in the back it is a notification', async () => {
       const w = web()
       const s = setup([calls('research', { question: 'q' })], { client: { research: w.research }, focused: false })
@@ -1129,7 +1167,13 @@ describe('the web', () => {
   test('which words ask how a research is going', () => {
     for (const t of ['como está a pesquisa?', 'e a pesquisa?', 'E aí, a pesquisa já terminou?', 'terminou a pesquisa?', 'como anda aquela pesquisa?', 'alguma novidade da pesquisa?'])
       expect([t, isResearchStatus(t)]).toEqual([t, true])
-    for (const t of ['pesquisa a fundo modelos de voz', 'faz uma pesquisa sobre placas de vídeo', 'pesquisa como funciona o whisper', 'qual o dólar hoje?'])
+    for (const t of [
+      'pesquisa a fundo modelos de voz',
+      'faz uma pesquisa sobre placas de vídeo',
+      'pesquisa como funciona o whisper',
+      'qual o dólar hoje?',
+      'me explica como a pesquisa de mercado que o parent do desktop fez ontem chegou naquele número',
+    ])
       expect([t, isResearchStatus(t)]).toEqual([t, false])
   })
 
