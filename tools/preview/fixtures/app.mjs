@@ -56,6 +56,7 @@ export const BASE = {
   // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
   nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
   usage_log: () => null,
+  // James's orb (#506): on, as with no `voice.orb` in jarvis.json; nothing is going on, so it stays down.\n  jarvis_orb_enabled: () => true,
 }
 
 /**
