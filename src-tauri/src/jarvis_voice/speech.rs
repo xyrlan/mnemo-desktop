@@ -604,8 +604,7 @@ impl Drop for Speaker {
 /// itself), else at its own rate with `pull` stepping between samples.
 pub fn default_output() -> Output {
     Box::new(|rate, shared| {
-        let device = cpal::default_host().default_output_device().ok_or("no speaker found")?;
-        let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default output".into());
+        let (device, name) = speaker()?;
         let supported = device.default_output_config().map_err(|e| format!("speaker {name}: {e}"))?;
         let format = supported.sample_format();
         let own: cpal::StreamConfig = supported.into();
@@ -620,6 +619,14 @@ pub fn default_output() -> Output {
         stream.play().map_err(|e| format!("speaker {name}: {e}"))?;
         Ok(Box::new(stream) as Box<dyn Any>)
     })
+}
+
+/// The default output device as the device it is now (`voice::as_itself`), and its name.
+pub(super) fn speaker() -> Result<(cpal::Device, String), String> {
+    let host = cpal::default_host();
+    let (device, _) = crate::voice::as_itself(&host, host.default_output_device().ok_or("no speaker found")?);
+    let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default output".into());
+    Ok((device, name))
 }
 
 fn open(device: &cpal::Device, config: cpal::StreamConfig, format: SampleFormat, shared: Arc<Shared>, step: f64) -> Result<cpal::Stream, String> {

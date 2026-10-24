@@ -9,10 +9,10 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, TryLockError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, I24, U24};
@@ -113,6 +113,8 @@ pub struct Sink {
     tap: Option<Tap>,
     /// Whether the take keeps what it hears for `finish`: not when only the tap listens.
     keep: bool,
+    /// Pieces pushed so far: a microphone that stops sending them is watched for (`Watch`).
+    pieces: Arc<AtomicU64>,
 }
 
 impl Sink {
@@ -123,6 +125,7 @@ impl Sink {
         T: Copy,
         f32: FromSample<T>,
     {
+        self.pieces.fetch_add(1, Ordering::Relaxed);
         let Some(tap) = &self.tap else {
             let mut b = lock(&self.samples);
             if b.len() < cap {
@@ -157,7 +160,33 @@ pub struct Opened {
     pub keep: Box<dyn std::any::Any>,
     pub rate: u32,
     pub device: String,
+    /// What to watch it for, beside the errors its stream reports; none for a stand-in.
+    pub watch: Option<Watch>,
 }
+
+/// A microphone as `Recording` watches it while it is open (`default_input`, on Windows). Opened
+/// as the device it is, its stream is told of no unplugging and no new default: an unplugged one
+/// just stops sending sound, and `NO_SOUND` of nothing is a lost microphone. A take that follows
+/// the default (hands-free) has also lost it once the system's default is another device.
+pub struct Watch {
+    /// The device's id.
+    pub id: String,
+    /// The id of the system's default microphone now.
+    pub default: Box<dyn Fn() -> Option<String> + Send>,
+}
+
+/// How often an open microphone is looked at (`Watch`).
+#[cfg(not(test))]
+const WATCH_EVERY: Duration = Duration::from_millis(500);
+#[cfg(test)]
+const WATCH_EVERY: Duration = Duration::from_millis(10);
+/// A microphone that sends nothing for this long is lost. WASAPI hands a shared capture stream a
+/// piece every 10 ms, silence included; a Bluetooth headset that switches profile takes a second
+/// or two.
+#[cfg(not(test))]
+const NO_SOUND: Duration = Duration::from_secs(3);
+#[cfg(test)]
+const NO_SOUND: Duration = Duration::from_millis(300);
 
 /// Opens an input on the capture thread: the default microphone, or a stand-in in tests.
 pub type Input = Box<dyn FnOnce(Sink) -> Result<Opened, String> + Send>;
@@ -177,19 +206,22 @@ pub(crate) struct Recording {
 impl Recording {
     /// `on_lost` hears a failure that ends the take as it happens, from the input's thread.
     pub(crate) fn start(input: Input, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
-        Self::open(input, None, true, Arc::new(on_lost))
+        Self::open(input, None, true, false, Arc::new(on_lost))
     }
 
     /// `start`, with `tap` seeing each piece as it comes. With `keep` false the take keeps
-    /// nothing: the tap is all that hears it, for as long as it runs.
-    pub(crate) fn tapped(input: Input, tap: Tap, keep: bool, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
-        Self::open(input, Some(tap), keep, Arc::new(on_lost))
+    /// nothing: the tap is all that hears it, for as long as it runs. With `follow` the
+    /// microphone is lost once the system's default is another (`Watch`): hands-free listens
+    /// through whatever the default is, where a take held by its key stays on the one it began on.
+    pub(crate) fn tapped(input: Input, tap: Tap, keep: bool, follow: bool, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
+        Self::open(input, Some(tap), keep, follow, Arc::new(on_lost))
     }
 
-    fn open(input: Input, tap: Option<Tap>, keep: bool, on_lost: Arc<dyn Fn(&str) + Send + Sync>) -> Result<Self, String> {
+    fn open(input: Input, tap: Option<Tap>, keep: bool, follow: bool, on_lost: Arc<dyn Fn(&str) + Send + Sync>) -> Result<Self, String> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(String, u32), String>>();
         let (stop, stop_rx) = mpsc::channel::<()>();
-        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost, tap, keep };
+        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost, tap, keep, pieces: Arc::default() };
+        let watcher = sink.clone();
         let lost = sink.lost.clone();
         let thread = std::thread::Builder::new()
             .name("voice-capture".into())
@@ -204,7 +236,7 @@ impl Recording {
                 };
                 let _ = ready_tx.send(Ok((opened.device, opened.rate)));
                 // Returns once `stop` is dropped.
-                let _ = stop_rx.recv();
+                watch(&stop_rx, opened.watch, follow, &watcher);
                 drop(opened.keep);
                 let samples = std::mem::take(&mut *lock(&samples));
                 Ok(Captured { samples, rate: opened.rate })
@@ -229,6 +261,32 @@ impl Recording {
     }
 }
 
+/// Waits for the take to be stopped, looking at its microphone meanwhile (`Watch`): one that
+/// sends nothing for `NO_SOUND` is lost, and so, when the take follows the default, is one the
+/// system no longer has as its default. Once lost, it only waits.
+fn watch(stop: &mpsc::Receiver<()>, watch: Option<Watch>, follow: bool, sink: &Sink) {
+    if let Some(w) = watch {
+        let mut seen = (sink.pieces.load(Ordering::Relaxed), Instant::now());
+        loop {
+            if !matches!(stop.recv_timeout(WATCH_EVERY), Err(mpsc::RecvTimeoutError::Timeout)) {
+                return;
+            }
+            let pieces = sink.pieces.load(Ordering::Relaxed);
+            if pieces != seen.0 {
+                seen = (pieces, Instant::now());
+            } else if seen.1.elapsed() >= NO_SOUND {
+                sink.lose("it stopped sending sound");
+                break;
+            }
+            if follow && (w.default)().as_deref() != Some(w.id.as_str()) {
+                sink.lose("the system's default microphone is now another one");
+                break;
+            }
+        }
+    }
+    let _ = stop.recv();
+}
+
 /// What a take whose microphone went away says.
 pub fn lost_message(device: &str, why: &str) -> String {
     let why = why.trim().trim_end_matches('.');
@@ -242,9 +300,12 @@ fn ends_take(kind: cpal::ErrorKind) -> bool {
     matches!(kind, K::DeviceNotAvailable | K::StreamInvalidated | K::HostUnavailable | K::PermissionDenied)
 }
 
-/// The default input device, as cpal opens it.
+/// The default input device, as cpal opens it: on Windows, as the device it is now (`as_itself`),
+/// watched (`Watch`).
 pub(crate) fn default_input(sink: Sink) -> Result<Opened, String> {
-    let device = cpal::default_host().default_input_device().ok_or("no microphone found")?;
+    let host = cpal::default_host();
+    let (device, id) = as_itself(&host, host.default_input_device().ok_or("no microphone found")?);
+    let watch = id.map(|id| Watch { id, default: Box::new(|| cpal::default_host().default_input_device().and_then(|d| d.id().ok()).map(|id| id.to_string())) });
     let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default microphone".into());
     let supported = device.default_input_config().map_err(|e| format!("microphone {name}: {e}"))?;
     let rate = supported.sample_rate();
@@ -265,7 +326,29 @@ pub(crate) fn default_input(sink: Sink) -> Result<Opened, String> {
     }
     .map_err(|e| format!("microphone {name}: {e}"))?;
     stream.play().map_err(|e| format!("microphone {name}: {e}"))?;
-    Ok(Opened { keep: Box::new(stream), rate, device: name })
+    Ok(Opened { keep: Box::new(stream), rate, device: name, watch })
+}
+
+/// cpal's default device (`default`) as the device it is now, with its id, on Windows; elsewhere
+/// as it is, with none. cpal opens its default device through `ActivateAudioInterfaceAsync`,
+/// which runs on the system's thread pool, and watches it with a notification client whose
+/// `OnDeviceStateChanged` and `OnDeviceRemoved` call `CoInitializeEx` for a single-threaded
+/// apartment on the pool thread that runs them. After a headset was unplugged (2026-10-24), no
+/// default device would open again in that process ("Failed to get audio client",
+/// RPC_E_CHANGED_MODE), and the stream open on the microphone was told nothing
+/// (`jarvis_voice::tests::opens_with_the_pool_made_sta`). Opened as itself, a device needs
+/// neither; what cpal's watching would have said of a microphone, `Watch` sees.
+#[cfg(windows)]
+pub(crate) fn as_itself(host: &cpal::Host, default: cpal::Device) -> (cpal::Device, Option<String>) {
+    match default.id().ok().and_then(|id| host.device_by_id(&id).map(|d| (d, id.to_string()))) {
+        Some((device, id)) => (device, Some(id)),
+        None => (default, None),
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn as_itself(_host: &cpal::Host, default: cpal::Device) -> (cpal::Device, Option<String>) {
+    (default, None)
 }
 
 fn build_input<T>(device: &cpal::Device, config: cpal::StreamConfig, sink: Sink) -> Result<cpal::Stream, String>
@@ -1436,7 +1519,7 @@ mod tests {
                 }
                 let _ = delivered.send(());
             });
-            Ok(Opened { keep: Box::new(feeder), rate: 48_000, device: "USB Mic".into() })
+            Ok(Opened { keep: Box::new(feeder), rate: 48_000, device: "USB Mic".into(), watch: None })
         })
     }
 
@@ -1466,6 +1549,111 @@ mod tests {
         rx.recv().unwrap();
         let take = rec.finish().unwrap();
         assert_eq!((take.samples.len(), take.rate), (4_800, 48_000));
+    }
+
+    /// A stand-in microphone watched as `id`, against the default `default` names. It sends a
+    /// piece `every` so often until it is closed; with none, nothing.
+    fn watched_input(id: &'static str, default: Arc<Mutex<String>>, every: Option<Duration>) -> Input {
+        struct Close(Arc<AtomicBool>);
+        impl Drop for Close {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        Box::new(move |sink: Sink| {
+            let open = Arc::new(AtomicBool::new(true));
+            let on = open.clone();
+            if let Some(every) = every {
+                std::thread::spawn(move || {
+                    while on.load(Ordering::SeqCst) {
+                        sink.push(&[0.1f32; 480], 1, usize::MAX);
+                        std::thread::sleep(every);
+                    }
+                });
+            }
+            let watch = Watch { id: id.into(), default: Box::new(move || Some(lock(&default).clone())) };
+            Ok(Opened { keep: Box::new(Close(open)), rate: 48_000, device: "USB Mic".into(), watch: Some(watch) })
+        })
+    }
+
+    fn told() -> (mpsc::Sender<String>, mpsc::Receiver<String>) {
+        mpsc::channel()
+    }
+
+    #[test]
+    fn a_microphone_that_stops_sending_sound_is_lost() {
+        let (tx, rx) = told();
+        let rec = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), None), move |why| {
+            let _ = tx.send(why.to_string());
+        })
+        .unwrap();
+        let why = rx.recv_timeout(Duration::from_secs(5)).expect("lost");
+        assert_eq!(why, "it stopped sending sound");
+        assert_eq!(rec.finish().map(|c| c.samples.len()).unwrap_err(), lost_message("USB Mic", "it stopped sending sound"));
+    }
+
+    #[test]
+    fn a_microphone_that_keeps_sending_is_kept_and_a_stand_in_is_not_watched() {
+        let (tx, rx) = told();
+        let sent = tx.clone();
+        let live = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), Some(Duration::from_millis(5))), move |why| {
+            let _ = sent.send(why.to_string());
+        })
+        .unwrap();
+        // Pieces far apart, but closer than `NO_SOUND`: still sending.
+        let sent = tx.clone();
+        let sparse = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), Some(NO_SOUND / 3)), move |why| {
+            let _ = sent.send(why.to_string());
+        })
+        .unwrap();
+        // A stand-in sends nothing either, and is not watched.
+        let (fed, _) = mpsc::channel();
+        let stand_in = Recording::start(fake_input(0, None, fed), move |why| {
+            let _ = tx.send(why.to_string());
+        })
+        .unwrap();
+        assert_eq!(rx.recv_timeout(NO_SOUND * 4), Err(mpsc::RecvTimeoutError::Timeout));
+        assert!(live.finish().unwrap().samples.len() >= 480);
+        assert!(sparse.finish().is_ok());
+        assert!(stand_in.finish().is_ok());
+    }
+
+    #[test]
+    fn hands_free_follows_the_default_and_a_take_held_by_the_key_does_not() {
+        for follow in [true, false] {
+            let default = Arc::new(Mutex::new("headset".to_string()));
+            let (tx, rx) = told();
+            let tap: Tap = Arc::new(|_| {});
+            let rec = Recording::tapped(watched_input("headset", default.clone(), Some(Duration::from_millis(5))), tap, !follow, follow, move |why| {
+                let _ = tx.send(why.to_string());
+            })
+            .unwrap();
+            assert_eq!(rx.recv_timeout(NO_SOUND), Err(mpsc::RecvTimeoutError::Timeout), "follow {follow}");
+            *lock(&default) = "usb".into();
+            let got = rx.recv_timeout(if follow { Duration::from_secs(5) } else { NO_SOUND * 2 });
+            if follow {
+                assert_eq!(got.as_deref(), Ok("the system's default microphone is now another one"));
+            } else {
+                assert_eq!(got, Err(mpsc::RecvTimeoutError::Timeout));
+            }
+            drop(rec);
+        }
+    }
+
+    /// On Windows the default microphone opens as the device it is, watched against what the
+    /// default is (`as_itself`). A machine with no microphone (CI) has nothing to open.
+    #[cfg(windows)]
+    #[test]
+    fn the_default_microphone_opens_as_itself_and_is_watched() {
+        let Some(default) = cpal::default_host().default_input_device() else {
+            return eprintln!("no microphone here: nothing to open");
+        };
+        let id = default.id().unwrap().to_string();
+        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost: Arc::new(|_| {}), tap: None, keep: false, pieces: Arc::default() };
+        let opened = default_input(sink).expect("the default microphone opens");
+        let watch = opened.watch.expect("watched");
+        assert_eq!(watch.id, id);
+        assert_eq!((watch.default)(), Some(id));
     }
 
     #[test]
