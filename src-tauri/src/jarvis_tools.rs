@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 pub use window::focused_window;
 
 /// The read tools, as `READ_TOOLS` in `client.ts` names them.
-pub const READ_TOOLS: [&str; 14] = [
+pub const READ_TOOLS: [&str; 15] = [
     "git_status",
     "git_log",
     "git_diff",
@@ -39,6 +39,7 @@ pub const READ_TOOLS: [&str; 14] = [
     "gh_pr_view",
     "gh_pr_checks",
     "gh_run_list",
+    "gh_issue_list",
     "gh_issue_view",
 ];
 
@@ -81,6 +82,10 @@ pub fn run(name: &str, args: &Value, ctx: &Ctx) -> Result<String, String> {
         "gh_pr_view" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::PrView(a.number()?)),
         "gh_pr_checks" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::PrChecks(a.number()?)),
         "gh_run_list" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::RunList),
+        "gh_issue_list" => match maybe_project(ctx, &a)? {
+            Some(p) => gh::issue_list(ctx.gh, p),
+            None => Ok(gh::issue_list_all(ctx.gh, &ctx.projects)),
+        },
         "gh_issue_view" => match a.number()? {
             Some(n) => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::IssueView(n)),
             None => Err("gh_issue_view needs the issue's number".to_string()),
@@ -261,6 +266,7 @@ mod tests {
             ("gh_pr_view", json!({ "project": p, "number": number })),
             ("gh_pr_checks", json!({ "project": p, "number": number })),
             ("gh_run_list", json!({ "project": p })),
+            ("gh_issue_list", json!({ "project": p })),
             ("gh_issue_view", json!({ "project": p, "number": number })),
         ];
         for (tool, args) in calls {

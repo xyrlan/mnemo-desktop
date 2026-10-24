@@ -44,6 +44,7 @@ export const TOOLS: Tool[] = [
   fn('gh_pr_view', 'Show a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_pr_checks', 'CI checks of a pull request.', { project: project(), number: { type: 'integer' } }, ['project']),
   fn('gh_run_list', 'Recent CI (GitHub Actions) runs of a project.', { project: project() }),
+  fn('gh_issue_list', 'Open issues of a project, or of every known project when none is named.', { project: project() }, []),
   fn('gh_issue_view', 'Show an issue.', { project: project(), number: { type: 'integer' } }),
   fn('parent_status', 'How a parent session already working on an earlier request is doing.', { project: project('the project the parent runs in') }),
   fn('delegate_to_parent', 'Hand a request that writes anything (code, commits, PRs, issues, messages, a follow-up instruction to a running parent) to a parent session in the project. Jarvis itself only reads.', { project: project(), request: { type: 'string', description: 'the request, verbatim' } }),

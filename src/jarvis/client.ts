@@ -36,6 +36,7 @@ export const READ_TOOLS = [
   'gh_pr_view',
   'gh_pr_checks',
   'gh_run_list',
+  'gh_issue_list',
   'gh_issue_view',
 ] as const
 export type ReadTool = (typeof READ_TOOLS)[number]

@@ -7,13 +7,15 @@ use crate::jarvis::JarvisProject;
 use std::path::Path;
 
 /// The subcommands Jarvis may run, all of them reads.
-pub const ALLOWED: [(&str, &str); 5] = [("pr", "list"), ("pr", "view"), ("pr", "checks"), ("run", "list"), ("issue", "view")];
+pub const ALLOWED: [(&str, &str); 6] = [("pr", "list"), ("pr", "view"), ("pr", "checks"), ("run", "list"), ("issue", "list"), ("issue", "view")];
 
 /// What `gh pr list` returns per PR.
 const PR_FIELDS: &str = "number,title,headRefName,isDraft,author,updatedAt";
+/// What `gh issue list` returns per issue.
+const ISSUE_FIELDS: &str = "number,title,labels,updatedAt";
 
 /// Every argument besides a subcommand and a number.
-const FLAGS: [&str; 7] = ["--state", "open", "--limit", "30", "15", "--json", PR_FIELDS];
+const FLAGS: [&str; 8] = ["--state", "open", "--limit", "30", "15", "--json", PR_FIELDS, ISSUE_FIELDS];
 
 /// One read, with the number the model gave when it takes one.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,6 +24,7 @@ pub enum Read {
     PrView(Option<u64>),
     PrChecks(Option<u64>),
     RunList,
+    IssueList,
     IssueView(u64),
 }
 
@@ -33,6 +36,7 @@ pub fn args(read: Read) -> Vec<String> {
         Read::PrView(num) => vec![Some("pr".into()), Some("view".into()), n(num)],
         Read::PrChecks(num) => vec![Some("pr".into()), Some("checks".into()), n(num)],
         Read::RunList => ["run", "list", "--limit", "15"].map(|s| Some(s.to_string())).to_vec(),
+        Read::IssueList => ["issue", "list", "--state", "open", "--limit", "30", "--json", ISSUE_FIELDS].map(|s| Some(s.to_string())).to_vec(),
         Read::IssueView(num) => vec![Some("issue".into()), Some("view".into()), Some(num.to_string())],
     };
     v.into_iter().flatten().collect()
@@ -118,14 +122,67 @@ pub fn pr_list(gh: GhRun, p: &JarvisProject) -> Result<String, String> {
     pr_lines(&ask(gh, p, Read::PrList)?)
 }
 
-/// The open pull requests of every project, asked at once, under a heading each; a project
-/// `gh` fails on says why.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Issue {
+    number: u64,
+    title: String,
+    #[serde(default)]
+    labels: Vec<Label>,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(serde::Deserialize)]
+struct Label {
+    name: String,
+}
+
+/// `gh issue list --json` as lines: `#12 title (bug; p1; updated 2026-10-22)`.
+fn issue_lines(json: &str) -> Result<String, String> {
+    let issues: Vec<Issue> = serde_json::from_str(json).map_err(|e| format!("gh issue list: {e}"))?;
+    if issues.is_empty() {
+        return Ok("no open issues".to_string());
+    }
+    let lines: Vec<String> = issues
+        .iter()
+        .map(|i| {
+            let mut about: Vec<String> = i.labels.iter().map(|l| l.name.clone()).collect();
+            if let Some(day) = i.updated_at.get(..10) {
+                about.push(format!("updated {day}"));
+            }
+            if about.is_empty() {
+                format!("#{} {}", i.number, i.title)
+            } else {
+                format!("#{} {} ({})", i.number, i.title, about.join("; "))
+            }
+        })
+        .collect();
+    Ok(lines.join("\n"))
+}
+
+/// The open issues of `p`.
+pub fn issue_list(gh: GhRun, p: &JarvisProject) -> Result<String, String> {
+    issue_lines(&ask(gh, p, Read::IssueList)?)
+}
+
+/// The open pull requests of every project, under a heading each (`each_project`).
 pub fn pr_list_all(gh: GhRun, projects: &[JarvisProject]) -> String {
+    each_project(gh, projects, pr_list)
+}
+
+/// The open issues of every project, under a heading each (`each_project`).
+pub fn issue_list_all(gh: GhRun, projects: &[JarvisProject]) -> String {
+    each_project(gh, projects, issue_list)
+}
+
+/// `list` of every project, asked at once, under a heading each; a project `gh` fails on says why.
+fn each_project(gh: GhRun, projects: &[JarvisProject], list: fn(GhRun, &JarvisProject) -> Result<String, String>) -> String {
     if projects.is_empty() {
         return "no known projects".to_string();
     }
     let got: Vec<(String, Result<String, String>)> = std::thread::scope(|s| {
-        let asks: Vec<_> = projects.iter().map(|p| (p.name.clone(), s.spawn(move || pr_list(gh, p)))).collect();
+        let asks: Vec<_> = projects.iter().map(|p| (p.name.clone(), s.spawn(move || list(gh, p)))).collect();
         asks.into_iter().map(|(n, h)| (n, h.join().unwrap_or_else(|_| Err("gh panicked".to_string())))).collect()
     });
     let parts: Vec<String> = got
@@ -174,7 +231,7 @@ mod tests {
 
     #[test]
     fn only_the_read_subcommands_pass() {
-        for read in [Read::PrList, Read::PrView(None), Read::PrView(Some(12)), Read::PrChecks(Some(3)), Read::RunList, Read::IssueView(7)] {
+        for read in [Read::PrList, Read::PrView(None), Read::PrView(Some(12)), Read::PrChecks(Some(3)), Read::RunList, Read::IssueList, Read::IssueView(7)] {
             assert_eq!(allowed(&args(read)), Ok(()), "{read:?}");
         }
         for write in [
@@ -195,7 +252,7 @@ mod tests {
             assert!(e.contains("refused"), "{write:?}: {e}");
         }
         // A read subcommand with an argument Jarvis never builds.
-        for extra in [&["pr", "view", "12", "--web"][..], &["pr", "view", "-R", "other/repo"], &["issue", "view", "1;rm"], &["pr", "list", "--json", "body"]] {
+        for extra in [&["pr", "view", "12", "--web"][..], &["pr", "view", "-R", "other/repo"], &["issue", "view", "1;rm"], &["pr", "list", "--json", "body"], &["issue", "list", "--json", "body"], &["issue", "list", "--state", "all"]] {
             assert!(allowed(&s(extra)).unwrap_err().contains("is refused"), "{extra:?}");
         }
     }
@@ -237,5 +294,22 @@ mod tests {
         assert_eq!(got, "## alpha\n#7 Fix it (fix/it; draft; by you; updated 2026-10-22)\n\n## beta\n(gh failed: no git remotes found)");
         let one = tool("gh_pr_list", &json!({ "project": "beta" }), &ctx).unwrap_err();
         assert_eq!(one, "no git remotes found");
+    }
+
+    #[test]
+    fn issue_list_reads_the_open_issues_of_one_project_or_all() {
+        let (a, b) = (crate::testutil::temp_dir("jarvis-gh-ia"), crate::testutil::temp_dir("jarvis-gh-ib"));
+        let a2 = a.clone();
+        let gh = move |args: &[String], cwd: &Path| {
+            assert_eq!(args.join(" "), "issue list --state open --limit 30 --json number,title,labels,updatedAt");
+            if cwd == a2 {
+                Ok(r#"[{"number":12,"title":"Login preso","labels":[{"name":"bug"},{"name":"p1"}],"updatedAt":"2026-10-22T10:00:00Z"},{"number":3,"title":"Docs","labels":[],"updatedAt":""}]"#.to_string())
+            } else {
+                Ok("[]".to_string())
+            }
+        };
+        let ctx = ctx_with(vec![project_at("alpha", &a), project_at("beta", &b)], &gh);
+        assert_eq!(tool("gh_issue_list", &json!({ "project": "alpha" }), &ctx).unwrap(), "#12 Login preso (bug; p1; updated 2026-10-22)\n#3 Docs");
+        assert_eq!(tool("gh_issue_list", &json!({}), &ctx).unwrap(), "## alpha\n#12 Login preso (bug; p1; updated 2026-10-22)\n#3 Docs\n\n## beta\nno open issues");
     }
 }
