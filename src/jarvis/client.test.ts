@@ -42,6 +42,9 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
   await client.onVoice(() => {})
   await client.onHeard(() => {})
   await client.onVoiceError(() => {})
+  await client.onLevel(() => {})
+  await client.listen(true)
+  await client.listen()
   expect(calls).toEqual([
     ['jarvis_projects', undefined],
     ['jarvis_log_append', { row: { said: 'oi' } }],
@@ -60,8 +63,10 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
     ['jarvis_open_in_browser', { project: 'mnemo', page: 'pr', number: 511 }],
     ['jarvis_open_in_browser', { project: 'mnemo', page: 'actions', number: null }],
     ['jarvis_open_url', { url: 'https://example.com' }],
+    ['jarvis_listen', { enabled: true }],
+    ['jarvis_listen', { enabled: null }],
   ])
-  expect(listened).toEqual(['jarvis://voice', 'jarvis://heard', 'jarvis://voice-error'])
+  expect(listened).toEqual(['jarvis://voice', 'jarvis://heard', 'jarvis://voice-error', 'jarvis://level'])
 })
 
 test('streamed commands hand Rust a channel and pass on what comes back', async () => {
