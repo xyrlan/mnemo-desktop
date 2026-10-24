@@ -237,10 +237,10 @@ impl Rig {
         self.until("transcribed", |r| lock(&r.voice.phases.flags).transcribing == 0);
     }
 
-    /// James says something and falls silent by himself: the window opens.
+    /// James asks something and falls silent by himself: the window opens.
     fn james_speaks(&self) {
         let n = self.phases().len();
-        self.voice.say("Tem três PRs abertos.").unwrap();
+        self.voice.say("Tem três PRs abertos. Quer ver algum?").unwrap();
         self.until("the window", |r| r.phases()[n..].contains(&VoicePhase::Waiting));
     }
 }
@@ -1000,9 +1000,10 @@ fn live_conversation_on_speakers() {
     let (voice, events) = live_voice(&room);
     let files = speech::ensure_files(None).unwrap();
     let mut piper = speech::Piper::new(&files);
+    // The two before a turn in the window ask something: only a question opens it.
     let replies = [
-        "Tem três PRs abertos no desktop. O quinhentos e vinte e três é o mais novo, e espera revisão.",
-        "O CI do quinhentos e vinte passou nos três sistemas. Falta só a revisão do mantenedor.",
+        "Tem três PRs abertos no desktop. O quinhentos e vinte e três é o mais novo. Quer ver o CI de algum?",
+        "O CI do quinhentos e vinte passou nos três sistemas. Quer que eu abra o PR?",
         "Abri o PR quinhentos e vinte no navegador. Está na sua tela agora.",
         "O log do mnemo tem quatro commits desde ontem, todos do mantenedor, sobre o painel.",
     ];
@@ -1030,7 +1031,8 @@ fn live_conversation_on_speakers() {
                 let speaking_from = Instant::now();
                 voice.say(reply).unwrap();
                 when(&events, speaking_from, |e| *e == Event::Phase(VoicePhase::Speaking)).expect("speaking");
-                let (t, _) = when(&events, speaking_from, |e| *e == Event::Phase(VoicePhase::Waiting)).expect("the window");
+                let silent = if wake::asks(reply) { VoicePhase::Waiting } else { VoicePhase::Idle };
+                let (t, _) = when(&events, speaking_from, |e| *e == Event::Phase(silent)).expect("silent");
                 let during: Vec<_> = lock(&events).iter().filter(|(at, e)| *at >= speaking_from && *at < t && !matches!(e, Event::Level(_))).map(|(_, e)| e.clone()).collect();
                 eprintln!("  James spoke {:.1} s: {:?}", t.duration_since(speaking_from).as_secs_f32(), during);
                 assert!(!during.contains(&Event::Phase(VoicePhase::Listening)), "a take started in his own voice");
