@@ -147,7 +147,7 @@ export function makeParents(load: () => Promise<ParentDeps>): ParentsApi {
       const agent = d.agentFor(host)
       if (!agent) throw new Error(`There is no ${host === 'grok' ? 'Grok Build' : 'Claude Code'} account to open a parent on`)
       const sessionId = d.newId()
-      const ref: ParentRef = { sessionId, project: o.project, root: o.root, request: o.request, host, startedAt: d.now() }
+      const ref: ParentRef = { sessionId, project: o.project, root: o.root, request: o.task || o.request, host, startedAt: d.now() }
       // Never skipping its permission prompts, whatever Settings say (`ask`): they are the only
       // guard between a misheard sentence and a write.
       await d.openSession({ kind: 'claude', root: o.root, sessionId, agent, ask: true })
@@ -178,7 +178,7 @@ export function makeParents(load: () => Promise<ParentDeps>): ParentsApi {
       }
       await d.sleep(SETTLE_MS)
       try {
-        await d.sendPrompt(pane, handoff(o.request, o.gathered))
+        await d.sendPrompt(pane, handoff({ task: o.task, words: o.request, conversation: o.conversation, gathered: o.gathered }))
       } catch (e) {
         entries.delete(sessionId)
         finish(entry)
