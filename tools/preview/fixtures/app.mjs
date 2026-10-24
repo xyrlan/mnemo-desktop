@@ -44,6 +44,8 @@ export const BASE = {
   home_refresh_github: () => null,
   // No Claude Code session in any terminal.
   chrome_session: () => null,
+  // James's orb (#506): on, as with no `voice.orb` in jarvis.json; nothing is going on, so it stays down.
+  jarvis_orb_enabled: () => true,
   // No terminal sessions survive from an earlier run; the Memory panel has nothing for the project.
   pty_list: () => [],
   memory_feed: () => ({ project: 'mnemo-desktop', briefing: null, fired: [], learned: [], inbox: [] }),
@@ -56,8 +58,6 @@ export const BASE = {
   // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
   nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
   usage_log: () => null,
-  // James's orb (#506): on, as with no `voice.orb` in jarvis.json; nothing is going on, so it stays down.
-  jarvis_orb_enabled: () => true,
 }
 
 /**

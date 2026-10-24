@@ -393,13 +393,13 @@ pub fn run() {
             jarvis_apps::jarvis_open_in_browser,
             jarvis_apps::jarvis_open_url,
 
-            // -- jarvis voice commands --
-            jarvis_voice::jarvis_say,
-            jarvis_voice::jarvis_hush,
-
             // -- jarvis orb commands --
             jarvis_orb::jarvis_orb,
             jarvis_orb::jarvis_orb_enabled,
+
+            // -- jarvis voice commands --
+            jarvis_voice::jarvis_say,
+            jarvis_voice::jarvis_hush,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
