@@ -604,6 +604,18 @@ function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as
 }
 
 describe('with Claude', () => {
+  test('Claude failing a spoken request is said, and the panel opens on the error', async () => {
+    const s = withClaude([], { client: { brainAsk: async () => Promise.reject(new Error('claude: not logged in')) } })
+    await s.jarvis.heard({ text: 'como está o mnemo?', confidence: 0.9, window: null })
+    expect(s.last()).toBe('Não deu: claude: not logged in')
+    expect(s.spoken).toEqual(['Não deu certo; o erro está no painel.'])
+    expect(s.store.getState().open).toBe(true)
+    // Typed, it is already in the panel it was typed in.
+    s.store.setState({ open: false })
+    await s.jarvis.ask('e agora?')
+    expect(s.store.getState().open).toBe(false)
+  })
+
   test('its JSON call is run, and the output is the next message', async () => {
     const s = withClaude(['Vou olhar.\n{"tool": "git_status", "args": {"project": "tasklist"}}', 'Está limpo, nada pendente.'])
     await s.jarvis.heard({ text: 'como está o git do tasklist?', confidence: 0.9, window: null })

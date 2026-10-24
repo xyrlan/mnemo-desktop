@@ -513,7 +513,12 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
         await handle(req)
       } catch (e) {
         note(`Não deu: ${message(e)}`, true)
-        if (req.spoken) void client.say('Não deu certo; o erro está no painel.').catch(() => {})
+        // Said aloud, the error is in the panel: it opens, as for a voice error, since a take
+        // answered under the orb leaves it closed (#506).
+        if (req.spoken) {
+          set({ open: true })
+          void client.say('Não deu certo; o erro está no painel.').catch(() => {})
+        }
       } finally {
         set({ busy: false })
       }
