@@ -273,6 +273,10 @@ struct Flags {
     hands_free: bool,
     /// James was hushed: his falling silent opens no window.
     hushed: bool,
+    /// What James said last asks the maintainer something (`wake::asks`): falling silent after
+    /// it, he opens the window for the answer. After anything else the conversation is over, and
+    /// his name is needed again.
+    asks: bool,
     said: Option<VoicePhase>,
     /// The levels' ticker runs.
     ticking: bool,
@@ -491,18 +495,26 @@ impl JarvisVoice {
         take
     }
 
-    /// Transcribes a released take and says what was heard, if anything was.
+    /// Transcribes a released take and says what was heard, if anything was. A take with no
+    /// request in it (a tap, a sound, whisper writing its prompt back, a thanks) reaches no one,
+    /// and stops James: the key pressed over him meant him to stop.
     pub fn finish(&self, take: Take) {
         let released = std::time::Instant::now();
         let heard = take.recording.finish().and_then(|c| self.backend.hear(&c));
         self.backend.done();
         match heard {
-            Ok((text, confidence)) if !text.is_empty() => {
-                // The latency, never the words: the log is not Jarvis's conversation log.
-                log::info!("jarvis voice: heard {} words in {} ms, confidence {confidence:.2}", text.split_whitespace().count(), released.elapsed().as_millis());
-                self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window, via: HeardVia::Key }))
+            Ok((text, confidence)) => {
+                let text = wake::collapse(&text);
+                let ms = released.elapsed().as_millis();
+                if text.is_empty() || wake::no_speech(&text) || wake::only_prompt(&text) || wake::goodbye(&text) {
+                    log::info!("jarvis voice: {} ({ms} ms)", if text.is_empty() { "nothing said in the take" } else { "a take with no request" });
+                    self.hush();
+                } else {
+                    // The latency, never the words: the log is not Jarvis's conversation log.
+                    log::info!("jarvis voice: heard {} words in {ms} ms, confidence {confidence:.2}", text.split_whitespace().count());
+                    self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window, via: HeardVia::Key }))
+                }
             }
-            Ok(_) => log::info!("jarvis voice: nothing said in the take ({} ms)", released.elapsed().as_millis()),
             Err(e) => {
                 log::warn!("jarvis voice: {e}");
                 self.emit(Event::Error(e));
@@ -521,6 +533,9 @@ impl JarvisVoice {
         let hushes = self.hushes.load(Ordering::SeqCst);
         let speaker = self.speaker()?;
         if self.hushes.load(Ordering::SeqCst) == hushes {
+            // What he ends on is the last thing queued.
+            let asks = wake::asks(text);
+            self.phases.update(|f| f.asks = asks);
             speaker.say(text);
         }
         Ok(())
@@ -550,8 +565,9 @@ impl JarvisVoice {
             self.held.clone(),
             Arc::new(move |speaking| {
                 phases.update(|f| {
-                    // James fell silent by himself: the window opens.
-                    if f.speaking && !speaking && f.hands_free && !f.hushed && !f.held {
+                    // James fell silent by himself after asking something: the window opens
+                    // for the answer.
+                    if f.speaking && !speaking && f.hands_free && !f.hushed && !f.held && f.asks {
                         f.waiting = true;
                     }
                     f.speaking = speaking;
@@ -1703,12 +1719,71 @@ mod tests {
         until("idle", &|e| e.last() == Some(&Event::Phase(VoicePhase::Idle)));
         assert!(!said(&events).contains(&Event::Phase(VoicePhase::Waiting)));
 
-        // Falling silent by himself he opens it, and the key closes it: its take is its own.
-        voice.say("o PR passou").unwrap();
+        // Falling silent by himself after asking he opens it, and the key closes it: its take is
+        // its own.
+        voice.say("o PR passou; quer ver o CI?").unwrap();
         until("the window", &|e| e.last() == Some(&Event::Phase(VoicePhase::Waiting)));
         voice.press(mic(), None).unwrap();
         voice.finish(voice.release().unwrap());
         assert_eq!(said(&events).last(), Some(&Event::Phase(VoicePhase::Idle)));
+    }
+
+    /// Waits until `done` holds of the events, for at most five seconds.
+    fn until(events: &Mutex<Vec<Event>>, what: &str, done: &dyn Fn(&[Event]) -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !done(&said(events)) {
+            assert!(std::time::Instant::now() < deadline, "{what}: {:?}", said(events));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn he_opens_the_window_only_when_he_ends_on_a_question() {
+        let (voice, events, _) = fake_voice(Ok(("e o CI?".into(), 0.9)));
+        voice.phases.update(|f| f.hands_free = true);
+        // An answer that asks nothing ends the conversation: his name is needed again.
+        voice.say("O PR passou.").unwrap();
+        until(&events, "silent", &|e| e.contains(&Event::Phase(VoicePhase::Speaking)) && e.last() == Some(&Event::Phase(VoicePhase::Idle)));
+        assert!(!said(&events).contains(&Event::Phase(VoicePhase::Waiting)));
+        // What he ends on decides: a question and then a statement, queued while the key holds
+        // him, ask nothing.
+        let n = said(&events).len();
+        voice.press(mic(), None).unwrap();
+        voice.say("Quer ver o CI?").unwrap();
+        voice.say("Te mostro depois.").unwrap();
+        voice.finish(voice.release().unwrap());
+        until(&events, "silent again", &|e| e[n..].contains(&Event::Phase(VoicePhase::Speaking)) && e.last() == Some(&Event::Phase(VoicePhase::Idle)));
+        assert!(!said(&events).contains(&Event::Phase(VoicePhase::Waiting)));
+        // Asking, he waits for the answer.
+        voice.say("O PR passou. Quer ver o CI?").unwrap();
+        until(&events, "the window", &|e| e.last() == Some(&Event::Phase(VoicePhase::Waiting)));
+    }
+
+    #[test]
+    fn a_key_take_with_no_request_reaches_no_one_and_stops_him() {
+        for heard in [".", "Ah!", "Projetos. Projetos.", "Obrigado.", "Beleza, obrigado por enquanto, James."] {
+            let (voice, events, played) = fake_voice(Ok((heard.into(), 0.9)));
+            voice.phases.update(|f| f.hands_free = true);
+            // Enough to say that the key comes while he speaks.
+            for _ in 0..50 {
+                voice.say("o PR passou; quer ver o CI?").unwrap();
+            }
+            until(&events, "speaking", &|e| e.contains(&Event::Phase(VoicePhase::Speaking)));
+            voice.press(mic(), None).unwrap();
+            voice.finish(voice.release().unwrap());
+            until(&events, "idle", &|e| e.last() == Some(&Event::Phase(VoicePhase::Idle)));
+            let at = lock(&played).len();
+            std::thread::sleep(Duration::from_millis(100));
+            assert_eq!(lock(&played).len(), at, "{heard:?}: he went on after the key");
+            let events = said(&events);
+            assert!(!events.iter().any(|e| matches!(e, Event::Heard(_))), "{heard:?}: {events:?}");
+            assert!(!events.contains(&Event::Phase(VoicePhase::Waiting)), "{heard:?}: a window opened");
+        }
+        // A request is one, the key's own.
+        let (voice, events, _) = fake_voice(Ok(("Obrigado, e o CI?".into(), 0.9)));
+        voice.press(mic(), None).unwrap();
+        voice.finish(voice.release().unwrap());
+        assert!(said(&events).iter().any(|e| matches!(e, Event::Heard(h) if h.text == "Obrigado, e o CI?" && h.via == HeardVia::Key)));
     }
 
     #[test]

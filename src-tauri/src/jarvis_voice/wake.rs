@@ -416,7 +416,8 @@ const GREETINGS: &[&[&str]] = &[
 const GOODBYES: &[&[&str]] = &[
     &["valeu"], &["obrigado"], &["obrigada"], &["brigado"], &["brigada"], &["tchau"], &["falou"], &["chega"], &["para"],
     &["parar"], &["pode", "parar"], &["pode", "ir"], &["era", "so", "isso"], &["so", "isso"], &["ate", "mais"],
-    &["ate", "logo"], &["ate", "depois"],
+    &["ate", "logo"], &["ate", "depois"], &["por", "enquanto"], &["por", "enquanto", "so"], &["por", "hoje"],
+    &["por", "hoje", "so"], &["por", "hoje", "isso"],
 ];
 const FILLERS: &[&str] = &["ok", "okay", "beleza", "ta", "bom", "entao", "e", "ai", "muito", "cara", "certo", "show", "ei", "oi"];
 
@@ -513,7 +514,8 @@ fn words(text: &str) -> Vec<(usize, &str, String)> {
 }
 
 /// Whether `text` only says goodbye: "valeu, James", "obrigado", "tchau", "pode parar", "era só
-/// isso".
+/// isso", "obrigado por enquanto", "por hoje é isso". "É isso" alone is not one: it is the yes to
+/// James's "É isso?".
 pub fn goodbye(text: &str) -> bool {
     let words: Vec<String> = text.split_whitespace().map(fold).filter(|w| !w.is_empty() && !is_name(w) && !FILLERS.contains(&w.as_str())).collect();
     if words.is_empty() {
@@ -575,12 +577,23 @@ pub fn no_speech(text: &str) -> bool {
 const MIN_CONFIDENCE: f32 = 0.3;
 
 /// Whether `text`, a take that did not say the name, is too unsure to be a request: heard with
-/// little confidence, or only words of whisper's prompt (`hear::prompt`), which it writes back
-/// for a sound it cannot make out ("Projetos."). A project's name alone may answer James; the
-/// prompt's jargon and its label for the names do not.
+/// little confidence, or `only_prompt`.
 pub fn unsure(text: &str, confidence: f32) -> bool {
+    confidence < MIN_CONFIDENCE || only_prompt(text)
+}
+
+/// Whether `text` is only words of whisper's prompt (`hear::prompt`), which it writes back for a
+/// sound it cannot make out ("Projetos."). A project's name alone may answer James; the prompt's
+/// jargon and its label for the names do not.
+pub fn only_prompt(text: &str) -> bool {
     let prompt: Vec<String> = hear::JARGON.split_whitespace().chain([hear::PROJECTS]).map(fold).collect();
-    confidence < MIN_CONFIDENCE || text.split_whitespace().map(fold).filter(|w| !w.is_empty()).all(|w| prompt.contains(&w))
+    text.split_whitespace().map(fold).filter(|w| !w.is_empty()).all(|w| prompt.contains(&w))
+}
+
+/// Whether what James says, `text`, ends by asking the maintainer something: then, and only
+/// then, the window stays open for the answer once he falls silent.
+pub fn asks(text: &str) -> bool {
+    text.trim_end_matches(|c: char| c.is_whitespace() || "!\"'\u{201d}\u{2019}\u{bb})]".contains(c)).ends_with('?')
 }
 
 /// `text` with each sentence that only repeats the one before it left out: looping on a sound,
@@ -670,6 +683,24 @@ mod tests {
         for not in ["Obrigado, e o CI?", "Para o desktop.", "James", "", "Valeu, agora abre o PR 42."] {
             assert!(!goodbye(not), "{not}");
         }
+        // Thanks and closings with their fillers.
+        for g in ["Beleza, muito obrigado por enquanto, James.", "Obrigado.", "Por enquanto é só.", "Por hoje é isso.", "Por hoje é só, valeu.", "Valeu, por hoje.", "Valeu, James."] {
+            assert!(goodbye(g), "{g}");
+        }
+        // The yes to "É isso?", and a request after thanks.
+        for not in ["É isso.", "Isso.", "Obrigado, e por enquanto o CI?", "Por enquanto abre o PR."] {
+            assert!(!goodbye(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn he_asks_when_what_he_says_ends_on_a_question() {
+        for q in ["Quer que eu mande para um parent?", "O PR passou. Quer ver o CI?", "Era isso?!", "Abro o \u{ab}PR 42?\u{bb} ", "Qual deles? "] {
+            assert!(asks(q), "{q}");
+        }
+        for not in ["O PR passou.", "Tem três PRs abertos: quer ver? Te mostro depois.", "Pronto!", "", "Abri o PR?."] {
+            assert!(!asks(not), "{not}");
+        }
     }
 
     #[test]
@@ -698,6 +729,7 @@ mod tests {
         assert!(!unsure("E o CI?", 0.9));
         // A project's name may answer "qual projeto?".
         assert!(!unsure("mnemo-desktop", 0.8));
+        assert!(only_prompt("Projetos. Projetos.") && only_prompt("CI, PR, VS Code.") && !only_prompt("Abre o PR."));
     }
 
     #[test]
