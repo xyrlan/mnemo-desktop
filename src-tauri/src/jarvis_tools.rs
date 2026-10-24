@@ -14,7 +14,7 @@
 mod files;
 mod gh;
 mod git;
-mod mnemo;
+pub(crate) mod mnemo;
 mod paths;
 mod window;
 
