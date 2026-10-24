@@ -144,7 +144,7 @@ pub mod jarvis_screen;
 // -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
 pub mod jarvis_apps;
 
-// -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
+// -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Kokoro out (#506, #530) --
 pub mod jarvis_voice;
 
 // -- jarvis orb (src/jarvis_orb.rs): James on screen while a conversation is on (#503, #506) --

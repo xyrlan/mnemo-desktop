@@ -143,7 +143,7 @@ pub(crate) fn wav(path: &Path) -> Vec<f32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
 /// Words of a transcript for scoring: lower case, no punctuation.

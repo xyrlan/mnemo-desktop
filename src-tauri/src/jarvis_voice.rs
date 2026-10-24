@@ -1,4 +1,4 @@
-//! Jarvis's voice (#506): a global push-to-talk key, whisper.cpp in Portuguese, Piper out.
+//! Jarvis's voice (#506): a global push-to-talk key, whisper.cpp in Portuguese, Kokoro out.
 //!
 //! - **The key** is the config's `voice.key` (`DEFAULT_KEY` when it names none), registered
 //!   system-wide through the global-shortcut plugin, so it works with the app unfocused or
@@ -9,8 +9,11 @@
 //!   in it emits none.
 //! - **Speech in** is dictation's capture and whisper.cpp (`voice.rs`), in Portuguese, with a
 //!   model of Jarvis's own (`hear.rs`); `voice.whisper` points at one already on disk.
-//! - **Speech out** is Piper with a PT-BR voice (`speech.rs`), queued, and silent while the key
-//!   is held; `voice.piper` points at a Piper of one's own, which is how it runs off Windows.
+//! - **Speech out** is Kokoro-82M with a PT-BR voice (`kokoro.rs`), `pm_alex` unless
+//!   `voice.kokoro` names another, on the GPU where there is one; queued, and silent while the
+//!   key is held (`speech.rs`). What it says is spelled as heard first (`pronounce.rs`). Where
+//!   Kokoro cannot run (off Windows, for now) Piper speaks, as it did before; `voice.piper` points
+//!   at a Piper of one's own, which is how it runs off Windows.
 //! - **Hands-free** (`wake.rs`): with the config's `voice.wake` set, or once `jarvis_listen` turns
 //!   it on, the microphone stays open and an utterance that begins with James's name is a take
 //!   (`via: wake`), without the name; after James has spoken, whatever is said within
@@ -28,6 +31,9 @@
 
 mod files;
 mod hear;
+mod kokoro;
+mod onnx_fix;
+mod pronounce;
 mod speech;
 mod wake;
 #[cfg(test)]
@@ -124,6 +130,8 @@ pub struct Config {
     pub key: Option<String>,
     pub piper: Option<PathBuf>,
     pub whisper: Option<PathBuf>,
+    /// `voice.kokoro`: which of Kokoro's PT-BR voices speaks. None: `kokoro::DEFAULT_VOICE`.
+    pub kokoro: Option<String>,
     /// `voice.wake`: hands-free on at launch, with this follow-up window in ms. None: off until
     /// `jarvis_listen` turns it on.
     pub wake: Option<u64>,
@@ -160,7 +168,13 @@ pub fn parse_config(section: &serde_json::Value, exists: bool, home: &Path) -> R
         },
         Some(other) => return Err(format!("voice.wake in jarvis.json is {other}, not true or {{ \"followMs\": {DEFAULT_FOLLOW_MS} }}")),
     };
-    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")?, wake })
+    let kokoro = match section.get("kokoro") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => None,
+        Some(serde_json::Value::String(s)) => Some(kokoro::voice(s)?.file.trim_end_matches(".bin").to_string()),
+        Some(other) => return Err(format!("voice.kokoro in jarvis.json is {other}, not a voice such as {:?}", kokoro::DEFAULT_VOICE)),
+    };
+    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")?, kokoro, wake })
 }
 
 /// `key` as the plugin reads it, refused when it is dictation's, however it is spelled.
@@ -864,7 +878,7 @@ impl wake::Host for Wired {
 }
 
 // ---------------------------------------------------------------------------------------
-// Whisper and Piper
+// Whisper, Kokoro and Piper
 
 /// The voice on this machine.
 pub struct Local {
@@ -872,11 +886,16 @@ pub struct Local {
     model: Mutex<Option<Arc<WhisperContext>>>,
     /// Whisper's prompt (`hear::prompt`), made again from the projects at each press.
     prompt: Mutex<String>,
-    /// Held while whisper's model is fetched, and while Piper's files are: dictation's `download`
-    /// resumes a `.part` file, and the launch's `prefetch` and a first take or `say` must not
-    /// write the same one at once.
+    /// Held while whisper's model is fetched, and while Kokoro's or Piper's files are:
+    /// dictation's `download` resumes a `.part` file, and the launch's `prefetch` and a first take
+    /// or `say` must not write the same one at once.
     fetching_model: Mutex<()>,
     fetching_piper: Mutex<()>,
+    /// Kokoro, loaded by `prefetch` for the speaker to take, so the first reply does not wait on
+    /// it. Held while it loads.
+    kokoro: Mutex<Option<kokoro::Kokoro>>,
+    /// The speaker was made: what `prefetch` would load now, it has.
+    spoke: AtomicBool,
 }
 
 impl Local {
@@ -887,6 +906,8 @@ impl Local {
             prompt: Mutex::new(hear::prompt(&[])),
             fetching_model: Mutex::new(()),
             fetching_piper: Mutex::new(()),
+            kokoro: Mutex::new(None),
+            spoke: AtomicBool::new(false),
         }
     }
 
@@ -910,6 +931,33 @@ impl Local {
     fn fetch_piper(&self) -> Result<speech::PiperFiles, String> {
         let _one = lock(&self.fetching_piper);
         speech::ensure_files(self.config.piper.clone())
+    }
+
+    /// Kokoro, fetched and loaded on the GPU when there is one, else on the CPU.
+    fn load_kokoro(&self) -> Result<kokoro::Kokoro, String> {
+        let device = kokoro::gpu().map_or(kokoro::Device::Cpu, kokoro::Device::Gpu);
+        let voice = self.config.kokoro.as_deref().unwrap_or(kokoro::DEFAULT_VOICE);
+        let files = {
+            // Piper's lock too: Kokoro's phonemes come from Piper's bundle.
+            let _one = lock(&self.fetching_piper);
+            kokoro::ensure_files(voice, device)?
+        };
+        app_full_speed(true);
+        let loaded = kokoro::Kokoro::load(&files);
+        app_full_speed(false);
+        loaded
+    }
+
+    /// Kokoro, taken by the speaker: the one `prefetch` loaded, or loaded now.
+    fn take_kokoro(&self) -> Result<kokoro::Kokoro, String> {
+        if !cfg!(windows) {
+            return Err("Kokoro has no runtime pinned on this OS yet".into());
+        }
+        let mut slot = lock(&self.kokoro);
+        match slot.take() {
+            Some(k) => Ok(k),
+            None => self.load_kokoro(),
+        }
     }
 
     fn model(&self) -> Result<Arc<WhisperContext>, String> {
@@ -974,7 +1022,18 @@ impl Backend for Local {
     fn prefetch(&self) {
         let started = std::time::Instant::now();
         // What fails here fails again, said to the panel, when the key or a reply needs the file.
-        let errors: Vec<String> = [self.fetch_model().map(drop), self.fetch_piper().map(drop)].into_iter().filter_map(Result::err).collect();
+        // Kokoro is loaded as well as fetched (unless the speaker came first and has it); Piper's
+        // voice is fetched only where Piper speaks.
+        let speech = if cfg!(windows) {
+            let mut slot = lock(&self.kokoro);
+            match slot.is_none() && !self.spoke.load(Ordering::SeqCst) {
+                true => self.load_kokoro().map(|k| *slot = Some(k)),
+                false => Ok(()),
+            }
+        } else {
+            self.fetch_piper().map(drop)
+        };
+        let errors: Vec<String> = [self.fetch_model().map(drop), speech].into_iter().filter_map(Result::err).collect();
         if errors.is_empty() {
             log::info!("jarvis voice: its files are ready ({:.1}s)", started.elapsed().as_secs_f32());
         }
@@ -989,9 +1048,20 @@ impl Backend for Local {
         on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
         on_error: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<speech::Speaker, String> {
-        let files = self.fetch_piper()?;
-        let piper = speech::Piper::new(&files);
-        speech::Speaker::start(files.rate, held, piper.into_synth(), speech::default_output(), on_speaking, on_error)
+        self.spoke.store(true, Ordering::SeqCst);
+        match self.take_kokoro() {
+            Ok(k) => speech::Speaker::start(kokoro::RATE, held, k.into_synth(), speech::default_output(), on_speaking, on_error),
+            Err(e) => {
+                // James still speaks, in Piper's voice, and says why where Kokoro was expected.
+                log::warn!("jarvis voice: Kokoro: {e}; Piper speaks instead");
+                if cfg!(windows) {
+                    on_error(format!("James speaks with Piper's voice: Kokoro did not start ({e})"));
+                }
+                let files = self.fetch_piper()?;
+                let piper = speech::Piper::new(&files);
+                speech::Speaker::start(files.rate, held, piper.into_synth(), speech::default_output(), on_speaking, on_error)
+            }
+        }
     }
 }
 
@@ -1131,7 +1201,8 @@ pub fn start(app: &AppHandle) {
         });
     }
     if prefetch {
-        // The first take and the first reply would otherwise wait on some 280 MB.
+        // The first take and the first reply would otherwise wait on some 380 MB, and on Kokoro
+        // loading.
         std::thread::spawn(move || voice.prefetch());
     }
 }
@@ -1169,7 +1240,7 @@ fn listen(app: &AppHandle, key: &str, voice: Arc<JarvisVoice>) -> Result<(), Str
 
 /// `jarvis_say(text: String) -> Result<(), String>`: queues `text` to be spoken in PT-BR, after
 /// what is already queued, and never while the key is held. Returns once it is queued; the first
-/// call fetches Piper and its voice.
+/// call fetches and loads Kokoro and its voice, unless the launch has.
 #[tauri::command]
 pub async fn jarvis_say(voice: State<'_, Arc<JarvisVoice>>, text: String) -> Result<(), String> {
     let voice = voice.inner().clone();
@@ -1286,6 +1357,11 @@ mod tests {
         assert!(parse_config(&json!({ "key": 3 }), true, home).is_err());
         assert!(parse_config(&json!({ "key": "Ctrl+Nonsense" }), true, home).is_err());
         assert!(parse_config(&json!({ "piper": 1 }), true, home).is_err());
+        assert_eq!(parse_config(&json!({}), true, home).unwrap().kokoro, None);
+        assert_eq!(parse_config(&json!({ "kokoro": "pf_dora" }), true, home).unwrap().kokoro.as_deref(), Some("pf_dora"));
+        assert_eq!(parse_config(&json!({ "kokoro": "pm_santa.bin" }), true, home).unwrap().kokoro.as_deref(), Some("pm_santa"));
+        assert!(parse_config(&json!({ "kokoro": "af_heart" }), true, home).unwrap_err().contains("pm_alex"));
+        assert!(parse_config(&json!({ "kokoro": 2 }), true, home).is_err());
     }
 
     #[test]
