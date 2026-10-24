@@ -779,6 +779,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_level_is_of_what_the_device_was_last_handed() {
+        let shared = Shared::new(Arc::default());
+        let level = || f32::from_bits(shared.level.load(Ordering::Relaxed));
+        lock(&shared.st).audio.extend([0.5, -0.5, 0.5, -0.5]);
+        let mut out = [0.0; 4];
+        shared.pull(&mut out, 1.0);
+        assert!((level() - 0.5).abs() < 1e-6, "{}", level());
+        shared.pull(&mut out, 1.0);
+        assert_eq!(level(), 0.0, "silence once it is all played");
+    }
+
+    #[test]
     fn the_key_going_down_mid_sentence_pauses_it_where_it_was() {
         let shared = Shared::new(Arc::default());
         lock(&shared.st).audio.extend([1.0, 2.0, 3.0, 4.0]);

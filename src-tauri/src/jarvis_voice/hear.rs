@@ -199,6 +199,7 @@ mod tests {
         let g = voice::geometric_mean(&[0.0, 1.5, 0.9]);
         assert!((0.0..=1.0).contains(&g), "{g}");
 
+        let _turn = voice::whisper_turn();
         let ctx = voice::load_context(&voice::test_model()).expect("load");
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice");
         let (text, confidence) = hear(&ctx, &wav(&fixtures.join("ola.wav")), JARGON).unwrap();
@@ -218,6 +219,21 @@ mod tests {
             .collect();
         let (_, noise) = hear(&ctx, &babble, JARGON).unwrap();
         assert!((0.0..=1.0).contains(&noise) && noise < confidence, "{noise} vs {confidence}");
+    }
+
+    #[test]
+    fn a_head_is_the_first_words_only() {
+        let _turn = voice::whisper_turn();
+        let ctx = voice::load_context(&voice::test_model()).expect("load");
+        let talk = wav(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice/wake-talk.wav"));
+        let start = &talk[..voice::WHISPER_RATE as usize * 4];
+        let (whole, _) = hear(&ctx, start, JARGON).unwrap();
+        let head = head(&ctx, start, JARGON).unwrap();
+        let words = |s: &str| s.split_whitespace().count();
+        // Enough for a greeting, the name and a word ("Fala, James, abre"), and no more: whisper
+        // ends the segment on the token that reaches `HEAD_TOKENS`, one past it.
+        assert!((5..=7).contains(&words(&head)), "{head:?}");
+        assert!(words(&whole) > words(&head), "{whole:?} vs {head:?}");
     }
 
     /// Accuracy and latency of Jarvis's candidate models over a set of spoken requests, for the

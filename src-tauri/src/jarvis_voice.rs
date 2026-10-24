@@ -536,6 +536,11 @@ impl JarvisVoice {
             return Ok(hands.is_some());
         };
         if on == hands.is_some() {
+            if !on {
+                // Off since its microphone was lost, perhaps (`lost`): turned off, it is not
+                // opened again.
+                self.era.fetch_add(1, Ordering::SeqCst);
+            }
             return Ok(on);
         }
         let era = self.era.fetch_add(1, Ordering::SeqCst) + 1;
@@ -639,11 +644,14 @@ impl JarvisVoice {
             return said("said goodbye", &|f| f.waiting = false);
         }
         // Without the name it began with; in the window, without one it may have begun with.
+        let named = via == HeardVia::Wake || wake::call(&text).is_some();
         let text = wake::request(&text, if via == HeardVia::Wake { lead } else { 0 });
-        if text.is_empty() {
-            // The name alone, or nothing made of what came in the window: the window opens for
-            // what comes next.
-            return said("had nothing after the name", &|f| f.waiting = f.hands_free && !f.held);
+        if text.is_empty() || wake::no_speech(&text) {
+            // The name alone: the window opens for what comes next. Nothing in the window, or only
+            // what whisper writes for a cough or the keyboard: it closes, or a noisy room would
+            // hold it open, one take after another.
+            let what = if named { "had nothing after the name" } else { "was no speech" };
+            return said(what, &|f| f.waiting = named && f.hands_free && !f.held);
         }
         log::info!("jarvis voice: heard {} words hands-free, confidence {confidence:.2}", text.split_whitespace().count());
         self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window, via }));
@@ -651,20 +659,43 @@ impl JarvisVoice {
     }
 }
 
-/// The microphone hands-free listens to went away: said, and hands-free is off, unless it was
-/// turned off or on again since.
+/// After losing its microphone, hands-free opens the default one again this often, this many
+/// times: a headset unplugged, or a Bluetooth one gone, leaves the system a moment to settle on
+/// another.
+#[cfg(not(test))]
+const REOPEN_EVERY: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const REOPEN_EVERY: Duration = Duration::from_millis(20);
+const REOPEN_TRIES: u32 = 10;
+
+/// The microphone hands-free listens to went away: it listens through the default one again, or,
+/// when none opens within `REOPEN_TRIES`, says so and is off. Turned off or on again meanwhile, it
+/// is left as it was turned.
 fn lost(voice: &Weak<JarvisVoice>, era: u64, why: &str) {
     let Some(voice) = voice.upgrade() else { return };
     if voice.era.load(Ordering::SeqCst) != era {
         return;
     }
-    let why = why.trim().trim_end_matches('.');
-    voice.emit(Event::Error(format!("the microphone stopped: {why}. Hands-free listening is off.")));
+    let why = why.trim().trim_end_matches('.').to_string();
     // Off its own thread: this runs on the input's.
     std::thread::spawn(move || {
-        if voice.era.load(Ordering::SeqCst) == era {
-            let _ = voice.listen(Some(false));
+        if voice.era.load(Ordering::SeqCst) != era {
+            return;
         }
+        let _ = voice.listen(Some(false));
+        log::warn!("jarvis voice: hands-free lost its microphone: {why}");
+        for _ in 0..REOPEN_TRIES {
+            let era = voice.era.load(Ordering::SeqCst);
+            std::thread::sleep(REOPEN_EVERY);
+            if voice.era.load(Ordering::SeqCst) != era {
+                return;
+            }
+            match voice.listen(Some(true)) {
+                Ok(_) => return log::info!("jarvis voice: hands-free listens again"),
+                Err(e) => log::info!("jarvis voice: hands-free: {e}"),
+            }
+        }
+        voice.emit(Event::Error(format!("the microphone stopped: {why}. Hands-free listening is off.")));
     });
 }
 
@@ -1082,6 +1113,28 @@ mod tests {
     }
 
     #[test]
+    fn the_name_alone_opens_the_window_and_noise_in_it_closes_it() {
+        for (heard, via, waiting) in [
+            ("James.", HeardVia::Wake, true),
+            ("", HeardVia::Wake, true),
+            ("James.", HeardVia::Follow, true),
+            ("", HeardVia::Follow, false),
+            ("Legendas pela comunidade Amara.org", HeardVia::Follow, false),
+        ] {
+            let (voice, events, _) = fake_voice(Ok((heard.into(), 0.9)));
+            voice.phases.update(|f| f.hands_free = true);
+            voice.ended(vec![0.1; 4_800], 16_000, via, 1);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while lock(&voice.phases.flags).transcribing > 0 {
+                assert!(std::time::Instant::now() < deadline, "{heard:?}");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(lock(&voice.phases.flags).waiting, waiting, "{heard:?} via {via:?}");
+            assert!(!said(&events).iter().any(|e| matches!(e, Event::Heard(_))), "{heard:?} is no request");
+        }
+    }
+
+    #[test]
     fn loudness_is_zero_to_one_in_decibels() {
         assert_eq!(loudness(0.0), 0.0);
         assert_eq!(loudness(0.001), 0.0);
@@ -1149,6 +1202,34 @@ mod tests {
         assert_eq!(err, "no microphone found");
         assert!(voice.release().is_none());
         assert_eq!(said(&events), vec![Event::Phase(VoicePhase::Listening), Event::Phase(VoicePhase::Idle)]);
+    }
+
+    #[test]
+    fn hushed_he_opens_no_window_and_the_key_closes_one() {
+        let (voice, events, _) = fake_voice(Ok(("e o CI?".into(), 0.9)));
+        voice.phases.update(|f| f.hands_free = true);
+        let until = |what: &str, done: &dyn Fn(&[Event]) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !done(&said(&events)) {
+                assert!(std::time::Instant::now() < deadline, "{what}: {:?}", said(&events));
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        // Enough to say that the hush comes while he speaks.
+        for _ in 0..50 {
+            voice.say("o PR passou").unwrap();
+        }
+        until("speaking", &|e| e.contains(&Event::Phase(VoicePhase::Speaking)));
+        voice.hush();
+        until("idle", &|e| e.last() == Some(&Event::Phase(VoicePhase::Idle)));
+        assert!(!said(&events).contains(&Event::Phase(VoicePhase::Waiting)));
+
+        // Falling silent by himself he opens it, and the key closes it: its take is its own.
+        voice.say("o PR passou").unwrap();
+        until("the window", &|e| e.last() == Some(&Event::Phase(VoicePhase::Waiting)));
+        voice.press(mic(), None).unwrap();
+        voice.finish(voice.release().unwrap());
+        assert_eq!(said(&events).last(), Some(&Event::Phase(VoicePhase::Idle)));
     }
 
     #[test]

@@ -131,11 +131,6 @@ struct Rig {
     _one: std::sync::MutexGuard<'static, ()>,
 }
 
-/// Whisper runs for one of these tests at a time: a run takes up to 16 threads that spin while
-/// they wait on each other, and several runs at once on fewer cores than their threads slowed
-/// each one from a second to minutes.
-static WHISPER: Mutex<()> = Mutex::new(());
-
 const RATE: usize = voice::WHISPER_RATE as usize;
 
 fn rig(follow_ms: u64) -> Rig {
@@ -143,7 +138,8 @@ fn rig(follow_ms: u64) -> Rig {
 }
 
 fn rig_with(follow_ms: u64, more: impl FnOnce(JarvisVoice) -> JarvisVoice) -> Rig {
-    let one = lock(&WHISPER);
+    // Whisper runs for one test at a time (`voice::whisper_turn`), this one's for all of it.
+    let one = voice::whisper_turn();
     let events = Arc::new(Mutex::new(vec![]));
     let into = events.clone();
     let (dictating, checks) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
@@ -225,7 +221,8 @@ impl Rig {
     }
 
     fn until(&self, what: &str, done: impl Fn(&Rig) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(60);
+        // Long: a transcription on a CI runner of few cores can take most of a minute.
+        let deadline = Instant::now() + Duration::from_secs(180);
         while !done(self) {
             assert!(Instant::now() < deadline, "{what}: {:?}", said(&self.events));
             std::thread::sleep(Duration::from_millis(10));
@@ -467,6 +464,56 @@ fn jarvis_listen_turns_hands_free_on_and_off() {
     let r = rig_with(8_000, |v| v.mic(|| Box::new(|_| Err("no microphone found".into()))));
     assert_eq!(r.voice.listen(Some(true)), Err("no microphone found".into()));
     assert_eq!(r.voice.listen(None), Ok(false));
+}
+
+#[test]
+fn a_lost_microphone_is_opened_again_and_one_that_never_opens_is_said() {
+    let errors = |r: &Rig| lock(&r.events).iter().filter(|e| matches!(e, Event::Error(_))).count();
+    let mic = TestMic::default();
+    let opens = mic.clone();
+    let r = rig_with(8_000, move |v| v.mic(move || opens.input()));
+    r.voice.listen(Some(true)).unwrap();
+    lock(&mic.sink).clone().unwrap().lose("the device was removed");
+    r.until("opened again", |_| mic.opened.load(Ordering::SeqCst) == 2);
+    r.until("on again", |r| r.voice.listen(None) == Ok(true));
+    mic.say(&room(0.5));
+    mic.say(&fixture("wake-start"));
+    mic.say(&room(1.0));
+    r.until("heard", |r| r.heard().len() == 1);
+    assert_eq!(errors(&r), 0, "nothing to say: it listens as before");
+    drop(r);
+
+    // Unplugged for good: no microphone opens again, and that is said once the tries are over.
+    let mic = TestMic::default();
+    let (opens, tries) = (mic.clone(), Arc::new(AtomicUsize::new(0)));
+    let counted = tries.clone();
+    let r = rig_with(8_000, move |v| {
+        v.mic(move || if counted.fetch_add(1, Ordering::SeqCst) == 0 { opens.input() } else { Box::new(|_| Err("no microphone found".into())) })
+    });
+    r.voice.listen(Some(true)).unwrap();
+    lock(&mic.sink).clone().unwrap().lose("the device was removed");
+    r.until("said", |r| errors(&r) == 1);
+    assert_eq!(tries.load(Ordering::SeqCst), 1 + REOPEN_TRIES as usize);
+    assert_eq!(r.voice.listen(None), Ok(false));
+    assert!(matches!(&lock(&r.events).iter().find(|e| matches!(e, Event::Error(_))), Some(Event::Error(m)) if m.contains("the device was removed")));
+    drop(r);
+
+    // Turned off while it tries: it stays off.
+    let mic = TestMic::default();
+    let (opens, tries) = (mic.clone(), Arc::new(AtomicUsize::new(0)));
+    let counted = tries.clone();
+    let r = rig_with(8_000, move |v| {
+        v.mic(move || if counted.fetch_add(1, Ordering::SeqCst) == 0 { opens.input() } else { Box::new(|_| Err("no microphone found".into())) })
+    });
+    r.voice.listen(Some(true)).unwrap();
+    lock(&mic.sink).clone().unwrap().lose("the device was removed");
+    r.until("a try", |_| tries.load(Ordering::SeqCst) >= 2);
+    r.voice.listen(Some(false)).unwrap();
+    let after = tries.load(Ordering::SeqCst);
+    std::thread::sleep(REOPEN_EVERY * 4);
+    assert!(tries.load(Ordering::SeqCst) <= after + 1, "it stopped trying");
+    assert_eq!(r.voice.listen(None), Ok(false));
+    assert_eq!(errors(&r), 0);
 }
 
 #[test]

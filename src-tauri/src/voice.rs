@@ -938,6 +938,16 @@ pub(crate) fn test_model() -> PathBuf {
     }
 }
 
+/// Whisper for one test at a time, held while it runs. A run takes up to 16 threads that spin
+/// while they wait on each other, and several runs at once on fewer cores than their threads
+/// slowed each from a second to minutes: on Windows CI, two hands-free tests waited past their
+/// deadline on a transcription (#527).
+#[cfg(test)]
+pub(crate) fn whisper_turn() -> MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    lock(&TURN)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1391,6 +1401,7 @@ mod tests {
     /// which other tests repoint.
     #[test]
     fn transcribes_the_fixtures() {
+        let _turn = whisper_turn();
         let path = test_model();
         let ctx = load_context(&path).expect("load");
         warm_up(&ctx).expect("warm up");

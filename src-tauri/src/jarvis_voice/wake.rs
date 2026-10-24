@@ -475,6 +475,25 @@ pub fn goodbye(text: &str) -> bool {
     ends[words.len()]
 }
 
+/// What whisper writes for a sound that was no speech, as `fold` leaves its words: the credits of
+/// the subtitles it learnt from.
+const NO_SPEECH: &[&str] = &[
+    "legendas pela comunidade amaraorg",
+    "legendas pela comunidade do amaraorg",
+    "inscrevase no canal",
+    "obrigado por assistir",
+    "subtitles by the amaraorg community",
+    "thank you for watching",
+    "thanks for watching",
+];
+
+/// Whether `text` is only what whisper writes for a sound that was no speech: a cough or the
+/// keyboard in the window.
+pub fn no_speech(text: &str) -> bool {
+    let words: Vec<String> = text.split_whitespace().map(fold).filter(|w| !w.is_empty()).collect();
+    NO_SPEECH.contains(&words.join(" ").as_str())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
     Call,
@@ -538,6 +557,16 @@ mod tests {
         }
         for not in ["Obrigado, e o CI?", "Para o desktop.", "James", "", "Valeu, agora abre o PR 42."] {
             assert!(!goodbye(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn whispers_words_for_no_speech_are_known() {
+        for noise in ["Legendas pela comunidade Amara.org", "Inscreva-se no canal!", "Obrigado por assistir.", "Thank you for watching!"] {
+            assert!(no_speech(noise), "{noise}");
+        }
+        for said in ["Abre o canal do mnemo no Discord.", "Legendas", "", "Obrigado."] {
+            assert!(!no_speech(said), "{said}");
         }
     }
 
@@ -635,6 +664,12 @@ mod tests {
         let before = host.checks.borrow().len();
         feed(&mut ears, &noise(10.0, 0.004, 3), &host);
         assert_eq!(host.checks.borrow().len(), before);
+        // The name said over the fan: an utterance of its own, checked.
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre".into()));
+        let fan = noise(1.5, 0.004, 4);
+        let over: Vec<f32> = tone(1.5, 0.05).iter().zip(&fan).map(|(s, f)| s + f).collect();
+        feed(&mut ears, &over, &host);
+        assert_eq!(*host.said.borrow(), ["began Wake"]);
     }
 
     #[test]
@@ -725,6 +760,36 @@ mod tests {
     }
 
     #[test]
+    fn the_name_said_short_is_checked_at_its_end() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James.".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        // Over before the first check is due.
+        feed(&mut ears, &tone(0.25, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 2), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        assert_eq!(host.checks.borrow().len(), 1);
+    }
+
+    #[test]
+    fn the_windows_first_moments_are_still_james() {
+        let host = Notes::default();
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        host.now.borrow_mut().waiting = true;
+        // The room's echo of his last word as the window opens: checked for the name like any
+        // sound, never a take of the window.
+        feed(&mut ears, &tone(0.2, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 2), &host);
+        assert!(host.said.borrow().is_empty(), "{:?}", host.said.borrow());
+        assert_eq!(host.checks.borrow().len(), 1);
+        // The window is still open for what is said after it.
+        feed(&mut ears, &tone(0.5, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow"]);
+    }
+
+    #[test]
     fn the_key_wins_over_a_take_under_way() {
         let host = Notes::default();
         *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre".into()));
@@ -740,6 +805,11 @@ mod tests {
         feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
         assert_eq!(host.checks.borrow().len(), 1);
         assert!(host.takes.borrow().is_empty());
+        // Nor is the window's: dictation records while it is open.
+        host.now.borrow_mut().waiting = true;
+        feed(&mut ears, &noise(0.5, 0.0005, 4), &host);
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "dropped"]);
     }
 
     /// James's voice through the speakers: what the speaker was fed, and the microphone hearing
