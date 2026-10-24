@@ -61,5 +61,17 @@ fn main() {
         println!("cargo:rerun-if-changed={}", p.display());
     }
 
+    // Whisper's Vulkan backend imports Vulkan's loader, vulkan-1.dll, which only a GPU driver
+    // installs: linked plainly, the app would not start on a machine without one. Delay-loaded,
+    // it is looked for when whisper first calls it, and `voice::uses_gpu` keeps whisper from
+    // calling it when it is not there. A binary that imports nothing from it (the helpers) would
+    // be warned that the flag went unused (LNK4199).
+    let target = |key: &str| std::env::var(key).unwrap_or_default();
+    if target("CARGO_CFG_TARGET_OS") == "windows" && target("CARGO_CFG_TARGET_ENV") == "msvc" {
+        println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
+        println!("cargo:rustc-link-arg=/IGNORE:4199");
+        println!("cargo:rustc-link-lib=delayimp");
+    }
+
     tauri_build::build()
 }

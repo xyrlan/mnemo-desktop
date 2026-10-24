@@ -284,7 +284,10 @@ mod tests {
             let t = std::time::Instant::now();
             let ctx = voice::load_context(Path::new(model)).expect("load");
             let loaded = t.elapsed().as_secs_f32();
+            // The first take also builds the GPU's pipelines: said apart, and not counted.
+            let t = std::time::Instant::now();
             let _ = hear(&ctx, &takes[0].1, &bench_prompt);
+            eprintln!("on the {}: first take {:.2}s", if voice::uses_gpu() { "GPU" } else { "CPU" }, t.elapsed().as_secs_f32());
             let (mut errors, mut total, mut exact) = (0usize, 0usize, 0usize);
             let mut times = vec![];
             let (mut sure_right, mut sure_wrong) = (vec![], vec![]);

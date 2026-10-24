@@ -1,9 +1,10 @@
 //! Push-to-talk dictation (issue #10). `voice_start` opens the default input device;
 //! `voice_stop` closes it and transcribes the take locally with whisper.cpp. The model
 //! downloads once, on first use, into `~/.mnemo-desktop/models/`; nothing else leaves the
-//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. On macOS the
-//! model runs on the GPU (Metal), and `warm` loads it at launch so the first take does not wait;
-//! elsewhere nothing of whisper runs before the first press.
+//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. The model runs
+//! on the GPU where there is one to use (`uses_gpu`: Metal on macOS, Vulkan on Windows), and
+//! `warm` loads it at launch so the first take does not wait; on the CPU nothing of whisper runs
+//! before the first press.
 //! A published build asks the CPU for `BASELINE` before it lets whisper run (#308).
 
 use std::io::{Read, Write};
@@ -26,8 +27,8 @@ const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 const MODEL_BYTES: u64 = 59_707_625;
 /// Points at any ggml whisper model and skips the download (tests, or a bigger model).
 const MODEL_ENV: &str = "MNEMO_WHISPER_MODEL";
-/// Keeps whisper on the CPU where it would use the GPU (Metal, on macOS): a bench, or a GPU
-/// that misbehaves.
+/// Keeps whisper on the CPU where it would use the GPU (Metal on macOS, Vulkan on Windows): a
+/// bench, or a GPU that misbehaves.
 const CPU_ENV: &str = "MNEMO_WHISPER_CPU";
 
 /// whisper.cpp only accepts 16 kHz mono.
@@ -603,19 +604,143 @@ pub fn download(url: &str, path: &Path, total: u64, stall: Duration, mut progres
     std::fs::rename(&part, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Whether whisper runs on the GPU: Metal on macOS, unless `MNEMO_WHISPER_CPU` is set.
+/// Whether whisper runs on the GPU, unless `MNEMO_WHISPER_CPU` is set: Metal on macOS, and on
+/// Windows Vulkan, when its loader is there and finds a GPU (`vulkan::gpu`). Linux runs on the
+/// CPU.
 pub fn uses_gpu() -> bool {
-    cfg!(target_os = "macos") && std::env::var_os(CPU_ENV).is_none()
+    // First, whatever the answer: it is what keeps ggml off a Vulkan loader that is not there.
+    let vulkan = vulkan::gpu();
+    std::env::var_os(CPU_ENV).is_none() && (cfg!(target_os = "macos") || vulkan)
+}
+
+/// Vulkan on Windows. ggml looks at every backend it was built with the first time whisper asks
+/// for a device, the CPU's included, and its Vulkan backend then calls the loader, vulkan-1.dll.
+/// Only a GPU driver installs it, so it is delay-loaded (`build.rs`): absent, a call into it
+/// raises the delay-load helper's exception from inside ggml, which survives it only where ggml
+/// happens to catch everything. `gpu` makes sure there is no such call: when the loader cannot be
+/// loaded, or `MNEMO_WHISPER_CPU` is set, ggml is told to leave Vulkan out before whisper is
+/// first asked for anything.
+#[cfg(windows)]
+mod vulkan {
+    use std::ffi::{c_char, c_int, CStr};
+    use std::sync::OnceLock;
+
+    use whisper_rs::whisper_rs_sys as sys;
+
+    /// Read by ggml's registry, which then never calls into Vulkan.
+    const DISABLE: &CStr = c"GGML_DISABLE_VULKAN";
+
+    extern "C" {
+        fn _putenv_s(name: *const c_char, value: *const c_char) -> c_int;
+        #[cfg(test)]
+        fn getenv(name: *const c_char) -> *const c_char;
+    }
+
+    /// Sets `name` in the C runtime's environment, which ggml's `getenv` reads. `std::env::set_var`
+    /// writes the process's, which the runtime copied at start and does not read again.
+    pub(super) fn crt_set(name: &CStr, value: &CStr) {
+        // SAFETY: two NUL-terminated strings, which the runtime copies.
+        unsafe { _putenv_s(name.as_ptr(), value.as_ptr()) };
+    }
+
+    /// Whether whisper has a GPU through Vulkan. Asked once a run: the first answer has already
+    /// shaped ggml's registry.
+    pub fn gpu() -> bool {
+        static GPU: OnceLock<bool> = OnceLock::new();
+        *GPU.get_or_init(|| {
+            whisper_rs::install_logging_hooks();
+            if let Some(why) = off(std::env::var_os(super::CPU_ENV).is_some(), loader) {
+                crt_set(DISABLE, c"1");
+                log::info!("voice: whisper runs on the CPU: {why}");
+                return false;
+            }
+            let found = devices();
+            match found.first() {
+                Some(name) => log::info!("voice: whisper runs on the GPU through Vulkan: {name}"),
+                None => log::info!("voice: whisper runs on the CPU: Vulkan found no GPU"),
+            }
+            !found.is_empty()
+        })
+    }
+
+    /// Why ggml must leave Vulkan out, if it must: the CPU was asked for (`cpu`), which then
+    /// loads nothing of Vulkan, or its loader cannot be loaded.
+    pub(super) fn off(cpu: bool, loader: impl FnOnce() -> bool) -> Option<&'static str> {
+        if cpu {
+            Some("MNEMO_WHISPER_CPU is set")
+        } else if !loader() {
+            Some("no Vulkan loader (vulkan-1.dll)")
+        } else {
+            None
+        }
+    }
+
+    /// Loads Vulkan's loader the way the delay-load helper would look for it, and keeps it: the
+    /// helper then finds it already in the process.
+    fn loader() -> bool {
+        let name: Vec<u16> = "vulkan-1.dll".encode_utf16().chain([0]).collect();
+        // SAFETY: a NUL-terminated wide string; the module stays loaded for the process's life.
+        !unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(name.as_ptr()) }.is_null()
+    }
+
+    /// The GPUs ggml's registry lists, by name: what whisper picks from with `use_gpu`.
+    fn devices() -> Vec<String> {
+        use sys::{ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU as GPU, ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU as IGPU};
+        // SAFETY: ggml's registry, read-only; the names it hands out live as long as it does.
+        unsafe {
+            (0..sys::ggml_backend_dev_count())
+                .map(|i| sys::ggml_backend_dev_get(i))
+                .filter(|&d| matches!(sys::ggml_backend_dev_type(d), GPU | IGPU))
+                .map(|d| CStr::from_ptr(sys::ggml_backend_dev_description(d)).to_string_lossy().into_owned())
+                .collect()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_cpu_asked_for_looks_for_no_loader_and_a_missing_one_leaves_vulkan_out() {
+            assert_eq!(off(true, || panic!("the loader is not looked for")), Some("MNEMO_WHISPER_CPU is set"));
+            assert_eq!(off(false, || false), Some("no Vulkan loader (vulkan-1.dll)"));
+            assert_eq!(off(false, || true), None);
+        }
+
+        /// What `crt_set` writes is what a `getenv` in C, ggml's, reads.
+        #[test]
+        fn what_is_set_is_what_c_reads() {
+            let name = c"MNEMO_VOICE_CRT_PROBE";
+            // SAFETY: a NUL-terminated name; the pointer is read before anything sets it again.
+            assert!(unsafe { getenv(name.as_ptr()) }.is_null());
+            crt_set(name, c"1");
+            let got = unsafe { getenv(name.as_ptr()) };
+            assert!(!got.is_null() && unsafe { CStr::from_ptr(got) } == c"1");
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod vulkan {
+    pub fn gpu() -> bool {
+        false
+    }
 }
 
 pub fn load_context(path: &Path) -> Result<WhisperContext, String> {
     whisper_rs::install_logging_hooks();
     let p = path.to_str().ok_or("model path is not UTF-8")?;
     // Flash attention takes a third or more off the GPU's time on a take and makes the CPU 1.6
-    // times slower (measured on an M5), so it goes with the GPU.
+    // times slower (measured on an M5), so it goes with the GPU. On Vulkan it took dictation's
+    // median take from 0.26 s to 0.16 s (RTX 4070 Ti SUPER, `bench`).
     let gpu = uses_gpu();
     let mut params = WhisperContextParameters::default();
     params.use_gpu(gpu).flash_attn(gpu);
+    // One at a time. On Vulkan, models loaded at once while the device first starts up fail in
+    // ggml ("unknown exception during model load": three of four threads did); once it is up
+    // they load together. Dictation's, a voice note's and Jarvis's can all be loading at once.
+    static LOADING: Mutex<()> = Mutex::new(());
+    let _one = lock(&LOADING);
     WhisperContext::new_with_params(p, params).map_err(|e| format!("model {p}: {e}"))
 }
 
@@ -844,14 +969,18 @@ pub fn warms_at_launch(gpu: bool, model_present: bool) -> bool {
 }
 
 /// At launch, on the GPU: loads and warms the model in the background when it is already on
-/// disk, so the first take waits for neither (`warms_at_launch`).
+/// disk, so the first take waits for neither (`warms_at_launch`). Whether there is a GPU is asked
+/// off the launch's thread too: on Windows that starts Vulkan.
 pub fn warm(app: &AppHandle) {
     let present = std::env::var_os(MODEL_ENV).is_some() || model_on_disk(&models_dir().join(MODEL_FILE));
-    if !warms_at_launch(uses_gpu(), present) {
+    if !present {
         return;
     }
     let app = app.clone();
     let spawned = std::thread::Builder::new().name("voice-warm".into()).spawn(move || {
+        if !warms_at_launch(uses_gpu(), present) {
+            return;
+        }
         let started = std::time::Instant::now();
         match model(&app) {
             Ok(_) => log::info!("voice: model ready in {:.1}s", started.elapsed().as_secs_f32()),
@@ -1287,8 +1416,9 @@ mod tests {
         assert!(!warms_at_launch(false, true), "the CPU path waits for the first press");
         assert!(!warms_at_launch(true, false), "nothing downloads at launch");
         assert!(!warms_at_launch(false, false));
-        // Windows and Linux have no GPU path: their launch runs nothing of whisper.
-        if !cfg!(target_os = "macos") {
+        // Linux has no GPU path: its launch runs nothing of whisper. Windows has one where Vulkan
+        // finds a GPU (`vulkan`).
+        if cfg!(target_os = "linux") {
             assert!(!uses_gpu());
         }
     }
@@ -1381,7 +1511,8 @@ mod tests {
         let ctx = load_context(&path).expect("load");
         let loaded = t.elapsed().as_secs_f32();
         warm_up(&ctx).expect("warm up");
-        eprintln!("load {loaded:.2}s, warm up {:.2}s", t.elapsed().as_secs_f32() - loaded);
+        let on = if uses_gpu() { "GPU" } else { "CPU" };
+        eprintln!("on the {on}: load {loaded:.2}s, warm up {:.2}s", t.elapsed().as_secs_f32() - loaded);
         let mut names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1408,6 +1539,38 @@ mod tests {
                     t.elapsed().as_secs_f32()
                 );
             }
+        }
+    }
+
+    /// Models loaded at once as a run's first loads all load (`load_context`): on Vulkan these
+    /// are what start the device up. That happens once a process, so they run in a fresh one:
+    /// this test binary again, running only `loads_at_once`.
+    #[test]
+    fn models_loaded_at_once_all_load() {
+        let path = test_model();
+        let out = crate::proc::command(std::env::current_exe().unwrap())
+            .args(["--exact", "voice::tests::loads_at_once", "--ignored", "--test-threads=1"])
+            .env(MODEL_ENV, &path)
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && said.contains("1 passed"), "{said}");
+    }
+
+    /// Four loads at once in a process that has loaded nothing; run by
+    /// `models_loaded_at_once_all_load`.
+    #[test]
+    #[ignore]
+    fn loads_at_once() {
+        let path = test_model();
+        let loads: Vec<_> = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || load_context(&path).map(drop))
+            })
+            .collect();
+        for load in loads {
+            load.join().unwrap().expect("load");
         }
     }
 
