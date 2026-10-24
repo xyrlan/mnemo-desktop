@@ -723,6 +723,8 @@ pub struct Shape<'a> {
     /// (`jarvis_voice/wake.rs`). Encoding part of the window makes whisper loop on a long take; a
     /// few tokens cannot.
     pub head: Option<i32>,
+    /// Set, whisper gives the run up where it is: what it was making is no longer wanted.
+    pub stop: Option<Arc<AtomicBool>>,
 }
 
 /// The part of whisper's 30 s window that `samples` of 16 kHz audio fill, in its encoder's
@@ -761,6 +763,19 @@ fn decode<F: FnMut(i32) + 'static>(
     }
     if let Some(threads) = shape.threads {
         params.set_n_threads(threads.max(1) as _);
+    }
+    if let Some(stop) = &shape.stop {
+        // Not whisper-rs 0.16's `set_abort_callback_safe`: it hands whisper a boxed closure and
+        // calls it as the unboxed one, and every run aborted at once in the tests.
+        unsafe extern "C" fn stopped(stop: *mut std::ffi::c_void) -> bool {
+            // SAFETY: the flag of `shape.stop`, which outlives the run.
+            unsafe { (*(stop as *const AtomicBool)).load(Ordering::Relaxed) }
+        }
+        // SAFETY: `stopped` only reads the flag, which `shape` holds until `full` returns.
+        unsafe {
+            params.set_abort_callback(Some(stopped));
+            params.set_abort_callback_user_data(Arc::as_ptr(stop) as *mut std::ffi::c_void);
+        }
     }
     if let Some(tokens) = shape.head {
         params.set_max_tokens(tokens);

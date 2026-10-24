@@ -106,6 +106,9 @@ impl Backend for Whisper {
     fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
         hear::hear(&self.ctx, &hear::to_whisper(&take.samples, take.rate), &self.prompt)
     }
+    fn hear_until(&self, take: &Captured, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+        hear::hear_until(&self.ctx, &hear::to_whisper(&take.samples, take.rate), &self.prompt, stop)
+    }
     fn check(&self, audio: &[f32]) -> Result<String, String> {
         self.checks.fetch_add(1, Ordering::SeqCst);
         hear::head(&self.ctx, audio, &self.prompt)
@@ -157,7 +160,7 @@ fn fixture(name: &str) -> Vec<f32> {
     hear::wav(&fixtures_dir().join(format!("{name}.wav")))
 }
 
-/// The room: noise far under speech.
+/// The room: noise far under speech. Two seconds of it after a take end it and its join.
 fn room(seconds: f32) -> Vec<f32> {
     let mut s = 0x9e37_79b9u32;
     (0..(seconds * RATE as f32) as usize)
@@ -256,7 +259,7 @@ fn the_name_at_the_start_is_a_take_seen_while_still_talking() {
     // Speech starts 0.2 s in and runs 2.6 s: `listening` came while it went on, at its second.
     assert!(at < RATE * 3 / 2, "listening {:.2} s in", at as f32 / RATE as f32);
     assert_eq!(r.heard(), vec![], "nothing heard before the take ends");
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     let h = &r.heard()[0];
     assert_eq!(h.via, HeardVia::Wake);
@@ -272,12 +275,12 @@ fn the_name_after_a_greeting_is_a_take_and_in_the_middle_is_not() {
     let (mut ears, wired) = r.ears();
     r.play(&mut ears, &wired, &room(0.5));
     r.play(&mut ears, &wired, &fixture("wake-middle"));
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     assert!(r.phases().is_empty(), "the name in the middle is not a call: {:?}", r.phases());
     assert!(r.checks.load(Ordering::SeqCst) <= 2);
 
     assert!(r.play(&mut ears, &wired, &fixture("wake-fala")).is_some());
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     let h = &r.heard()[0];
     assert!(h.via == HeardVia::Wake && h.text.contains("passou") && !h.text.to_lowercase().starts_with("fala"), "{h:?}");
@@ -290,7 +293,7 @@ fn a_misheard_name_counts() {
     let (mut ears, wired) = r.ears();
     r.play(&mut ears, &wired, &room(0.5));
     assert!(r.play(&mut ears, &wired, &fixture("wake-misheard")).is_some(), "{:?}", said(&r.events));
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     assert!(r.heard()[0].text.contains("VS Code"), "{:?}", r.heard());
 }
@@ -304,7 +307,7 @@ fn the_window_opens_after_james_speaks_takes_a_sentence_and_closes_in_silence() 
     let at = r.play(&mut ears, &wired, &room(0.5).into_iter().chain(fixture("wake-follow")).collect::<Vec<_>>());
     // A take from its first syllable: speech starts 0.7 s into what was played.
     assert!(at.is_some_and(|at| at < RATE * 9 / 10), "{at:?}");
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     assert_eq!(r.heard()[0].via, HeardVia::Follow);
     assert!(r.heard()[0].text.contains("site"), "{:?}", r.heard());
@@ -320,9 +323,74 @@ fn the_window_opens_after_james_speaks_takes_a_sentence_and_closes_in_silence() 
     r.play(&mut ears, &wired, &room(0.2));
     assert_eq!(r.phases().last(), Some(&VoicePhase::Idle));
     r.play(&mut ears, &wired, &fixture("wake-follow"));
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.settled();
     assert_eq!(r.heard().len(), 1);
+}
+
+/// `audio` cut at the start of its `nth` pause (from 1): 40 ms or more between words, under a
+/// tenth of their level.
+fn at_pause(audio: &[f32], nth: usize) -> (&[f32], &[f32]) {
+    let frame = RATE / 50;
+    let voiced: Vec<bool> = audio.chunks(frame).map(|f| voice::rms(f) > 0.03).collect();
+    let mut at = voiced.iter().position(|&v| v).expect("speech");
+    for _ in 0..nth {
+        at += voiced[at..].windows(2).position(|w| w.iter().all(|v| !v)).expect("a pause");
+        if voiced[at..].iter().any(|&v| v) {
+            at += voiced[at..].iter().position(|&v| v).unwrap();
+        }
+    }
+    let quiet = voiced[..at].iter().rposition(|&v| v).expect("speech") + 1;
+    audio.split_at(quiet * frame)
+}
+
+#[test]
+fn a_breath_after_the_name_is_the_same_take() {
+    let r = rig(8_000);
+    let (mut ears, wired) = r.ears();
+    r.play(&mut ears, &wired, &room(0.5));
+    let audio = fixture("wake-start");
+    let (start, rest) = at_pause(&audio, 3);
+    // "Djêims, quais PRs estão", a breath of a second, and "abertos no desktop?".
+    r.play(&mut ears, &wired, &start.iter().copied().chain(room(1.0)).chain(rest.iter().copied()).collect::<Vec<_>>());
+    r.play(&mut ears, &wired, &room(2.0));
+    r.until("heard", |r| r.heard().len() == 1);
+    r.settled();
+    let h = &r.heard();
+    assert_eq!(h.len(), 1, "{h:?}");
+    assert!(h[0].via == HeardVia::Wake && h[0].text.contains("PRs") && h[0].text.contains("abertos"), "{h:?}");
+    // What was made of the first part was given up, and that is no error.
+    assert!(!said(&r.events).iter().any(|e| matches!(e, Event::Error(_))), "{:?}", said(&r.events));
+}
+
+#[test]
+fn a_transcript_no_longer_wanted_is_given_up() {
+    let _one = voice::whisper_turn();
+    // The app's own backend, on the tests' model.
+    let local = Local::new(Config { whisper: Some(voice::test_model()), ..Config::default() });
+    let take = Captured { samples: fixture("wake-start"), rate: RATE as u32 };
+    // Whisper looks at the flag once the audio is encoded, and at each token after: the encoding
+    // is the cost of a transcript given up.
+    let (text, _) = local.hear_until(&take, &Arc::default()).expect("heard");
+    assert!(text.contains("abertos"), "{text}");
+    assert!(local.hear_until(&take, &Arc::new(AtomicBool::new(true))).is_err());
+}
+
+#[test]
+fn what_is_said_while_a_take_is_transcribed_needs_no_name() {
+    let r = rig(8_000);
+    let (mut ears, wired) = r.ears();
+    r.play(&mut ears, &wired, &room(0.5));
+    let audio = fixture("wake-start");
+    let (start, rest) = at_pause(&audio, 3);
+    // A pause past the join, and more said before the take is transcribed: the test plays faster
+    // than whisper hears. Said after the name alone, it would be the request.
+    r.play(&mut ears, &wired, &start.iter().copied().chain(room(2.5)).chain(rest.iter().copied()).collect::<Vec<_>>());
+    r.play(&mut ears, &wired, &room(2.0));
+    r.settled();
+    let h = &r.heard();
+    assert_eq!(h.len(), 2, "{:?}", said(&r.events));
+    assert!(h[0].via == HeardVia::Wake && h[1].via == HeardVia::Follow && h[1].text.contains("abertos"), "{h:?}");
 }
 
 #[test]
@@ -333,7 +401,7 @@ fn a_goodbye_in_the_window_ends_the_conversation() {
     r.james_speaks();
     r.play(&mut ears, &wired, &room(0.5));
     assert!(r.play(&mut ears, &wired, &fixture("wake-goodbye")).is_some());
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.settled();
     assert_eq!(r.heard(), vec![], "a goodbye is no take");
     assert_eq!(r.phases().last(), Some(&VoicePhase::Idle));
@@ -349,7 +417,7 @@ fn the_name_while_james_speaks_hushes_him_and_his_own_voice_starts_nothing() {
     r.voice.phases.update(|f| f.speaking = true);
     let reply = fixture("wake-reply");
     r.on_speakers(&mut ears, &wired, &reply, 0.3, &room(reply.len() as f32 / RATE as f32));
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     assert_eq!(r.voice.hushes.load(Ordering::SeqCst), 0);
     assert!(!r.phases().contains(&VoicePhase::Listening), "{:?}", r.phases());
 
@@ -358,7 +426,7 @@ fn the_name_while_james_speaks_hushes_him_and_his_own_voice_starts_nothing() {
     over.extend(fixture("wake-interrupt"));
     assert!(r.on_speakers(&mut ears, &wired, &reply, 0.3, &over).is_some(), "{:?}", said(&r.events));
     assert_eq!(r.voice.hushes.load(Ordering::SeqCst), 1, "hushed, as by jarvis_hush");
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     let h = &r.heard()[0];
     assert!(h.via == HeardVia::Wake && h.text.contains("desktop"), "{h:?}");
@@ -379,7 +447,7 @@ fn the_key_wins_over_hands_free() {
     });
     r.voice.press(silent, None).unwrap();
     r.play(&mut ears, &wired, &audio[half..]);
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     assert!(!lock(&r.voice.phases.flags).taking);
     let take = r.voice.release().expect("the key's take");
     r.voice.finish(take);
@@ -395,7 +463,7 @@ fn dictation_takes_the_microphone_from_hands_free() {
     r.dictating.store(true, Ordering::SeqCst);
     r.play(&mut ears, &wired, &room(0.5));
     r.play(&mut ears, &wired, &fixture("wake-start"));
-    r.play(&mut ears, &wired, &room(1.0));
+    r.play(&mut ears, &wired, &room(2.0));
     assert_eq!(r.checks.load(Ordering::SeqCst), 0);
     assert!(r.phases().is_empty());
 }
@@ -445,7 +513,7 @@ fn jarvis_listen_turns_hands_free_on_and_off() {
 
     mic.say(&room(0.5));
     mic.say(&fixture("wake-start"));
-    mic.say(&room(1.0));
+    mic.say(&room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     assert_eq!(r.heard()[0].via, HeardVia::Wake);
 
@@ -454,7 +522,7 @@ fn jarvis_listen_turns_hands_free_on_and_off() {
     assert_eq!(r.voice.listen(None), Ok(false));
     std::thread::sleep(Duration::from_millis(300));
     mic.say(&fixture("wake-start"));
-    mic.say(&room(1.0));
+    mic.say(&room(2.0));
     std::thread::sleep(Duration::from_millis(500));
     r.settled();
     assert_eq!(r.heard().len(), 1, "off hears nothing");
@@ -478,7 +546,7 @@ fn a_lost_microphone_is_opened_again_and_one_that_never_opens_is_said() {
     r.until("on again", |r| r.voice.listen(None) == Ok(true));
     mic.say(&room(0.5));
     mic.say(&fixture("wake-start"));
-    mic.say(&room(1.0));
+    mic.say(&room(2.0));
     r.until("heard", |r| r.heard().len() == 1);
     assert_eq!(errors(&r), 0, "nothing to say: it listens as before");
     drop(r);
@@ -524,7 +592,7 @@ fn no_levels_while_idle_and_the_microphones_while_waiting() {
     r.voice.listen(Some(true)).unwrap();
     mic.say(&room(0.5));
     mic.say(&fixture("wake-talk"));
-    mic.say(&room(1.0));
+    mic.say(&room(2.0));
     std::thread::sleep(Duration::from_millis(600));
     r.settled();
     assert!(r.phases().is_empty(), "talk without the name is no call: {:?}", r.phases());
@@ -856,7 +924,7 @@ fn live_check_cost() {
     let prompt = hear::prompt(&[]);
     let audio = &fixture("wake-talk")[..RATE * 122 / 100];
     for threads in [2, 4, 6, 8] {
-        let shape = voice::Shape { prompt: Some(&prompt), threads: Some(threads), head: Some(6) };
+        let shape = voice::Shape { prompt: Some(&prompt), threads: Some(threads), head: Some(6), stop: None };
         let _ = voice::transcribe_scored(&ctx, audio, voice::Language::Pt, &shape);
         let (wall, cpu) = (Instant::now(), cpu_time());
         for _ in 0..10 {

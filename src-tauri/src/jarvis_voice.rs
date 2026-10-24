@@ -35,7 +35,7 @@ mod wake_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
+use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -192,6 +192,11 @@ pub trait Backend: Send + Sync + 'static {
     fn warm(&self);
     /// The text of a take and the decoder's confidence; empty when nothing was said.
     fn hear(&self, take: &Captured) -> Result<(String, f32), String>;
+    /// `hear`, given up once `stop` is set: a hands-free take that went on past its pause is heard
+    /// again whole, and what was begun on its first part is not wanted.
+    fn hear_until(&self, take: &Captured, _stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+        self.hear(take)
+    }
     /// After a take, heard or not (the microphone may have failed before anything was): what
     /// `warm` set up for it may go.
     fn done(&self) {}
@@ -245,6 +250,8 @@ struct Flags {
     taking: bool,
     /// Takes ended and not yet heard: a press can come before the last one is done.
     transcribing: usize,
+    /// Of those, the hands-free ones: what is said meanwhile is for James (`wake::Now::pending`).
+    pending: usize,
     speaking: bool,
     /// The follow-up window is open.
     waiting: bool,
@@ -341,6 +348,18 @@ impl Phases {
     }
 }
 
+/// Hands-free takes handed on at their pause (`wake::Host`), numbered: the last one that ended, the
+/// last that is over, and those that went on past their pause, until their transcript has seen
+/// it. Each take goes on or is over before the next one ends.
+#[derive(Default)]
+struct Joins {
+    ended: u64,
+    settled: u64,
+    resumed: Vec<u64>,
+    /// Stops the transcript of the last take that ended, once it is not wanted.
+    stop: Option<Arc<AtomicBool>>,
+}
+
 /// A take under way, and the window that was in front when it began.
 pub struct Take {
     recording: Recording,
@@ -370,6 +389,13 @@ pub struct JarvisVoice {
     mic: Box<dyn Fn() -> voice::Input + Send + Sync>,
     /// The window in front when the hands-free take under way began.
     front: Mutex<Option<String>>,
+    joins: Mutex<Joins>,
+    /// Told when `joins` changes, or the era does.
+    joined: Condvar,
+    /// Held while a hands-free take is transcribed. Two at once would take each other's cores:
+    /// whisper's threads spin while they wait on each other, and a take that went on overlapping
+    /// the transcript of its first part took a minute in the tests, where alone it takes seconds.
+    hearing: Mutex<()>,
 }
 
 impl JarvisVoice {
@@ -386,6 +412,9 @@ impl JarvisVoice {
             follow_ms: DEFAULT_FOLLOW_MS,
             mic: Box::new(|| Box::new(voice::default_input)),
             front: Mutex::new(None),
+            joins: Mutex::default(),
+            joined: Condvar::new(),
+            hearing: Mutex::new(()),
         }
     }
 
@@ -540,10 +569,13 @@ impl JarvisVoice {
                 // Off since its microphone was lost, perhaps (`lost`): turned off, it is not
                 // opened again.
                 self.era.fetch_add(1, Ordering::SeqCst);
+                self.joined.notify_all();
             }
             return Ok(on);
         }
         let era = self.era.fetch_add(1, Ordering::SeqCst) + 1;
+        // A take waiting to know whether it went on has its answer: nothing more joins it.
+        self.joined.notify_all();
         if !on {
             // Dropped, the recording closes the microphone; the ears see the era change and go.
             *hands = None;
@@ -607,31 +639,97 @@ impl JarvisVoice {
         });
     }
 
-    /// A hands-free take ended: transcribed on its own thread, while the ears listen on.
+    /// A hands-free take reached its pause: transcribed on its own thread, while the ears listen
+    /// on for whether it goes on.
     fn ended(self: &Arc<Self>, samples: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
         self.phases.update(|f| {
             f.taking = false;
             f.transcribing += 1;
+            f.pending += 1;
         });
-        let window = lock(&self.front).take();
+        let stop = Arc::new(AtomicBool::new(false));
+        let take = {
+            let mut j = lock(&self.joins);
+            j.ended += 1;
+            j.stop = Some(stop.clone());
+            j.ended
+        };
+        let era = self.era.load(Ordering::SeqCst);
+        // Kept, not taken: a take that goes on ends again, in front of the same window.
+        let window = lock(&self.front).clone();
         let me = self.clone();
-        std::thread::spawn(move || me.finish_hands_free(Captured { samples, rate }, via, lead, window));
+        std::thread::spawn(move || me.finish_hands_free(Captured { samples, rate }, via, lead, window, (take, era), stop));
     }
 
-    fn finish_hands_free(&self, take: Captured, via: HeardVia, lead: usize, window: Option<String>) {
+    /// The take that ended went on past its pause: what is being made of it is not wanted.
+    fn resumed(&self) {
+        let mut j = lock(&self.joins);
+        let last = j.ended;
+        j.resumed.push(last);
+        if let Some(stop) = j.stop.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+        drop(j);
+        self.joined.notify_all();
+        self.phases.update(|f| f.taking = true);
+    }
+
+    /// The take that ended is over: what is made of it is heard.
+    fn settled(&self) {
+        let mut j = lock(&self.joins);
+        j.settled = j.ended;
+        j.stop = None;
+        drop(j);
+        self.joined.notify_all();
+    }
+
+    /// Whether the take that was `take` in `era` went on past its pause, once that is known: it
+    /// went on, or it settled, or hands-free was turned off or on since, and nothing joins it.
+    fn went_on(&self, (take, era): (u64, u64)) -> bool {
+        let mut j = lock(&self.joins);
+        loop {
+            if let Some(at) = j.resumed.iter().position(|&t| t == take) {
+                j.resumed.swap_remove(at);
+                return true;
+            }
+            if j.settled >= take || self.era.load(Ordering::SeqCst) != era {
+                return false;
+            }
+            // Told of every change; the timeout is only in case one is ever missed.
+            j = match self.joined.wait_timeout(j, Duration::from_secs(1)) {
+                Ok((j, _)) => j,
+                Err(e) => e.into_inner().0,
+            };
+        }
+    }
+
+    fn finish_hands_free(&self, take: Captured, via: HeardVia, lead: usize, window: Option<String>, which: (u64, u64), stop: Arc<AtomicBool>) {
         let ended = Instant::now();
+        let secs = take.samples.len() as f32 / take.rate.max(1) as f32;
         self.backend.warm();
-        let heard = self.backend.hear(&take);
+        let heard = {
+            let _one = lock(&self.hearing);
+            if stop.load(Ordering::SeqCst) {
+                Err("not wanted".to_string())
+            } else {
+                self.backend.hear_until(&take, &stop)
+            }
+        };
         self.backend.done();
         let ms = ended.elapsed().as_millis();
-        // What the take was, said as `update` lands it: the latency, never the words.
+        let went_on = self.went_on(which);
+        // What the take was, said as `update` lands it: its length and the latency, never the words.
         let said = |what: &str, change: &dyn Fn(&mut Flags)| {
-            log::info!("jarvis voice: a hands-free take ({via:?}) {what} in {ms} ms");
+            log::info!("jarvis voice: a {secs:.1} s hands-free take ({via:?}) {what} in {ms} ms");
             self.phases.update(|f| {
                 change(f);
                 f.transcribing = f.transcribing.saturating_sub(1);
+                f.pending = f.pending.saturating_sub(1);
             });
         };
+        if went_on {
+            return said("went on past its pause", &|_| {});
+        }
         let (text, confidence) = match heard {
             Ok(heard) => heard,
             Err(e) => {
@@ -640,16 +738,17 @@ impl JarvisVoice {
                 return said("failed", &|_| {});
             }
         };
+        let text = wake::collapse(&text);
         if wake::goodbye(&text) {
             return said("said goodbye", &|f| f.waiting = false);
         }
         // Without the name it began with; in the window, without one it may have begun with.
         let named = via == HeardVia::Wake || wake::call(&text).is_some();
         let text = wake::request(&text, if via == HeardVia::Wake { lead } else { 0 });
-        if text.is_empty() || wake::no_speech(&text) {
+        if text.is_empty() || wake::no_speech(&text) || (!named && wake::unsure(&text, confidence)) {
             // The name alone: the window opens for what comes next. Nothing in the window, or only
-            // what whisper writes for a cough or the keyboard: it closes, or a noisy room would
-            // hold it open, one take after another.
+            // what whisper writes for a cough, the keyboard or a hesitation: it closes, or a noisy
+            // room would hold it open, one take after another.
             let what = if named { "had nothing after the name" } else { "was no speech" };
             return said(what, &|f| f.waiting = named && f.hands_free && !f.held);
         }
@@ -714,7 +813,7 @@ impl Wired {
 impl wake::Host for Wired {
     fn now(&self) -> wake::Now {
         let f = lock(&self.voice.phases.flags);
-        wake::Now { blocked: f.held || self.voice.backend.dictating(), speaking: f.speaking, waiting: f.waiting }
+        wake::Now { blocked: f.held || self.voice.backend.dictating(), speaking: f.speaking, waiting: f.waiting, pending: f.pending > 0 }
     }
 
     fn check(&self, audio: &[f32]) -> String {
@@ -736,6 +835,18 @@ impl wake::Host for Wired {
     fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
         if self.live() {
             self.voice.ended(audio, rate, via, lead)
+        }
+    }
+
+    fn resumed(&self) {
+        if self.live() {
+            self.voice.resumed()
+        }
+    }
+
+    fn settled(&self) {
+        if self.live() {
+            self.voice.settled()
         }
     }
 
@@ -779,6 +890,18 @@ impl Local {
         }
     }
 
+    /// What `run` hears in `take`, with the model and the prompt; nothing, without running it,
+    /// in a take that is silent.
+    fn heard(&self, take: &Captured, run: impl FnOnce(&WhisperContext, &[f32], &str) -> Result<(String, f32), String>) -> Result<(String, f32), String> {
+        let audio = hear::to_whisper(&take.samples, take.rate);
+        if voice::is_silent(&audio) {
+            return Ok((String::new(), 0.0));
+        }
+        let model = self.model()?;
+        let prompt = lock(&self.prompt).clone();
+        run(&model, &audio, &prompt)
+    }
+
     fn fetch_model(&self) -> Result<PathBuf, String> {
         let _one = lock(&self.fetching_model);
         hear::fetch(self.config.whisper.clone())
@@ -813,13 +936,11 @@ impl Backend for Local {
     }
 
     fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
-        let audio = hear::to_whisper(&take.samples, take.rate);
-        if voice::is_silent(&audio) {
-            return Ok((String::new(), 0.0));
-        }
-        let model = self.model()?;
-        let prompt = lock(&self.prompt).clone();
-        hear::hear(&model, &audio, &prompt)
+        self.heard(take, hear::hear)
+    }
+
+    fn hear_until(&self, take: &Captured, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+        self.heard(take, |model, audio, prompt| hear::hear_until(model, audio, prompt, stop))
     }
 
     fn check(&self, audio: &[f32]) -> Result<String, String> {
@@ -1112,26 +1233,235 @@ mod tests {
         assert_eq!(wake(json!({ "key": DEFAULT_KEY, "wake": { "followMs": 8000 }, "orb": true }), true), Ok(Some(8_000)));
     }
 
+    /// Until no take is being transcribed.
+    fn transcribed(voice: &JarvisVoice) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while lock(&voice.phases.flags).transcribing > 0 {
+            assert!(std::time::Instant::now() < deadline, "{:?}", lock(&voice.phases.flags).transcribing);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     #[test]
     fn the_name_alone_opens_the_window_and_noise_in_it_closes_it() {
-        for (heard, via, waiting) in [
-            ("James.", HeardVia::Wake, true),
-            ("", HeardVia::Wake, true),
-            ("James.", HeardVia::Follow, true),
-            ("", HeardVia::Follow, false),
-            ("Legendas pela comunidade Amara.org", HeardVia::Follow, false),
+        for (heard, confidence, via, waiting) in [
+            ("James.", 0.9, HeardVia::Wake, true),
+            ("", 0.9, HeardVia::Wake, true),
+            ("James.", 0.9, HeardVia::Follow, true),
+            ("James, ahn...", 0.9, HeardVia::Follow, true),
+            ("", 0.9, HeardVia::Follow, false),
+            ("Legendas pela comunidade Amara.org", 0.9, HeardVia::Follow, false),
+            // Whisper's writing for a room with no one talking in it: a dot, sounds, its own prompt.
+            (".", 0.4, HeardVia::Follow, false),
+            ("Ah!", 0.7, HeardVia::Follow, false),
+            ("Aaaahhh.", 0.2, HeardVia::Follow, false),
+            ("Uóter.", 0.0, HeardVia::Follow, false),
+            ("Projetos. Projetos. Projetos.", 0.7, HeardVia::Follow, false),
         ] {
-            let (voice, events, _) = fake_voice(Ok((heard.into(), 0.9)));
+            let (voice, events, _) = fake_voice(Ok((heard.into(), confidence)));
             voice.phases.update(|f| f.hands_free = true);
             voice.ended(vec![0.1; 4_800], 16_000, via, 1);
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            while lock(&voice.phases.flags).transcribing > 0 {
-                assert!(std::time::Instant::now() < deadline, "{heard:?}");
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            voice.settled();
+            transcribed(&voice);
             assert_eq!(lock(&voice.phases.flags).waiting, waiting, "{heard:?} via {via:?}");
             assert!(!said(&events).iter().any(|e| matches!(e, Event::Heard(_))), "{heard:?} is no request");
         }
+    }
+
+    #[test]
+    fn a_request_is_heard_once_said_and_unsure_only_without_the_name() {
+        for (heard, confidence, via, request) in [
+            ("Desculpa.", 0.44, HeardVia::Follow, "Desculpa."),
+            ("E o CI? E o CI?", 0.9, HeardVia::Follow, "E o CI?"),
+            // The name heard in it: little confidence is for the loop to ask about (#506).
+            ("James, abre o PR.", 0.2, HeardVia::Follow, "abre o PR."),
+            ("James, abre o PR. James, abre o PR.", 0.2, HeardVia::Wake, "abre o PR."),
+            ("mnemo-desktop", 0.8, HeardVia::Follow, "mnemo-desktop"),
+        ] {
+            let (voice, events, _) = fake_voice(Ok((heard.into(), confidence)));
+            voice.phases.update(|f| f.hands_free = true);
+            voice.ended(vec![0.1; 4_800], 16_000, via, 1);
+            voice.settled();
+            transcribed(&voice);
+            let texts: Vec<String> = said(&events).into_iter().filter_map(|e| if let Event::Heard(h) = e { Some(h.text) } else { None }).collect();
+            assert_eq!(texts, [request], "{heard:?} via {via:?}");
+        }
+    }
+
+    /// What a `Scripted` backend was asked: transcripts begun, given up, and the most at once.
+    #[derive(Default)]
+    struct Counts {
+        calls: std::sync::atomic::AtomicUsize,
+        stopped: std::sync::atomic::AtomicUsize,
+        busy: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+    }
+
+    /// Hears what `heard` says of a take's length. `slow`: each take takes half a second, unless
+    /// it is stopped first.
+    struct Scripted {
+        heard: fn(usize) -> String,
+        slow: bool,
+        counts: Arc<Counts>,
+    }
+
+    impl Backend for Scripted {
+        fn warm(&self) {}
+        fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
+            Ok(((self.heard)(take.samples.len()), 0.9))
+        }
+        fn hear_until(&self, take: &Captured, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+            let c = &self.counts;
+            c.calls.fetch_add(1, Ordering::SeqCst);
+            let busy = c.busy.fetch_add(1, Ordering::SeqCst) + 1;
+            c.most.fetch_max(busy, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_millis(if self.slow { 500 } else { 0 });
+            let mut heard = self.hear(take);
+            while std::time::Instant::now() < deadline {
+                if stop.load(Ordering::SeqCst) {
+                    c.stopped.fetch_add(1, Ordering::SeqCst);
+                    heard = Err("whisper: aborted".into());
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            c.busy.fetch_sub(1, Ordering::SeqCst);
+            heard
+        }
+        fn speaker(
+            &self,
+            _: Arc<AtomicBool>,
+            _: Arc<dyn Fn(bool) + Send + Sync>,
+            _: Arc<dyn Fn(String) + Send + Sync>,
+        ) -> Result<speech::Speaker, String> {
+            Err("no speaker".into())
+        }
+    }
+
+    fn scripted(slow: bool) -> (Arc<JarvisVoice>, Arc<Mutex<Vec<Event>>>, Arc<Counts>) {
+        let events = Arc::new(Mutex::new(vec![]));
+        let into = events.clone();
+        let counts = Arc::new(Counts::default());
+        let heard = |len: usize| match len {
+            ..=1_999 => "James.".to_string(),
+            2_000..=3_999 => "James, abre o VS Code.".to_string(),
+            4_000..=5_999 => "E o CI?".to_string(),
+            _ => "E o CI do desktop?".to_string(),
+        };
+        let backend = Scripted { heard, slow, counts: counts.clone() };
+        let voice = Arc::new(JarvisVoice::new(Box::new(backend), Arc::new(move |e| lock(&into).push(e))).mic(mic));
+        voice.phases.update(|f| f.hands_free = true);
+        (voice, events, counts)
+    }
+
+    /// Until `n` transcripts have begun.
+    fn begun(counts: &Counts, n: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while counts.calls.load(Ordering::SeqCst) < n {
+            assert!(std::time::Instant::now() < deadline, "{n} begun");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn texts(events: &Mutex<Vec<Event>>) -> Vec<String> {
+        said(events).into_iter().filter_map(|e| if let Event::Heard(h) = e { Some(h.text) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_take_that_went_on_past_its_pause_is_heard_once_whole() {
+        let (voice, events, counts) = scripted(true);
+        let wired = Wired { voice: voice.clone(), era: voice.era.load(Ordering::SeqCst) };
+        use wake::Host;
+        // The name, a breath, and the request, in front of the editor.
+        wired.began(HeardVia::Wake);
+        *lock(&voice.front) = Some("app.rs - mnemo-desktop - Visual Studio Code".into());
+        wired.ended(vec![0.1; 1_000], 16_000, HeardVia::Wake, 1);
+        assert!(wired.now().pending, "what is said now is for James");
+        // Its transcript under way when the take goes on.
+        begun(&counts, 1);
+        wired.resumed();
+        assert_eq!(said(&events).last(), Some(&Event::Phase(VoicePhase::Listening)), "listening again");
+        wired.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+        wired.settled();
+        transcribed(&voice);
+        assert!(!wired.now().pending);
+        let heard: Vec<Heard> = said(&events).into_iter().filter_map(|e| if let Event::Heard(h) = e { Some(h) } else { None }).collect();
+        assert_eq!(heard.len(), 1, "{:?}", said(&events));
+        assert_eq!((heard[0].text.as_str(), heard[0].via), ("abre o VS Code.", HeardVia::Wake));
+        assert_eq!(heard[0].window.as_deref(), Some("app.rs - mnemo-desktop - Visual Studio Code"));
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 1, "the first part's transcript was given up");
+        assert!(!said(&events).iter().any(|e| matches!(e, Event::Error(_))), "a transcript given up is no error");
+        assert!(!lock(&voice.phases.flags).waiting, "a request, not the name alone");
+
+        // A transcript done before the take went on is not used either; the whole take's is.
+        let (voice, events, counts) = scripted(false);
+        voice.ended(vec![0.1; 5_000], 16_000, HeardVia::Follow, 0);
+        begun(&counts, 1);
+        while counts.busy.load(Ordering::SeqCst) > 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        voice.resumed();
+        voice.ended(vec![0.1; 7_000], 16_000, HeardVia::Follow, 0);
+        voice.settled();
+        transcribed(&voice);
+        assert_eq!(texts(&events), ["E o CI do desktop?"]);
+    }
+
+    #[test]
+    fn hands_free_takes_are_transcribed_one_at_a_time() {
+        // The name alone, and the request said while it is transcribed.
+        let (voice, events, counts) = scripted(true);
+        voice.ended(vec![0.1; 1_000], 16_000, HeardVia::Wake, 1);
+        voice.settled();
+        voice.ended(vec![0.1; 5_000], 16_000, HeardVia::Follow, 0);
+        voice.settled();
+        transcribed(&voice);
+        assert_eq!(texts(&events), ["E o CI?"]);
+        assert_eq!(counts.most.load(Ordering::SeqCst), 1, "never two at once");
+
+        // A take that goes on while its transcript waits its turn is never begun.
+        let (voice, events, counts) = scripted(true);
+        voice.ended(vec![0.1; 5_000], 16_000, HeardVia::Follow, 0);
+        voice.settled();
+        begun(&counts, 1);
+        voice.ended(vec![0.1; 1_000], 16_000, HeardVia::Wake, 1);
+        voice.resumed();
+        voice.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+        voice.settled();
+        transcribed(&voice);
+        assert_eq!(texts(&events), ["E o CI?", "abre o VS Code."]);
+        assert_eq!(counts.calls.load(Ordering::SeqCst), 2, "the first part's never begun");
+    }
+
+    #[test]
+    fn a_take_waits_for_its_join_and_hands_free_turned_off_ends_the_wait() {
+        // Turned off, or off again after its microphone was lost: nothing more can join the take,
+        // and it is heard at once.
+        for was_on in [true, false] {
+            let (voice, events, _) = scripted(false);
+            if was_on {
+                voice.listen(Some(true)).unwrap();
+            }
+            voice.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+            std::thread::sleep(Duration::from_millis(150));
+            assert!(!said(&events).iter().any(|e| matches!(e, Event::Heard(_))), "heard before the join was out");
+            assert_eq!(lock(&voice.phases.flags).transcribing, 1);
+            let off = std::time::Instant::now();
+            voice.listen(Some(false)).unwrap();
+            transcribed(&voice);
+            assert!(off.elapsed() < Duration::from_millis(500), "{:?}", off.elapsed());
+            assert_eq!(texts(&events), ["abre o VS Code."], "was on: {was_on}");
+        }
+
+        // Its join out, a transcript already made is heard at once: the join adds nothing to it.
+        let (voice, events, _) = scripted(false);
+        voice.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+        std::thread::sleep(Duration::from_millis(150));
+        let settled = std::time::Instant::now();
+        voice.settled();
+        transcribed(&voice);
+        assert!(settled.elapsed() < Duration::from_millis(500), "{:?}", settled.elapsed());
+        assert_eq!(texts(&events), ["abre o VS Code."]);
     }
 
     #[test]
