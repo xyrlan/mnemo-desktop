@@ -27,6 +27,8 @@
 {"request": "escreve um teste pro parser de sessões do mnemo", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "e aí, como tá aquilo?", "context": "um parent está rodando no mnemo-desktop, com o pedido de corrigir um teste", "expect": {"tool": "parent_status", "project": "mnemo-desktop"}}
 {"request": "já terminou?", "context": "um parent está rodando no llama.cpp", "expect": {"tool": "parent_status", "project": "llama.cpp"}}
+{"request": "fecha o parent do mnemo", "context": "um parent está rodando no mnemo, com o pedido de abrir um PR", "expect": {"tool": "stop_parent", "project": "mnemo"}}
+{"request": "pode abrir um parent no tauri", "expect": {"tool": "ask_user", "project": "tauri"}}
 {"request": "fala pra ele também atualizar o changelog", "context": "um parent está rodando no mnemo, com o pedido de abrir um PR", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "o que mudou aqui?", "context": "a janela em foco é um terminal no projeto whisper.cpp", "expect": {"tool": "git_diff", "project": "whisper.cpp"}}
 {"request": "abre um PR com isso", "expect": {"tool": "ask_user"}}

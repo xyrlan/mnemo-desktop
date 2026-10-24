@@ -1,6 +1,6 @@
 import { PAUSE_MS } from './brain'
 import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup } from './client'
-import { CANCEL_MS, createJarvis, isFollowUp, isNo, isYes, MAX_STEPS } from './loop'
+import { CANCEL_MS, createJarvis, isBareOpen, isFollowUp, isNo, isStopParent, isYes, MAX_STEPS } from './loop'
 import type { OpenParent, ParentEvent, ParentRef, ParentsApi, ParentStatus } from './parent'
 import type { Message } from './routing'
 import { createJarvisStore, type JarvisStore } from './store'
@@ -307,6 +307,125 @@ describe('delegating', () => {
     expect(s.last()).toBe('Apagar a branch main mesmo?')
     await s.jarvis.ask('sim, pode')
     expect(s.parents.opened[0].request).toBe('apaga a main do tasklist\nsim, pode')
+  })
+
+  test('a write that names the parent he opened goes to it, not to a new one', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })], { live: [ref('a', 'tasklist')] })
+    await s.jarvis.ask('Eu preciso que esse parent que você abriu agora veja o Google Ads')
+    expect(s.parents.opened).toEqual([])
+    expect(s.parents.sent).toEqual([['a', 'Eu preciso que esse parent que você abriu agora veja o Google Ads']])
+  })
+})
+
+describe('ending a parent', () => {
+  test('stop_parent ends the parent he opened in the project named', async () => {
+    const s = setup([calls('stop_parent', { project: 'mnemo-desktop' })], { live: [ref('a', 'mnemo-desktop'), ref('b', 'tasklist')] })
+    await s.jarvis.ask('fecha o parent do tasklist')
+    expect(s.parents.cancelled).toEqual(['b'])
+    expect(s.parents.opened).toEqual([])
+    expect(s.last()).toBe('Fechei o parent do tasklist.')
+    expect(s.store.getState().recent).toEqual({ project: 'tasklist', at: t })
+    expect(s.logged).toEqual([expect.objectContaining({ tool: 'stop_parent', project: 'tasklist', reply: 'Fechei o parent do tasklist.' })])
+  })
+
+  test("with none named, the brain's project, else the only one running", async () => {
+    const s = setup([calls('stop_parent', { project: 'tasklist' })], { live: [ref('a', 'mnemo-desktop'), ref('b', 'tasklist')] })
+    await s.jarvis.ask('fecha aquele parent')
+    expect(s.parents.cancelled).toEqual(['b'])
+    const one = setup([calls('stop_parent', {})], { live: [ref('a', 'mnemo-desktop')] })
+    await one.jarvis.ask('encerra a sessão')
+    expect(one.parents.cancelled).toEqual(['a'])
+    expect(one.last()).toBe('Fechei o parent do mnemo-desktop.')
+  })
+
+  test('two running and none told: he asks which, and the answer ends that one', async () => {
+    const s = setup([calls('stop_parent', {}), calls('stop_parent', {})], { live: [ref('a', 'mnemo-desktop'), ref('b', 'tasklist', 'abre o PR')] })
+    await s.jarvis.ask('fecha o parent')
+    expect(s.parents.cancelled).toEqual([])
+    expect(s.last()).toBe('Qual parent: o do mnemo-desktop («corrige o login») ou o do tasklist («abre o PR»)?')
+    await s.jarvis.ask('o do tasklist')
+    expect(s.parents.cancelled).toEqual(['b'])
+  })
+
+  test('none of his running in the project, or at all: he says so and ends nothing', async () => {
+    const s = setup([calls('stop_parent', { project: 'tasklist' })], { live: [ref('a', 'mnemo-desktop')] })
+    await s.jarvis.ask('fecha o parent do tasklist')
+    expect(s.parents.cancelled).toEqual([])
+    expect(s.last()).toBe('Não abri nenhum parent no tasklist.')
+    const none = setup([calls('stop_parent', {})])
+    await none.jarvis.ask('fecha o parent')
+    expect(none.last()).toBe('Não abri nenhum parent.')
+  })
+
+  test('closing a parent handed to delegate_to_parent ends it, and opens nothing', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })], { live: [ref('a', 'tasklist')] })
+    await s.jarvis.ask('Preciso que você feche a sessão do parent do tasklist lá que a gente abriu.')
+    expect(s.parents.opened).toEqual([])
+    expect(s.parents.sent).toEqual([])
+    expect(s.parents.cancelled).toEqual(['a'])
+    expect(s.last()).toBe('Fechei o parent do tasklist.')
+    // With none of his running, still none is opened to close one.
+    const none = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })])
+    await none.jarvis.ask('pare esse parent do tasklist')
+    expect(none.parents.opened).toEqual([])
+    expect(none.last()).toBe('Não abri nenhum parent no tasklist.')
+  })
+
+  test('ending another parent leaves "cancela" on the one just delegated', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' }), calls('stop_parent', { project: 'mnemo-desktop' })], { live: [ref('a', 'mnemo-desktop')] })
+    await s.jarvis.ask('corrige o teste do tasklist')
+    await s.jarvis.ask('fecha o parent do desktop')
+    expect(s.parents.cancelled).toEqual(['a'])
+    await s.jarvis.ask('cancela')
+    expect(s.parents.cancelled).toEqual(['a', 's1'])
+  })
+
+  test('the parent just delegated, ended, is not cancelled again', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' }), calls('stop_parent', { project: 'tasklist' })])
+    await s.jarvis.ask('corrige o teste do tasklist')
+    await s.jarvis.ask('fecha o parent do tasklist')
+    expect(s.parents.cancelled).toEqual(['s1'])
+    expect(s.store.getState().delegated).toBeNull()
+    await s.jarvis.ask('cancela')
+    expect(s.parents.cancelled).toEqual(['s1'])
+  })
+
+  test('heard low, it waits for a yes', async () => {
+    const s = setup([calls('stop_parent', { project: 'tasklist' })], { live: [ref('a', 'tasklist')] })
+    await s.jarvis.heard({ text: 'fecha o parent do tasklist', confidence: 0.3, window: null })
+    expect(s.parents.cancelled).toEqual([])
+    expect(s.store.getState().pending).toMatchObject({ kind: 'confirm', tool: 'stop_parent' })
+    await s.jarvis.ask('sim')
+    expect(s.parents.cancelled).toEqual(['a'])
+  })
+})
+
+describe('a parent asked for with nothing to do', () => {
+  test('he asks what for, and the parent opens with the task joined on', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' }), calls('delegate_to_parent', { project: 'tasklist', request: 'x' })])
+    await s.jarvis.ask('Pode abrir um parent no tasklist.')
+    expect(s.parents.opened).toEqual([])
+    expect(s.last()).toBe('Pra fazer o quê no tasklist?')
+    expect(s.store.getState().pending).toMatchObject({ kind: 'ask', request: 'Pode abrir um parent no tasklist.' })
+    await s.jarvis.ask('ver como está o Google Ads')
+    expect(s.parents.opened.map((o) => o.request)).toEqual(['Pode abrir um parent no tasklist.\nver como está o Google Ads'])
+  })
+
+  test('with no project told, which one first, then what for', async () => {
+    const s = setup([calls('delegate_to_parent', {}), calls('delegate_to_parent', { project: 'tasklist' }), calls('delegate_to_parent', { project: 'tasklist' })])
+    await s.jarvis.ask('abre um parent')
+    expect(s.last()).toMatch(/^Em qual projeto\?/)
+    await s.jarvis.ask('no tasklist')
+    expect(s.last()).toBe('Pra fazer o quê no tasklist?')
+    expect(s.parents.opened).toEqual([])
+    await s.jarvis.ask('rodar os testes')
+    expect(s.parents.opened.map((o) => o.request)).toEqual(['abre um parent\nno tasklist\nrodar os testes'])
+  })
+
+  test('a parent asked for with its task opens at once', async () => {
+    const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })])
+    await s.jarvis.ask('abre um parent no tasklist pra corrigir o teste')
+    expect(s.parents.opened.map((o) => o.request)).toEqual(['abre um parent no tasklist pra corrigir o teste'])
   })
 })
 
@@ -748,11 +867,84 @@ describe('with Claude', () => {
     expect(s.parents.opened.map((o) => o.request)).toEqual(['corrige o teste do tasklist'])
     expect(s.asks).toHaveLength(3)
   })
+
+  test('Claude ends a parent with stop_parent, and a bare parent is asked what for', async () => {
+    const s = withClaude(
+      [
+        '{"tool": "stop_parent", "args": {"project": "tasklist"}}',
+        '{"tool": "delegate_to_parent", "args": {"project": "mnemo-desktop", "request": "abre um parent"}}',
+        '{"tool": "delegate_to_parent", "args": {"project": "mnemo-desktop", "request": "x"}}',
+      ],
+      { live: [ref('a', 'tasklist')] },
+    )
+    await s.jarvis.heard({ text: 'fecha o parent do tasklist', confidence: 0.9, window: null })
+    expect(s.parents.cancelled).toEqual(['a'])
+    expect(s.spoken).toEqual(['Fechei o parent do tasklist.'])
+    expect(s.asks[0].system).toContain('- stop_parent(project?): ')
+    expect(s.asks[0].system).toContain('Nunca abra um parent para fechar ou parar outro')
+    expect(s.asks[0].system).toContain('pergunte antes, com ask_user, o que ele deve fazer')
+    await s.jarvis.heard({ text: 'abre um parent no desktop', confidence: 0.9, window: null })
+    expect(s.parents.opened).toEqual([])
+    expect(s.last()).toBe('Pra fazer o quê no mnemo-desktop?')
+    await s.jarvis.heard({ text: 'roda os testes', confidence: 0.9, window: null })
+    // The question was the loop's, not Claude's: it is told.
+    expect(s.asks[2].text).toContain('James: Pra fazer o quê no mnemo-desktop?')
+    expect(s.parents.opened.map((o) => o.request)).toEqual(['abre um parent no desktop\nroda os testes'])
+  })
 })
 
 test('what reads as a follow-up', () => {
-  for (const t of ['diz pra ele também corrigir o lint', 'fala pra ele parar', 'manda pro parent rodar os testes', 'Além disso, atualiza o README', 'pede a ela o link do PR'])
+  for (const t of [
+    'diz pra ele também corrigir o lint',
+    'fala pra ele parar',
+    'manda pro parent rodar os testes',
+    'Além disso, atualiza o README',
+    'pede a ela o link do PR',
+    'aquele parent precisa rodar o lint',
+    'nesse parent, roda o lint de novo',
+    'a resposta do parent está errada, corrige',
+    'nessa sessão, roda o lint',
+    'avisa a sessão do tasklist que o CI quebrou',
+    'a issue que a gente abriu precisa de um teste',
+    'o que você acabou de despachar tem que esperar o CI',
+    'o PR que vc criou tem conflito',
+  ])
     expect([t, isFollowUp(t)]).toEqual([t, true])
-  for (const t of ['corrige o teste do tasklist', 'cria uma issue sobre isso', 'abre um PR', 'elemento quebrado no header'])
+  for (const t of ['corrige o teste do tasklist', 'cria uma issue sobre isso', 'abre um PR', 'elemento quebrado no header', 'Pode abrir um parent no tasklist.', 'abre uma sessão no tasklist', 'manda pro tasklist corrigir o lint'])
     expect([t, isFollowUp(t)]).toEqual([t, false])
+})
+
+test('what asks to end a parent', () => {
+  for (const t of [
+    'fecha aquele parent',
+    'Pare esse parent que você acabou de despachar do tasklist.',
+    'Preciso que você feche a sessão do parent do desktop lá que a gente abriu.',
+    'encerra a sessão',
+    'pode fechar o parent do tasklist',
+    'mata o parent',
+    'derruba essa sessão',
+    'desliga um parent',
+    'cancela este parent',
+    'parar aquela sessão de vez',
+    'fecha esse parent e me diz quando fechou',
+  ])
+    expect([t, isStopParent(t)]).toEqual([t, true])
+  for (const t of ['manda para o parent rodar os testes', 'fecha a issue que o parent abriu', 'pede pro parent fechar o PR', 'diz pro parent parar a sessão de testes', 'avisa ele pra fechar a sessão do banco', 'para tudo', 'fecha o PR do tasklist', 'abre um parent'])
+    expect([t, isStopParent(t)]).toEqual([t, false])
+})
+
+test('what asks for a parent with nothing to do', () => {
+  const known = [...projects, { name: 'notes', aliases: ['bloco de notas'], root: '/Users/you/code/my-notes' }]
+  for (const t of [
+    'Pode abrir um parent no bloco de notas.',
+    'abre um parent no tasklist',
+    'James, cria uma sessão nova no desktop pra mim, por favor',
+    'abre outro parent',
+    'sobe um parent no notes',
+    'inicia uma sessão aqui agora',
+    'abre um parent no my-notes',
+  ])
+    expect([t, isBareOpen(t, known)]).toEqual([t, true])
+  for (const t of ['abre um parent no tasklist pra corrigir o teste', 'abre um PR no tasklist', 'abre o tasklist', 'fecha o parent', 'e o parent do tasklist?', 'Pode abrir um parent no bloco de notas.\nver o Google Ads'])
+    expect([t, isBareOpen(t, known)]).toEqual([t, false])
 })
