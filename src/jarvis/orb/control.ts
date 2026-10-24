@@ -2,7 +2,7 @@
  *  request being worked on, the lines), shows and hides the orb's window through `jarvis_orb`, and
  *  sends the orb what only this window knows as `jarvis://orb`. The voice's own events, levels
  *  included, reach the orb's page directly. */
-import type { JarvisStore } from '../store'
+import type { JarvisStore, Line } from '../store'
 import { captionsOf } from './caption'
 import { HIDDEN, LINGER_MS, lookOf, stepShow, type OrbState, type Shown } from './show'
 
@@ -50,7 +50,11 @@ export function createOrbControl({
   const update = () => {
     if (!enabled) return
     const s = store.getState()
-    const look = lookOf(s.voice, s.busy)
+    // A typed request is answered in the panel it was typed in: James working on it is no
+    // conversation for the orb. A spoken one is, whichever way it came.
+    let asked: Line | undefined
+    for (let i = s.lines.length - 1; i >= 0 && !asked; i--) if (s.lines[i].who === 'you') asked = s.lines[i]
+    const look = lookOf(s.voice, s.busy && asked?.who === 'you' && asked.spoken)
     const was = shown
     shown = stepShow(shown, look, now())
     if (shown.shown && !was.shown) void api.show(true).catch(() => {})

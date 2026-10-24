@@ -88,6 +88,21 @@ test('the orb shows for a conversation, is told each look, and hides after the l
   expect(calls).toEqual([false])
 })
 
+test('a typed request is answered in the panel: the orb stays down', async () => {
+  const { store, calls } = setup(true)
+  await settle()
+  addLine(store, { who: 'you', text: 'como está o CI?', spoken: false }, 0)
+  store.setState({ busy: true })
+  addLine(store, { who: 'james', text: 'Verde.' }, 0)
+  store.setState({ busy: false })
+  expect(calls).toEqual([])
+  // A spoken one after it brings the orb up while James works on it.
+  addLine(store, { who: 'you', text: 'e o PR?', spoken: true }, 0)
+  store.setState({ busy: true })
+  expect(calls[0]).toBe(true)
+  expect(calls[1]).toMatchObject({ look: 'thinking' })
+})
+
 test('a new take within the linger keeps the orb up', async () => {
   const { store, calls, advance } = setup(true)
   await settle()
