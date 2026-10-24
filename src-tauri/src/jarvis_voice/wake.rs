@@ -9,8 +9,13 @@
 //!   while it is still being said; it ends at the pause, or at `MAX_TAKE`. An utterance that did
 //!   not begin with the name is not decoded again, however long it runs: one check, two when the
 //!   first heard only a greeting.
+//! - **A pause is not always the end.** At the pause a take is handed on to be transcribed, and
+//!   speech back within `JOIN` goes on with it: "James, [a breath] abre o VS Code", or a request
+//!   said in two goes, is one take. What was made of its first part is then not used.
 //! - **The window.** After James has spoken, whatever is said before the window closes is a take,
 //!   no name needed. Its start is the utterance's, so it is `listening` from the first syllable.
+//!   So is what is said while a take is still being transcribed: right after the name alone, the
+//!   request, before the window the name opens is there.
 //! - **His own voice.** On speakers the microphone hears James. A frame counts as someone talking
 //!   only when it is louder than his voice, as it reaches the microphone, would make it: how much
 //!   of him reaches it (`gain`) is learnt while he speaks, against what the speaker was fed in the
@@ -40,6 +45,13 @@ const TAIL_MS: u32 = 200;
 /// greeting ("ei"), or a word cut short. "Ei, James" is said in about 0.9 s.
 const FIRST_CHECK_MS: u32 = 1_000;
 const SECOND_CHECK_MS: u32 = 2_000;
+/// After a take's pause, speech back within this long goes on with the take. Its transcript starts
+/// at the pause and is used only once this is out, so it costs nothing while whisper is slower:
+/// in the maintainer's first session with hands-free (2026-10-24, `small` on the CPU) a take took
+/// 1.4 s to 6.5 s to transcribe, 2.3 s in the median. That session lost the request said after a
+/// breath following the name, five times in two minutes. With `PAUSE_MS`, 1.7 s of silence ends a
+/// take: a breath between the name and the request, or between two halves of one, is shorter.
+const JOIN_MS: u32 = 1_000;
 /// A take never runs longer.
 const MAX_TAKE_MS: u32 = 30_000;
 /// The first moments of the window still belong to James: the room's echo of his last word.
@@ -73,6 +85,8 @@ pub struct Now {
     pub speaking: bool,
     /// The follow-up window is open.
     pub waiting: bool,
+    /// A hands-free take is being transcribed: what is said now is for James.
+    pub pending: bool,
 }
 
 /// What the ears tell the voice, and ask of it.
@@ -83,9 +97,14 @@ pub trait Host {
     fn check(&self, audio: &[f32]) -> String;
     /// A take began: it opened with the name (`Wake`), or came in the window (`Follow`).
     fn began(&self, via: HeardVia);
-    /// The take that began has ended: its audio, mono at `rate`, to transcribe. `lead`: how many
-    /// words the check heard up to the name and with it, for `request`.
+    /// The take that began reached its pause: its audio, mono at `rate`, to transcribe. `lead`:
+    /// how many words the check heard up to the name and with it, for `request`. What is made of
+    /// it is used once the take has `settled`, and never if it `resumed`.
     fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize);
+    /// The take that ended goes on: speech came back within `JOIN_MS`. It ends again, all of it.
+    fn resumed(&self);
+    /// The take that ended is over: nothing came back within `JOIN_MS`, or the key took over.
+    fn settled(&self);
     /// The take that began will not end: the key or dictation took over.
     fn dropped(&self);
     /// The window closed with nothing said in it.
@@ -114,6 +133,8 @@ struct Utterance {
     checks: u8,
     /// Words of the check up to the name and with it.
     lead: usize,
+    /// A take handed on at its pause (`Host::ended`), and still open to what comes back.
+    handed: bool,
 }
 
 pub struct Ears {
@@ -193,9 +214,10 @@ impl Ears {
         }
         let played = self.outs.iter().map(|&(_, o)| o).fold(0.0f32, f32::max);
         let echo = if played > OUT_FLOOR { self.gain * played } else { 0.0 };
+        // A take handed on at its pause goes on as an utterance would start.
         let threshold = match self.utterance {
-            None => (self.floor * GATE).max(MIN_GATE),
-            Some(_) => (self.floor * HOLD).max(MIN_HOLD),
+            Some(Utterance { handed: false, .. }) => (self.floor * HOLD).max(MIN_HOLD),
+            _ => (self.floor * GATE).max(MIN_GATE),
         };
         let voiced = self.frames > WARMUP && level > threshold && level > ECHO_MARGIN * echo;
 
@@ -237,6 +259,33 @@ impl Ears {
                     self.utterance = Some(self.start(now, played > OUT_FLOOR, host));
                 }
             }
+            Some(mut u) if u.handed => {
+                u.audio.extend_from_slice(frame);
+                self.preroll.extend(frame.iter().copied());
+                let keep = self.samples(PREROLL_MS) as usize;
+                while self.preroll.len() > keep {
+                    self.preroll.pop_front();
+                }
+                self.run = if voiced { self.run + 1 } else { 0 };
+                u.quiet += 1;
+                if now.blocked {
+                    // The key or dictation took over: the take is what was said up to its pause.
+                    self.run = 0;
+                    host.settled();
+                } else if self.run >= ONSET {
+                    self.run = 0;
+                    u.handed = false;
+                    u.quiet = 0;
+                    u.voiced = u.audio.len();
+                    host.resumed();
+                    self.utterance = Some(u);
+                } else if u.quiet * FRAME_MS >= PAUSE_MS + JOIN_MS {
+                    self.run = 0;
+                    host.settled();
+                } else {
+                    self.utterance = Some(u);
+                }
+            }
             Some(mut u) => {
                 if u.mode != Mode::Ignored {
                     u.audio.extend_from_slice(frame);
@@ -265,11 +314,7 @@ impl Ears {
                 }
                 let paused = u.quiet * FRAME_MS >= PAUSE_MS;
                 let full = matches!(u.mode, Mode::Take(_)) && u.audio.len() as u64 >= self.samples(MAX_TAKE_MS);
-                if paused || full {
-                    self.end(u, host);
-                } else {
-                    self.utterance = Some(u);
-                }
+                self.utterance = if paused || full { self.end(u, full, host) } else { Some(u) };
             }
         }
 
@@ -282,7 +327,8 @@ impl Ears {
         }
     }
 
-    /// An utterance starts: in the window it is a take at once; else it is checked for the name.
+    /// An utterance starts: in the window, or while a take is being transcribed, it is a take at
+    /// once; else it is checked for the name.
     /// Over James's voice what came before it is his, not the utterance's: it starts at its own
     /// first frame, or it would not begin with the name.
     fn start(&mut self, now: Now, over_james: bool, host: &dyn Host) -> Utterance {
@@ -300,10 +346,16 @@ impl Ears {
                 host.began(HeardVia::Follow);
                 Mode::Take(HeardVia::Follow)
             }
+            // Said after the name alone, before its transcript opens the window; over James it
+            // takes his name, as ever.
+            _ if now.pending && !now.speaking => {
+                host.began(HeardVia::Follow);
+                Mode::Take(HeardVia::Follow)
+            }
             _ => Mode::Checking,
         };
         let audio = if mode == Mode::Ignored { vec![] } else { audio };
-        Utterance { voiced: audio.len(), audio, began, quiet: 0, mode, checks: 0, lead: 0 }
+        Utterance { voiced: audio.len(), audio, began, quiet: 0, mode, checks: 0, lead: 0, handed: false }
     }
 
     /// Decodes the start of `u` for the name. `last`: the utterance has ended, and an unsure
@@ -325,15 +377,24 @@ impl Ears {
         }
     }
 
-    fn end(&mut self, mut u: Utterance, host: &dyn Host) {
+    /// `u` reached its pause, or its longest (`full`). A take is handed on to be transcribed; at
+    /// its pause it stays, open to what comes back within `JOIN_MS`.
+    fn end(&mut self, mut u: Utterance, full: bool, host: &dyn Host) -> Option<Utterance> {
         if u.mode == Mode::Checking {
             self.check(&mut u, true, host);
         }
-        if let Mode::Take(via) = u.mode {
-            let end = (u.voiced + self.samples(TAIL_MS) as usize).min(u.audio.len());
+        let Mode::Take(via) = u.mode else { return None };
+        let end = (u.voiced + self.samples(TAIL_MS) as usize).min(u.audio.len());
+        if full {
+            // Cut at thirty seconds: what is said on is another utterance.
             u.audio.truncate(end);
             host.ended(u.audio, self.rate, via, u.lead);
+            host.settled();
+            return None;
         }
+        host.ended(u.audio[..end].to_vec(), self.rate, via, u.lead);
+        u.handed = true;
+        Some(u)
     }
 }
 
@@ -487,11 +548,62 @@ const NO_SPEECH: &[&str] = &[
     "thanks for watching",
 ];
 
-/// Whether `text` is only what whisper writes for a sound that was no speech: a cough or the
-/// keyboard in the window.
+/// Sounds rather than words, as `fold` leaves them with a letter held long written once
+/// ("Aaaahhh!" is "ah"): someone hesitating, or whisper's word for a breath.
+const INTERJECTIONS: &[&str] = &["ah", "ahn", "an", "e", "eh", "hm", "hum", "oh", "uh", "uhm", "um"];
+
+/// `word` with each run of one letter written once.
+fn squeeze(word: &str) -> String {
+    let mut out = String::new();
+    for c in word.chars() {
+        if !out.ends_with(c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Whether `text` is no speech: nothing but punctuation ("."), only sounds ("Ah!", "Hmm…"), or
+/// what whisper writes for a cough or the keyboard.
 pub fn no_speech(text: &str) -> bool {
     let words: Vec<String> = text.split_whitespace().map(fold).filter(|w| !w.is_empty()).collect();
-    NO_SPEECH.contains(&words.join(" ").as_str())
+    words.iter().all(|w| INTERJECTIONS.contains(&squeeze(w).as_str())) || NO_SPEECH.contains(&words.join(" ").as_str())
+}
+
+/// Under this confidence a take that did not say the name is noise. Seen live (2026-10-24), what
+/// whisper made of the room after James spoke came at 0.00 to 0.39, requests at 0.44 and over.
+const MIN_CONFIDENCE: f32 = 0.3;
+
+/// Whether `text`, a take that did not say the name, is too unsure to be a request: heard with
+/// little confidence, or only words of whisper's prompt (`hear::prompt`), which it writes back
+/// for a sound it cannot make out ("Projetos."). A project's name alone may answer James; the
+/// prompt's jargon and its label for the names do not.
+pub fn unsure(text: &str, confidence: f32) -> bool {
+    let prompt: Vec<String> = hear::JARGON.split_whitespace().chain([hear::PROJECTS]).map(fold).collect();
+    confidence < MIN_CONFIDENCE || text.split_whitespace().map(fold).filter(|w| !w.is_empty()).all(|w| prompt.contains(&w))
+}
+
+/// `text` with each sentence that only repeats the one before it left out: looping on a sound,
+/// whisper writes "Projetos. Projetos. Projetos.".
+pub fn collapse(text: &str) -> String {
+    let mut kept: Vec<&str> = vec![];
+    let mut last = String::new();
+    let mut start = 0;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let end = i + c.len_utf8();
+        let ends = ".!?…".contains(c) && chars.peek().map_or(true, |(_, n)| n.is_whitespace());
+        if ends || chars.peek().is_none() {
+            let sentence = text[start..end].trim();
+            let key = sentence.split_whitespace().map(fold).collect::<Vec<_>>().join(" ");
+            if !sentence.is_empty() && key != last {
+                kept.push(sentence);
+                last = key;
+            }
+            start = end;
+        }
+    }
+    kept.join(" ")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -565,8 +677,36 @@ mod tests {
         for noise in ["Legendas pela comunidade Amara.org", "Inscreva-se no canal!", "Obrigado por assistir.", "Thank you for watching!"] {
             assert!(no_speech(noise), "{noise}");
         }
-        for said in ["Abre o canal do mnemo no Discord.", "Legendas", "", "Obrigado."] {
+        // A dot, and sounds.
+        for noise in [".", "", "...", "Ah!", "Aaaahhhhhhh.", "Hmm...", "É...", "Ahn, hum."] {
+            assert!(no_speech(noise), "{noise}");
+        }
+        for said in ["Abre o canal do mnemo no Discord.", "Legendas", "Obrigado.", "Desculpa.", "Uhum.", "Aham.", "Ah, abre o PR."] {
             assert!(!no_speech(said), "{said}");
+        }
+    }
+
+    #[test]
+    fn a_take_without_the_name_is_unsure_with_little_confidence_or_only_whispers_prompt() {
+        // Noise in the window, as whisper writes it.
+        assert!(unsure("Uóter.", 0.0));
+        assert!(unsure("Projetos.", 0.7));
+        assert!(unsure("CI, PR, VS Code.", 0.9));
+        assert!(unsure("Abre o PR 42.", 0.29));
+        assert!(!unsure("Abre o PR 42.", 0.3));
+        assert!(!unsure("Desculpa.", 0.44));
+        assert!(!unsure("E o CI?", 0.9));
+        // A project's name may answer "qual projeto?".
+        assert!(!unsure("mnemo-desktop", 0.8));
+    }
+
+    #[test]
+    fn a_sentence_whisper_says_again_is_said_once() {
+        assert_eq!(collapse("Projetos. Projetos. Projetos. Projetos. Projetos."), "Projetos.");
+        assert_eq!(collapse("E o CI? E o CI?"), "E o CI?");
+        assert_eq!(collapse("Oi.  oi!"), "Oi.");
+        for kept in ["Sim. Não. Sim.", "Abre o PR 42. E o CI?", "Abre o site.com.br agora.", "Projetos.com Projetos.com", "Quais PRs estão abertos", ""] {
+            assert_eq!(collapse(kept), kept);
         }
     }
 
@@ -608,6 +748,12 @@ mod tests {
         fn ended(&self, audio: Vec<f32>, _rate: u32, via: HeardVia, _lead: usize) {
             self.said.borrow_mut().push(format!("ended {via:?}"));
             self.takes.borrow_mut().push((audio.len(), via));
+        }
+        fn resumed(&self) {
+            self.said.borrow_mut().push("resumed".into());
+        }
+        fn settled(&self) {
+            self.said.borrow_mut().push("settled".into());
         }
         fn dropped(&self) {
             self.said.borrow_mut().push("dropped".into());
@@ -723,9 +869,10 @@ mod tests {
         let mut ears = Ears::new(RATE, 8_000);
         feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
         feed(&mut ears, &tone(31.0, 0.05), &host);
-        // Two checks before the take; what is said past its thirty seconds is another utterance.
+        // Two checks before the take; what is said past its thirty seconds is another utterance,
+        // never the take going on.
         assert!(host.checks.borrow()[1] >= RATE as usize * 2, "{:?}", host.checks.borrow());
-        assert_eq!(host.said.borrow()[..2], ["began Wake", "ended Wake"]);
+        assert_eq!(host.said.borrow()[..3], ["began Wake", "ended Wake", "settled"]);
         let (len, _) = host.takes.borrow()[0];
         assert_eq!(len, RATE as usize * 30);
     }
@@ -742,6 +889,8 @@ mod tests {
         feed(&mut ears, &tone(1.5, 0.05), &host);
         feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
         assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow"]);
+        feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow", "settled"]);
         assert!(host.checks.borrow().is_empty());
 
         // The window again, and nothing said in it.
@@ -810,6 +959,135 @@ mod tests {
         feed(&mut ears, &noise(0.5, 0.0005, 4), &host);
         feed(&mut ears, &tone(1.0, 0.05), &host);
         assert_eq!(*host.said.borrow(), ["began Wake", "dropped"]);
+    }
+
+    #[test]
+    fn a_breath_after_the_name_and_the_request_are_one_take() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James.".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        // The name, then a breath past the pause: handed on, and still open.
+        feed(&mut ears, &tone(0.25, 0.05), &host);
+        feed(&mut ears, &noise(1.55, 0.0005, 2), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        // The request, inside the join: the same take goes on, with no check.
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed"]);
+        feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed", "ended Wake"]);
+        feed(&mut ears, &noise(1.0, 0.0005, 4), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed", "ended Wake", "settled"]);
+        assert_eq!(host.checks.borrow().len(), 1);
+        // Handed on again, it is all of it: the preroll, the name, the breath, the request, the tail.
+        let takes = host.takes.borrow();
+        let secs = |i: usize| takes[i].0 as f32 / RATE as f32;
+        assert!((0.55..0.7).contains(&secs(0)), "{}", secs(0));
+        assert!((secs(0) + 3.0..secs(0) + 3.2).contains(&secs(1)), "{}", secs(1));
+    }
+
+    #[test]
+    fn a_pause_past_the_join_ends_the_take_and_a_click_in_it_does_not_go_on_with_it() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre o PR.".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(0.8, 0.0005, 2), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        // A click, shorter than an onset, and a hum over the room's floor but under the gate that
+        // starts an utterance.
+        feed(&mut ears, &tone(0.04, 0.05), &host);
+        feed(&mut ears, &noise(0.2, 0.0005, 3), &host);
+        feed(&mut ears, &tone(0.4, 0.0025), &host);
+        feed(&mut ears, &noise(0.2, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        feed(&mut ears, &noise(0.1, 0.0005, 4), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled"]);
+        // What is said next is an utterance of its own, checked for the name, its first syllable
+        // kept with what came before it.
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled", "began Wake"]);
+        assert_eq!(host.checks.borrow().len(), 2);
+        assert!(host.checks.borrow()[1] >= RATE as usize * 23 / 20, "{:?}", host.checks.borrow());
+
+        // Speech back just past the join is not the take going on either.
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "Então eu falei".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        host.now.borrow_mut().waiting = true;
+        feed(&mut ears, &noise(0.5, 0.0005, 2), &host);
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        feed(&mut ears, &noise(1.75, 0.0005, 3), &host);
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow", "settled"]);
+    }
+
+    #[test]
+    fn speech_back_as_short_as_an_onset_goes_on_with_the_take() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre o PR.".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 2), &host);
+        // A syllable no longer than an onset: the take goes on, and it is in it.
+        feed(&mut ears, &tone(0.08, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed"]);
+        feed(&mut ears, &noise(0.1, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed"], "a breath after it is no pause");
+        feed(&mut ears, &noise(0.7, 0.0005, 4), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "resumed", "ended Wake"]);
+        let takes = host.takes.borrow();
+        let longer = (takes[1].0 - takes[0].0) as f32 / RATE as f32;
+        assert!((1.05..1.12).contains(&longer), "{longer}");
+    }
+
+    #[test]
+    fn the_key_in_the_join_ends_the_take() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(0.8, 0.0005, 2), &host);
+        host.now.borrow_mut().blocked = true;
+        feed(&mut ears, &noise(0.02, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled"]);
+        // What is said into the key is its own take.
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 4), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled"]);
+        assert_eq!(host.checks.borrow().len(), 1);
+    }
+
+    #[test]
+    fn what_is_said_while_a_take_is_transcribed_needs_no_name() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "Então eu falei".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        host.now.borrow_mut().pending = true;
+        feed(&mut ears, &tone(0.1, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow"], "a take from its first syllable");
+        feed(&mut ears, &tone(1.0, 0.05), &host);
+        feed(&mut ears, &noise(1.8, 0.0005, 2), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow", "settled"]);
+        assert!(host.checks.borrow().is_empty());
+
+        // Over James, only his name; and nothing while the key is held.
+        host.said.borrow_mut().clear();
+        host.now.borrow_mut().speaking = true;
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
+        assert!(host.said.borrow().is_empty(), "{:?}", host.said.borrow());
+        assert_eq!(host.checks.borrow().len(), 1);
+        *host.now.borrow_mut() = Now { pending: true, blocked: true, ..Now::default() };
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 4), &host);
+        assert!(host.said.borrow().is_empty(), "{:?}", host.said.borrow());
+        assert_eq!(host.checks.borrow().len(), 1);
     }
 
     /// James's voice through the speakers: what the speaker was fed, and the microphone hearing

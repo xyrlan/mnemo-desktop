@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 #[cfg(test)]
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use whisper_rs::WhisperContext;
 
@@ -65,15 +67,21 @@ pub fn fetch(configured: Option<PathBuf>) -> Result<PathBuf, String> {
 /// What Jarvis heard in a take at 16 kHz mono: the text and the decoder's confidence, 0–1. An
 /// empty text is a take with nothing said. `prompt` is `prompt`'s.
 pub fn hear(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<(String, f32), String> {
-    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt))
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt, None))
+}
+
+/// `hear`, given up once `stop` is set: hands-free hears a take at its pause, and again whole when
+/// it goes on past it (`wake.rs`).
+pub fn hear_until(ctx: &WhisperContext, audio: &[f32], prompt: &str, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt, Some(stop.clone())))
 }
 
 /// Up to 16 threads, where dictation stops at 8: a Jarvis take is short and the maintainer is
 /// waiting on it (large-v3-turbo over the set: 9.4 s a take with 8, 6.9 s with 16, on an
 /// i9-13900KS).
-fn shape(prompt: &str) -> voice::Shape<'_> {
+fn shape(prompt: &str, stop: Option<Arc<AtomicBool>>) -> voice::Shape<'_> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
-    voice::Shape { prompt: Some(prompt), threads: Some(threads), head: None }
+    voice::Shape { prompt: Some(prompt), threads: Some(threads), head: None, stop }
 }
 
 /// Tokens of an utterance's start that `head` writes: "Fala, James, abre", enough to tell.
@@ -88,13 +96,15 @@ const HEAD_THREADS: usize = 4;
 /// James's name (`wake.rs`): a short decode of only what is there, at most `HEAD_TOKENS` tokens.
 pub fn head(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<String, String> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(HEAD_THREADS);
-    let shape = voice::Shape { prompt: Some(prompt), threads: Some(threads), head: Some(HEAD_TOKENS) };
+    let shape = voice::Shape { prompt: Some(prompt), threads: Some(threads), head: Some(HEAD_TOKENS), stop: None };
     voice::transcribe_scored(ctx, audio, Language::Pt, &shape).map(|(text, _)| text)
 }
 
 /// The words of the maintainer's requests that are not Portuguese, which whisper, told the take
 /// is Portuguese, otherwise spells as Portuguese ("o jeito do desktop" for "o git do desktop").
-const JARGON: &str = "James, git, commit, PR, CI, checks, issue, README, branch, merge, diff, log, VS Code";
+pub const JARGON: &str = "James, git, commit, PR, CI, checks, issue, README, branch, merge, diff, log, VS Code";
+/// What comes before the projects' names in the prompt.
+pub const PROJECTS: &str = "Projetos";
 /// Whisper keeps at most 224 tokens of prompt; this many characters stays well inside that.
 const PROMPT_CHARS: usize = 480;
 
@@ -104,7 +114,7 @@ pub fn prompt(projects: &[crate::jarvis::JarvisProject]) -> String {
     let mut out = format!("{JARGON}.");
     let names = projects.iter().flat_map(|p| std::iter::once(&p.name).chain(&p.aliases));
     for (i, name) in names.enumerate() {
-        let piece = format!("{}{name}", if i == 0 { " Projetos: " } else { ", " });
+        let piece = if i == 0 { format!(" {PROJECTS}: {name}") } else { format!(", {name}") };
         if out.chars().count() + piece.chars().count() + 1 > PROMPT_CHARS {
             break;
         }
