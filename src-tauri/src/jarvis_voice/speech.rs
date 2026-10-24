@@ -1,10 +1,11 @@
-//! Jarvis speaking (#506): Piper, local, with a PT-BR voice. What `jarvis_say` hands over waits
-//! in a queue; one thread turns it into audio through Piper, another plays it. While the
+//! Jarvis speaking (#506): what `jarvis_say` hands over waits in a queue; one thread turns it into
+//! audio, through Kokoro (`kokoro.rs`, #530) or, where Kokoro cannot run, Piper, and another plays
+//! it. While the
 //! push-to-talk key is held the player sends silence and holds its place, so nothing is said over
 //! the maintainer, and the rest follows once the key is up. `hush` drops the queue and what is
 //! still unplayed.
 //!
-//! Piper loads its voice in about 0.2 s, so a process is started ahead of time and waits on its
+//! Piper, local, with a PT-BR voice, loads it in about 0.2 s, so a process is started ahead of time and waits on its
 //! stdin with the voice loaded: a sentence then starts sounding after its own synthesis only.
 //! That process ends by itself when the app does, since its stdin closes.
 
@@ -89,7 +90,7 @@ pub fn voice_rate(config: &str) -> Result<u32, String> {
 
 /// Piper's release, unpacked once into `<dir>/piper-2023.11.14-2/` by Windows' own `tar`.
 #[cfg(windows)]
-fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
     let home = dir.join(PIPER_RELEASE);
     let exe = home.join("piper.exe");
     if exe.is_file() {
@@ -123,7 +124,7 @@ fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
 }
 
 #[cfg(not(windows))]
-fn piper_exe(_dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn piper_exe(_dir: &Path) -> Result<PathBuf, String> {
     // A bare name: started from the PATH, and said plainly when it is not there (`Piper::spawn`).
     let _ = PIPER_RELEASE;
     Ok(PathBuf::from("piper"))
@@ -187,8 +188,9 @@ impl Piper {
         spoken
     }
 
+    /// The synth the speaker runs, saying the text as `pronounce::heard` spells it.
     pub fn into_synth(mut self) -> Synth {
-        Box::new(move |text, sink| self.say(text, sink))
+        Box::new(move |text, sink| self.say(&super::pronounce::heard(text), sink))
     }
 }
 
