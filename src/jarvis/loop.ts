@@ -303,20 +303,26 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     reply(turn, `Mandei para o ${project}.`)
   }
 
-  const status = async (turn: Turn, args: Record<string, unknown>) => {
+  /** How the parent `parent_status` asks about is doing, in James's words, or the parents it could
+   *  be when it cannot tell which. */
+  const parentState = async (turn: Turn, args: Record<string, unknown>): Promise<string | ParentRef[]> => {
     const live = running()
     const named = projectsIn(turn.words, turn.projects)
     const given = knownProject(args.project, turn.projects)
     const want = named.length === 1 ? named[0] : given
     let pool = want ? live.filter((p) => p.project === want) : live
     if (!pool.length && live.length === 1 && !named.length) pool = live
-    if (!pool.length) return reply(turn, want ? `Nenhum parent rodando no ${want}.` : 'Nenhum parent rodando.')
-    if (pool.length > 1) return pickParent(turn, pool)
+    if (!pool.length) return want ? `Nenhum parent rodando no ${want}.` : 'Nenhum parent rodando.'
+    if (pool.length > 1) return pool
     const p = pool[0]
     turn.project = p.project
     const s = await parents.status(p.sessionId)
     const tail = s.question ? `: ${s.question}` : s.summary ? `: ${s.summary}` : '.'
-    reply(turn, `O parent do ${p.project} ${STATE_WORDS[s.state]}${tail}`)
+    return `O parent do ${p.project} ${STATE_WORDS[s.state]}${tail}`
+  }
+  const status = async (turn: Turn, args: Record<string, unknown>) => {
+    const state = await parentState(turn, args)
+    return typeof state === 'string' ? reply(turn, state) : pickParent(turn, state)
   }
 
   /** The call a low-confidence take was held on, for the yes that runs it. */
@@ -370,9 +376,16 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     turn.ranOn = undefined
     if (isRead(tool)) return read(turn, tool, args)
     if (tool === 'look_at_screen') return look(turn, String(args.question ?? ''))
+    // Claude reads a parent's state and goes on from it; the local model's request ends on it.
+    if (tool === 'parent_status' && turn.brain?.kind === 'claude') {
+      const state = await parentState(turn, args)
+      return typeof state === 'string' ? state : `Há ${state.length} parents rodando: ${state.map((p) => `o do ${p.project} (${quote(p.request, 40)})`).join(', ')}.`
+    }
     await route(turn, tool, args)
     return null
   }
+  /** A call whose output goes back to the brain, which then speaks again. */
+  const readsBack = (turn: Turn, tool: string) => isRead(tool) || tool === 'look_at_screen' || (tool === 'parent_status' && turn.brain?.kind === 'claude')
 
   /** The local model, over OpenAI-style messages and its own tool calls. */
   const runLocal = async (turn: Turn, start: Message[]) => {
@@ -392,14 +405,15 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   }
 
   /** Claude, a message at a time: it answers in words, or names a tool in a JSON line whose output
-   *  is the next message. Words written before a call are said at once, while the tool runs. */
+   *  is the next message. Words written before a read are said at once, while it runs; before a
+   *  call the request ends on (a question, a handoff, an app) they would only be said twice. */
   const runClaude = async (turn: Turn, system: string, first: string) => {
     let text = first
     for (let step = 0; step < MAX_STEPS; step++) {
       claudeTalking = true
       const answer = readReply(await client.brainAsk(system, text))
       if (!answer.tool) return reply(turn, answer.words || 'Não entendi.', true)
-      if (answer.words) {
+      if (answer.words && readsBack(turn, answer.tool)) {
         addLine(store, { who: 'james', text: answer.words }, now())
         say(turn, answer.words)
       }

@@ -26,6 +26,8 @@ describe("Claude's reply", () => {
 
   test('braces in strings, and missing or odd args', () => {
     expect(readReply('{"tool": "search", "args": {"project": "x", "query": "fn() { }"}}').args).toEqual({ project: 'x', query: 'fn() { }' })
+    // An unbalanced brace in a string, after an escaped quote, does not end the call.
+    expect(readReply('Vou buscar. {"tool": "search", "args": {"project": "x", "query": "a\\"}"}} depois').args).toEqual({ project: 'x', query: 'a"}' })
     expect(readReply('{"tool": "list_sessions"}')).toEqual({ words: '', tool: 'list_sessions', args: {} })
     expect(readReply('{"tool": "list_sessions", "args": [1]}').args).toEqual({})
   })

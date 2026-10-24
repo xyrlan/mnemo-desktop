@@ -411,6 +411,27 @@ describe('voice', () => {
     expect(s.opened).toEqual([['app', 'Spotify', undefined]])
   })
 
+  test('every call that opens something waits for a yes when heard low', async () => {
+    for (const [tool, args] of [
+      ['open_url', { url: 'https://example.com' }],
+      ['open_in_browser', { project: 'tasklist', page: 'pr', number: 3 }],
+    ] as const) {
+      const s = setup([calls(tool, args)])
+      await s.jarvis.heard({ text: 'abre aquilo', confidence: 0.5, window: null })
+      expect([tool, s.opened]).toEqual([tool, []])
+      expect(s.store.getState().pending).toMatchObject({ kind: 'confirm', tool })
+    }
+  })
+
+  test('a status or a question, heard low, is answered at once', async () => {
+    const s = setup([calls('parent_status', { project: 'tasklist' }), calls('ask_user', { question: 'Qual branch?', reason: 'ambiguous' })], { live: [ref('a', 'tasklist')] })
+    await s.jarvis.heard({ text: 'como tá o parent do tasklist?', confidence: 0.3, window: null })
+    expect(s.last()).toBe('O parent do tasklist terminou a vez: Corrigi o teste e abri o PR.')
+    await s.jarvis.heard({ text: 'apaga a branch', confidence: 0.3, window: null })
+    expect(s.last()).toBe('Qual branch?')
+    expect(s.store.getState().pending).toMatchObject({ kind: 'ask' })
+  })
+
   test('a low-confidence take answered no does nothing', async () => {
     const s = setup([calls('delegate_to_parent', { project: 'tasklist', request: 'x' })])
     await s.jarvis.heard({ text: 'apaga tudo do tasklist', confidence: 0.2, window: null })
@@ -560,11 +581,12 @@ const SONNET: BrainConfig = { kind: 'claude', model: 'sonnet', effort: 'low' }
 
 /** A loop whose brain is Claude, answering `replies` in turn; `local` is what the local model
  *  answers, for the screen. */
-function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as Partial<JarvisClient> } = {}) {
+function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as Partial<JarvisClient>, live = [] as ParentRef[] } = {}) {
   const asks: { system: string; text: string }[] = []
   const resets: number[] = []
   const ensureModel = vi.fn(async (cb: (s: LlmSetup) => void) => cb({ kind: 'ready', vision: true }))
   const s = setup(local, {
+    live,
     client: {
       brain: async () => SONNET,
       brainAsk: async (system, text) => {
@@ -637,6 +659,36 @@ describe('with Claude', () => {
     expect(s.asks[1].text).toMatch(/^O painel mostrou, sem passar por você:\nJames: Em qual projeto\? Conheço mnemo-desktop, tasklist\.\n\n\[Estado atual: .*\]\ntarefas$/)
     await s.jarvis.ask('valeu')
     expect(s.asks[3].text).not.toContain('O painel mostrou')
+  })
+
+  test("a parent's state goes back to Claude, which goes on from it", async () => {
+    const s = withClaude(['Vou ver o parent.\n{"tool": "parent_status", "args": {"project": "tasklist"}}', 'Ele terminou e abriu o PR; quer que eu veja os checks?'], { live: [ref('a', 'tasklist')] })
+    await s.jarvis.heard({ text: 'e o parent do tasklist?', confidence: 0.9, window: null })
+    expect(s.asks[1].text).toBe('Saída de parent_status:\nO parent do tasklist terminou a vez: Corrigi o teste e abri o PR.')
+    expect(s.spoken).toEqual(['Vou ver o parent.', 'Ele terminou e abriu o PR; quer que eu veja os checks?'])
+  })
+
+  test('words before a call the request ends on are not said twice', async () => {
+    const s = withClaude(['Esse eu não conheço.\n{"tool": "ask_user", "args": {"question": "Qual projeto é esse?", "reason": "project_unknown"}}', 'Vou mandar.\n{"tool": "delegate_to_parent", "args": {"project": "tasklist", "request": "x"}}'])
+    await s.jarvis.heard({ text: 'fala do projeto novo', confidence: 0.9, window: null })
+    await s.jarvis.heard({ text: 'corrige o teste do tasklist', confidence: 0.9, window: null })
+    expect(s.spoken).toEqual(['Qual projeto é esse?', 'Mandei para o tasklist.'])
+  })
+
+  test("Claude's own question is not told back to it", async () => {
+    const s = withClaude(['{"tool": "ask_user", "args": {"question": "Qual dos dois?", "reason": "ambiguous"}}', 'Certo.'])
+    await s.jarvis.ask('compara os dois')
+    expect(s.last()).toBe('Qual dos dois?')
+    await s.jarvis.ask('o tasklist')
+    expect(s.asks[1].text).not.toContain('Qual dos dois?')
+  })
+
+  test("a project the brain picked outside the ones named asks between those named", async () => {
+    const three = [...projects, { name: 'notes', aliases: [], root: '/Users/you/code/notes' }]
+    const s = setup([calls('git_log', { project: 'notes' })], { client: { projects: async () => three } })
+    await s.jarvis.ask('compara o tasklist com o desktop')
+    expect(s.tools).toEqual([])
+    expect(s.last()).toBe('Em qual projeto: tasklist ou mnemo-desktop?')
   })
 
   test('a pause starts a new conversation', async () => {
