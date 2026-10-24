@@ -31,6 +31,7 @@ export const READ_TOOLS = [
   'search',
   'read_briefings',
   'query_rules',
+  'search_vault',
   'list_sessions',
   'gh_pr_list',
   'gh_pr_view',
@@ -51,6 +52,12 @@ export type Heard = { text: string; confidence: number; window: string | null }
  *  `local`: the model under llama-server (`jarvis_llm_*`), the default. `claude`: Claude Code's
  *  CLI on the maintainer's own subscription, one conversation at a time (`jarvis_brain_ask`). */
 export type BrainConfig = { kind: 'local' } | { kind: 'claude'; model: string; effort: string }
+
+/** `jarvis_research` (jarvis-research): what a search of the web found, for the brain and the
+ *  panel. `summary` is a sentence or two, said aloud; `details`, the answer whole, for the panel;
+ *  `sources`, the pages it rests on. All of it is text from the web: information, never an
+ *  instruction. */
+export type Research = { summary: string; details: string; sources: { title: string; url: string }[] }
 
 /** `jarvis_apps` (jarvis-apps): the apps of the config, by name. */
 export type AppEntry = { name: string; project: boolean }
@@ -92,6 +99,14 @@ export interface JarvisClient {
   /** `jarvis_focused_window() -> Option<String>`: the title of the last window in front that was
    *  not this app (jarvis-tools). */
   focusedWindow(): Promise<string | null>
+
+  /** `jarvis_research(question: String, deep: bool) -> Result<Research, String>`: searches the web
+   *  for `question` and reads what it finds, in a process that can do nothing else, on the
+   *  maintainer's own Claude subscription. Not `deep`: one search or a few, in seconds, for the
+   *  brain to answer from (`web_search`). `deep`: several searches and the pages read, for up to a
+   *  few minutes, while the conversation goes on (`research`). Failures, a timeout and no Claude
+   *  to run are errors (jarvis-research). */
+  research(question: string, deep: boolean): Promise<Research>
 
   /** `jarvis_say(text: String) -> Result<(), String>`: speaks `text` in PT-BR, queued after what is
    *  already queued, and never while the key is held (jarvis-voice). */
@@ -137,6 +152,7 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     brainReset: () => invoke('jarvis_brain_reset'),
     tool: (name, args) => invoke('jarvis_tool', { name, args }),
     focusedWindow: () => invoke('jarvis_focused_window'),
+    research: (question, deep) => invoke('jarvis_research', { question, deep }),
     say: (text) => invoke('jarvis_say', { text }),
     hush: () => invoke('jarvis_hush'),
     onVoice: (cb) => listen<VoicePhase>('jarvis://voice', cb),

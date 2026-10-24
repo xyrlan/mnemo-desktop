@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 pub use window::focused_window;
 
 /// The read tools, as `READ_TOOLS` in `client.ts` names them.
-pub const READ_TOOLS: [&str; 15] = [
+pub const READ_TOOLS: [&str; 16] = [
     "git_status",
     "git_log",
     "git_diff",
@@ -34,6 +34,7 @@ pub const READ_TOOLS: [&str; 15] = [
     "search",
     "read_briefings",
     "query_rules",
+    "search_vault",
     "list_sessions",
     "gh_pr_list",
     "gh_pr_view",
@@ -74,6 +75,8 @@ pub fn run(name: &str, args: &Value, ctx: &Ctx) -> Result<String, String> {
         "search" => files::search(project(ctx, &a)?, a.need_str("query")?),
         "read_briefings" => mnemo::briefings(vault(ctx)?, project(ctx, &a)?, a.str("since")?, &ctx.today),
         "query_rules" => mnemo::rules(vault(ctx)?, maybe_project(ctx, &a)?, a.need_str("query")?),
+        // The vault piece of jarvis-research (#503) builds it.
+        "search_vault" => Err("search_vault is not built yet".to_string()),
         "list_sessions" => mnemo::sessions(&(ctx.sessions)()?, maybe_project(ctx, &a)?, &ctx.projects),
         "gh_pr_list" => match maybe_project(ctx, &a)? {
             Some(p) => gh::pr_list(ctx.gh, p),
