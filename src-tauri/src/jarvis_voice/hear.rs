@@ -73,7 +73,23 @@ pub fn hear(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<(String
 /// i9-13900KS).
 fn shape(prompt: &str) -> voice::Shape<'_> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
-    voice::Shape { prompt: Some(prompt), threads: Some(threads) }
+    voice::Shape { prompt: Some(prompt), threads: Some(threads), head: None }
+}
+
+/// Tokens of an utterance's start that `head` writes: "Fala, James, abre", enough to tell.
+const HEAD_TOKENS: i32 = 6;
+/// Threads of a check. Hands-free runs one or two per utterance it hears, all day, and whisper's
+/// threads spin while they wait on each other: measured with `MODEL` on an i9-13900KS over 1.2 s
+/// of speech (`wake_tests.rs`, `live_check_cost`), a check took 335 ms and 0.64 s of CPU on 2
+/// threads, 210 ms and 0.73 s on 4, 147 ms and 0.95 s on 8.
+const HEAD_THREADS: usize = 4;
+
+/// The first words of an utterance's start (16 kHz, a second or two), for whether it began with
+/// James's name (`wake.rs`): a short decode of only what is there, at most `HEAD_TOKENS` tokens.
+pub fn head(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<String, String> {
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(HEAD_THREADS);
+    let shape = voice::Shape { prompt: Some(prompt), threads: Some(threads), head: Some(HEAD_TOKENS) };
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape).map(|(text, _)| text)
 }
 
 /// The words of the maintainer's requests that are not Portuguese, which whisper, told the take
@@ -183,6 +199,7 @@ mod tests {
         let g = voice::geometric_mean(&[0.0, 1.5, 0.9]);
         assert!((0.0..=1.0).contains(&g), "{g}");
 
+        let _turn = voice::whisper_turn();
         let ctx = voice::load_context(&voice::test_model()).expect("load");
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice");
         let (text, confidence) = hear(&ctx, &wav(&fixtures.join("ola.wav")), JARGON).unwrap();
@@ -202,6 +219,21 @@ mod tests {
             .collect();
         let (_, noise) = hear(&ctx, &babble, JARGON).unwrap();
         assert!((0.0..=1.0).contains(&noise) && noise < confidence, "{noise} vs {confidence}");
+    }
+
+    #[test]
+    fn a_head_is_the_first_words_only() {
+        let _turn = voice::whisper_turn();
+        let ctx = voice::load_context(&voice::test_model()).expect("load");
+        let talk = wav(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice/wake-talk.wav"));
+        let start = &talk[..voice::WHISPER_RATE as usize * 4];
+        let (whole, _) = hear(&ctx, start, JARGON).unwrap();
+        let head = head(&ctx, start, JARGON).unwrap();
+        let words = |s: &str| s.split_whitespace().count();
+        // Enough for a greeting, the name and a word ("Fala, James, abre"), and no more: whisper
+        // ends the segment on the token that reaches `HEAD_TOKENS`, one past it.
+        assert!((5..=7).contains(&words(&head)), "{head:?}");
+        assert!(words(&whole) > words(&head), "{whole:?} vs {head:?}");
     }
 
     /// Accuracy and latency of Jarvis's candidate models over a set of spoken requests, for the

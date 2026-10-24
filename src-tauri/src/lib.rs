@@ -411,6 +411,10 @@ pub fn run() {
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
             jarvis_voice::jarvis_hush,
+
+            // -- jarvis wake commands --
+            // Hands-free listening on and off (src/jarvis_voice.rs, src/jarvis_voice/wake.rs).
+            jarvis_voice::jarvis_listen,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {

@@ -11,20 +11,32 @@
 //!   model of Jarvis's own (`hear.rs`); `voice.whisper` points at one already on disk.
 //! - **Speech out** is Piper with a PT-BR voice (`speech.rs`), queued, and silent while the key
 //!   is held; `voice.piper` points at a Piper of one's own, which is how it runs off Windows.
-//! - `jarvis://voice` says `idle`, `listening`, `transcribing` or `speaking` as it changes, the
-//!   first of those that is true, in that order of precedence from `listening` down.
-//!   `jarvis://voice-error` says what went wrong where no command was there to return it.
+//! - **Hands-free** (`wake.rs`): with the config's `voice.wake` set, or once `jarvis_listen` turns
+//!   it on, the microphone stays open and an utterance that begins with James's name is a take
+//!   (`via: wake`), without the name; after James has spoken, whatever is said within
+//!   `voice.wake.followMs` is one too (`via: follow`), and a goodbye there ends the conversation.
+//!   While James speaks only his name counts, and it hushes him. The key and dictation win over
+//!   it: while either listens, hands-free takes nothing.
+//! - `jarvis://voice` says `idle`, `listening`, `transcribing`, `speaking` or `waiting` (the
+//!   follow-up window) as it changes, the first of those that is true, in that order of precedence
+//!   from `listening` down. `jarvis://level` carries the microphone's and the speaker's loudness,
+//!   0–1, 20 times a second while it is not `idle`. `jarvis://voice-error` says what went wrong
+//!   where no command was there to return it.
 //!
-//! Files are fetched at launch once the key is on, else on first use, each checked against its
-//! sha256 (`files.rs`).
+//! Files are fetched at launch once the key or hands-free is on, else on first use, each checked
+//! against its sha256 (`files.rs`).
 
 mod files;
 mod hear;
 mod speech;
+mod wake;
+#[cfg(test)]
+mod wake_tests;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -47,16 +59,36 @@ pub enum VoicePhase {
     Listening,
     Transcribing,
     Speaking,
+    /// James has answered and the follow-up window is open.
+    Waiting,
 }
 
-/// `jarvis://heard`: a take, once the key is released.
+/// How a take began: the push-to-talk key, James's name said hands-free, or the follow-up window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HeardVia {
+    Key,
+    Wake,
+    Follow,
+}
+
+/// `jarvis://heard`: a take, once it ended.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Heard {
+    /// What was said; a hands-free take comes without the name it began with.
     pub text: String,
     /// The decoder's own confidence, 0–1.
     pub confidence: f32,
-    /// The title of the window in front when the key went down.
+    /// The title of the window in front when the take began.
     pub window: Option<String>,
+    pub via: HeardVia,
+}
+
+/// `jarvis://level`: how loud the microphone and the speaker are, each 0–1.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct VoiceLevel {
+    pub mic: f32,
+    pub out: f32,
 }
 
 /// What the voice tells the panel.
@@ -65,6 +97,7 @@ pub enum Event {
     Phase(VoicePhase),
     Heard(Heard),
     Error(String),
+    Level(VoiceLevel),
 }
 
 impl Event {
@@ -73,12 +106,16 @@ impl Event {
             Event::Phase(_) => "jarvis://voice",
             Event::Heard(_) => "jarvis://heard",
             Event::Error(_) => "jarvis://voice-error",
+            Event::Level(_) => "jarvis://level",
         }
     }
 }
 
 // ---------------------------------------------------------------------------------------
 // Config
+
+/// The follow-up window when the config's `voice.wake` names none.
+pub const DEFAULT_FOLLOW_MS: u64 = 8_000;
 
 /// The config's `voice` section.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -87,6 +124,9 @@ pub struct Config {
     pub key: Option<String>,
     pub piper: Option<PathBuf>,
     pub whisper: Option<PathBuf>,
+    /// `voice.wake`: hands-free on at launch, with this follow-up window in ms. None: off until
+    /// `jarvis_listen` turns it on.
+    pub wake: Option<u64>,
 }
 
 /// Reads `voice` from `jarvis.json`'s parsed `section`. `exists` is whether there is a
@@ -110,7 +150,17 @@ pub fn parse_config(section: &serde_json::Value, exists: bool, home: &Path) -> R
         }
         Some(other) => return Err(format!("voice.key in jarvis.json is {other}, not a key such as {DEFAULT_KEY:?}")),
     };
-    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")? })
+    let wake = match section.get("wake") {
+        _ if !exists => None,
+        None | Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => None,
+        Some(serde_json::Value::Bool(true)) => Some(DEFAULT_FOLLOW_MS),
+        Some(serde_json::Value::Object(o)) => match o.get("followMs") {
+            None | Some(serde_json::Value::Null) => Some(DEFAULT_FOLLOW_MS),
+            Some(ms) => Some(ms.as_u64().filter(|&ms| ms > 0).ok_or_else(|| format!("voice.wake.followMs in jarvis.json is {ms}, not a number of ms"))?),
+        },
+        Some(other) => return Err(format!("voice.wake in jarvis.json is {other}, not true or {{ \"followMs\": {DEFAULT_FOLLOW_MS} }}")),
+    };
+    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")?, wake })
 }
 
 /// `key` as the plugin reads it, refused when it is dictation's, however it is spelled.
@@ -148,6 +198,20 @@ pub trait Backend: Send + Sync + 'static {
     /// At launch, once the key is on, on its own thread: fetches what the first take and the
     /// first `say` would otherwise wait on. Nothing is loaded.
     fn prefetch(&self) {}
+    /// The first words of the start of an utterance (16 kHz, a second or two), for whether it
+    /// began with James's name: a short decode of only that audio (`wake.rs`). Nothing, while
+    /// what it needs is not loaded yet: it never waits for a download.
+    fn check(&self, _audio: &[f32]) -> Result<String, String> {
+        Ok(String::new())
+    }
+    /// As hands-free turns on, on its own thread: fetches and loads what its checks need.
+    fn load(&self) -> Result<(), String> {
+        Ok(())
+    }
+    /// Dictation is recording: hands-free takes nothing.
+    fn dictating(&self) -> bool {
+        false
+    }
     /// A speaker, started. Nothing plays while `held` is true.
     fn speaker(
         &self,
@@ -157,15 +221,18 @@ pub trait Backend: Send + Sync + 'static {
     ) -> Result<speech::Speaker, String>;
 }
 
-/// The phase, from what is going on: the key held comes first, then a take being transcribed,
-/// then speech.
-pub fn phase_of(held: bool, transcribing: bool, speaking: bool) -> VoicePhase {
-    if held {
+/// The phase, from what is going on: someone being listened to comes first (the key held, or a
+/// hands-free take being said), then a take being transcribed, then speech, then the follow-up
+/// window.
+pub fn phase_of(listening: bool, transcribing: bool, speaking: bool, waiting: bool) -> VoicePhase {
+    if listening {
         VoicePhase::Listening
     } else if transcribing {
         VoicePhase::Transcribing
     } else if speaking {
         VoicePhase::Speaking
+    } else if waiting {
+        VoicePhase::Waiting
     } else {
         VoicePhase::Idle
     }
@@ -174,27 +241,102 @@ pub fn phase_of(held: bool, transcribing: bool, speaking: bool) -> VoicePhase {
 #[derive(Default)]
 struct Flags {
     held: bool,
-    /// Takes released and not yet heard: a press can come before the last one is done.
+    /// A hands-free take is being said.
+    taking: bool,
+    /// Takes ended and not yet heard: a press can come before the last one is done.
     transcribing: usize,
     speaking: bool,
+    /// The follow-up window is open.
+    waiting: bool,
+    /// Hands-free listening is on: James falling silent opens the window.
+    hands_free: bool,
+    /// James was hushed: his falling silent opens no window.
+    hushed: bool,
     said: Option<VoicePhase>,
+    /// The levels' ticker runs.
+    ticking: bool,
 }
 
 type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
+/// How loud the microphone and the speaker are, as RMS in `f32` bits: written by whoever hears or
+/// plays, read by the levels' ticker.
+#[derive(Default)]
+struct Levels {
+    mic: AtomicU32,
+    /// The speaker's own (`speech::Speaker::level`), once it is set up.
+    out: OnceLock<Arc<AtomicU32>>,
+}
+
+impl Levels {
+    fn mic(&self) -> f32 {
+        f32::from_bits(self.mic.load(Ordering::Relaxed))
+    }
+
+    fn out(&self) -> f32 {
+        self.out.get().map_or(0.0, |o| f32::from_bits(o.load(Ordering::Relaxed)))
+    }
+}
+
+/// How often `jarvis://level` is sent while the phase is not `idle`.
+const LEVEL_EVERY: Duration = Duration::from_millis(50);
+
+/// An RMS as the orb's 0–1: -60 dB is 0, -10 dB is 1, linear in dB between.
+pub fn loudness(rms: f32) -> f32 {
+    if rms <= 0.0 {
+        return 0.0;
+    }
+    ((20.0 * rms.log10() + 60.0) / 50.0).clamp(0.0, 1.0)
+}
+
 struct Phases {
     flags: Mutex<Flags>,
     emit: Emit,
+    levels: Levels,
 }
 
 impl Phases {
-    fn update(&self, change: impl FnOnce(&mut Flags)) {
+    fn update(self: &Arc<Self>, change: impl FnOnce(&mut Flags)) {
         let mut f = lock(&self.flags);
         change(&mut f);
-        let now = phase_of(f.held, f.transcribing > 0, f.speaking);
+        let now = phase_of(f.held || f.taking, f.transcribing > 0, f.speaking, f.waiting);
         if f.said.unwrap_or(VoicePhase::Idle) != now {
             f.said = Some(now);
             (self.emit)(Event::Phase(now));
+        }
+        if now != VoicePhase::Idle && !f.ticking {
+            f.ticking = true;
+            let me = self.clone();
+            let spawned = std::thread::Builder::new().name("jarvis-levels".into()).spawn(move || me.tick());
+            if spawned.is_err() {
+                f.ticking = false;
+            }
+        }
+    }
+
+    /// Sends the levels, smoothed for an animation, until the phase is `idle`: the microphone's
+    /// while someone is listened to or the window is open, the speaker's while James speaks.
+    fn tick(self: Arc<Self>) {
+        let (mut mic, mut out) = (0.0f32, 0.0f32);
+        let smooth = |was: f32, now: f32| was + (now - was) * if now > was { 0.6 } else { 0.2 };
+        loop {
+            std::thread::sleep(LEVEL_EVERY);
+            let phase = {
+                let mut f = lock(&self.flags);
+                let phase = f.said.unwrap_or(VoicePhase::Idle);
+                if phase == VoicePhase::Idle {
+                    f.ticking = false;
+                    return;
+                }
+                phase
+            };
+            mic = smooth(mic, loudness(self.levels.mic()));
+            out = smooth(out, loudness(self.levels.out()));
+            let hearing = matches!(phase, VoicePhase::Listening | VoicePhase::Waiting);
+            (self.emit)(Event::Level(VoiceLevel {
+                mic: if hearing { mic } else { 0.0 },
+                out: if phase == VoicePhase::Speaking { out } else { 0.0 },
+            }));
         }
     }
 }
@@ -203,6 +345,11 @@ impl Phases {
 pub struct Take {
     recording: Recording,
     window: Option<String>,
+}
+
+/// The microphone hands-free listens to, open while it is on.
+struct Hands {
+    _recording: Recording,
 }
 
 pub struct JarvisVoice {
@@ -215,18 +362,43 @@ pub struct JarvisVoice {
     /// Counts `hush`es, so a `say` that was waiting for its speaker to be set up when one came
     /// says nothing.
     hushes: AtomicU64,
+    hands: Mutex<Option<Hands>>,
+    /// Bumped each time hands-free turns on or off: the ears of an earlier one say nothing.
+    era: AtomicU64,
+    follow_ms: u64,
+    /// Opens the microphone hands-free listens to.
+    mic: Box<dyn Fn() -> voice::Input + Send + Sync>,
+    /// The window in front when the hands-free take under way began.
+    front: Mutex<Option<String>>,
 }
 
 impl JarvisVoice {
     pub fn new(backend: Box<dyn Backend>, emit: Emit) -> Self {
         JarvisVoice {
             backend,
-            phases: Arc::new(Phases { flags: Mutex::default(), emit }),
+            phases: Arc::new(Phases { flags: Mutex::default(), emit, levels: Levels::default() }),
             take: Mutex::new(None),
             held: Arc::default(),
             speaker: Mutex::new(None),
             hushes: AtomicU64::new(0),
+            hands: Mutex::new(None),
+            era: AtomicU64::new(0),
+            follow_ms: DEFAULT_FOLLOW_MS,
+            mic: Box::new(|| Box::new(voice::default_input)),
+            front: Mutex::new(None),
         }
+    }
+
+    /// The follow-up window, `ms` long.
+    pub fn follow(mut self, ms: u64) -> Self {
+        self.follow_ms = ms;
+        self
+    }
+
+    /// Hands-free listens through what `mic` opens, the default microphone otherwise.
+    pub fn mic(mut self, mic: impl Fn() -> voice::Input + Send + Sync + 'static) -> Self {
+        self.mic = Box::new(mic);
+        self
     }
 
     fn emit(&self, e: Event) {
@@ -234,16 +406,21 @@ impl JarvisVoice {
     }
 
     /// The key went down: the microphone opens, and nothing is said until it is up. A second
-    /// press while one is held does nothing.
+    /// press while one is held does nothing. The window closes: the key's take is its own.
     pub fn press(self: &Arc<Self>, input: voice::Input, window: Option<String>) -> Result<(), String> {
         let mut take = lock(&self.take);
         if take.is_some() {
             return Ok(());
         }
         self.held.store(true, Ordering::SeqCst);
-        self.phases.update(|f| f.held = true);
+        self.phases.update(|f| {
+            f.held = true;
+            f.waiting = false;
+        });
         let me = self.clone();
-        let recording = Recording::start(input, move |why| me.emit(Event::Error(voice::lost_message("microphone", why))));
+        let phases = self.phases.clone();
+        let meter: voice::Tap = Arc::new(move |mono: &[f32]| phases.levels.mic.store(voice::rms(mono).to_bits(), Ordering::Relaxed));
+        let recording = Recording::tapped(input, meter, true, move |why| me.emit(Event::Error(voice::lost_message("microphone", why))));
         match recording {
             Ok(recording) => {
                 *take = Some(Take { recording, window });
@@ -280,7 +457,7 @@ impl JarvisVoice {
             Ok((text, confidence)) if !text.is_empty() => {
                 // The latency, never the words: the log is not Jarvis's conversation log.
                 log::info!("jarvis voice: heard {} words in {} ms, confidence {confidence:.2}", text.split_whitespace().count(), released.elapsed().as_millis());
-                self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window }))
+                self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window, via: HeardVia::Key }))
             }
             Ok(_) => log::info!("jarvis voice: nothing said in the take ({} ms)", released.elapsed().as_millis()),
             Err(e) => {
@@ -306,9 +483,14 @@ impl JarvisVoice {
         Ok(())
     }
 
-    /// Stops speaking and drops what is queued.
+    /// Stops speaking and drops what is queued. Hushed, James opens no window: whoever hushed him
+    /// has something else to say, typed or spoken.
     pub fn hush(&self) {
         self.hushes.fetch_add(1, Ordering::SeqCst);
+        self.phases.update(|f| {
+            f.hushed = true;
+            f.waiting = false;
+        });
         if let Ok(Some(s)) = self.speaker.try_lock().as_deref() {
             s.hush();
         }
@@ -323,14 +505,250 @@ impl JarvisVoice {
         let errors = self.phases.clone();
         let s = Arc::new(self.backend.speaker(
             self.held.clone(),
-            Arc::new(move |speaking| phases.update(|f| f.speaking = speaking)),
+            Arc::new(move |speaking| {
+                phases.update(|f| {
+                    // James fell silent by himself: the window opens.
+                    if f.speaking && !speaking && f.hands_free && !f.hushed && !f.held {
+                        f.waiting = true;
+                    }
+                    f.speaking = speaking;
+                    f.hushed = false;
+                })
+            }),
             Arc::new(move |e| {
                 log::warn!("jarvis voice: {e}");
                 (errors.emit)(Event::Error(e))
             }),
         )?);
+        let _ = self.phases.levels.out.set(s.level());
         *slot = Some(s.clone());
         Ok(s)
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Hands-free
+
+    /// Turns hands-free listening on or off for this run, opening or closing its microphone, or
+    /// with `None` only says whether it is on. Returns whether it is on.
+    pub fn listen(self: &Arc<Self>, enabled: Option<bool>) -> Result<bool, String> {
+        let mut hands = lock(&self.hands);
+        let Some(on) = enabled else {
+            return Ok(hands.is_some());
+        };
+        if on == hands.is_some() {
+            if !on {
+                // Off since its microphone was lost, perhaps (`lost`): turned off, it is not
+                // opened again.
+                self.era.fetch_add(1, Ordering::SeqCst);
+            }
+            return Ok(on);
+        }
+        let era = self.era.fetch_add(1, Ordering::SeqCst) + 1;
+        if !on {
+            // Dropped, the recording closes the microphone; the ears see the era change and go.
+            *hands = None;
+            self.phases.update(|f| {
+                f.hands_free = false;
+                f.taking = false;
+                f.waiting = false;
+            });
+            log::info!("jarvis voice: hands-free off");
+            return Ok(false);
+        }
+        let (tx, rx) = mpsc::channel::<(Vec<f32>, f32)>();
+        let phases = self.phases.clone();
+        let tap: voice::Tap = Arc::new(move |mono: &[f32]| {
+            phases.levels.mic.store(voice::rms(mono).to_bits(), Ordering::Relaxed);
+            // The speaker's level as this piece was heard: what of it is James (`wake.rs`).
+            let _ = tx.send((mono.to_vec(), phases.levels.out()));
+        });
+        let me = Arc::downgrade(self);
+        let recording = Recording::tapped((self.mic)(), tap, false, move |why| lost(&me, era, why))?;
+        let wired = Wired { voice: self.clone(), era };
+        let (rate, follow) = (recording.rate, self.follow_ms);
+        std::thread::Builder::new()
+            .name("jarvis-ears".into())
+            .spawn(move || {
+                let mut ears = wake::Ears::new(rate, follow);
+                while wired.live() {
+                    match rx.recv_timeout(Duration::from_millis(200)) {
+                        Ok((piece, out)) => ears.feed(&piece, out, &wired),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            })
+            .map_err(|e| format!("jarvis voice: {e}"))?;
+        *hands = Some(Hands { _recording: recording });
+        drop(hands);
+        self.phases.update(|f| f.hands_free = true);
+        log::info!("jarvis voice: hands-free on");
+        let me = self.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = me.backend.load() {
+                log::warn!("jarvis voice: hands-free: {e}");
+                me.emit(Event::Error(format!("hands-free listening cannot hear James's name until whisper's model is ready: {e}")));
+            }
+        });
+        Ok(true)
+    }
+
+    /// A hands-free take began.
+    fn began(&self, via: HeardVia) {
+        *lock(&self.front) = foreground_title();
+        let speaking = lock(&self.phases.flags).speaking;
+        // His name while he speaks: he stops, as for `jarvis_hush`, and listens.
+        if via == HeardVia::Wake && speaking {
+            self.hush();
+        }
+        self.phases.update(|f| {
+            f.taking = true;
+            f.waiting = false;
+        });
+    }
+
+    /// A hands-free take ended: transcribed on its own thread, while the ears listen on.
+    fn ended(self: &Arc<Self>, samples: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
+        self.phases.update(|f| {
+            f.taking = false;
+            f.transcribing += 1;
+        });
+        let window = lock(&self.front).take();
+        let me = self.clone();
+        std::thread::spawn(move || me.finish_hands_free(Captured { samples, rate }, via, lead, window));
+    }
+
+    fn finish_hands_free(&self, take: Captured, via: HeardVia, lead: usize, window: Option<String>) {
+        let ended = Instant::now();
+        self.backend.warm();
+        let heard = self.backend.hear(&take);
+        self.backend.done();
+        let ms = ended.elapsed().as_millis();
+        // What the take was, said as `update` lands it: the latency, never the words.
+        let said = |what: &str, change: &dyn Fn(&mut Flags)| {
+            log::info!("jarvis voice: a hands-free take ({via:?}) {what} in {ms} ms");
+            self.phases.update(|f| {
+                change(f);
+                f.transcribing = f.transcribing.saturating_sub(1);
+            });
+        };
+        let (text, confidence) = match heard {
+            Ok(heard) => heard,
+            Err(e) => {
+                log::warn!("jarvis voice: {e}");
+                self.emit(Event::Error(e));
+                return said("failed", &|_| {});
+            }
+        };
+        if wake::goodbye(&text) {
+            return said("said goodbye", &|f| f.waiting = false);
+        }
+        // Without the name it began with; in the window, without one it may have begun with.
+        let named = via == HeardVia::Wake || wake::call(&text).is_some();
+        let text = wake::request(&text, if via == HeardVia::Wake { lead } else { 0 });
+        if text.is_empty() || wake::no_speech(&text) {
+            // The name alone: the window opens for what comes next. Nothing in the window, or only
+            // what whisper writes for a cough or the keyboard: it closes, or a noisy room would
+            // hold it open, one take after another.
+            let what = if named { "had nothing after the name" } else { "was no speech" };
+            return said(what, &|f| f.waiting = named && f.hands_free && !f.held);
+        }
+        log::info!("jarvis voice: heard {} words hands-free, confidence {confidence:.2}", text.split_whitespace().count());
+        self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window, via }));
+        said("was heard", &|_| {});
+    }
+}
+
+/// After losing its microphone, hands-free opens the default one again this often, this many
+/// times: a headset unplugged, or a Bluetooth one gone, leaves the system a moment to settle on
+/// another.
+#[cfg(not(test))]
+const REOPEN_EVERY: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const REOPEN_EVERY: Duration = Duration::from_millis(20);
+const REOPEN_TRIES: u32 = 10;
+
+/// The microphone hands-free listens to went away: it listens through the default one again, or,
+/// when none opens within `REOPEN_TRIES`, says so and is off. Turned off or on again meanwhile, it
+/// is left as it was turned.
+fn lost(voice: &Weak<JarvisVoice>, era: u64, why: &str) {
+    let Some(voice) = voice.upgrade() else { return };
+    if voice.era.load(Ordering::SeqCst) != era {
+        return;
+    }
+    let why = why.trim().trim_end_matches('.').to_string();
+    // Off its own thread: this runs on the input's.
+    std::thread::spawn(move || {
+        if voice.era.load(Ordering::SeqCst) != era {
+            return;
+        }
+        let _ = voice.listen(Some(false));
+        log::warn!("jarvis voice: hands-free lost its microphone: {why}");
+        for _ in 0..REOPEN_TRIES {
+            let era = voice.era.load(Ordering::SeqCst);
+            std::thread::sleep(REOPEN_EVERY);
+            if voice.era.load(Ordering::SeqCst) != era {
+                return;
+            }
+            match voice.listen(Some(true)) {
+                Ok(_) => return log::info!("jarvis voice: hands-free listens again"),
+                Err(e) => log::info!("jarvis voice: hands-free: {e}"),
+            }
+        }
+        voice.emit(Event::Error(format!("the microphone stopped: {why}. Hands-free listening is off.")));
+    });
+}
+
+/// The voice, as the ears of one era of hands-free see it.
+struct Wired {
+    voice: Arc<JarvisVoice>,
+    era: u64,
+}
+
+impl Wired {
+    fn live(&self) -> bool {
+        self.voice.era.load(Ordering::SeqCst) == self.era
+    }
+}
+
+impl wake::Host for Wired {
+    fn now(&self) -> wake::Now {
+        let f = lock(&self.voice.phases.flags);
+        wake::Now { blocked: f.held || self.voice.backend.dictating(), speaking: f.speaking, waiting: f.waiting }
+    }
+
+    fn check(&self, audio: &[f32]) -> String {
+        let started = Instant::now();
+        let heard = self.voice.backend.check(audio);
+        log::debug!("jarvis voice: name check in {} ms", started.elapsed().as_millis());
+        heard.unwrap_or_else(|e| {
+            log::warn!("jarvis voice: name check: {e}");
+            String::new()
+        })
+    }
+
+    fn began(&self, via: HeardVia) {
+        if self.live() {
+            self.voice.began(via)
+        }
+    }
+
+    fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
+        if self.live() {
+            self.voice.ended(audio, rate, via, lead)
+        }
+    }
+
+    fn dropped(&self) {
+        if self.live() {
+            self.voice.phases.update(|f| f.taking = false);
+        }
+    }
+
+    fn closed(&self) {
+        if self.live() {
+            self.voice.phases.update(|f| f.waiting = false);
+        }
     }
 }
 
@@ -404,6 +822,30 @@ impl Backend for Local {
         hear::hear(&model, &audio, &prompt)
     }
 
+    fn check(&self, audio: &[f32]) -> Result<String, String> {
+        if voice::is_silent(audio) {
+            return Ok(String::new());
+        }
+        // Not `model()`: the first launch fetches 190 MB, and the ears do not wait on it.
+        let Some(model) = self.model.try_lock().ok().and_then(|m| m.clone()) else {
+            return Ok(String::new());
+        };
+        let prompt = lock(&self.prompt).clone();
+        app_full_speed(true);
+        let heard = hear::head(&model, audio, &prompt);
+        app_full_speed(false);
+        heard
+    }
+
+    fn load(&self) -> Result<(), String> {
+        *lock(&self.prompt) = hear::prompt(&crate::jarvis::projects());
+        self.model().map(drop)
+    }
+
+    fn dictating(&self) -> bool {
+        voice::dictating()
+    }
+
     fn done(&self) {
         app_full_speed(false);
     }
@@ -470,17 +912,31 @@ pub fn full_speed(process: std::os::windows::io::RawHandle) {
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
 
-/// This app at full speed while a take is under way (`true`), and back to Windows's own choice
-/// after it (`false`): the app is often minimized when the key is used.
-#[cfg(windows)]
+/// What wants the app at full speed now: takes under way, and name checks. Signed, so that a
+/// `false` that comes before its `true` (a take released before its warm-up ran) still balances.
+static FULL_SPEED: AtomicIsize = AtomicIsize::new(0);
+
+/// This app at full speed while a take or a name check is under way (`true`), and back to
+/// Windows's own choice once none is (`false`, one for each `true`): the app is often minimized
+/// when James is called. Hands-free listening for the name is left to Windows.
 fn app_full_speed(on: bool) {
+    let was = FULL_SPEED.fetch_add(if on { 1 } else { -1 }, Ordering::SeqCst);
+    match (on, was) {
+        (true, 0) => set_full_speed(true),
+        (false, 1) => set_full_speed(false),
+        _ => {}
+    }
+}
+
+#[cfg(windows)]
+fn set_full_speed(on: bool) {
     // SAFETY: the pseudo-handle of this process, always valid.
     let me = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() };
     throttling(me as _, if on { PROCESS_POWER_THROTTLING_EXECUTION_SPEED } else { 0 })
 }
 
 #[cfg(not(windows))]
-fn app_full_speed(_on: bool) {}
+fn set_full_speed(_on: bool) {}
 
 /// Takes the execution-speed throttling of `process` into its own hands (`control` set: never
 /// throttled), or gives it back to Windows (`control` 0).
@@ -510,7 +966,8 @@ fn throttling(process: std::os::windows::io::RawHandle, control: u32) {
 // ---------------------------------------------------------------------------------------
 // The app
 
-/// At launch: the voice's state, and the key once `jarvis.json` exists.
+/// At launch: the voice's state, the key once `jarvis.json` exists, and hands-free listening when
+/// its `voice.wake` is set.
 pub fn start(app: &AppHandle) {
     let emitter = app.clone();
     let emit: Emit = Arc::new(move |e: Event| {
@@ -519,26 +976,42 @@ pub fn start(app: &AppHandle) {
             Event::Phase(p) => emitter.emit(name, p),
             Event::Heard(h) => emitter.emit(name, h),
             Event::Error(m) => emitter.emit(name, m),
+            Event::Level(l) => emitter.emit(name, l),
         };
     });
     let exists = crate::jarvis::config_path().is_file();
     let config = crate::jarvis::section("voice").and_then(|s| parse_config(&s, exists, &crate::app_dir::home()));
     let config = config.unwrap_or_else(|e| {
-        log::warn!("jarvis voice: {e}; the push-to-talk key is off");
+        log::warn!("jarvis voice: {e}; the push-to-talk key and hands-free are off");
         Config::default()
     });
-    let key = config.key.clone();
-    let voice = Arc::new(JarvisVoice::new(Box::new(Local::new(config)), emit));
+    let (key, wake) = (config.key.clone(), config.wake);
+    let voice = Arc::new(JarvisVoice::new(Box::new(Local::new(config)), emit).follow(wake.unwrap_or(DEFAULT_FOLLOW_MS)));
     app.manage(voice.clone());
+    let mut prefetch = false;
     if let Some(key) = key {
         match listen(app, &key, voice.clone()) {
             Ok(()) => {
                 log::info!("jarvis voice: push-to-talk on {key}");
-                // The first take and the first reply would otherwise wait on some 280 MB.
-                std::thread::spawn(move || voice.prefetch());
+                prefetch = true;
             }
             Err(e) => log::warn!("jarvis voice: the push-to-talk key {key}: {e}"),
         }
+    }
+    if wake.is_some() {
+        prefetch = true;
+        let voice = voice.clone();
+        // Opening the microphone can take a moment; the launch does not wait on it.
+        std::thread::spawn(move || {
+            if let Err(e) = voice.listen(Some(true)) {
+                log::warn!("jarvis voice: hands-free: {e}");
+                voice.emit(Event::Error(format!("hands-free listening did not start: {e}")));
+            }
+        });
+    }
+    if prefetch {
+        // The first take and the first reply would otherwise wait on some 280 MB.
+        std::thread::spawn(move || voice.prefetch());
     }
 }
 
@@ -588,6 +1061,15 @@ pub fn jarvis_hush(voice: State<'_, Arc<JarvisVoice>>) {
     voice.hush();
 }
 
+/// `jarvis_listen(enabled: Option<bool>) -> Result<bool, String>`: turns hands-free listening on
+/// or off for this run, opening or closing its microphone, or with none only reads it. Resolves
+/// with whether it is on; a microphone that will not open is an error.
+#[tauri::command]
+pub async fn jarvis_listen(voice: State<'_, Arc<JarvisVoice>>, enabled: Option<bool>) -> Result<bool, String> {
+    let voice = voice.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || voice.listen(enabled)).await.map_err(|e| format!("jarvis voice: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,6 +1095,54 @@ mod tests {
     }
 
     #[test]
+    fn hands_free_is_on_at_launch_only_when_the_config_says_so() {
+        let home = Path::new("/home/you");
+        let wake = |v: serde_json::Value, exists: bool| parse_config(&v, exists, home).map(|c| c.wake);
+        assert_eq!(wake(json!({}), true), Ok(None));
+        assert_eq!(wake(json!({ "wake": null }), true), Ok(None));
+        assert_eq!(wake(json!({ "wake": false }), true), Ok(None));
+        assert_eq!(wake(json!({ "wake": true }), true), Ok(Some(DEFAULT_FOLLOW_MS)));
+        assert_eq!(wake(json!({ "wake": {} }), true), Ok(Some(8_000)));
+        assert_eq!(wake(json!({ "wake": { "followMs": 5000 } }), true), Ok(Some(5_000)));
+        assert_eq!(wake(json!({ "wake": true }), false), Ok(None));
+        assert!(wake(json!({ "wake": { "followMs": "8s" } }), true).is_err());
+        assert!(wake(json!({ "wake": { "followMs": 0 } }), true).is_err());
+        assert!(wake(json!({ "wake": "yes" }), true).is_err());
+        // docs/jarvis.example.json's own.
+        assert_eq!(wake(json!({ "key": DEFAULT_KEY, "wake": { "followMs": 8000 }, "orb": true }), true), Ok(Some(8_000)));
+    }
+
+    #[test]
+    fn the_name_alone_opens_the_window_and_noise_in_it_closes_it() {
+        for (heard, via, waiting) in [
+            ("James.", HeardVia::Wake, true),
+            ("", HeardVia::Wake, true),
+            ("James.", HeardVia::Follow, true),
+            ("", HeardVia::Follow, false),
+            ("Legendas pela comunidade Amara.org", HeardVia::Follow, false),
+        ] {
+            let (voice, events, _) = fake_voice(Ok((heard.into(), 0.9)));
+            voice.phases.update(|f| f.hands_free = true);
+            voice.ended(vec![0.1; 4_800], 16_000, via, 1);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while lock(&voice.phases.flags).transcribing > 0 {
+                assert!(std::time::Instant::now() < deadline, "{heard:?}");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(lock(&voice.phases.flags).waiting, waiting, "{heard:?} via {via:?}");
+            assert!(!said(&events).iter().any(|e| matches!(e, Event::Heard(_))), "{heard:?} is no request");
+        }
+    }
+
+    #[test]
+    fn loudness_is_zero_to_one_in_decibels() {
+        assert_eq!(loudness(0.0), 0.0);
+        assert_eq!(loudness(0.001), 0.0);
+        assert!((loudness(0.01) - 0.4).abs() < 1e-4);
+        assert_eq!(loudness(0.5), 1.0);
+    }
+
+    #[test]
     fn the_key_routes_to_jarvis_never_to_dictation() {
         // Dictation's toggle, however it is spelled, is refused as Jarvis's key.
         for k in ["CommandOrControl+E", "CmdOrCtrl+E", "CmdOrControl+e"] {
@@ -627,7 +1157,7 @@ mod tests {
         voice.press(mic(), Some("app.rs - mnemo-desktop - Visual Studio Code".into())).unwrap();
         let take = voice.release().expect("a take");
         voice.finish(take);
-        let got = lock(&events).clone();
+        let got = said(&events);
         assert_eq!(
             got,
             vec![
@@ -637,6 +1167,7 @@ mod tests {
                     text: "abre o PR 42".into(),
                     confidence: 0.8,
                     window: Some("app.rs - mnemo-desktop - Visual Studio Code".into()),
+                    via: HeardVia::Key,
                 }),
                 Event::Phase(VoicePhase::Idle),
             ]
@@ -653,7 +1184,7 @@ mod tests {
         voice.finish(voice.release().unwrap());
         assert!(voice.release().is_none());
         assert_eq!(
-            lock(&events).clone(),
+            said(&events),
             vec![Event::Phase(VoicePhase::Listening), Event::Phase(VoicePhase::Transcribing), Event::Phase(VoicePhase::Idle)]
         );
     }
@@ -663,14 +1194,42 @@ mod tests {
         let (voice, events, _) = fake_voice(Err("whisper: out of memory".into()));
         voice.press(mic(), None).unwrap();
         voice.finish(voice.release().unwrap());
-        assert_eq!(lock(&events)[2], Event::Error("whisper: out of memory".into()));
-        assert_eq!(lock(&events).last(), Some(&Event::Phase(VoicePhase::Idle)));
+        assert_eq!(said(&events)[2], Event::Error("whisper: out of memory".into()));
+        assert_eq!(said(&events).last(), Some(&Event::Phase(VoicePhase::Idle)));
 
         let (voice, events, _) = fake_voice(Ok(("x".into(), 1.0)));
         let err = voice.press(Box::new(|_| Err("no microphone found".into())), None).unwrap_err();
         assert_eq!(err, "no microphone found");
         assert!(voice.release().is_none());
-        assert_eq!(lock(&events).clone(), vec![Event::Phase(VoicePhase::Listening), Event::Phase(VoicePhase::Idle)]);
+        assert_eq!(said(&events), vec![Event::Phase(VoicePhase::Listening), Event::Phase(VoicePhase::Idle)]);
+    }
+
+    #[test]
+    fn hushed_he_opens_no_window_and_the_key_closes_one() {
+        let (voice, events, _) = fake_voice(Ok(("e o CI?".into(), 0.9)));
+        voice.phases.update(|f| f.hands_free = true);
+        let until = |what: &str, done: &dyn Fn(&[Event]) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !done(&said(&events)) {
+                assert!(std::time::Instant::now() < deadline, "{what}: {:?}", said(&events));
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        // Enough to say that the hush comes while he speaks.
+        for _ in 0..50 {
+            voice.say("o PR passou").unwrap();
+        }
+        until("speaking", &|e| e.contains(&Event::Phase(VoicePhase::Speaking)));
+        voice.hush();
+        until("idle", &|e| e.last() == Some(&Event::Phase(VoicePhase::Idle)));
+        assert!(!said(&events).contains(&Event::Phase(VoicePhase::Waiting)));
+
+        // Falling silent by himself he opens it, and the key closes it: its take is its own.
+        voice.say("o PR passou").unwrap();
+        until("the window", &|e| e.last() == Some(&Event::Phase(VoicePhase::Waiting)));
+        voice.press(mic(), None).unwrap();
+        voice.finish(voice.release().unwrap());
+        assert_eq!(said(&events).last(), Some(&Event::Phase(VoicePhase::Idle)));
     }
 
     #[test]
@@ -680,11 +1239,11 @@ mod tests {
         voice.say("o PR passou").unwrap();
         std::thread::sleep(Duration::from_millis(150));
         assert!(lock(&played).is_empty(), "spoke over the maintainer");
-        assert_eq!(lock(&events).clone(), vec![Event::Phase(VoicePhase::Listening)], "listening outranks speaking");
+        assert_eq!(said(&events), vec![Event::Phase(VoicePhase::Listening)], "listening outranks speaking");
         let take = voice.release().unwrap();
         voice.finish(take);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while lock(&played).len() < 100 || lock(&events).last() != Some(&Event::Phase(VoicePhase::Idle)) {
+        while lock(&played).len() < 100 || said(&events).last() != Some(&Event::Phase(VoicePhase::Idle)) {
             assert!(std::time::Instant::now() < deadline, "{:?}", lock(&events));
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -703,13 +1262,16 @@ mod tests {
 
     #[test]
     fn phases_rank_listening_then_transcribing_then_speaking() {
-        assert_eq!(phase_of(true, true, true), VoicePhase::Listening);
-        assert_eq!(phase_of(false, true, true), VoicePhase::Transcribing);
-        assert_eq!(phase_of(false, false, true), VoicePhase::Speaking);
-        assert_eq!(phase_of(false, false, false), VoicePhase::Idle);
+        assert_eq!(phase_of(true, true, true, true), VoicePhase::Listening);
+        assert_eq!(phase_of(false, true, true, true), VoicePhase::Transcribing);
+        assert_eq!(phase_of(false, false, true, true), VoicePhase::Speaking);
+        assert_eq!(phase_of(false, false, false, true), VoicePhase::Waiting);
+        assert_eq!(phase_of(false, false, false, false), VoicePhase::Idle);
+        assert_eq!(serde_json::to_value(VoicePhase::Waiting).unwrap(), json!("waiting"));
         assert_eq!(serde_json::to_value(VoicePhase::Transcribing).unwrap(), json!("transcribing"));
-        let h = Heard { text: "oi".into(), confidence: 0.5, window: None };
-        assert_eq!(serde_json::to_value(h).unwrap(), json!({ "text": "oi", "confidence": 0.5, "window": null }));
+        let h = Heard { text: "oi".into(), confidence: 0.5, window: None, via: HeardVia::Follow };
+        assert_eq!(serde_json::to_value(h).unwrap(), json!({ "text": "oi", "confidence": 0.5, "window": null, "via": "follow" }));
+        assert_eq!(serde_json::to_value(VoiceLevel { mic: 0.5, out: 0.0 }).unwrap(), json!({ "mic": 0.5, "out": 0.0 }));
     }
 
     #[test]
@@ -795,6 +1357,11 @@ mod tests {
             let (heard, confidence) = local.hear(&Captured { samples, rate: files.rate }).unwrap();
             eprintln!("release → heard: {} ms, {confidence:.2}: {heard} ({text})", t.elapsed().as_millis());
         }
+    }
+
+    /// What the voice said, its levels left out: they come on their own clock.
+    fn said(events: &Mutex<Vec<Event>>) -> Vec<Event> {
+        lock(events).iter().filter(|e| !matches!(e, Event::Level(_))).cloned().collect()
     }
 
     /// A microphone that gives a tenth of a second of tone.
