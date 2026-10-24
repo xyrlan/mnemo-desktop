@@ -20,7 +20,7 @@ This wave makes the brain swappable and fixes the loop. Read #503 first: James r
 closed tool set, never runs a shell, and every write goes to a parent that never skips its
 permission prompts. None of that changes.
 
-**The seam is on main; build on it, do not move it.**
+**The seam is PR #522, stacked on #521, and your branch starts on it; build on it, do not move it.**
 - `src/jarvis/client.ts` holds three new commands and their docs:
   - `BrainConfig`;
   - `jarvis_brain() -> Result<BrainConfig, String>`;
@@ -59,7 +59,9 @@ permission prompts. None of that changes.
 - No real transcript, request or log row in a fixture. James's log is private.
 - Every process starts through `proc.rs`, and the home dir is read through `app_dir::home()`.
 - Build in your own target, `CARGO_TARGET_DIR=$HOME/.cache/mnemo-desktop-jarvis-<piece>`.
-- Before your first push, `git fetch && git rebase origin/main`.
+- Before your first push, `git fetch`, then rebase: onto `origin/main` once #522 has landed there,
+  onto `origin/jarvis/brain` until then. Your PR targets main; until #522 lands, its diff shows the
+  seam's commits too.
 - A piece that changes what is on screen shows it through an isolated dev instance, and its PR
   says what was seen.
 - Never stop the maintainer's own llama-server on port 8091.
