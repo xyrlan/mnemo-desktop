@@ -396,16 +396,14 @@ struct Word {
     idf: f32,
 }
 
-/// One index, of the vault last searched.
-static INDEX: Mutex<Option<(PathBuf, Index)>> = Mutex::new(None);
+/// One index per vault: the app has one, and each test its own, so that a search of one vault
+/// never starts another's index over.
+static INDEX: Mutex<Option<HashMap<PathBuf, Index>>> = Mutex::new(None);
 
 /// Runs `f` over the index of `root`, brought up to date first.
 fn with_index<T>(root: &Path, f: impl FnOnce(&Index) -> T) -> T {
     let mut slot = INDEX.lock().unwrap_or_else(|e| e.into_inner());
-    if slot.as_ref().is_none_or(|(r, _)| r != root) {
-        *slot = Some((root.to_path_buf(), Index::default()));
-    }
-    let (_, index) = slot.as_mut().expect("set above");
+    let index = slot.get_or_insert_with(HashMap::new).entry(root.to_path_buf()).or_default();
     index.refresh(root);
     f(index)
 }

@@ -42,6 +42,8 @@ The separator inside a field is quoted.
 ",
     );
     note(&v.join("shared").join("_inbox").join("feedback").join("staged.md"), "Staged", "feedback", "Not yet a live note", "migration embeddings token crash");
+    note(&v.join("shared").join("_inbox").join("staged-flat.md"), "Staged flat", "feedback", "Not yet a live note either", "migration embeddings token crash");
+    note(&v.join("shared").join("_archive").join("expired.md"), "Expired", "feedback", "A rule mnemo retired", "migration embeddings token crash");
     note(&v.join("bots").join("tmp-probe").join("memory").join("noise.md"), "noise", "project", "A probe's page", "migration embeddings token crash");
     write(&v.join("shared").join("README.md"), "migration embeddings token crash");
     v
@@ -108,7 +110,58 @@ Quote every field"), "{other}");
 fn the_inbox_noise_bots_and_index_files_are_not_searched() {
     let v = vault();
     let got = names(&v, None, "migration embeddings token crash");
-    assert!(!got.iter().any(|g| g == "staged" || g == "noise" || g == "README"), "{got:?}");
+    assert!(!got.iter().any(|g| ["staged", "staged-flat", "expired", "noise", "README"].contains(&g.as_str())), "{got:?}");
+}
+
+#[test]
+fn a_rare_word_counts_for_more_than_a_common_one() {
+    let v = crate::testutil::temp_dir("jarvis-vault-idf");
+    for i in 0..6 {
+        briefing(&v, "app", &format!("comm{i:04}-x"), "2026-10-01", "Routine work on the release.", "- release notes\n- release checks");
+    }
+    briefing(&v, "app", "aaaa0000-x", "2026-10-02", "Release, release and the release again.", "- release release release");
+    briefing(&v, "app", "zzzz0000-x", "2026-09-01", "Found the deadlock.", "- The deadlock was in the pool");
+    let got = names(&v, None, "release deadlock");
+    assert_eq!(got[0], "zzzz0000-x", "{got:?}");
+}
+
+#[test]
+fn a_short_page_with_a_word_beats_a_long_one_with_it_as_often() {
+    let v = crate::testutil::temp_dir("jarvis-vault-length");
+    briefing(&v, "app", "short000-x", "2026-10-01", "A short session.", "- Tuned the cache.");
+    let filler = (0..300).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+    // Later, so that it would come first were the two scored alike.
+    briefing(&v, "app", "long0000-x", "2026-10-02", "A long session.", &format!("- Tuned the cache.\n- {filler}"));
+    assert_eq!(names(&v, None, "cache"), ["short000-x", "long0000-x"]);
+}
+
+#[test]
+fn a_word_in_the_tldr_counts_for_more_than_one_in_the_body() {
+    let v = crate::testutil::temp_dir("jarvis-vault-tldr");
+    briefing(&v, "app", "tldr0000-x", "2026-10-01", "Upgraded webpack.", "- small steps");
+    briefing(&v, "app", "body0000-x", "2026-10-02", "Small steps.", "- upgraded webpack");
+    assert_eq!(names(&v, None, "webpack"), ["tldr0000-x", "body0000-x"]);
+}
+
+#[test]
+fn a_word_finds_the_longer_ones_it_starts_after_its_own() {
+    let v = crate::testutil::temp_dir("jarvis-vault-prefix");
+    briefing(&v, "app", "exact000-x", "2026-10-01", "The config moved.", "- config");
+    briefing(&v, "app", "longer00-x", "2026-10-02", "The configurator moved.", "- configurator");
+    briefing(&v, "app", "errors00-x", "2026-10-03", "Logged the errors.", "- errors");
+    assert_eq!(names(&v, None, "config"), ["exact000-x", "longer00-x"]);
+    assert_eq!(names(&v, None, "erro"), ["errors00-x"], "a stem shorter than every page's word");
+}
+
+#[test]
+fn a_note_and_its_copy_in_shared_are_one_hit() {
+    let v = crate::testutil::temp_dir("jarvis-vault-copy");
+    note(&v.join("bots").join("app").join("memory").join("retry-policy.md"), "retry-policy", "project", "Retries back off", "Every retry doubles its wait.");
+    write(
+        &v.join("shared").join("project").join("app__retry-policy.md"),
+        "---\nname: retry-policy\ndescription: Retries back off\ntype: project\nagent: app\n---\n\nEvery retry doubles its wait.\n",
+    );
+    assert_eq!(names(&v, None, "retry wait").len(), 1);
 }
 
 #[test]
