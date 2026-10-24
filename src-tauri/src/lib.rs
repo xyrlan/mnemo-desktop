@@ -132,6 +132,9 @@ pub mod jarvis;
 // -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
 pub mod jarvis_llm;
 
+// -- jarvis brain (src/jarvis_brain.rs): who answers James, and Claude when that is Claude --
+pub mod jarvis_brain;
+
 // -- jarvis tools (src/jarvis_tools.rs): the read tools and the window in front (#505) --
 pub mod jarvis_tools;
 
@@ -216,6 +219,9 @@ pub fn run() {
         // -- jarvis llm --
         // Its llama-server stops when the app exits (src/jarvis_llm.rs).
         .plugin(jarvis_llm::plugin())
+        // -- jarvis brain --
+        // Its `claude` stops when the app exits (src/jarvis_brain.rs).
+        .plugin(jarvis_brain::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -376,6 +382,11 @@ pub fn run() {
             jarvis_llm::jarvis_llm_ensure,
             jarvis_llm::jarvis_llm_chat,
             jarvis_llm::jarvis_llm_stop,
+
+            // -- jarvis brain commands --
+            jarvis_brain::jarvis_brain,
+            jarvis_brain::jarvis_brain_ask,
+            jarvis_brain::jarvis_brain_reset,
 
             // -- jarvis tools commands --
             jarvis_tools::jarvis_tool,
