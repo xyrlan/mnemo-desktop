@@ -3,6 +3,7 @@ import type { AppEntry, BrainConfig, Heard, JarvisClient, JarvisProject, ReadToo
 import { READ_TOOLS } from './client'
 import { inferProject, knownProject, projectsIn } from './infer'
 import type { Host, ParentRef, ParentsApi, ParentStatus } from './parent'
+import { conversation as transcript, followUp } from './parent'
 import { firstCall, foldChunks, recoverBareCall, requestBody, systemPrompt, TOOLS, type Message, type ToolCall } from './routing'
 import { forSpeech } from './speech'
 import { addLine, foldParent, foldResearch, parentLine, unended, type JarvisStore, type ResearchRun } from './store'
@@ -24,6 +25,8 @@ export const CONFIDENT = 0.6
 export const CANCEL_MS = 2 * 60_000
 /** What a handoff's gathered part holds at most; the parent reads the rest itself. */
 export const GATHERED_MAX = 6000
+/** What a handoff's conversation part holds at most: the latest exchanges. */
+export const CONVERSATION_MAX = 4000
 const PER_READ = 2000
 /** How long James must have been neither speaking nor listening, nor working on a request, before
  *  he tells a research's outcome aloud: a key pressed right after his last words is a request
@@ -72,6 +75,8 @@ export type Jarvis = {
 }
 
 const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim()
+/** Words only, for telling whether two texts say the same. */
+const plain = (s: string) => fold(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const isCancel = (t: string) => /^(cancela|cancelar|cancele|esquece|para tudo)\b/.test(fold(t)) && fold(t).split(/\s+/).length <= 4
 /** The maintainer's ways of saying no and yes, accents off ("não é isso", "é esse mesmo"). A bare
  *  "e" is not "é": it starts a new question ("e o CI?"). */
@@ -456,6 +461,13 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   const pickParent = (turn: Turn, pool: ParentRef[]) =>
     ask(turn, `Qual parent: ${pool.map((p) => `o do ${p.project} (${quote(p.request, 40)})`).join(' ou ')}?`)
 
+  /** What a parent is handed besides the words: the brain's task, unless it only says the words
+   *  again, and the exchanges that led to them. */
+  const brief = (turn: Turn, args: Record<string, unknown>) => {
+    const task = typeof args.request === 'string' ? args.request.trim() : ''
+    return { task: task && plain(task) !== plain(turn.verbatim) ? task : '', conversation: transcript(exchanges.slice(-REMEMBERED), CONVERSATION_MAX) }
+  }
+
   const delegate = async (turn: Turn, args: Record<string, unknown>) => {
     // Ending a parent is never another parent's task, whichever tool the brain named.
     if (isStopParent(turn.verbatim)) return stop(turn, args)
@@ -473,7 +485,7 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
       if (pool.length === 1) {
         const p = pool[0]
         turn.project = p.project
-        await parents.send(p.sessionId, turn.verbatim)
+        await parents.send(p.sessionId, followUp({ ...brief(turn, args), words: turn.verbatim }))
         set({ recent: { project: p.project, at: now() } })
         return reply(turn, `Mandei para o parent do ${p.project}.`)
       }
@@ -482,7 +494,7 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     if (!project) return
     const root = turn.projects.find((p) => p.name === project)!.root
     note(`abrindo um parent no ${project}`)
-    const ref = await parents.open({ project, root, request: turn.verbatim, gathered: gathered(turn), host: hostIn(turn.verbatim) })
+    const ref = await parents.open({ project, root, request: turn.verbatim, ...brief(turn, args), gathered: gathered(turn), host: hostIn(turn.verbatim) })
     set((s) => ({ delegated: { sessionId: ref.sessionId, project, at: now() }, parents: foldParent(s.parents, { kind: 'opened', parent: ref }) }))
     reply(turn, `Mandei para o ${project}.`)
   }
