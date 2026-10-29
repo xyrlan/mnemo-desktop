@@ -1219,3 +1219,190 @@ fn live_conversation_on_speakers() {
     assert_eq!(lock(&events).iter().rev().find_map(|(_, e)| if let Event::Phase(p) = e { Some(*p) } else { None }), Some(VoicePhase::Idle));
     voice.listen(Some(false)).unwrap();
 }
+
+// ---------------------------------------------------------------------------------------
+// The trace of a live run: what `live_latency` plays, with every name check and every event of
+// the ears written down, so that a request lost in a run can be read back step by step.
+
+type Trace = Arc<Mutex<Vec<(Instant, String)>>>;
+
+fn note(trace: &Trace, line: String) {
+    lock(trace).push((Instant::now(), line));
+}
+
+/// The voice's own `Wired`, writing down what the ears tell it and ask of it, with `Now` then.
+struct Traced {
+    wired: Wired,
+    trace: Trace,
+}
+
+impl wake::Host for Traced {
+    fn now(&self) -> wake::Now {
+        self.wired.now()
+    }
+    fn check(&self, audio: &[f32]) -> String {
+        let text = self.wired.check(audio);
+        note(&self.trace, format!("check {:.2} s -> {text:?}, a call: {:?}; {:?}", audio.len() as f32 / RATE as f32, wake::call(&text).is_some(), self.wired.now()));
+        text
+    }
+    fn began(&self, via: HeardVia) {
+        note(&self.trace, format!("began {via:?}; {:?}", self.wired.now()));
+        self.wired.began(via)
+    }
+    fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
+        note(&self.trace, format!("ended {via:?}, {:.2} s, lead {lead}; {:?}", audio.len() as f32 / rate as f32, self.wired.now()));
+        self.wired.ended(audio, rate, via, lead)
+    }
+    fn resumed(&self) {
+        note(&self.trace, format!("resumed; {:?}", self.wired.now()));
+        self.wired.resumed()
+    }
+    fn settled(&self) {
+        note(&self.trace, format!("settled; {:?}", self.wired.now()));
+        self.wired.settled()
+    }
+    fn dropped(&self) {
+        note(&self.trace, format!("dropped; {:?}", self.wired.now()));
+        self.wired.dropped()
+    }
+    fn closed(&self) {
+        note(&self.trace, format!("closed; {:?}", self.wired.now()));
+        self.wired.closed()
+    }
+}
+
+/// Jarvis's voice on this machine in `room`, writing down each whole take's transcript.
+struct TracedRoom {
+    local: Local,
+    room: Arc<Room>,
+    trace: Trace,
+}
+
+impl Backend for TracedRoom {
+    fn warm(&self) {
+        self.local.warm()
+    }
+    fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
+        let heard = self.local.hear(take);
+        note(&self.trace, format!("transcript of {:.2} s: {heard:?}", take.samples.len() as f32 / take.rate as f32));
+        heard
+    }
+    fn done(&self) {
+        self.local.done()
+    }
+    fn check(&self, audio: &[f32]) -> Result<String, String> {
+        self.local.check(audio)
+    }
+    fn load(&self) -> Result<(), String> {
+        self.local.load()
+    }
+    fn speaker(
+        &self,
+        held: Arc<AtomicBool>,
+        on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
+        on_error: Arc<dyn Fn(String) + Send + Sync>,
+    ) -> Result<speech::Speaker, String> {
+        let files = speech::ensure_files(None)?;
+        let piper = speech::Piper::new(&files);
+        speech::Speaker::start(files.rate, held, piper.into_synth(), self.room.speaker(), on_speaking, on_error)
+    }
+}
+
+/// `live_latency`'s requests and breaths in real time, `MNEMO_JARVIS_RUNS` runs of it (3 unless
+/// set), a fresh voice each run: each case's takes, and the trace of each case that lost its
+/// request whole. What a check decoded is in the trace: this is the test's output, never the
+/// app's log.
+/// `cargo test --release --lib jarvis_voice::wake_tests::live_trace -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn live_trace() {
+    const BREATHS: [f32; 3] = [0.8, 1.0, 1.2];
+    let runs: usize = std::env::var("MNEMO_JARVIS_RUNS").ok().and_then(|r| r.parse().ok()).unwrap_or(3);
+    let files = speech::ensure_files(None).unwrap();
+    let mut piper = speech::Piper::new(&files);
+    let said: Vec<(&str, Vec<f32>)> = REQUESTS.iter().map(|t| (*t, piper_say(&mut piper, files.rate, t))).collect();
+    let mut cases = vec![];
+    for (text, audio) in &said {
+        cases.push((format!("{text:?} as said"), audio.clone()));
+    }
+    for (text, audio) in &said {
+        let at = pauses(audio);
+        let middle = at.iter().copied().skip(1).min_by_key(|&p| p.abs_diff((at[0] + audio.len()) / 2));
+        for (where_, cut) in [("after the name", Some(at[0])), ("in the middle", middle)] {
+            let Some(cut) = cut else { continue };
+            for breath in BREATHS {
+                let mut with = audio[..cut].to_vec();
+                with.extend(vec![0.0; (breath * RATE as f32) as usize]);
+                with.extend_from_slice(&audio[cut..]);
+                cases.push((format!("{text:?}, {breath:.1} s {where_}"), with));
+            }
+        }
+    }
+    let mut lost_all = 0;
+    for run in 1..=runs {
+        let room = Arc::new(Room::default());
+        let trace: Trace = Arc::default();
+        let backend = TracedRoom { local: Local::new(Config::default()), room: room.clone(), trace: trace.clone() };
+        backend.load().unwrap();
+        let into = trace.clone();
+        let emit: Emit = Arc::new(move |e| {
+            if !matches!(e, Event::Level(_)) {
+                note(&into, format!("event {e:?}"));
+            }
+        });
+        let voice = Arc::new(live_cue(JarvisVoice::new(Box::new(backend), emit)));
+        // Hands-free as `listen` runs it, its ears on `Traced`.
+        voice.phases.update(|f| f.hands_free = true);
+        let (tx, rx) = mpsc::channel::<(Vec<f32>, f32)>();
+        let phases = voice.phases.clone();
+        let tap: voice::Tap = Arc::new(move |mono: &[f32]| {
+            phases.levels.mic.store(voice::rms(mono).to_bits(), Ordering::Relaxed);
+            let _ = tx.send((mono.to_vec(), phases.levels.out()));
+        });
+        let recording = voice::Recording::tapped(room.mic(), tap, false, true, |_| {}).unwrap();
+        let host = Traced { wired: Wired { voice: voice.clone(), era: voice.era.load(Ordering::SeqCst) }, trace: trace.clone() };
+        let rate = recording.rate;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let ears = std::thread::spawn(move || {
+            let mut ears = wake::Ears::new(rate, DEFAULT_FOLLOW_MS);
+            while !stopped.load(Ordering::SeqCst) {
+                if let Ok((piece, out)) = rx.recv_timeout(Duration::from_millis(200)) {
+                    ears.feed(&piece, out, &host);
+                }
+            }
+        });
+        std::thread::sleep(Duration::from_secs(2));
+
+        let (mut lost, mut split, mut one) = (0, 0, 0);
+        for (name, audio) in &cases {
+            note(&trace, format!("--- {name}"));
+            let began = room.say(audio);
+            std::thread::sleep(Duration::from_secs_f32(audio.len() as f32 / RATE as f32 + 3.0));
+            let takes = lock(&trace).iter().filter(|(t, l)| *t >= began && l.starts_with("event Heard")).count();
+            match takes {
+                0 => {
+                    lost += 1;
+                    eprintln!("run {run} LOST {name}");
+                    let start = began - Duration::from_secs(6);
+                    for (t, l) in lock(&trace).iter().filter(|(t, _)| *t >= start) {
+                        eprintln!("    {:+6} ms {l}", ms_between(began, *t));
+                    }
+                }
+                1 => one += 1,
+                _ => split += 1,
+            }
+        }
+        eprintln!("run {run}: {} cases, {one} one take, {split} in two or more, {lost} lost", cases.len());
+        lost_all += lost;
+        stop.store(true, Ordering::SeqCst);
+        ears.join().unwrap();
+        drop(recording);
+    }
+    eprintln!("{runs} runs: {lost_all} lost");
+}
+
+/// The cue on, as the app has it.
+fn live_cue(v: JarvisVoice) -> JarvisVoice {
+    v.cue(true)
+}
