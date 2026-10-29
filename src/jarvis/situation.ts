@@ -248,7 +248,6 @@ export function createSituation(client: JarvisClient, now: () => number): Situat
   })
 
   const ciRead = async (project: string, pr: Pr): Promise<Pr> => {
-    if (pr.draft) return pr
     try {
       return { ...pr, ci: ciOf(await client.tool('gh_pr_checks', { project, number: pr.number })) }
     } catch (e) {

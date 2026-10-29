@@ -248,6 +248,8 @@ describe('createSituation', () => {
     await vi.waitFor(() => expect(first).toBe(false))
     f.state.data.list_sessions = '## notes\n- child 0c0c0c0c "Arrumar o build": blocked'
     const b = s.refresh()
+    // A second read that did not wait would be done by now, and the first would land over it.
+    await new Promise((r) => setTimeout(r, 0))
     release()
     await Promise.all([a, b])
     expect(s.text()).toContain('filho "Arrumar o build" bloqueado')
@@ -270,6 +272,17 @@ describe('createSituation', () => {
     stop()
     await vi.advanceTimersByTimeAsync(GITHUB_EVERY_MS * 3)
     expect([count('list_sessions'), count('gh_pr_list')]).toEqual([1 + GITHUB_EVERY_MS / SESSIONS_EVERY_MS, 6])
+  })
+
+  test('a tick while GitHub is still being read does not stack another read', async () => {
+    vi.useFakeTimers()
+    const f = fake()
+    let asked = 0
+    f.client.projects = () => (asked++, new Promise<JarvisProject[]>(() => {}))
+    const stop = createSituation(f.client, () => 1).start()
+    await vi.advanceTimersByTimeAsync(GITHUB_EVERY_MS * 3)
+    expect(asked).toBe(1)
+    stop()
   })
 
   test('nothing running and nothing open is said, not left empty', () => {
