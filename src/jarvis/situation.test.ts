@@ -212,6 +212,21 @@ describe('createSituation', () => {
     expect(lines[lines.length - 1]).toMatch(/^\(\+\d+ linhas fora deste resumo\)$/)
   })
 
+  test('a few long lines are held to the characters too, not only to the lines', () => {
+    const repos = new Map(
+      Array.from({ length: 6 }, (_, i) => {
+        const name = `p${i}`
+        const children = Array.from({ length: 12 }, (_, j) => ({ id: `${i}${j}`, what: '', state: `estado-${j}-longo`, needs: '' }))
+        return [name, { name, parents: [], children }] as const
+      }),
+    )
+    const text = compose({ ok: true, byRepo: repos }, [])
+    const lines = text.split('\n')
+    expect(lines.length).toBeLessThan(MAX_LINES)
+    expect(text.length).toBeLessThanOrEqual(MAX_CHARS)
+    expect(lines[lines.length - 1]).toMatch(/^\(\+\d+ linhas? fora deste resumo\)$/)
+  })
+
   test('a refresh asked while one runs resolves with what was read after it was asked', async () => {
     const f = fake()
     let release = () => {}
@@ -229,6 +244,8 @@ describe('createSituation', () => {
     }
     const s = createSituation(f.client, () => 1)
     const a = s.refresh()
+    // The first read has the old sessions in hand, and waits.
+    await vi.waitFor(() => expect(first).toBe(false))
     f.state.data.list_sessions = '## notes\n- child 0c0c0c0c "Arrumar o build": blocked'
     const b = s.refresh()
     release()

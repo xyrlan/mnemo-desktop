@@ -233,8 +233,9 @@ export function createSituation(client: JarvisClient, now: () => number): Situat
   const update = () => {
     const next = compose(sessions, github)
     if (next === text) return
+    // Once read, `compose` is never '' again: `at` stays null only until then.
     text = next
-    at = next ? now() : null
+    at = now()
   }
 
   const readSessions = serial(async () => {
