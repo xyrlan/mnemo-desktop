@@ -1,8 +1,10 @@
 import { PAUSE_MS } from './brain'
 import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup, Research } from './client'
-import { CANCEL_MS, createJarvis, FROM_WEB, isBareOpen, isFollowUp, isNo, isResearchStatus, isStopParent, isYes, LOOKING, MAX_STEPS } from './loop'
+import { CANCEL_MS, createJarvis, FROM_WEB, isBareOpen, isFollowUp, isNo, isResearchStatus, isStopParent, isYes, LOOKING, MAX_STEPS, type LoopDeps } from './loop'
 import { followUp, type OpenParent, type ParentEvent, type ParentRef, type ParentsApi, type ParentStatus } from './parent'
 import type { Message } from './routing'
+import type { Situation } from './situation'
+import type { Speaker } from './speaker'
 import { createJarvisStore, type JarvisStore } from './store'
 
 const projects: JarvisProject[] = [
@@ -39,6 +41,12 @@ function fakeClient(replies: Chunk[][], over: Partial<JarvisClient> = {}) {
     stopModel: async () => {},
     brain: async () => ({ kind: 'local' }),
     brainAsk: async () => Promise.reject(new Error('Claude was not expected to be asked')),
+    // Claude's reply in one piece, as the seam's Rust side sends it.
+    brainStream: async (system, text, on) => {
+      const reply = await client.brainAsk(system, text)
+      on(reply)
+      return reply
+    },
     brainReset: async () => {},
     tool: async (name, args) => {
       tools.push([name, args])
@@ -97,7 +105,17 @@ const ref = (sessionId: string, project: string, request = 'corrige o login'): P
 })
 
 let t = 1_000_000
-function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true, wait = async (_ms: number) => {} } = {}) {
+/** A situation that knows nothing, as the seam's. */
+const QUIET: Situation = { text: () => '', changedAt: () => null, refresh: async () => {}, start: () => () => {} }
+/** A speaker that says nothing early, as the seam's: these tests pin what the loop says. */
+const WHOLE = (): Speaker => ({ push: () => {}, rest: (words) => words })
+
+type Extras = Pick<LoopDeps, 'situation' | 'speaker' | 'report'>
+
+function setup(
+  replies: Chunk[][],
+  { live = [] as ParentRef[], client: over = {} as Partial<JarvisClient>, focused = true, wait = async (_ms: number) => {}, situation = QUIET, speaker = WHOLE, report }: { live?: ParentRef[]; client?: Partial<JarvisClient>; focused?: boolean; wait?: (ms: number) => Promise<void> } & Extras = {},
+) {
   const c = fakeClient(replies, over)
   const p = fakeParents(live)
   const store: JarvisStore = createJarvisStore()
@@ -110,6 +128,9 @@ function setup(replies: Chunk[][], { live = [] as ParentRef[], client: over = {}
     focused: () => focused,
     notify: async (title, body) => void notes.push([title, body]),
     wait,
+    situation,
+    speaker,
+    ...(report && { report }),
   })
   const lines = () => store.getState().lines.map((l) => `${l.who}: ${l.text}`)
   const last = () => store.getState().lines.at(-1)?.text
@@ -729,11 +750,12 @@ const SONNET: BrainConfig = { kind: 'claude', model: 'sonnet', effort: 'low' }
 
 /** A loop whose brain is Claude, answering `replies` in turn; `local` is what the local model
  *  answers, for the screen. */
-function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as Partial<JarvisClient>, live = [] as ParentRef[] } = {}) {
+function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as Partial<JarvisClient>, live = [] as ParentRef[], ...extras }: { local?: Chunk[][]; client?: Partial<JarvisClient>; live?: ParentRef[] } & Extras = {}) {
   const asks: { system: string; text: string }[] = []
   const resets: number[] = []
   const ensureModel = vi.fn(async (cb: (s: LlmSetup) => void) => cb({ kind: 'ready', vision: true }))
   const s = setup(local, {
+    ...extras,
     live,
     client: {
       brain: async () => SONNET,
@@ -1235,5 +1257,117 @@ describe('the web', () => {
     const s = setup([])
     await s.jarvis.openUrl('https://github.com/tauri-apps/tauri/releases')
     expect(s.opened).toEqual([['url', 'https://github.com/tauri-apps/tauri/releases']])
+  })
+})
+
+describe('conversing (jarvis-converse)', () => {
+  /** A speaker that says each piece at once: what is left once the reply is whole is nothing. */
+  const EAGER = (say: (sentence: string) => void): Speaker => ({ push: (piece) => say(piece), rest: () => '' })
+  const streaming = (pieces: string[]): Partial<JarvisClient> => ({
+    brainStream: async (_system, _text, on) => {
+      pieces.forEach(on)
+      return pieces.join('')
+    },
+  })
+
+  test('what a speaker said while Claude wrote is not said again once the reply is whole', async () => {
+    const s = withClaude([], { client: streaming(['Tem dois PRs abertos. ', 'O 524 está verde.']), speaker: EAGER })
+    await s.jarvis.heard({ text: 'como estão os PRs?', confidence: 0.9, window: null })
+    expect(s.spoken).toEqual(['Tem dois PRs abertos.', 'O 524 está verde.'])
+    // The panel and the conversation have the reply whole.
+    expect(s.last()).toBe('Tem dois PRs abertos. O 524 está verde.')
+  })
+
+  test('before a read, only what the speaker left is said while it runs', async () => {
+    const replies = [['Vou olhar. ', '{"tool": "git_status", "args": {"project": "tasklist"}}'], ['Está limpo.']]
+    const s = withClaude([], {
+      speaker: (say) => ({ push: (piece) => !piece.startsWith('{') && say(piece), rest: () => '' }),
+      client: {
+        brainStream: async (_system, _text, on) => {
+          const pieces = replies.shift()!
+          pieces.forEach(on)
+          return pieces.join('')
+        },
+      },
+    })
+    await s.jarvis.heard({ text: 'como está o git do tasklist?', confidence: 0.9, window: null })
+    expect(s.tools).toEqual([['git_status', { project: 'tasklist' }]])
+    expect(s.spoken).toEqual(['Vou olhar.', 'Está limpo.'])
+  })
+
+  test('a newer request hushes what is left of the one being answered', async () => {
+    let finish: (reply: string) => void = () => {}
+    let started = false
+    const s = withClaude(['São dez da manhã.'], {
+      client: {
+        brainStream: async (system, text, on) => {
+          if (text.endsWith('conta uma história longa')) {
+            started = true
+            const reply = await new Promise<string>((r) => (finish = r))
+            on(reply)
+            return reply
+          }
+          const reply = await s.client.brainAsk(system, text)
+          on(reply)
+          return reply
+        },
+      },
+    })
+    const first = s.jarvis.heard({ text: 'conta uma história longa', confidence: 0.9, window: null })
+    await vi.waitFor(() => expect(started).toBe(true))
+    const second = s.jarvis.heard({ text: 'na verdade, que horas são?', confidence: 0.9, window: null })
+    finish('Era uma vez um parent que nunca terminava.')
+    await Promise.all([first, second])
+    // The old answer is in the panel, never aloud; the new one is said.
+    expect(s.lines()).toContain('james: Era uma vez um parent que nunca terminava.')
+    expect(s.spoken).toEqual(['São dez da manhã.'])
+  })
+
+  test('the panorama goes with a request when it changed since Claude last saw it', async () => {
+    let state = { text: 'tasklist: 2 PRs abertos, CI verde.', at: 100 }
+    let started = 0
+    let stopped = 0
+    const situation: Situation = {
+      text: () => state.text,
+      changedAt: () => state.at,
+      refresh: async () => {},
+      start: () => (started++, () => void stopped++),
+    }
+    const s = withClaude(['Dois PRs no tasklist.', 'Nada mudou.', 'Agora são três.', 'Três.'], { situation })
+    expect(started).toBe(1)
+    await s.jarvis.ask('como tá tudo?')
+    await s.jarvis.ask('e agora?')
+    state = { text: 'tasklist: 3 PRs abertos.', at: 200 }
+    await s.jarvis.ask('e agora?')
+    expect(s.asks.map((a) => a.text.includes('[Panorama dos projetos'))).toEqual([true, false, true])
+    expect(s.asks[0].text).toContain('tasklist: 2 PRs abertos, CI verde.')
+    expect(s.asks[2].text).toContain('tasklist: 3 PRs abertos.')
+    // A new conversation sees it again.
+    t += PAUSE_MS
+    await s.jarvis.ask('como tá tudo?')
+    expect(s.asks[3].text).toContain('tasklist: 3 PRs abertos.')
+    s.jarvis.dispose()
+    expect(stopped).toBe(1)
+  })
+
+  test('what a parent asked for aloud says is told to Claude, and said aloud at a quiet moment', async () => {
+    const report = (e: ParentEvent) => (e.kind === 'turn-ended' ? { say: `O parent do ${e.parent.project} terminou: ${e.summary}`, tell: `Parent do ${e.parent.project}: ${e.summary}` } : null)
+    const s = withClaude(['{"tool": "delegate_to_parent", "args": {"project": "tasklist", "request": "Corrigir o teste de upload no Windows."}}', 'Ele corrigiu o teste.'], { report })
+    await s.jarvis.heard({ text: 'manda um parent corrigir o teste de upload do tasklist', confidence: 0.9, window: null })
+    const p = s.parents.opened.length && s.parents.api.running()[0]
+    expect(p).toBeTruthy()
+    s.parents.emit({ kind: 'turn-ended', parent: p as ParentRef, summary: 'Corrigi o teste e abri o PR 12.' })
+    await vi.waitFor(() => expect(s.spoken).toContain('O parent do tasklist terminou: Corrigi o teste e abri o PR 12.'))
+    await s.jarvis.ask('e aí, como ficou?')
+    expect(s.asks[1].text).toContain('Parent do tasklist: Corrigi o teste e abri o PR 12.')
+  })
+
+  test('a parent asked for by typing is told to Claude and never said aloud', async () => {
+    const report = (e: ParentEvent) => (e.kind === 'turn-ended' ? { say: 'Terminou.', tell: `Parent do ${e.parent.project}: ${e.summary}` } : null)
+    const s = withClaude(['{"tool": "delegate_to_parent", "args": {"project": "tasklist", "request": "Corrigir o teste de upload no Windows."}}'], { report })
+    await s.jarvis.ask('manda um parent corrigir o teste de upload do tasklist')
+    s.parents.emit({ kind: 'turn-ended', parent: s.parents.api.running()[0], summary: 'Pronto.' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(s.spoken).toEqual([])
   })
 })

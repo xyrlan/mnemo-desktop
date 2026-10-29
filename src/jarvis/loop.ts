@@ -2,9 +2,11 @@ import { claudeSystem, moment, PAUSE_MS, readReply, REMEMBERED, toolText, turnTe
 import type { AppEntry, BrainConfig, Heard, JarvisClient, JarvisProject, ReadTool, Research } from './client'
 import { READ_TOOLS } from './client'
 import { inferProject, knownProject, projectsIn } from './infer'
-import type { Host, ParentRef, ParentsApi, ParentStatus } from './parent'
-import { conversation as transcript, followUp } from './parent'
+import type { Host, ParentEvent, ParentRef, ParentReport, ParentsApi, ParentStatus } from './parent'
+import { conversation as transcript, followUp, reportOf } from './parent'
 import { firstCall, foldChunks, recoverBareCall, requestBody, systemPrompt, TOOLS, type Message, type ToolCall } from './routing'
+import { createSituation, type Situation } from './situation'
+import { createSpeaker, type Speaker } from './speaker'
 import { forSpeech } from './speech'
 import { addLine, foldParent, foldResearch, parentLine, unended, type JarvisStore, type ResearchRun } from './store'
 
@@ -58,6 +60,12 @@ export type LoopDeps = {
   notify?: (title: string, body: string) => Promise<void>
   /** Resolves after `ms`; a test's at once. */
   wait?: (ms: number) => Promise<void>
+  /** The projects' state for the brain; `createSituation` over `client` when absent. */
+  situation?: Situation
+  /** A speaker for one brain message, saying through `say`; `createSpeaker` when absent. */
+  speaker?: (say: (sentence: string) => void) => Speaker
+  /** What a parent's event is said and told as; `reportOf` when absent. */
+  report?: (e: ParentEvent) => ParentReport | null
 }
 
 export type Jarvis = {
@@ -167,9 +175,22 @@ type Turn = {
   confirmed: boolean
   /** What James ended the request on, for the conversation's memory. */
   final: string | null
+  /** A newer request came while this one ran: nothing more of it is said aloud. */
+  hushed: boolean
 }
 
-export function createJarvis({ client, parents, store, now = Date.now, focused = () => true, notify, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }: LoopDeps): Jarvis {
+export function createJarvis({
+  client,
+  parents,
+  store,
+  now = Date.now,
+  focused = () => true,
+  notify,
+  wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  situation = createSituation(client, now),
+  speaker: speakerFor = createSpeaker,
+  report: reportFor = reportOf,
+}: LoopDeps): Jarvis {
   const set = store.setState
   const note = (text: string, error?: true) => addLine(store, error ? { who: 'note', text, error } : { who: 'note', text }, now())
 
@@ -222,26 +243,31 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   let exchanges: Exchange[] = []
   let unseen: string[] = []
   let claudeTalking = false
+  /** When the panorama Claude last saw changed (`Situation.changedAt`); null: it saw none yet. */
+  let panoramaAt: number | null = null
   const tell = (line: string) => void (unseen = [...unseen, line].slice(-2 * REMEMBERED))
   const pause = async () => {
     exchanges = []
     unseen = []
+    panoramaAt = null
     if (!claudeTalking) return
     claudeTalking = false
     await client.brainReset().catch(() => {})
   }
 
   // ---- answering ----
-  /** Aloud, for a heard request: the reply as `forSpeech` has it. The panel and the log keep it whole. */
+  /** Aloud, for a heard request no newer one has hushed: the reply as `forSpeech` has it. The panel
+   *  and the log keep it whole. */
   const say = (turn: Turn, text: string) => {
-    if (turn.req.spoken) void client.say(forSpeech(text)).catch(() => {})
+    if (turn.req.spoken && !turn.hushed && text.trim()) void client.say(forSpeech(text)).catch(() => {})
   }
-  /** What James ends a request on. `own`: Claude's words, which its conversation already holds. */
-  const reply = (turn: Turn, text: string, own = false) => {
+  /** What James ends a request on. `own`: Claude's words, which its conversation already holds.
+   *  `aloud`: what of it is still to be said, when a speaker said the rest while Claude wrote. */
+  const reply = (turn: Turn, text: string, own = false, aloud = text) => {
     addLine(store, { who: 'james', text }, now())
     turn.final = text
     if (!own) tell(`James: ${text}`)
-    say(turn, text)
+    say(turn, aloud)
     void client
       .log({
         at: new Date(now()).toISOString(),
@@ -458,6 +484,8 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     const live = parents.running()
     return [...live, ...shown.filter((r) => !live.some((l) => l.sessionId === r.sessionId))]
   }
+  /** The parents asked for aloud: what they say is said aloud too (`report`). */
+  const askedAloud = new Set<string>()
   const pickParent = (turn: Turn, pool: ParentRef[]) =>
     ask(turn, `Qual parent: ${pool.map((p) => `o do ${p.project} (${quote(p.request, 40)})`).join(' ou ')}?`)
 
@@ -486,6 +514,7 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
         const p = pool[0]
         turn.project = p.project
         await parents.send(p.sessionId, followUp({ ...brief(turn, args), words: turn.verbatim }))
+        if (turn.req.spoken) askedAloud.add(p.sessionId)
         set({ recent: { project: p.project, at: now() } })
         return reply(turn, `Mandei para o parent do ${p.project}.`)
       }
@@ -495,6 +524,7 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     const root = turn.projects.find((p) => p.name === project)!.root
     note(`abrindo um parent no ${project}`)
     const ref = await parents.open({ project, root, request: turn.verbatim, ...brief(turn, args), gathered: gathered(turn), host: hostIn(turn.verbatim) })
+    if (turn.req.spoken) askedAloud.add(ref.sessionId)
     set((s) => ({ delegated: { sessionId: ref.sessionId, project, at: now() }, parents: foldParent(s.parents, { kind: 'opened', parent: ref }) }))
     reply(turn, `Mandei para o ${project}.`)
   }
@@ -606,13 +636,13 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   /** A call whose output goes back to the brain, which then speaks again. */
   const readsBack = (turn: Turn, tool: string) =>
     isRead(tool) || tool === 'look_at_screen' || tool === 'web_search' || (tool === 'parent_status' && turn.brain?.kind === 'claude')
-  /** Said at once, while a call runs: the brain's words, or before a search of the web, which
-   *  takes seconds, James's own when it wrote none. */
-  const meanwhile = (turn: Turn, tool: string, words: string) => {
+  /** Said at once, while a call runs: the brain's words (`aloud`, what of them a speaker has not
+   *  said yet), or before a search of the web, which takes seconds, James's own when it wrote none. */
+  const meanwhile = (turn: Turn, tool: string, words: string, aloud = words) => {
     const text = words || (tool === 'web_search' ? LOOKING : '')
     if (!text) return
     addLine(store, { who: 'james', text }, now())
-    say(turn, text)
+    say(turn, words ? aloud : text)
   }
 
   /** The local model, over OpenAI-style messages and its own tool calls. */
@@ -634,15 +664,19 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
   }
 
   /** Claude, a message at a time: it answers in words, or names a tool in a JSON line whose output
-   *  is the next message. Words written before a read are said at once, while it runs; before a
-   *  call the request ends on (a question, a handoff, an app) they would only be said twice. */
+   *  is the next message. A speaker says its words while it writes them (jarvis-speaker); what is
+   *  left once the message is whole is said then. Words written before a read are said at once,
+   *  while it runs; before a call the request ends on (a question, a handoff, an app), only what a
+   *  speaker already said is: the rest would be said twice. */
   const runClaude = async (turn: Turn, system: string, first: string) => {
     let text = first
     for (let step = 0; step < MAX_STEPS; step++) {
       claudeTalking = true
-      const answer = readReply(await client.brainAsk(system, text))
-      if (!answer.tool) return reply(turn, answer.words || 'Não entendi.', true)
-      if (readsBack(turn, answer.tool)) meanwhile(turn, answer.tool, answer.words)
+      const speaker = speakerFor((sentence) => say(turn, sentence))
+      const answer = readReply(await client.brainStream(system, text, (piece) => speaker.push(piece)))
+      const rest = speaker.rest(answer.words)
+      if (!answer.tool) return answer.words ? reply(turn, answer.words, true, rest) : reply(turn, 'Não entendi.', true)
+      if (readsBack(turn, answer.tool)) meanwhile(turn, answer.tool, answer.words, rest)
       const out = await use(turn, answer.tool, answer.args)
       if (out === null) return
       text = toolText(answer.tool, turn.ranOn, out)
@@ -656,10 +690,12 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     addLine(store, { who: 'you', text: req.text, spoken: req.spoken }, now())
     const said = `Usuário: ${req.text}`
     tell(said)
-    const turn: Turn = { req, words: req.text, verbatim: req.text, window: req.window ?? null, gathered: [], projects: [], tool: null, args: null, brain: null, confirmed: false, final: null }
+    const turn: Turn = { req, words: req.text, verbatim: req.text, window: req.window ?? null, gathered: [], projects: [], tool: null, args: null, brain: null, confirmed: false, final: null, hushed: false }
+    current = turn
     try {
       await steps(turn, said)
     } finally {
+      if (current === turn) current = null
       // One more than the local model is shown: the exchange a pending question came from is
       // replaced by the question itself.
       if (turn.final !== null) exchanges = [...exchanges, { request: req.text, reply: turn.final }].slice(-REMEMBERED - 1)
@@ -723,7 +759,11 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
       if (unseen.at(-1) === said) unseen = unseen.slice(0, -1)
       const told = unseen
       unseen = []
-      return runClaude(turn, claudeSystem(projects, apps), turnText(req.text, context(turn.window), told))
+      // The projects' state goes with a request when it changed since Claude last saw it.
+      const at = situation.changedAt()
+      const panorama = at !== null && at !== panoramaAt ? situation.text() : ''
+      if (panorama) panoramaAt = at
+      return runClaude(turn, claudeSystem(projects, apps), turnText(req.text, context(turn.window), told, panorama))
     }
 
     const messages: Message[] = [{ role: 'system', content: systemPrompt(projects, context(turn.window), true, apps) }]
@@ -734,6 +774,8 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     await runLocal(turn, messages)
   }
 
+  /** The request being answered, if one is. */
+  let current: Turn | null = null
   let queue: Promise<void> = Promise.resolve()
   const enqueue = (req: Request) =>
     (queue = queue.then(async () => {
@@ -752,9 +794,11 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
         set({ busy: false })
       }
     }))
-  // A new request is the one to answer: what James is still saying stops, so a question asked
-  // over him is not followed by the rest of the old answer (#506).
+  // A new request is the one to answer: what James is still saying stops, and nothing more of the
+  // request he was answering is said, so a question asked over him is not followed by the rest of
+  // the old answer (#506), nor by what Claude is still writing of it.
   const request = (req: Request) => {
+    if (current) current.hushed = true
     void client.hush().catch(() => {})
     return enqueue(req)
   }
@@ -766,6 +810,9 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     .catch(() => {})
 
   // ---- the parents' events ----
+  // What a parent says is in the panel at once, told to the brain with the next request, and, for
+  // a parent asked for aloud, said aloud at a quiet moment (jarvis-parent-report): the maintainer
+  // hears how a task handed off ended without asking.
   set({ parents: parents.running().map((ref) => ({ ref, state: 'working' as const, summary: null, question: null })) })
   const unsubscribe = parents.subscribe((e) => {
     set((s) => ({ parents: foldParent(s.parents, e) }))
@@ -773,7 +820,15 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
     const text = parentLine(e)
     addLine(store, { who: 'parent', project: e.parent.project, sessionId: e.parent.sessionId, text }, now())
     if (!focused()) void notify?.(`James · ${e.parent.project}`, text).catch(() => {})
+    const r = reportFor(e)
+    if (!r) return
+    // What a parent says is part of the conversation: the next request is not a fresh one.
+    lastAt = now()
+    tell(r.tell)
+    if (r.say && askedAloud.has(e.parent.sessionId)) sayWhenQuiet(forSpeech(r.say))
   })
+  // The projects' state, kept fresh for the brain.
+  const stopSituation = situation.start()
 
   return {
     ask: (text) => (text.trim() ? request({ text: text.trim(), spoken: false }) : Promise.resolve()),
@@ -795,6 +850,9 @@ export function createJarvis({ client, parents, store, now = Date.now, focused =
         note(`Não deu para abrir ${url}: ${message(e)}`, true)
       }
     },
-    dispose: unsubscribe,
+    dispose() {
+      unsubscribe()
+      stopSituation()
+    },
   }
 }

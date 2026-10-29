@@ -394,6 +394,7 @@ pub fn run() {
             // -- jarvis brain commands --
             jarvis_brain::jarvis_brain,
             jarvis_brain::jarvis_brain_ask,
+            jarvis_brain::jarvis_brain_stream,
             jarvis_brain::jarvis_brain_reset,
 
             // -- jarvis tools commands --

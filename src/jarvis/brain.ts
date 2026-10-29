@@ -46,10 +46,12 @@ export function claudeSystem(projects: Project[], apps: App[] = []): string {
 }
 
 /** What Claude is sent for a request: what the panel showed that Claude did not say (`told`), the
- *  moment and the state (`context`), then the request. */
-export function turnText(request: string, context: string, told: string[]): string {
+ *  projects' state when it changed since Claude last saw it (`panorama`, `./situation`), the moment
+ *  and the state (`context`), then the request. */
+export function turnText(request: string, context: string, told: string[], panorama = ''): string {
   return [
     ...(told.length ? ['O painel mostrou, sem passar por você:', ...told, ''] : []),
+    ...(panorama ? ['[Panorama dos projetos, lido agora há pouco; vale até vir outro:', panorama, ']'] : []),
     `[Estado atual: ${context}]`,
     request,
   ].join('\n')

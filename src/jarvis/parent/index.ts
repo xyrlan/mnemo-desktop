@@ -4,11 +4,13 @@
  *
  *  - `./handoff`: the three-part text typed into a parent;
  *  - `./follow`: its state, from its `claude agents` row and its transcript (pure);
- *  - `./parents`: the API over what it needs of the app; `./live`, that, as the app runs it. */
+ *  - `./parents`: the API over what it needs of the app; `./live`, that, as the app runs it;
+ *  - `./report`: what James says and tells the brain when a parent he opened says something. */
 
 import { makeParents } from './parents'
 
 export { conversation, followUp, handoff } from './handoff'
+export { reportOf, type ParentReport } from './report'
 
 export type Host = 'claude' | 'grok'
 

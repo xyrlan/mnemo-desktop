@@ -64,6 +64,9 @@ test('what Claude is sent: what it did not see, the state, the request; and a to
   expect(turnText('e agora?', 'agora é x', ['James: Mandei para o tasklist.'])).toBe(
     'O painel mostrou, sem passar por você:\nJames: Mandei para o tasklist.\n\n[Estado atual: agora é x]\ne agora?',
   )
+  expect(turnText('como tá tudo?', 'agora é x', [], 'tasklist: 2 PRs abertos')).toBe(
+    '[Panorama dos projetos, lido agora há pouco; vale até vir outro:\ntasklist: 2 PRs abertos\n]\n[Estado atual: agora é x]\ncomo tá tudo?',
+  )
   expect(toolText('git_status', 'tasklist', 'limpo')).toBe('Saída de git_status no tasklist:\nlimpo')
   expect(toolText('gh_pr_list', undefined, 'nenhum')).toBe('Saída de gh_pr_list:\nnenhum')
 })

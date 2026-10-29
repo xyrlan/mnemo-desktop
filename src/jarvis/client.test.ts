@@ -75,14 +75,19 @@ test('streamed commands hand Rust a channel and pass on what comes back', async 
   const { client, calls } = fake()
   const setup: unknown[] = []
   const chunks: unknown[] = []
+  const pieces: unknown[] = []
   await client.ensureModel((s) => setup.push(s))
   await client.chat({ messages: [] }, (c) => chunks.push(c))
+  await client.brainStream('Você é o James.', 'bom dia', (p) => pieces.push(p))
   expect(calls.map(([cmd, a]) => [cmd, Object.keys(a ?? {})])).toEqual([
     ['jarvis_llm_ensure', ['on']],
     ['jarvis_llm_chat', ['body', 'on']],
+    ['jarvis_brain_stream', ['system', 'text', 'on']],
   ])
+  expect(calls[2][1]).toMatchObject({ system: 'Você é o James.', text: 'bom dia' })
   expect(setup).toEqual([{ from: 'jarvis_llm_ensure' }])
   expect(chunks).toEqual([{ from: 'jarvis_llm_chat' }])
+  expect(pieces).toEqual([{ from: 'jarvis_brain_stream' }])
 })
 
 test('the read tools are exactly the tools Rust runs: the rest are the panel\'s to route', () => {

@@ -461,6 +461,15 @@ pub async fn jarvis_brain_ask(system: String, text: String) -> Result<String, St
     tauri::async_runtime::spawn_blocking(move || ask(&system, &text)).await.map_err(|e| format!("jarvis: {e}"))?
 }
 
+/// `jarvis_brain_ask`, with the reply also sent on `on` as Claude writes it. The seam sends it
+/// whole, once, when the turn ends; jarvis-brain-stream sends it in pieces.
+#[tauri::command]
+pub async fn jarvis_brain_stream(system: String, text: String, on: tauri::ipc::Channel<String>) -> Result<String, String> {
+    let reply = tauri::async_runtime::spawn_blocking(move || ask(&system, &text)).await.map_err(|e| format!("jarvis: {e}"))??;
+    let _ = on.send(reply.clone());
+    Ok(reply)
+}
+
 #[tauri::command]
 pub async fn jarvis_brain_reset() {
     let _ = tauri::async_runtime::spawn_blocking(reset).await;

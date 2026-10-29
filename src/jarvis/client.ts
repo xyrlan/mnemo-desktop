@@ -97,6 +97,10 @@ export interface JarvisClient {
    *  or when `system`, the model or the effort changed; resolves with Claude's reply, whole. Claude
    *  has no tool of its own: it answers in words (jarvis-brain). */
   brainAsk(system: string, text: string): Promise<string>
+  /** `jarvis_brain_stream(system: String, text: String, on: Channel<String>) -> Result<String, String>`:
+   *  `jarvis_brain_ask`, with Claude's reply also sent on `on` in pieces, in order, as Claude writes
+   *  it; resolves with the reply, whole, which is every piece joined (jarvis-brain-stream). */
+  brainStream(system: string, text: string, onText: (piece: string) => void): Promise<string>
   /** `jarvis_brain_reset() -> ()`: ends the conversation with Claude; the next ask starts a new
    *  one (jarvis-brain). */
   brainReset(): Promise<void>
@@ -163,6 +167,11 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     stopModel: () => invoke('jarvis_llm_stop'),
     brain: () => invoke('jarvis_brain'),
     brainAsk: (system, text) => invoke('jarvis_brain_ask', { system, text }),
+    brainStream: (system, text, cb) => {
+      const on = channel<string>()
+      on.onmessage = cb
+      return invoke('jarvis_brain_stream', { system, text, on })
+    },
     brainReset: () => invoke('jarvis_brain_reset'),
     tool: (name, args) => invoke('jarvis_tool', { name, args }),
     focusedWindow: () => invoke('jarvis_focused_window'),
