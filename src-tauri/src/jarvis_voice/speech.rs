@@ -958,9 +958,13 @@ pub(crate) mod tests {
         let nonzero = cue_sound(22_050).iter().filter(|&&x| x != 0.0).count();
         until(|| lock(&heard).len() == nonzero);
         assert!(speaking.recv_timeout(Duration::from_millis(100)).is_err(), "James is not speaking for it");
-        // Said, then hushed with the cue: what was said goes, the cue plays on.
+        // Said, then hushed with the cue: what was said goes, the cue plays on. Thirty texts,
+        // 0.14 s of speech, for the player to see him speaking however a runner sleeps; still
+        // fewer samples than the cue, so a hush that dropped it would leave too few.
         let before = lock(&heard).len();
-        s.say("abc");
+        for _ in 0..30 {
+            s.say("abc");
+        }
         assert_eq!(speaking.recv_timeout(Duration::from_secs(5)), Ok(true));
         s.cue();
         s.hush();
