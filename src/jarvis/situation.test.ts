@@ -217,7 +217,7 @@ describe('createSituation', () => {
       Array.from({ length: 6 }, (_, i) => {
         const name = `p${i}`
         const children = Array.from({ length: 12 }, (_, j) => ({ id: `${i}${j}`, what: '', state: `estado-${j}-longo`, needs: '' }))
-        return [name, { name, parents: [], children }] as const
+        return [name, { name, parents: [], children }] as [string, { name: string; parents: never[]; children: typeof children }]
       }),
     )
     const text = compose({ ok: true, byRepo: repos }, [])
@@ -288,6 +288,18 @@ describe('createSituation', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(asked).toBe(1)
     stop()
+  })
+
+  test('a hidden window keeps the beat: James is heard from the orb', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const f = fake()
+    const count = (n: ReadTool) => f.calls.filter((c) => c.name === n).length
+    const stop = createSituation(f.client, () => 1).start()
+    await vi.advanceTimersByTimeAsync(GITHUB_EVERY_MS)
+    expect([count('list_sessions'), count('gh_pr_list')]).toEqual([1 + GITHUB_EVERY_MS / SESSIONS_EVERY_MS, 6])
+    stop()
+    hidden.mockRestore()
   })
 
   test('nothing running and nothing open is said, not left empty', () => {

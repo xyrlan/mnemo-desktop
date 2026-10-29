@@ -1,3 +1,4 @@
+import { pollWhileShown } from '../shell/while-shown'
 import type { JarvisClient } from './client'
 
 /** The state of the projects, kept fresh in the background so the brain answers "como tá tudo?"
@@ -211,17 +212,9 @@ async function inTurns<T, R>(items: T[], n: number, f: (t: T) => Promise<R>): Pr
 
 /** One read at a time of a kind: a call while one runs waits for it, then reads again, so what it
  *  resolves with was read after it was asked. */
-function serial(read: () => Promise<void>): { run: () => Promise<void>; busy: () => boolean } {
+function serial(read: () => Promise<void>): () => Promise<void> {
   let last: Promise<void> = Promise.resolve()
-  let running = 0
-  return {
-    run: () => {
-      running++
-      last = last.then(read).catch(() => {}).finally(() => void running--)
-      return last
-    },
-    busy: () => running > 0,
-  }
+  return () => (last = last.then(read).catch(() => {}))
 }
 
 export function createSituation(client: JarvisClient, now: () => number): Situation {
@@ -277,7 +270,7 @@ export function createSituation(client: JarvisClient, now: () => number): Situat
   })
 
   const refresh = async () => {
-    await Promise.all([readSessions.run(), readGithub.run()])
+    await Promise.all([readSessions(), readGithub()])
   }
 
   return {
@@ -285,12 +278,13 @@ export function createSituation(client: JarvisClient, now: () => number): Situat
     changedAt: () => at,
     refresh,
     start: () => {
-      void refresh()
-      const s = setInterval(() => void (readSessions.busy() || readSessions.run()), SESSIONS_EVERY_MS)
-      const g = setInterval(() => void (readGithub.busy() || readGithub.run()), GITHUB_EVERY_MS)
+      // Both read at once. James is heard while the window is hidden (the orb, hands-free), so
+      // a hidden window keeps the same beat.
+      const s = pollWhileShown(readSessions, SESSIONS_EVERY_MS, { hiddenMs: SESSIONS_EVERY_MS })
+      const g = pollWhileShown(readGithub, GITHUB_EVERY_MS, { hiddenMs: GITHUB_EVERY_MS })
       return () => {
-        clearInterval(s)
-        clearInterval(g)
+        s()
+        g()
       }
     },
   }
