@@ -30,7 +30,9 @@ export type ParentStatus = {
 
 export type ParentEvent =
   | { kind: 'opened'; parent: ParentRef }
-  | { kind: 'turn-ended'; parent: ParentRef; summary: string }
+  /** `last`: the parent's last message, at most `LAST_MAX` characters (`./follow`), '' when it
+   *  said nothing; absent from an emitter that does not carry it. */
+  | { kind: 'turn-ended'; parent: ParentRef; summary: string; last?: string }
   | { kind: 'asking'; parent: ParentRef; question: string }
   | { kind: 'approval'; parent: ParentRef; question: string }
   | { kind: 'exited'; parent: ParentRef }
