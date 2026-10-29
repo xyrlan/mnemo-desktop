@@ -12,6 +12,11 @@
 //! - **A pause is not always the end.** At the pause a take is handed on to be transcribed, and
 //!   speech back within `JOIN` goes on with it: "James, [a breath] abre o VS Code", or a request
 //!   said in two goes, is one take. What was made of its first part is then not used.
+//! - **What was said decides how long to wait** (#503). A transcript that reads as a request said
+//!   to its end (`whole`: "abre o VS Code.", "e o CI?") ends the take after `WHOLE_MS` of silence;
+//!   one that does not (the name alone, "quais PRs estão", "abre o,") waits the join out. Speech
+//!   back after `WHOLE_MS`, in what was the join, is still for James (`Ears::grace`): a take of its
+//!   own, no name needed, so a request cut there is heard in two, never lost.
 //! - **The window.** After James has spoken, whatever is said before the window closes is a take,
 //!   no name needed. Its start is the utterance's, so it is `listening` from the first syllable.
 //!   So is what is said while a take is still being transcribed: right after the name alone, the
@@ -33,10 +38,14 @@ use crate::voice::rms;
 const FRAME_MS: u32 = 20;
 /// Frames over the gate in a row that start an utterance: a click or a knock is shorter.
 const ONSET: u32 = 4;
-/// What ends an utterance: this long under the gate. Measured over the fixtures Piper spoke
-/// (`fixtures/voice/wake-*.wav`), a comma leaves up to 0.38 s of silence and a full stop 0.46 s:
-/// 0.7 s keeps a request of two sentences, and a breath between them, one take.
+/// What ends an utterance that is no take: this long under the gate. Measured over the fixtures
+/// Piper spoke (`fixtures/voice/wake-*.wav`), a comma leaves up to 0.38 s of silence and a full
+/// stop 0.46 s: 0.7 s keeps two sentences of talk one utterance, checked once.
 const PAUSE_MS: u32 = 700;
+/// What hands a take (or an utterance not yet checked) on to be transcribed: shorter than
+/// `PAUSE_MS`, since speech back within `JOIN_MS` still goes on with it. Over a full stop's
+/// 0.46 s, so that two sentences said at Piper's pace are one transcript.
+const TAKE_PAUSE_MS: u32 = 600;
 /// Audio kept from before the gate opened, so the first syllable is not cut.
 const PREROLL_MS: u32 = 300;
 /// Silence kept after the last frame of speech, so the last word is not cut.
@@ -46,12 +55,22 @@ const TAIL_MS: u32 = 200;
 const FIRST_CHECK_MS: u32 = 1_000;
 const SECOND_CHECK_MS: u32 = 2_000;
 /// After a take's pause, speech back within this long goes on with the take. Its transcript starts
-/// at the pause and is used only once this is out, so it costs nothing while whisper is slower:
-/// in the maintainer's first session with hands-free (2026-10-24, `small` on the CPU) a take took
-/// 1.4 s to 6.5 s to transcribe, 2.3 s in the median. That session lost the request said after a
-/// breath following the name, five times in two minutes. With `PAUSE_MS`, 1.7 s of silence ends a
-/// take: a breath between the name and the request, or between two halves of one, is shorter.
+/// at the pause and is used once this is out, so it cost nothing while whisper was slower: in the
+/// maintainer's first session with hands-free (2026-10-24, `small` on the CPU) a take took 1.4 s
+/// to 6.5 s to transcribe, 2.3 s in the median. That session lost the request said after a breath
+/// following the name, five times in two minutes. With `PAUSE_MS`, 1.7 s of silence ends a take: a
+/// breath between the name and the request, or between two halves of one, is shorter.
+///
+/// On the GPU whisper takes 0.25 s, and 1.7 s was most of the wait for James: a take whose
+/// transcript is `whole` ends at `WHOLE_MS` (`Now::whole`), and only the others wait this out.
 const JOIN_MS: u32 = 1_000;
+/// The silence that ends a take whose transcript reads `whole`, from its last word. Not less: cut
+/// at a pause between words, half a request often reads whole too. Measured with Piper over 13
+/// requests cut at each of their 73 pauses (`live_breaths`), whisper closed the half with a full
+/// stop or a question mark 36 times with Jarvis's model, 46 with the base one ("James, abre o PR
+/// 40."). So this is the longest breath that is never cut; a longer one is kept where the half did
+/// not read whole (`JOIN_MS`), and heard as a second take where it did.
+const WHOLE_MS: u32 = 900;
 /// A take never runs longer.
 const MAX_TAKE_MS: u32 = 30_000;
 /// The first moments of the window still belong to James: the room's echo of his last word.
@@ -87,6 +106,9 @@ pub struct Now {
     pub waiting: bool,
     /// A hands-free take is being transcribed: what is said now is for James.
     pub pending: bool,
+    /// The take handed on was transcribed, and what was heard reads as said to its end (`whole`):
+    /// no join is waited for, and it ends at `WHOLE_MS`.
+    pub whole: bool,
 }
 
 /// What the ears tell the voice, and ask of it.
@@ -103,7 +125,8 @@ pub trait Host {
     fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize);
     /// The take that ended goes on: speech came back within `JOIN_MS`. It ends again, all of it.
     fn resumed(&self);
-    /// The take that ended is over: nothing came back within `JOIN_MS`, or the key took over.
+    /// The take that ended is over: nothing came back within `JOIN_MS`, its transcript was
+    /// `whole`, or the key took over.
     fn settled(&self);
     /// The take that began will not end: the key or dictation took over.
     fn dropped(&self);
@@ -157,6 +180,11 @@ pub struct Ears {
     /// When the window closes, and until when its start is still James's echo.
     window: Option<(u64, u64)>,
     follow: u64,
+    /// A take that ended before its join was out (`Now::whole`): until when it would have been,
+    /// on the clock. What starts before then is still for James, a take with no name. It does not
+    /// run while the speaker plays: the cue the take plays hides, as James's voice does, what is
+    /// said over it.
+    grace: u64,
 }
 
 impl Ears {
@@ -176,6 +204,7 @@ impl Ears {
             utterance: None,
             window: None,
             follow: rate as u64 * follow_ms / 1000,
+            grace: 0,
         }
     }
 
@@ -214,6 +243,9 @@ impl Ears {
         }
         let played = self.outs.iter().map(|&(_, o)| o).fold(0.0f32, f32::max);
         let echo = if played > OUT_FLOOR { self.gain * played } else { 0.0 };
+        if played > OUT_FLOOR && self.clock < self.grace {
+            self.grace += frame.len() as u64;
+        }
         // A take handed on at its pause goes on as an utterance would start.
         let threshold = match self.utterance {
             Some(Utterance { handed: false, .. }) => (self.floor * HOLD).max(MIN_HOLD),
@@ -279,7 +311,12 @@ impl Ears {
                     u.voiced = u.audio.len();
                     host.resumed();
                     self.utterance = Some(u);
-                } else if u.quiet * FRAME_MS >= PAUSE_MS + JOIN_MS {
+                } else if (now.whole && u.quiet * FRAME_MS >= WHOLE_MS) || u.quiet * FRAME_MS >= PAUSE_MS + JOIN_MS {
+                    if now.whole {
+                        // The join it did not wait out, from where its last word ended.
+                        let quiet = self.samples(u.quiet * FRAME_MS);
+                        self.grace = (self.clock + self.samples(PAUSE_MS + JOIN_MS)).saturating_sub(quiet);
+                    }
                     self.run = 0;
                     host.settled();
                 } else {
@@ -312,7 +349,8 @@ impl Ears {
                 if u.mode == Mode::Checking && since >= due {
                     self.check(&mut u, false, host);
                 }
-                let paused = u.quiet * FRAME_MS >= PAUSE_MS;
+                let pause = if u.mode == Mode::Ignored { PAUSE_MS } else { TAKE_PAUSE_MS };
+                let paused = u.quiet * FRAME_MS >= pause;
                 let full = matches!(u.mode, Mode::Take(_)) && u.audio.len() as u64 >= self.samples(MAX_TAKE_MS);
                 self.utterance = if paused || full { self.end(u, full, host) } else { Some(u) };
             }
@@ -327,8 +365,8 @@ impl Ears {
         }
     }
 
-    /// An utterance starts: in the window, or while a take is being transcribed, it is a take at
-    /// once; else it is checked for the name.
+    /// An utterance starts: in the window, while a take is being transcribed, or in the join a
+    /// take did not wait out, it is a take at once; else it is checked for the name.
     /// Over James's voice what came before it is his, not the utterance's: it starts at its own
     /// first frame, or it would not begin with the name.
     fn start(&mut self, now: Now, over_james: bool, host: &dyn Host) -> Utterance {
@@ -346,9 +384,9 @@ impl Ears {
                 host.began(HeardVia::Follow);
                 Mode::Take(HeardVia::Follow)
             }
-            // Said after the name alone, before its transcript opens the window; over James it
-            // takes his name, as ever.
-            _ if now.pending && !now.speaking => {
+            // Said after the name alone, before its transcript opens the window, or on after a
+            // request that read whole; over James it takes his name, as ever.
+            _ if (now.pending || began < self.grace) && !now.speaking => {
                 host.began(HeardVia::Follow);
                 Mode::Take(HeardVia::Follow)
             }
@@ -596,6 +634,31 @@ pub fn asks(text: &str) -> bool {
     text.trim_end_matches(|c: char| c.is_whitespace() || "!\"'\u{201d}\u{2019}\u{bb})]".contains(c)).ends_with('?')
 }
 
+/// Words a request does not end on, as `whole` compares them (lower case, accents kept: "e" is
+/// "and", "é" is "is"; "que" goes on, "o quê?" does not): articles, prepositions and their
+/// contractions, conjunctions. Whisper, handed half a request at a breath, may still end it with a
+/// full stop: "abre o PR do." is not the end of one.
+const DANGLING: &[&str] = &[
+    "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "num",
+    "numa", "ao", "aos", "à", "às", "por", "pelo", "pela", "pelos", "pelas", "pra", "pro", "pras", "pros", "para", "com",
+    "sem", "sobre", "entre", "até", "desde", "e", "ou", "mas", "que", "se", "nem", "porque", "pois", "the", "and", "or",
+    "of", "to", "for", "with",
+];
+
+/// Whether `request`, what a take asked once the name is off it, reads as said to its end: a
+/// sentence whisper closed (".", "?", "!"), not trailing off ("...") or on a comma, and not on a
+/// word that leads into more (`DANGLING`). Then no join is waited for (`Now::whole`).
+pub fn whole(request: &str) -> bool {
+    let text = request.trim_end_matches(|c: char| c.is_whitespace() || "\"'\u{201d}\u{2019}\u{bb})]".contains(c));
+    let Some(stop) = text.chars().last() else { return false };
+    if !".?!".contains(stop) || text.ends_with("..") || no_speech(text) {
+        return false;
+    }
+    let last = text.split_whitespace().last().unwrap_or("");
+    let last: String = last.chars().flat_map(char::to_lowercase).filter(|c| c.is_alphanumeric()).collect();
+    !last.is_empty() && !DANGLING.contains(&last.as_str())
+}
+
 /// `text` with each sentence that only repeats the one before it left out: looping on a sound,
 /// whisper writes "Projetos. Projetos. Projetos.".
 pub fn collapse(text: &str) -> String {
@@ -740,6 +803,89 @@ mod tests {
         for kept in ["Sim. Não. Sim.", "Abre o PR 42. E o CI?", "Abre o site.com.br agora.", "Projetos.com Projetos.com", "Quais PRs estão abertos", ""] {
             assert_eq!(collapse(kept), kept);
         }
+    }
+
+    #[test]
+    fn a_request_reads_whole_once_whisper_closed_it_on_a_word_that_ends_one() {
+        for done in ["abre o VS Code.", "E o CI?", "Quais PRs estão abertos no desktop?", "Roda os testes!", "O quê?", "Abre o PR 42.", "Por quê?", "abre \u{ab}o site\u{bb}.\u{201d} "] {
+            assert!(whole(done), "{done:?}");
+        }
+        // Not closed, trailing off, on a comma, on a word that leads into more, or no speech.
+        for more in ["quais PRs estão", "abre o,", "abre o PR do.", "Então...", "Abre o\u{2026}", "roda os testes e.", "Manda pra.", "E o que.", "Ah.", "", ".", "mnemo-desktop"] {
+            assert!(!whole(more), "{more:?}");
+        }
+    }
+
+    #[test]
+    fn a_take_that_reads_whole_ends_without_its_join_and_speech_in_what_was_the_join_is_for_james() {
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        // A take is handed on sooner than talk ends.
+        feed(&mut ears, &noise(0.62, 0.0005, 2), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        // Its transcript reads whole: it ends at `WHOLE_MS`, a breath after its pause.
+        host.now.borrow_mut().whole = true;
+        feed(&mut ears, &noise(0.24, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake"]);
+        feed(&mut ears, &noise(0.06, 0.0005, 3), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled"]);
+        host.now.borrow_mut().whole = false;
+        // More said within what was the join: a take at once, with no name and no check.
+        feed(&mut ears, &noise(0.5, 0.0005, 4), &host);
+        feed(&mut ears, &tone(0.1, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled", "began Follow"]);
+        assert_eq!(host.checks.borrow().len(), 1);
+
+        // The cue plays as it ends, and hides what is said over it: its time is not the grace's.
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "James, abre".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(0.62, 0.0005, 2), &host);
+        host.now.borrow_mut().whole = true;
+        feed(&mut ears, &noise(0.3, 0.0005, 3), &host);
+        host.now.borrow_mut().whole = false;
+        for piece in noise(0.5, 0.0005, 4).chunks(480) {
+            ears.feed(piece, 0.03, &host);
+        }
+        feed(&mut ears, &noise(0.6, 0.0005, 5), &host);
+        feed(&mut ears, &tone(0.1, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Wake", "ended Wake", "settled", "began Follow"]);
+
+        // Past it, the name is needed again.
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "Então eu falei".into()));
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        host.now.borrow_mut().pending = true;
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        host.now.borrow_mut().pending = false;
+        feed(&mut ears, &noise(0.62, 0.0005, 2), &host);
+        host.now.borrow_mut().whole = true;
+        feed(&mut ears, &noise(0.3, 0.0005, 3), &host);
+        host.now.borrow_mut().whole = false;
+        assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow", "settled"]);
+        feed(&mut ears, &noise(0.85, 0.0005, 4), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        assert_eq!(*host.said.borrow(), ["began Follow", "ended Follow", "settled"]);
+        assert_eq!(host.checks.borrow().len(), 1, "checked for the name");
+
+        // Read whole is no reason to end talk with no name: it ends at its own pause.
+        let host = Notes::default();
+        *host.heard.borrow_mut() = Some(Box::new(|_| "Então eu falei".into()));
+        host.now.borrow_mut().whole = true;
+        let mut ears = Ears::new(RATE, 8_000);
+        feed(&mut ears, &noise(0.5, 0.0005, 1), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(0.62, 0.0005, 2), &host);
+        feed(&mut ears, &tone(1.5, 0.05), &host);
+        feed(&mut ears, &noise(1.0, 0.0005, 3), &host);
+        assert!(host.said.borrow().is_empty(), "{:?}", host.said.borrow());
+        assert_eq!(host.checks.borrow().len(), 1, "one utterance, its pause a breath");
     }
 
     #[test]
