@@ -8,8 +8,12 @@
 //! stream-json on its stdin and stdout. The first ask starts it and it lives across asks, so a
 //! later turn takes about a second and remembers the earlier ones. It restarts when the system
 //! prompt, the model, the effort or the account differ from what it runs with; `jarvis_brain_reset`
-//! ends it. Asks run one at a time. An ask with no `result` within `ASK_TIMEOUT` ends it and fails;
+//! ends it. `jarvis_brain_ask` and `jarvis_brain_stream` share it. Asks run one at a time. An ask with no `result` within `ASK_TIMEOUT` ends it and fails;
 //! a process that dies leaves its last stderr lines as the error, and the next ask starts afresh.
+//! `jarvis_brain_stream` sends the reply in pieces as Claude writes it: `--include-partial-messages`
+//! makes the CLI write each `text_delta` of the reply as a `stream_event` line before the turn's
+//! `result` (`piece_of`), and whatever of the `result` the deltas did not cover goes last, so the
+//! pieces joined are the `result` (`rest_of`).
 //! It never outlives the app: it is tied to it the way llama-server is (`jarvis_llm::spawn_tied`),
 //! and the app's exit ends it (`plugin`).
 //!
@@ -141,6 +145,8 @@ pub fn args(model: &str, effort: &str, system_file: &Path) -> Vec<OsString> {
         "stream-json",
         // `--print` writes stream-json only with it.
         "--verbose",
+        // The reply's deltas as `stream_event` lines, for `jarvis_brain_stream`.
+        "--include-partial-messages",
         "--model",
         model,
         "--effort",
@@ -324,6 +330,30 @@ pub fn result_of(line: &str) -> Option<Result<String, String>> {
     Some(Err(format!("Claude: {why}")))
 }
 
+/// The reply's text a stream-json line adds, when it is a `text_delta` of a `stream_event`. A
+/// thinking or tool-input delta, any other event, and every other line are `None`.
+pub fn piece_of(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("stream_event") {
+        return None;
+    }
+    let event = v.get("event")?;
+    if event.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
+        return None;
+    }
+    let delta = event.get("delta")?;
+    if delta.get("type").and_then(|t| t.as_str()) != Some("text_delta") {
+        return None;
+    }
+    Some(delta.get("text")?.as_str()?.to_string())
+}
+
+/// What of `result` is still to be sent once `sent` was: `None` when `sent` is not how `result`
+/// begins, so no last piece can make the pieces joined be the `result`.
+pub fn rest_of<'a>(result: &'a str, sent: &str) -> Option<&'a str> {
+    result.strip_prefix(sent)
+}
+
 /// A user message as stream-json takes it, one line.
 fn user_line(text: &str) -> String {
     serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
@@ -344,6 +374,12 @@ impl Brain {
     /// none runs, or when the one running has another key or has died. Resolves with the turn's
     /// result, waiting `timeout` at most.
     pub fn ask(&self, key: &Key, text: &str, start: &dyn Fn(&Key) -> Result<Command, String>, timeout: Duration) -> Result<String, String> {
+        self.stream(key, text, start, timeout, &mut |_| {})
+    }
+
+    /// `ask`, with the reply also handed to `on` in pieces as Claude writes it. Resolved with a
+    /// result, the pieces joined are that result: what of it the deltas did not cover goes last.
+    pub fn stream(&self, key: &Key, text: &str, start: &dyn Fn(&Key) -> Result<Command, String>, timeout: Duration, on: &mut dyn FnMut(&str)) -> Result<String, String> {
         let _one = lock(&self.asking);
         let conv = self.conversation(key, start)?;
         let events = lock(&conv.events);
@@ -360,12 +396,30 @@ impl Brain {
             return Err(why);
         }
         let deadline = asked + timeout;
+        let mut sent = String::new();
+        let mut first: Option<Duration> = None;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match events.recv_timeout(left) {
                 Ok(Event::Out(l)) => {
-                    if let Some(got) = result_of(&l) {
-                        log::info!("jarvis: claude answered in {:.1} s", asked.elapsed().as_secs_f32());
+                    if let Some(piece) = piece_of(&l) {
+                        if !piece.is_empty() {
+                            first.get_or_insert_with(|| asked.elapsed());
+                            sent.push_str(&piece);
+                            on(&piece);
+                        }
+                    } else if let Some(got) = result_of(&l) {
+                        if let Ok(reply) = &got {
+                            match rest_of(reply, &sent) {
+                                Some("") => {}
+                                Some(rest) => on(rest),
+                                None => log::warn!("jarvis: claude's result is not the {} bytes it streamed; the pieces differ from the reply", sent.len()),
+                            }
+                        }
+                        match first {
+                            Some(f) => log::info!("jarvis: claude answered in {:.1} s, its first piece in {:.1} s", asked.elapsed().as_secs_f32(), f.as_secs_f32()),
+                            None => log::info!("jarvis: claude answered in {:.1} s", asked.elapsed().as_secs_f32()),
+                        }
                         return got;
                     }
                 }
@@ -435,13 +489,18 @@ static BRAIN: Brain = Brain::new();
 
 /// `text` asked of Claude under `system`, as the config's brain says.
 pub fn ask(system: &str, text: &str) -> Result<String, String> {
+    stream(system, text, &mut |_| {})
+}
+
+/// `ask`, with the reply also handed to `on` in pieces as Claude writes it (`Brain::stream`).
+pub fn stream(system: &str, text: &str, on: &mut dyn FnMut(&str)) -> Result<String, String> {
     let (model, effort) = match config()? {
         BrainConfig::Claude { model, effort } => (model, effort),
         BrainConfig::Local => return Err(format!("the brain is local (no \"brain\" of kind \"claude\" in {}), so there is no Claude to ask", crate::jarvis::config_path().display())),
     };
     let key = Key { system: system.to_string(), model, effort, account: account() };
     let dir = brain_dir();
-    BRAIN.ask(&key, text, &|k| claude_in(&dir, k), ASK_TIMEOUT)
+    BRAIN.stream(&key, text, &|k| claude_in(&dir, k), ASK_TIMEOUT, on)
 }
 
 pub fn reset() {
@@ -461,13 +520,14 @@ pub async fn jarvis_brain_ask(system: String, text: String) -> Result<String, St
     tauri::async_runtime::spawn_blocking(move || ask(&system, &text)).await.map_err(|e| format!("jarvis: {e}"))?
 }
 
-/// `jarvis_brain_ask`, with the reply also sent on `on` as Claude writes it. The seam sends it
-/// whole, once, when the turn ends; jarvis-brain-stream sends it in pieces.
+/// `jarvis_brain_ask`, with the reply also sent on `on` in pieces, in order, as Claude writes it;
+/// joined, they are the reply it resolves with.
 #[tauri::command]
 pub async fn jarvis_brain_stream(system: String, text: String, on: tauri::ipc::Channel<String>) -> Result<String, String> {
-    let reply = tauri::async_runtime::spawn_blocking(move || ask(&system, &text)).await.map_err(|e| format!("jarvis: {e}"))??;
-    let _ = on.send(reply.clone());
-    Ok(reply)
+    let mut send = move |piece: &str| {
+        let _ = on.send(piece.to_string());
+    };
+    tauri::async_runtime::spawn_blocking(move || stream(&system, &text, &mut send)).await.map_err(|e| format!("jarvis: {e}"))?
 }
 
 #[tauri::command]
