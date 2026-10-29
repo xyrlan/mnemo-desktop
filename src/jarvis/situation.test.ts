@@ -290,6 +290,17 @@ describe('createSituation', () => {
     stop()
   })
 
+  test('a read that throws past its own guard neither rejects nor jams the reads after it', async () => {
+    let calls = 0
+    const s = createSituation(fake().client, () => {
+      if (++calls === 1) throw new Error('clock')
+      return 7
+    })
+    await expect(s.refresh()).resolves.toBeUndefined()
+    await s.refresh()
+    expect(s.changedAt()).toBe(7)
+  })
+
   test('a hidden window keeps the beat: James is heard from the orb', async () => {
     vi.useFakeTimers()
     const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
