@@ -278,9 +278,14 @@ describe('createSituation', () => {
     vi.useFakeTimers()
     const f = fake()
     let asked = 0
-    f.client.projects = () => (asked++, new Promise<JarvisProject[]>(() => {}))
+    let release = (_: JarvisProject[]) => {}
+    const slow = new Promise<JarvisProject[]>((r) => (release = r))
+    f.client.projects = () => (asked++ ? Promise.resolve([]) : slow)
     const stop = createSituation(f.client, () => 1).start()
-    await vi.advanceTimersByTimeAsync(GITHUB_EVERY_MS * 3)
+    // Two ticks come while the first read hangs; once it ends, none of them reads after it.
+    await vi.advanceTimersByTimeAsync(GITHUB_EVERY_MS * 3 - 1)
+    release([])
+    await vi.advanceTimersByTimeAsync(0)
     expect(asked).toBe(1)
     stop()
   })
