@@ -1797,8 +1797,9 @@ mod tests {
                 transcribed(&voice);
             }
             if plays {
+                // A few hundred samples: the test's output pulls at the pace of the runner's sleeps.
                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
-                while lock(&played).len() < 3_000 {
+                while lock(&played).len() < 300 {
                     assert!(std::time::Instant::now() < deadline, "{heard:?} via {via:?}: no cue");
                     std::thread::sleep(Duration::from_millis(5));
                 }

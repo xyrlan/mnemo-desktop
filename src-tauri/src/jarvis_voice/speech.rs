@@ -811,6 +811,34 @@ pub(crate) mod tests {
         })
     }
 
+    /// `fake_output` at the device's own pace, 22 050 samples a second however long a sleep of
+    /// the runner's takes, as a device pulls: what the cue takes the time it would.
+    fn paced_output(heard: Arc<Mutex<Vec<f32>>>) -> Output {
+        Box::new(move |_rate, shared| {
+            let into = heard.clone();
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = stop.clone();
+            std::thread::spawn(move || {
+                let (start, mut pulled) = (Instant::now(), 0usize);
+                while !stopped.load(Ordering::SeqCst) {
+                    let due = (start.elapsed().as_secs_f64() * 22_050.0) as usize - pulled;
+                    let mut buf = vec![0f32; due];
+                    shared.pull(&mut buf, 1.0);
+                    pulled += due;
+                    lock(&into).extend(buf.iter().copied().filter(|&s| s != 0.0));
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            });
+            struct Stop(Arc<AtomicBool>);
+            impl Drop for Stop {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            Ok(Box::new(Stop(stop)) as Box<dyn Any>)
+        })
+    }
+
     fn speaker(held: bool) -> (Speaker, Arc<AtomicBool>, Arc<Mutex<Vec<f32>>>, mpsc::Receiver<bool>) {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let key = Arc::new(AtomicBool::new(held));
@@ -919,7 +947,13 @@ pub(crate) mod tests {
 
     #[test]
     fn the_cue_plays_by_itself_and_a_hush_leaves_it() {
-        let (s, _key, heard, speaking) = speaker(false);
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let (tx, speaking) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let on_speaking = Arc::new(move |b| {
+            let _ = lock(&tx).send(b);
+        });
+        let s = Speaker::start(22_050, Arc::default(), fake_synth(), paced_output(heard.clone()), on_speaking, Arc::new(|e| panic!("{e}"))).unwrap();
         s.cue();
         let nonzero = cue_sound(22_050).iter().filter(|&&x| x != 0.0).count();
         until(|| lock(&heard).len() == nonzero);
@@ -938,7 +972,7 @@ pub(crate) mod tests {
     fn the_cue_waits_for_the_key_and_keeps_the_device_open_while_it_plays() {
         // An output that says how often it was opened.
         let (heard, opened) = (Arc::new(Mutex::new(Vec::new())), Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-        let mut inner = fake_output(heard.clone());
+        let mut inner = paced_output(heard.clone());
         let count = opened.clone();
         let output: Output = Box::new(move |rate, shared| {
             count.fetch_add(1, Ordering::SeqCst);
@@ -956,7 +990,8 @@ pub(crate) mod tests {
         // Played as the device's linger after speech runs out: it stays open for the cue.
         s.say("a");
         until(|| lock(&heard).len() == nonzero + 100);
-        std::thread::sleep(LINGER - Duration::from_millis(300));
+        // The cue then plays on 150 ms past the linger.
+        std::thread::sleep(LINGER - Duration::from_millis(150));
         s.cue();
         until(|| lock(&heard).len() == 2 * nonzero + 100);
         assert_eq!(opened.load(Ordering::SeqCst), 1, "opened once");

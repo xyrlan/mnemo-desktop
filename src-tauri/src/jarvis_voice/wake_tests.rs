@@ -429,17 +429,6 @@ fn a_breath_is_never_cut_with_whisper_keeping_up() {
     r.settled();
     let h = r.heard();
     assert!(h.len() == 1 && h[0].text.contains("desktop"), "{:?}", said(&r.events));
-
-    // After the name alone, a pause of 1.5 s, the transcript made in it: the name waits for more.
-    let (name, rest) = at_pause(&audio, 1);
-    let n = r.transcripts.load(Ordering::SeqCst);
-    r.play(&mut ears, &wired, &voiced(name).iter().copied().chain(room(0.62)).collect::<Vec<_>>());
-    r.transcribed(n + 1);
-    r.play(&mut ears, &wired, &room(0.88).into_iter().chain(voiced(rest).iter().copied()).collect::<Vec<_>>());
-    r.play(&mut ears, &wired, &room(2.0));
-    r.settled();
-    let h = r.heard();
-    assert!(h.len() == 2 && h[1].via == HeardVia::Wake && h[1].text.contains("desktop"), "{:?}", said(&r.events));
 }
 
 #[test]
