@@ -1,6 +1,6 @@
 import { PAUSE_MS } from './brain'
 import type { AppEntry, BrainConfig, JarvisClient, JarvisProject, LlmSetup, Research } from './client'
-import { CANCEL_MS, createJarvis, FROM_WEB, isBareOpen, isFollowUp, isNo, isResearchStatus, isStopParent, isYes, LOOKING, MAX_STEPS, type LoopDeps } from './loop'
+import { CANCEL_MS, CONTINUES, createJarvis, FROM_WEB, isBareOpen, isFollowUp, isNo, isResearchStatus, isStopParent, isYes, LOOKING, MAX_STEPS, type LoopDeps } from './loop'
 import { followUp, type OpenParent, type ParentEvent, type ParentRef, type ParentsApi, type ParentStatus } from './parent'
 import type { Message } from './routing'
 import type { Situation } from './situation'
@@ -1369,6 +1369,76 @@ describe('conversing (jarvis-converse)', () => {
     await vi.waitFor(() => expect(s.spoken).toContain('O parent do tasklist terminou: Corrigi o teste e abri o PR 12.'))
     await s.jarvis.ask('e aí, como ficou?')
     expect(s.asks[1].text).toContain('Parent do tasklist: Corrigi o teste e abri o PR 12.')
+  })
+
+  describe('a request a breath cut in two', () => {
+    /** Claude, holding its reply to `held` until `finish`; the rest answered from `replies`. */
+    const holding = (held: string, replies: string[], extras: Parameters<typeof withClaude>[1] = {}) => {
+      const state = { started: false, finish: (_reply: string) => {} }
+      const s = withClaude(replies, {
+        ...extras,
+        client: {
+          ...extras.client,
+          brainStream: async (system, text, on) => {
+            if (text.endsWith(held) && !state.started) {
+              state.started = true
+              const reply = await new Promise<string>((r) => (state.finish = r))
+              on(reply)
+              return reply
+            }
+            const reply = await s.client.brainAsk(system, text)
+            on(reply)
+            return reply
+          },
+        },
+      })
+      return { s, state }
+    }
+
+    test('its rest, heard with no name while the first half is thought over, is asked with it, and the first half runs no call', async () => {
+      const { s, state } = holding('vê o git do tasklist.', ['Os dois estão limpos.'])
+      const first = s.jarvis.heard({ text: 'vê o git do tasklist.', confidence: 0.9, window: null, via: 'wake' })
+      await vi.waitFor(() => expect(state.started).toBe(true))
+      const rest = s.jarvis.heard({ text: 'E do mnemo também.', confidence: 0.9, window: null, via: 'follow' })
+      state.finish('{"tool": "git_status", "args": {"project": "tasklist"}}')
+      await Promise.all([first, rest])
+      expect(s.tools).toEqual([])
+      expect(s.asks).toHaveLength(1)
+      expect(s.asks[0].text).toContain(`${CONTINUES}\nvê o git do tasklist. E do mnemo também.`)
+      expect(s.spoken).toEqual(['Os dois estão limpos.'])
+      expect(s.lines().filter((l) => l.startsWith('james:'))).toEqual(['james: Os dois estão limpos.'])
+    })
+
+    test('a take with the name is a request of its own: the one before it runs its call, silently', async () => {
+      const { s, state } = holding('vê o git do tasklist.', ['Está limpo.', 'São dez da manhã.'])
+      const first = s.jarvis.heard({ text: 'vê o git do tasklist.', confidence: 0.9, window: null, via: 'wake' })
+      await vi.waitFor(() => expect(state.started).toBe(true))
+      const second = s.jarvis.heard({ text: 'que horas são?', confidence: 0.9, window: null, via: 'wake' })
+      state.finish('{"tool": "git_status", "args": {"project": "tasklist"}}')
+      await Promise.all([first, second])
+      expect(s.tools).toEqual([['git_status', { project: 'tasklist' }]])
+      expect(s.asks.map((a) => a.text.includes(CONTINUES))).toEqual([false, false])
+      expect(s.spoken).toEqual(['São dez da manhã.'])
+    })
+
+    test('a take with no name once a call of the request before it ran, or once James answered, is a request of its own', async () => {
+      let read: () => void = () => {}
+      const reads: string[] = []
+      const { s, state } = holding('vê o git do tasklist.', ['Está limpo.', 'Também está limpo.', 'De nada.'], {
+        client: { tool: async (name) => (reads.push(name), new Promise<string>((r) => (read = () => r(`${name} output`)))) },
+      })
+      const first = s.jarvis.heard({ text: 'vê o git do tasklist.', confidence: 0.9, window: null, via: 'wake' })
+      await vi.waitFor(() => expect(state.started).toBe(true))
+      state.finish('{"tool": "git_status", "args": {"project": "tasklist"}}')
+      await vi.waitFor(() => expect(reads).toEqual(['git_status']))
+      const rest = s.jarvis.heard({ text: 'E do mnemo também.', confidence: 0.9, window: null, via: 'follow' })
+      read()
+      await Promise.all([first, rest])
+      await s.jarvis.heard({ text: 'valeu.', confidence: 0.9, window: null, via: 'follow' })
+      expect(s.asks.map((a) => a.text.includes(CONTINUES))).toEqual([false, false, false])
+      expect(s.asks[1].text).toMatch(/E do mnemo também\.$/)
+      expect(s.asks[2].text).toMatch(/valeu\.$/)
+    })
   })
 
   test('a parent asked for by typing is told to Claude and never said aloud', async () => {

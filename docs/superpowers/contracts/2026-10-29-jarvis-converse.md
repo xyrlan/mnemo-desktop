@@ -39,7 +39,10 @@ it.** The seam holds:
   - `rest` said once the message is whole;
   - a newer request hushes the request being answered;
   - the panorama in the turn text when it changed;
-  - a parent's report told to the brain, and said aloud for a parent asked for aloud.
+  - a parent's report told to the brain, and said aloud for a parent asked for aloud;
+  - a request a breath cut in two joined again: a `follow` take heard while the request before it
+    is still thought over, before any of its calls ran, is asked together with it, and the first
+    half runs no call.
 
   `loop.test.ts` pins the wiring with fakes (`conversing (jarvis-converse)`). `createJarvis` takes
   `situation`, `speaker` and `report` for that.
@@ -163,7 +166,8 @@ The end of a turn, heard sooner, and the maintainer hearing that they were heard
    breath between the name and the request, or within a request, lost five requests in two
    minutes.
    - Bring the median from the end of speech to `jarvis://heard` under about a second.
-   - Do not cut a breath within a request.
+   - Do not cut a breath within a request. Where a take is handed on early and the request goes
+     on, the rest must reach the loop as a `follow` take, which the loop joins to it.
    - Measure both on generated speech with pauses of the lengths that matter.
 2. **A cue.** When a take is heard and goes to the brain (a key take or a hands-free one, and not
    one dropped as junk), a short, soft sound plays at once. It is not speech, and it does not
