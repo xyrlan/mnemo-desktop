@@ -1334,8 +1334,9 @@ describe('conversing (jarvis-converse)', () => {
       start: () => (started++, () => void stopped++),
     }
     const s = withClaude(['Dois PRs no tasklist.', 'Nada mudou.', 'Agora são três.', 'Três.'], { situation })
-    expect(started).toBe(1)
     await s.jarvis.ask('como tá tudo?')
+    // Kept fresh from when Claude is known to be the brain, once.
+    expect(started).toBe(1)
     await s.jarvis.ask('e agora?')
     state = { text: 'tasklist: 3 PRs abertos.', at: 200 }
     await s.jarvis.ask('e agora?')
@@ -1348,6 +1349,14 @@ describe('conversing (jarvis-converse)', () => {
     expect(s.asks[3].text).toContain('tasklist: 3 PRs abertos.')
     s.jarvis.dispose()
     expect(stopped).toBe(1)
+  })
+
+  test('with the local model, nothing reads the projects in the background', async () => {
+    let started = 0
+    const situation: Situation = { ...QUIET, start: () => (started++, () => {}) }
+    const s = setup([said('Bom dia!')], { situation })
+    await s.jarvis.ask('bom dia')
+    expect(started).toBe(0)
   })
 
   test('what a parent asked for aloud says is told to Claude, and said aloud at a quiet moment', async () => {

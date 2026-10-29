@@ -740,6 +740,7 @@ export function createJarvis({
     })
     set({ brain })
     turn.brain = brain
+    keepFresh(brain)
     // With Claude the local model is not started: it takes no VRAM until the screen needs it.
     if (brain.kind === 'local' && !(await ensure())) return note('O modelo não subiu; veja acima.', true)
     const k = await knowledge()
@@ -803,10 +804,21 @@ export function createJarvis({
     return enqueue(req)
   }
 
+  // The projects' state is kept fresh for Claude only, from when it is known to be the brain: with
+  // the local model, or with no James configured, nothing reads the projects in the background.
+  let stopSituation: (() => void) | null = null
+  let disposed = false
+  const keepFresh = (brain: BrainConfig) => {
+    if (brain.kind === 'claude' && !stopSituation && !disposed) stopSituation = situation.start()
+  }
+
   // The bar shows who answers before the first request asks.
   void client
     .brain()
-    .then((brain) => set({ brain }))
+    .then((brain) => {
+      set({ brain })
+      keepFresh(brain)
+    })
     .catch(() => {})
 
   // ---- the parents' events ----
@@ -827,8 +839,6 @@ export function createJarvis({
     tell(r.tell)
     if (r.say && askedAloud.has(e.parent.sessionId)) sayWhenQuiet(forSpeech(r.say))
   })
-  // The projects' state, kept fresh for the brain.
-  const stopSituation = situation.start()
 
   return {
     ask: (text) => (text.trim() ? request({ text: text.trim(), spoken: false }) : Promise.resolve()),
@@ -851,8 +861,9 @@ export function createJarvis({
       }
     },
     dispose() {
+      disposed = true
       unsubscribe()
-      stopSituation()
+      stopSituation?.()
     },
   }
 }
