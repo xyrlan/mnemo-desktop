@@ -109,16 +109,17 @@ export function ciOf(out: string): Pr['ci'] {
   return '?'
 }
 
-const PARENT: Record<string, string> = { busy: 'ocupada', idle: 'ociosa', waiting: 'esperando' }
-const CHILD: Record<string, string> = { working: 'trabalhando', blocked: 'bloqueado', idle: 'parado' }
+/** How a state is said for one, and for more: `2 ocupadas`, `2 bloqueados`. */
+const PARENT: Record<string, [string, string]> = { busy: ['ocupada', 'ocupadas'], idle: ['ociosa', 'ociosas'], waiting: ['esperando', 'esperando'] }
+const CHILD: Record<string, [string, string]> = { working: ['trabalhando', 'trabalhando'], blocked: ['bloqueado', 'bloqueados'], idle: ['parado', 'parados'] }
 /** A child in these states has finished: what it left shows as its PR. */
 const FINISHED = new Set(['done', 'stopped'])
 
 /** `n` things of `kinds`, as `3 filhos (2 trabalhando, 1 parado)`. */
-function counted(n: number, one: string, many: string, kinds: string[], words: Record<string, string>): string {
+function counted(n: number, one: string, many: string, kinds: string[], words: Record<string, [string, string]>): string {
   const by = new Map<string, number>()
-  for (const k of kinds) by.set(words[k] ?? k, (by.get(words[k] ?? k) ?? 0) + 1)
-  const parts = [...by].map(([w, c]) => `${c} ${w}`)
+  for (const k of kinds) by.set(k, (by.get(k) ?? 0) + 1)
+  const parts = [...by].map(([k, c]) => `${c} ${words[k]?.[c === 1 ? 0 : 1] ?? k}`)
   return `${n} ${n === 1 ? one : many} (${parts.join(', ')})`
 }
 

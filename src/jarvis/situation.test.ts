@@ -121,7 +121,7 @@ describe('createSituation', () => {
 
   test('a repository that is none of the known projects is marked, and still asks for the maintainer', async () => {
     const over = {
-      list_sessions: `${SESSIONS}\n\n## system32\n- parent dddddddd "solta": waiting (input needed), in C:\\Windows\\System32\n\n## TL\n- child 7a7a7a7a "Pelo apelido": working`,
+      list_sessions: `${SESSIONS}\n\n## system32\n- parent dddddddd "solta": waiting (input needed), in C:\\Windows\\System32\n\n## TL\n- parent cccccccc: busy, in /Users/you/github/tasklist\n- child 7a7a7a7a "Pelo apelido": working`,
     }
     const projects = [
       { name: 'tasklist', aliases: ['tl'], root: '/r/t' },
@@ -135,7 +135,7 @@ describe('createSituation', () => {
     expect(lines[0]).toContain(`; system32 ${OUTSIDE}: sessão "solta" esperando (input needed)`)
     expect(lines).toContain(`system32 ${OUTSIDE}: 1 sessão (1 esperando).`)
     // An alias is the project: its sessions join the project's line, unmarked.
-    expect(lines.find((l) => l.startsWith('tasklist:'))).toContain('3 filhos (2 trabalhando, 1 bloqueado)')
+    expect(lines.find((l) => l.startsWith('tasklist:'))).toContain('3 sessões (1 esperando, 2 ocupadas); 3 filhos (2 trabalhando, 1 bloqueado)')
     expect(s.text()).not.toMatch(/TL|tasklist \(fora|notes \(fora/)
     expect(lines.every((l) => l.length <= LINE_CHARS)).toBe(true)
     expect(s.text().length).toBeLessThanOrEqual(MAX_CHARS)
