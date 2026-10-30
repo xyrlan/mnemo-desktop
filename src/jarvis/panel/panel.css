@@ -77,6 +77,30 @@
 .nx .jv-parent-state { flex: none; color: var(--nx-dim); }
 .nx .jv-parent-req { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-faint); text-overflow: ellipsis; white-space: nowrap; }
 
+/* The researches James runs in the background (jarvis-research): a running one in working's colour,
+   a failed one in danger's, a done one in ok's. The section scrolls on its own, so the
+   conversation keeps its room. */
+.nx .jv-researches { flex: none; max-height: 45%; padding: 8px 12px 0; overflow-y: auto; }
+.nx .jv-research { margin-bottom: 6px; padding: 4px 8px; border-left: 3px solid var(--nx-edge); background: var(--nx-hull-2); }
+.nx .jv-research[data-state='running'] { border-left-color: var(--state-working, #60a5fa); }
+.nx .jv-research[data-state='done'] { border-left-color: var(--nx-ok); }
+.nx .jv-research[data-state='failed'] { border-left-color: var(--nx-danger); }
+.nx .jv-research-head { display: flex; gap: 8px; min-width: 0; }
+.nx .jv-research-state { flex: none; color: var(--nx-dim); }
+.nx .jv-research-q { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
+.nx .jv-research .jv-bar { margin: 4px 0 2px; }
+.nx .jv-research-summary { margin: 4px 0; overflow-wrap: anywhere; }
+.nx .jv-research-more > summary { color: var(--nx-faint); cursor: pointer; }
+.nx .jv-research-details { margin: 4px 0; color: var(--nx-dim); overflow-wrap: anywhere; white-space: pre-wrap; }
+.nx .jv-research-error { margin: 4px 0; color: var(--nx-danger); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* A search's sources: each opens in the browser. */
+.nx .jv-sources { margin: 2px 0 0; padding: 0; list-style: none; }
+.nx .jv-sources > li { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.nx .jv-source { min-width: 0; padding: 0; overflow: hidden; border: 0; background: none; color: var(--nx-pale); text-align: left; text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.nx .jv-source:hover { color: #fff; }
+.nx .jv-source-host { flex: none; color: var(--nx-faint); font-size: 10px; }
+
 /* The conversation. */
 .nx .jv-lines { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; list-style: none; }
 .nx .jv-line { display: flex; flex-direction: column; gap: 1px; padding: 3px 0; overflow-wrap: anywhere; white-space: pre-wrap; }

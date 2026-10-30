@@ -25,8 +25,12 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
   await client.projects()
   await client.log({ said: 'oi' })
   await client.stopModel()
+  await client.brain()
+  await client.brainAsk('Você é o James.', 'bom dia')
+  await client.brainReset()
   await client.tool('git_log', { project: 'mnemo', limit: 5 })
   await client.focusedWindow()
+  await client.research('qual a última versão do Tauri?', false)
   await client.say('pronto')
   await client.hush()
   await client.screenshot()
@@ -38,12 +42,21 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
   await client.openUrl('https://example.com')
   await client.onVoice(() => {})
   await client.onHeard(() => {})
+  await client.onVoiceError(() => {})
+  await client.onVoiceNote(() => {})
+  await client.onLevel(() => {})
+  await client.listen(true)
+  await client.listen()
   expect(calls).toEqual([
     ['jarvis_projects', undefined],
     ['jarvis_log_append', { row: { said: 'oi' } }],
     ['jarvis_llm_stop', undefined],
+    ['jarvis_brain', undefined],
+    ['jarvis_brain_ask', { system: 'Você é o James.', text: 'bom dia' }],
+    ['jarvis_brain_reset', undefined],
     ['jarvis_tool', { name: 'git_log', args: { project: 'mnemo', limit: 5 } }],
     ['jarvis_focused_window', undefined],
+    ['jarvis_research', { question: 'qual a última versão do Tauri?', deep: false }],
     ['jarvis_say', { text: 'pronto' }],
     ['jarvis_hush', undefined],
     ['jarvis_screenshot', undefined],
@@ -53,22 +66,29 @@ test('every command goes to Rust under the contract\'s name, with its arguments'
     ['jarvis_open_in_browser', { project: 'mnemo', page: 'pr', number: 511 }],
     ['jarvis_open_in_browser', { project: 'mnemo', page: 'actions', number: null }],
     ['jarvis_open_url', { url: 'https://example.com' }],
+    ['jarvis_listen', { enabled: true }],
+    ['jarvis_listen', { enabled: null }],
   ])
-  expect(listened).toEqual(['jarvis://voice', 'jarvis://heard'])
+  expect(listened).toEqual(['jarvis://voice', 'jarvis://heard', 'jarvis://voice-error', 'jarvis://voice-note', 'jarvis://level'])
 })
 
 test('streamed commands hand Rust a channel and pass on what comes back', async () => {
   const { client, calls } = fake()
   const setup: unknown[] = []
   const chunks: unknown[] = []
+  const pieces: unknown[] = []
   await client.ensureModel((s) => setup.push(s))
   await client.chat({ messages: [] }, (c) => chunks.push(c))
+  await client.brainStream('Você é o James.', 'bom dia', (p) => pieces.push(p))
   expect(calls.map(([cmd, a]) => [cmd, Object.keys(a ?? {})])).toEqual([
     ['jarvis_llm_ensure', ['on']],
     ['jarvis_llm_chat', ['body', 'on']],
+    ['jarvis_brain_stream', ['system', 'text', 'on']],
   ])
+  expect(calls[2][1]).toMatchObject({ system: 'Você é o James.', text: 'bom dia' })
   expect(setup).toEqual([{ from: 'jarvis_llm_ensure' }])
   expect(chunks).toEqual([{ from: 'jarvis_llm_chat' }])
+  expect(pieces).toEqual([{ from: 'jarvis_brain_stream' }])
 })
 
 test('the read tools are exactly the tools Rust runs: the rest are the panel\'s to route', () => {
@@ -77,7 +97,10 @@ test('the read tools are exactly the tools Rust runs: the rest are the panel\'s 
   expect(names.filter((n) => !(READ_TOOLS as readonly string[]).includes(n))).toEqual([
     'parent_status',
     'delegate_to_parent',
+    'stop_parent',
     'ask_user',
+    'web_search',
+    'research',
     'look_at_screen',
     'open_app',
     'open_in_browser',

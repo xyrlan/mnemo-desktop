@@ -221,6 +221,13 @@ pub fn helper_pid(config_dir: &Path, pid: u64) -> bool {
         .is_some_and(|v| v.get("entrypoint").and_then(|e| e.as_str()) == Some("sdk-cli"))
 }
 
+/// `parse_agents`' rows without James's brain (`jarvis_brain`): a `claude -p` that `claude agents`
+/// lists as an interactive session in the app's own dir under `home`. It is no one's session: not
+/// a parent here, so not in `list_sessions` nor among the parents James follows, and not a helper.
+pub fn without_brain(rows: Vec<ParentSession>, home: &Path) -> Vec<ParentSession> {
+    rows.into_iter().filter(|p| !crate::jarvis_brain::is_brain_dir(&p.cwd, home)).collect()
+}
+
 /// `parse_agents`' rows split into parents and helpers (`helper_pid`).
 pub fn split_helpers(rows: Vec<ParentSession>, config_dir: &Path) -> (Vec<ParentSession>, Vec<Helper>) {
     let (helpers, parents): (Vec<_>, Vec<_>) = rows.into_iter().partition(|p| p.pid.is_some_and(|pid| helper_pid(config_dir, pid)));
@@ -1271,6 +1278,7 @@ pub fn recall_prs(root: &str) -> Option<Vec<Pr>> {
 pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
     let mut errors = Vec::new();
     let accounts = account_dirs::accounts();
+    let home = crate::app_dir::home();
     let mut agent_starts = HashMap::new();
     let mut agent_waiting = HashMap::new();
     let mut parents: Vec<ParentSession> = Vec::new();
@@ -1293,7 +1301,7 @@ pub fn collect_snapshot(focused_cwd: Option<&str>, with_prs: bool) -> Snapshot {
         agent_waiting.extend(agents.as_deref().map(parse_agent_waiting).unwrap_or_default());
         match agents.and_then(|j| parse_agents(&j)) {
             Ok(ps) => {
-                let (ps, hs) = split_helpers(ps, &a.config_dir);
+                let (ps, hs) = split_helpers(without_brain(ps, &home), &a.config_dir);
                 helpers.extend(hs.into_iter().map(|h| Helper { account: a.id.clone(), ..h }));
                 for p in ps {
                     if !parents.iter().any(|o| o.session_id == p.session_id) {
@@ -1592,6 +1600,26 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(parents.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![Some(222), Some(333)]);
         assert_eq!(helpers, vec![Helper { cwd: "/Users/you/github/mnemo-wt-c-grok-install".into(), account: default_account() }]);
+    }
+
+    #[test]
+    fn james_brain_is_no_session() {
+        // `claude agents` lists the brain's `claude -p` as an interactive session in the app's dir,
+        // a debug build's as much as the release's.
+        let rows = parse_agents(
+            r#"[
+              {"pid": 111, "cwd": "/Users/you/.mnemo-desktop/jarvis-brain", "kind": "interactive", "sessionId": "aaaaaaaa-1111-4000-8000-000000000001", "name": "jarvis-brain-12", "status": "idle"},
+              {"pid": 222, "cwd": "/Users/you/github/mnemo", "kind": "interactive", "sessionId": "bbbbbbbb-2222-4000-8000-000000000002", "name": "mnemo-d6", "status": "busy"},
+              {"pid": 333, "cwd": "/Users/you/.mnemo-desktop-dev/jarvis-brain", "kind": "interactive", "sessionId": "cccccccc-3333-4000-8000-000000000003", "name": "jarvis-brain-40", "status": "busy"}
+            ]"#,
+        )
+        .unwrap();
+        let parents = without_brain(rows, Path::new("/Users/you"));
+        assert_eq!(parents.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![Some(222)]);
+        // So `list_sessions`, which reads the poll's groups, never names it.
+        let group = RepoGroup { root: "/Users/you/github/mnemo".into(), name: "mnemo".into(), parents, missions: vec![], children: vec![] };
+        let listed = crate::jarvis_tools::mnemo::sessions(&[group], None, &[]).unwrap();
+        assert_eq!(listed, "## mnemo\n- parent bbbbbbbb \"mnemo-d6\": busy, in /Users/you/github/mnemo");
     }
 
     #[test]

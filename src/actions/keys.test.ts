@@ -4,10 +4,11 @@ import { actionForKey, actionFromMenu, installKeys, makeDedupe } from './keys'
 const ev = (key: string, o: Partial<KeyboardEvent> = {}) =>
   ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...o }) as KeyboardEvent
 
-test("mac bindings: ⌘W and ⇧⌘W close, ⌘E dictates, and nothing else is the app's", () => {
+test("mac bindings: ⌘W and ⇧⌘W close, ⌘E dictates, ⌘J opens James, and nothing else is the app's", () => {
   expect(actionForKey(ev('w', { metaKey: true }), 'mac')).toBe('pane.close')
   expect(actionForKey(ev('W', { metaKey: true, shiftKey: true }), 'mac')).toBe('tab.close')
   expect(actionForKey(ev('e', { metaKey: true }), 'mac')).toBe('dictation.toggle')
+  expect(actionForKey(ev('j', { metaKey: true }), 'mac')).toBe('jarvis.toggle')
   // The workbench's chords went with it (#459).
   for (const [key, o] of [
     ['t', { metaKey: true }],
@@ -34,6 +35,7 @@ test('other platforms leave plain Ctrl to the shell and bind Ctrl+Shift (#329)',
   for (const k of ['w', 'd', 'k', 'l', 'e', 'n', 'b', 't', 'j', 'c', 'v', '1', '9']) expect([k, actionForKey(ev(k, ctrl), 'other')]).toEqual([k, null])
   expect(actionForKey(ev('W', ctrlShift), 'other')).toBe('pane.close')
   expect(actionForKey(ev('E', ctrlShift), 'other')).toBe('dictation.toggle')
+  expect(actionForKey(ev('J', ctrlShift), 'other')).toBe('jarvis.toggle')
   // What sat on Ctrl+Shift and would collide moved to Alt+Shift.
   expect(actionForKey(ev('W', altShift), 'other')).toBe('tab.close')
   // The terminal's copy and paste, and what the workbench had, are not the app's.

@@ -22,7 +22,7 @@
 //! the config or the PATH.
 
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::{Mutex, MutexGuard};
@@ -310,9 +310,10 @@ static SERVER: Mutex<Option<Server>> = Mutex::new(None);
 static SETUP: Mutex<()> = Mutex::new(());
 static SERIAL: Mutex<u64> = Mutex::new(0);
 
-/// Holds the server's life to the app's; see the module doc.
+/// Holds the server's life to the app's; see the module doc. Shared with `jarvis_brain`, whose
+/// `claude` dies with the app the same way.
 #[cfg(windows)]
-struct Tie(windows_sys::Win32::Foundation::HANDLE);
+pub(crate) struct Tie(windows_sys::Win32::Foundation::HANDLE);
 
 // The job handle is only closed, from whichever thread drops it.
 #[cfg(windows)]
@@ -326,9 +327,10 @@ impl Drop for Tie {
 }
 
 /// Starts `cmd` in a job that kills it once the app's handle to the job closes. The handle is
-/// never inheritable, so the server holds no handle to its own job.
+/// never inheritable, so the server holds no handle to its own job. `what` names the program in
+/// the errors. What the program starts in turn joins its job, and dies with it too.
 #[cfg(windows)]
-fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
+pub(crate) fn spawn_tied(mut cmd: std::process::Command, what: &str) -> Result<(Child, Tie), String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -336,7 +338,7 @@ fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
     };
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {
-        return Err(format!("llama-server: no job object ({})", std::io::Error::last_os_error()));
+        return Err(format!("{what}: no job object ({})", std::io::Error::last_os_error()));
     }
     let tie = Tie(job);
     let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
@@ -350,14 +352,14 @@ fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
         )
     };
     if set == 0 {
-        return Err(format!("llama-server: the job object took no limit ({})", std::io::Error::last_os_error()));
+        return Err(format!("{what}: the job object took no limit ({})", std::io::Error::last_os_error()));
     }
-    let mut child = cmd.spawn().map_err(|e| format!("llama-server could not start: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("{what} could not start: {e}"))?;
     if unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as _) } == 0 {
         let e = std::io::Error::last_os_error();
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!("llama-server: it could not be tied to the app ({e}), so it was stopped"));
+        return Err(format!("{what}: it could not be tied to the app ({e}), so it was stopped"));
     }
     Ok((child, tie))
 }
@@ -366,10 +368,10 @@ fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
 /// signal follows the starting thread, not the process.
 #[cfg(unix)]
 #[allow(dead_code)]
-struct Tie(std::sync::mpsc::Sender<()>);
+pub(crate) struct Tie(std::sync::mpsc::Sender<()>);
 
 #[cfg(unix)]
-fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
+pub(crate) fn spawn_tied(mut cmd: std::process::Command, what: &str) -> Result<(Child, Tie), String> {
     #[cfg(target_os = "linux")]
     unsafe {
         use std::os::unix::process::CommandExt;
@@ -389,8 +391,8 @@ fn spawn_tied(mut cmd: std::process::Command) -> Result<(Child, Tie), String> {
             // Returns once `Tie` drops its sender: the server is stopped or no longer ours.
             let _ = parked.recv();
         })
-        .map_err(|e| format!("llama-server: {e}"))?;
-    let child = child.recv().map_err(|e| format!("llama-server: {e}"))?.map_err(|e| format!("llama-server could not start: {e}"))?;
+        .map_err(|e| format!("{what}: {e}"))?;
+    let child = child.recv().map_err(|e| format!("{what}: {e}"))?.map_err(|e| format!("{what} could not start: {e}"))?;
     Ok((child, Tie(keep)))
 }
 
@@ -441,7 +443,7 @@ pub fn ensure(on: &dyn Fn(LlmSetup)) -> Result<(), String> {
     if let Some(dir) = files.server.parent() {
         cmd.current_dir(dir);
     }
-    let (child, tie) = spawn_tied(cmd)?;
+    let (child, tie) = spawn_tied(cmd, "llama-server")?;
     let serial = {
         let mut n = lock(&SERIAL);
         *n += 1;
@@ -609,7 +611,7 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::sync::{Arc, Mutex};
 
     #[test]

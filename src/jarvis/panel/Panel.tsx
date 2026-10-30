@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useStore } from 'zustand'
+import type { BrainConfig, Research } from '../client'
 import type { Jarvis } from '../loop'
 import type { ParentState } from '../parent'
-import { approvals, type JarvisStore, type Line, type Parent, type Setup } from '../store'
+import { approvals, unended, type JarvisStore, type Line, type Parent, type ResearchRun, type Setup } from '../store'
 import '../../nexus/ui/ui.css'
 import './panel.css'
 
 type Props = {
   store: JarvisStore
-  jarvis: Pick<Jarvis, 'ask' | 'answer' | 'ensure'>
+  jarvis: Pick<Jarvis, 'ask' | 'answer' | 'ensure' | 'openUrl'>
   /** `jarvis.toggle`'s chord, printed on the launcher; none while it has no chord. */
   shortcut?: string
 }
@@ -34,6 +35,9 @@ function setupWord(s: Setup): string {
       return 'model failed'
   }
 }
+
+/** Who answers, for the bar: Claude and its model, or the local model's state. */
+const brainWord = (brain: BrainConfig | null, setup: Setup) => (brain?.kind === 'claude' ? `claude · ${brain.model}` : setupWord(setup))
 
 const STATE: Record<ParentState, string> = {
   starting: 'starting',
@@ -100,25 +104,103 @@ function Approval({ parent, onAnswer }: { parent: Parent; onAnswer(allow: boolea
   )
 }
 
-function LineRow({ line }: { line: Line }) {
+const RESEARCH_STATE: Record<ResearchRun['state'], string> = {
+  queued: 'queued',
+  running: 'researching',
+  done: 'done',
+  failed: 'failed',
+}
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** The pages a search rests on: each opens in the browser. */
+function Sources({ sources, onOpen }: { sources: Research['sources']; onOpen(url: string): void }) {
+  return (
+    <ul className="jv-sources">
+      {sources.map((s) => (
+        <li key={s.url}>
+          <button type="button" className="jv-source" title={s.url} onClick={() => onOpen(s.url)}>
+            {s.title}
+          </button>
+          <span className="jv-source-host">{hostOf(s.url)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const answerWord = (n: number) => (n === 0 ? 'Answer' : n === 1 ? 'Answer and 1 source' : `Answer and ${n} sources`)
+
+/** A research James runs in the background (jarvis-research): its state, and once it ends what
+ *  it found, whole, with its sources, or why it failed. `open`: the answer shown, not folded. */
+function ResearchCard({ run, open, onOpen }: { run: ResearchRun; open: boolean; onOpen(url: string): void }) {
+  const { result } = run
+  return (
+    <article className="jv-research" data-state={run.state} data-id={run.id}>
+      <div className="jv-research-head">
+        <span className="jv-research-state">{RESEARCH_STATE[run.state]}</span>
+        <span className="jv-research-q" title={run.question}>
+          {run.question}
+        </span>
+      </div>
+      {run.state === 'running' && (
+        <div className="jv-bar" data-indeterminate="">
+          <div />
+        </div>
+      )}
+      {result && (
+        <>
+          <p className="jv-research-summary">{result.summary}</p>
+          <details className="jv-research-more" open={open}>
+            <summary>{answerWord(result.sources.length)}</summary>
+            <p className="jv-research-details">{result.details}</p>
+            {result.sources.length > 0 && <Sources sources={result.sources} onOpen={onOpen} />}
+          </details>
+        </>
+      )}
+      {run.state === 'failed' && (
+        <p className="jv-research-error" role="alert">
+          {run.error}
+        </p>
+      )}
+    </article>
+  )
+}
+
+function LineRow({ line, onOpen }: { line: Line; onOpen(url: string): void }) {
   return (
     <li className="jv-line" data-who={line.who} data-error={line.who === 'note' && line.error ? '' : undefined}>
       {line.who === 'you' && <span className="jv-who">{line.spoken ? 'you (spoken)' : 'you'}</span>}
       {line.who === 'james' && <span className="jv-who">James</span>}
       {line.who === 'parent' && <span className="jv-who">{line.project}</span>}
-      <span className="jv-text">{line.text}</span>
+      {line.who === 'web' ? (
+        <>
+          <span className="jv-who">sources · {line.text}</span>
+          <Sources sources={line.sources} onOpen={onOpen} />
+        </>
+      ) : (
+        <span className="jv-text">{line.text}</span>
+      )}
     </li>
   )
 }
 
 /** James on screen (#505): the conversation, the model's setup, the parents Jarvis opened and an
- *  approval any of them waits on, and a field to type to him. Docked on the right, over the ship
- *  and under a Nexus window. */
+ *  approval any of them waits on, his researches (jarvis-research), and a field to type to him.
+ *  Docked on the right, over the ship and under a Nexus window. */
 export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   const open = useStore(store, (s) => s.open)
+  const brain = useStore(store, (s) => s.brain)
   const setup = useStore(store, (s) => s.setup)
   const lines = useStore(store, (s) => s.lines)
   const parents = useStore(store, (s) => s.parents)
+  const researches = useStore(store, (s) => s.researches)
   const busy = useStore(store, (s) => s.busy)
   const voice = useStore(store, (s) => s.voice)
   const asking = useStore(store, (s) => s.pending !== null)
@@ -136,6 +218,9 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   }, [lines, open])
 
   const waiting = approvals({ parents })
+  const openUrl = (url: string) => void jarvis.openUrl(url)
+  // The newest research ended shows its answer whole; older ones fold theirs.
+  const newestEnded = researches.find((r) => !unended(r))?.id
   if (!open)
     return (
       <button
@@ -161,15 +246,16 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
     <section className="nx jv-panel" role="complementary" aria-label="James" data-voice={voice}>
       <div className="nx-window-bar">
         <h2 className="nx-window-title">James</h2>
-        <span className="nx-window-sub" data-testid="jv-setup-word">
-          {setupWord(setup)}
+        <span className="nx-window-sub" data-testid="jv-setup-word" data-brain={brain?.kind ?? 'local'}>
+          {brainWord(brain, setup)}
           {voice !== 'idle' ? ` · ${voice}` : ''}
         </span>
         <button type="button" className="nx-window-close" aria-label="Close" title="Close (Esc)" onClick={close}>
           ×
         </button>
       </div>
-      <SetupCard setup={setup} onStart={() => void jarvis.ensure()} />
+      {/* With Claude the local model only sees the screen: its card shows once a look starts it. */}
+      {!(brain?.kind === 'claude' && setup.kind === 'idle') && <SetupCard setup={setup} onStart={() => void jarvis.ensure()} />}
       {waiting.map((p) => (
         <Approval key={p.ref.sessionId} parent={p} onAnswer={(allow) => void jarvis.answer(p.ref.sessionId, allow)} />
       ))}
@@ -187,10 +273,18 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
           ))}
         </div>
       )}
+      {researches.length > 0 && (
+        <div className="jv-researches">
+          <h3 className="nx-section">Research</h3>
+          {researches.map((r) => (
+            <ResearchCard key={r.id} run={r} open={r.id === newestEnded} onOpen={openUrl} />
+          ))}
+        </div>
+      )}
       <ol ref={list} className="jv-lines" aria-live="polite">
         {lines.length === 0 && <li className="jv-empty nx-muted">Type to James in Portuguese. He reads; anything that writes goes to a parent session.</li>}
         {lines.map((l) => (
-          <LineRow key={l.id} line={l} />
+          <LineRow key={l.id} line={l} onOpen={openUrl} />
         ))}
         {busy && <li className="jv-line jv-thinking nx-muted">…</li>}
       </ol>

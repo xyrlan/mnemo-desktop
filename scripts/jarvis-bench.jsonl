@@ -18,6 +18,8 @@
 {"request": "os checks do PR 42 do mnemo passaram?", "expect": {"tool": "gh_pr_checks", "project": "mnemo", "args": {"number": 42}}}
 {"request": "o CI do llama tá verde?", "expect": {"tool": "gh_run_list", "project": "llama.cpp"}}
 {"request": "o que diz a issue 504 do desktop?", "expect": {"tool": "gh_issue_view", "project": "mnemo-desktop", "args": {"number": 504}}}
+{"request": "quais issues estão abertas no whisper?", "expect": {"tool": "gh_issue_list", "project": "whisper.cpp"}}
+{"request": "James, tem alguma issue aberta pra eu pegar?", "expect": {"tool": "gh_issue_list"}}
 {"request": "corrige o teste que quebrou no desktop", "expect": {"tool": "delegate_to_parent", "project": "mnemo-desktop"}}
 {"request": "abre um PR no mnemo trocando o nome da flag verbose por debug", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "cria uma issue no tauri sobre o atalho global no windows", "expect": {"tool": "delegate_to_parent", "project": "tauri"}}
@@ -25,6 +27,8 @@
 {"request": "escreve um teste pro parser de sessões do mnemo", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "e aí, como tá aquilo?", "context": "um parent está rodando no mnemo-desktop, com o pedido de corrigir um teste", "expect": {"tool": "parent_status", "project": "mnemo-desktop"}}
 {"request": "já terminou?", "context": "um parent está rodando no llama.cpp", "expect": {"tool": "parent_status", "project": "llama.cpp"}}
+{"request": "fecha o parent do mnemo", "context": "um parent está rodando no mnemo, com o pedido de abrir um PR", "expect": {"tool": "stop_parent", "project": "mnemo"}}
+{"request": "pode abrir um parent no tauri", "expect": {"tool": "ask_user", "project": "tauri"}}
 {"request": "fala pra ele também atualizar o changelog", "context": "um parent está rodando no mnemo, com o pedido de abrir um PR", "expect": {"tool": "delegate_to_parent", "project": "mnemo"}}
 {"request": "o que mudou aqui?", "context": "a janela em foco é um terminal no projeto whisper.cpp", "expect": {"tool": "git_diff", "project": "whisper.cpp"}}
 {"request": "abre um PR com isso", "expect": {"tool": "ask_user"}}
@@ -45,3 +49,8 @@
 {"request": "me mostra as actions do mnemo no navegador", "expect": {"tool": "open_in_browser", "project": "mnemo", "args": {"page": "actions"}}}
 {"request": "abre o github.com/ggml-org/llama.cpp pra mim", "expect": {"tool": "open_url", "args": {"url": "github.com/ggml-org/llama.cpp"}}}
 {"request": "James, abre o site huggingface.co", "expect": {"tool": "open_url", "args": {"url": "huggingface.co"}}}
+{"request": "quando foi que a gente mexeu no atalho do push-to-talk no desktop?", "expect": {"tool": "search_vault", "project": "mnemo-desktop"}}
+{"request": "o que a gente decidiu sobre o modelo do whisper no mnemo?", "expect": {"tool": "search_vault", "project": "mnemo"}}
+{"request": "qual é a versão mais nova do Tauri que saiu?", "expect": {"tool": "web_search"}}
+{"request": "James, quanto tá o dólar hoje?", "expect": {"tool": "web_search"}}
+{"request": "pesquisa a fundo quais modelos de voz em português rodam local e me avisa", "expect": {"tool": "research"}}

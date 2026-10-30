@@ -1,5 +1,5 @@
 import type { ParentRef } from './parent'
-import { addLine, approvals, createJarvisStore, foldParent, MAX_LINES, parentLine } from './store'
+import { addLine, approvals, createJarvisStore, foldParent, foldResearch, MAX_ENDED, MAX_LINES, parentLine, unended, type ResearchRun } from './store'
 
 const ref = (sessionId: string): ParentRef => ({ sessionId, project: 'tasklist', root: '/Users/you/code/tasklist', request: 'corrige', host: 'claude', startedAt: 0 })
 
@@ -47,4 +47,28 @@ test('each event has its line', () => {
   expect(parentLine({ kind: 'asking', parent: ref('a'), question: 'Qual?' })).toBe('Pergunta: Qual?')
   expect(parentLine({ kind: 'approval', parent: ref('a'), question: 'Push?' })).toBe('Espera aprovação: Push?')
   expect(parentLine({ kind: 'exited', parent: ref('a') })).toBe('Parent encerrado.')
+})
+
+const run = (id: number, state: ResearchRun['state']): ResearchRun => ({ id, question: `q${id}`, spoken: false, at: id, state })
+
+test('a research is added first and then updated in place', () => {
+  let rs = foldResearch([], run(1, 'running'))
+  rs = foldResearch(rs, run(2, 'queued'))
+  expect(rs.map((r) => [r.id, r.state])).toEqual([
+    [2, 'queued'],
+    [1, 'running'],
+  ])
+  rs = foldResearch(rs, { ...run(1, 'done'), result: { summary: 'S.', details: 'D.', sources: [] } })
+  expect(rs.map((r) => [r.id, r.state])).toEqual([
+    [2, 'queued'],
+    [1, 'done'],
+  ])
+  expect(rs.filter(unended).map((r) => r.id)).toEqual([2])
+})
+
+test('the panel keeps every research still to end and the last ones ended', () => {
+  let rs: ResearchRun[] = [run(0, 'running')]
+  for (let i = 1; i <= MAX_ENDED + 3; i++) rs = foldResearch(rs, run(i, i % 2 ? 'done' : 'failed'))
+  expect(rs.filter((r) => !unended(r)).map((r) => r.id)).toEqual([8, 7, 6, 5, 4].slice(0, MAX_ENDED))
+  expect(rs.at(-1)!.id).toBe(0)
 })

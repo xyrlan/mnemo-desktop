@@ -132,6 +132,9 @@ pub mod jarvis;
 // -- jarvis llm (src/jarvis_llm.rs): the local model under llama-server (#505) --
 pub mod jarvis_llm;
 
+// -- jarvis brain (src/jarvis_brain.rs): who answers James, and Claude when that is Claude --
+pub mod jarvis_brain;
+
 // -- jarvis tools (src/jarvis_tools.rs): the read tools and the window in front (#505) --
 pub mod jarvis_tools;
 
@@ -141,8 +144,13 @@ pub mod jarvis_screen;
 // -- jarvis apps (src/jarvis_apps.rs): opening apps from a list, and URLs (#508) --
 pub mod jarvis_apps;
 
-// -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Piper out (#506) --
+// -- jarvis voice (src/jarvis_voice.rs): the push-to-talk key, whisper in, Kokoro out (#506, #530) --
 pub mod jarvis_voice;
+
+// -- jarvis orb (src/jarvis_orb.rs): James on screen while a conversation is on (#503, #506) --
+pub mod jarvis_orb;
+// -- jarvis research (src/jarvis_research.rs): the web, at two speeds (#503) --
+pub mod jarvis_research;
 
 // -- test helpers (src/testutil.rs) --
 #[cfg(test)]
@@ -216,6 +224,12 @@ pub fn run() {
         // -- jarvis llm --
         // Its llama-server stops when the app exits (src/jarvis_llm.rs).
         .plugin(jarvis_llm::plugin())
+        // -- jarvis brain --
+        // Its `claude` stops when the app exits (src/jarvis_brain.rs).
+        .plugin(jarvis_brain::plugin())
+        // -- jarvis research --
+        // Its searches stop when the app exits (src/jarvis_research.rs).
+        .plugin(jarvis_research::plugin())
         .manage(PtyState(pty::PtyManager::new()))
         // -- voice state --
         .manage(voice::VoiceState::default())
@@ -377,6 +391,12 @@ pub fn run() {
             jarvis_llm::jarvis_llm_chat,
             jarvis_llm::jarvis_llm_stop,
 
+            // -- jarvis brain commands --
+            jarvis_brain::jarvis_brain,
+            jarvis_brain::jarvis_brain_ask,
+            jarvis_brain::jarvis_brain_stream,
+            jarvis_brain::jarvis_brain_reset,
+
             // -- jarvis tools commands --
             jarvis_tools::jarvis_tool,
             jarvis_tools::jarvis_focused_window,
@@ -390,9 +410,19 @@ pub fn run() {
             jarvis_apps::jarvis_open_in_browser,
             jarvis_apps::jarvis_open_url,
 
+            // -- jarvis orb commands --
+            jarvis_orb::jarvis_orb,
+            jarvis_orb::jarvis_orb_enabled,
+
             // -- jarvis voice commands --
             jarvis_voice::jarvis_say,
             jarvis_voice::jarvis_hush,
+
+            // -- jarvis wake commands --
+            // Hands-free listening on and off (src/jarvis_voice.rs, src/jarvis_voice/wake.rs).
+            jarvis_voice::jarvis_listen,
+            // -- jarvis research commands --
+            jarvis_research::jarvis_research,
         ])
         .setup(|app| {
             match std::env::var_os("MNEMO_DESKTOP_SMOKE") {
@@ -505,6 +535,9 @@ pub fn run() {
         // The shells outlive the window: the daemon keeps them for the next launch (src/pty.rs).
         // Only terminals the app held itself, with no daemon to hand them to, end here.
         .on_window_event(|window, event| match event {
+            // -- jarvis orb --
+            // The orb's window is not the app's: closing it asks nothing and ends no terminal.
+            _ if window.label() != "main" => {}
             // Where they do end with the window, it asks first when one is running something (#338).
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 if let Some(question) = pty::closing::question(&window.state::<PtyState>().0.busy()) {
@@ -512,7 +545,10 @@ pub fn run() {
                     ask_to_close(window, question);
                 }
             }
-            tauri::WindowEvent::Destroyed => window.state::<PtyState>().0.release(),
+            tauri::WindowEvent::Destroyed => {
+                window.state::<PtyState>().0.release();
+                jarvis_orb::main_closed(window.app_handle());
+            }
             _ => {}
         })
         .run(tauri::generate_context!());

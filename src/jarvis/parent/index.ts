@@ -4,15 +4,18 @@
  *
  *  - `./handoff`: the three-part text typed into a parent;
  *  - `./follow`: its state, from its `claude agents` row and its transcript (pure);
- *  - `./parents`: the API over what it needs of the app; `./live`, that, as the app runs it. */
+ *  - `./parents`: the API over what it needs of the app; `./live`, that, as the app runs it;
+ *  - `./report`: what James says and tells the brain when a parent he opened says something. */
 
 import { makeParents } from './parents'
 
-export { handoff } from './handoff'
+export { conversation, followUp, handoff } from './handoff'
+export { reportOf, type ParentReport } from './report'
 
 export type Host = 'claude' | 'grok'
 
-/** A parent Jarvis opened. `sessionId` is the one passed to `--session-id`. */
+/** A parent Jarvis opened. `sessionId` is the one passed to `--session-id`; `request` is what it
+ *  was asked to do: the brain's task when it wrote one, else the maintainer's words. */
 export type ParentRef = { sessionId: string; project: string; root: string; request: string; host: Host; startedAt: number }
 
 export type ParentState = 'starting' | 'working' | 'idle' | 'asking' | 'approval' | 'exited'
@@ -37,6 +40,11 @@ export type OpenParent = {
   root: string
   /** The maintainer's words, verbatim. */
   request: string
+  /** The task as the brain wrote it from the conversation, self-contained; empty when it wrote
+   *  none of its own. */
+  task: string
+  /** The exchanges that led to the request, as `conversation` writes them; empty when none. */
+  conversation: string
   /** What Jarvis gathered (git state, files read, what the screen showed, in words), handed over
    *  as "gathered by Jarvis, may be wrong". */
   gathered: string

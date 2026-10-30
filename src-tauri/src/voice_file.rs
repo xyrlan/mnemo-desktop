@@ -542,6 +542,7 @@ mod tests {
     /// `voice::tests::transcribes_the_fixtures`: the decode feeds whisper what it understands.
     #[test]
     fn the_opus_fixture_is_heard_by_dictations_model() {
+        let _turn = voice::whisper_turn();
         let ctx = voice::load_context(&voice::test_model()).expect("load");
         let audio = decode_file(&fixture_path("ola.opus")).unwrap();
         let text = voice::transcribe(&ctx, &audio, Language::Pt).unwrap().to_lowercase();

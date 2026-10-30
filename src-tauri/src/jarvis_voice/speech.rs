@@ -1,10 +1,11 @@
-//! Jarvis speaking (#506): Piper, local, with a PT-BR voice. What `jarvis_say` hands over waits
-//! in a queue; one thread turns it into audio through Piper, another plays it. While the
+//! Jarvis speaking (#506): what `jarvis_say` hands over waits in a queue; one thread turns it into
+//! audio, through Kokoro (`kokoro.rs`, #530) or, where Kokoro cannot run, Piper, and another plays
+//! it. While the
 //! push-to-talk key is held the player sends silence and holds its place, so nothing is said over
 //! the maintainer, and the rest follows once the key is up. `hush` drops the queue and what is
 //! still unplayed.
 //!
-//! Piper loads its voice in about 0.2 s, so a process is started ahead of time and waits on its
+//! Piper, local, with a PT-BR voice, loads it in about 0.2 s, so a process is started ahead of time and waits on its
 //! stdin with the voice loaded: a sentence then starts sounding after its own synthesis only.
 //! That process ends by itself when the app does, since its stdin closes.
 
@@ -13,7 +14,7 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -89,7 +90,7 @@ pub fn voice_rate(config: &str) -> Result<u32, String> {
 
 /// Piper's release, unpacked once into `<dir>/piper-2023.11.14-2/` by Windows' own `tar`.
 #[cfg(windows)]
-fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
     let home = dir.join(PIPER_RELEASE);
     let exe = home.join("piper.exe");
     if exe.is_file() {
@@ -123,7 +124,7 @@ fn piper_exe(dir: &Path) -> Result<PathBuf, String> {
 }
 
 #[cfg(not(windows))]
-fn piper_exe(_dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn piper_exe(_dir: &Path) -> Result<PathBuf, String> {
     // A bare name: started from the PATH, and said plainly when it is not there (`Piper::spawn`).
     let _ = PIPER_RELEASE;
     Ok(PathBuf::from("piper"))
@@ -187,8 +188,9 @@ impl Piper {
         spoken
     }
 
+    /// The synth the speaker runs, saying the text as `pronounce::heard` spells it.
     pub fn into_synth(mut self) -> Synth {
-        Box::new(move |text, sink| self.say(text, sink))
+        Box::new(move |text, sink| self.say(&super::pronounce::heard(text), sink))
     }
 }
 
@@ -365,13 +367,25 @@ pub struct Shared {
     cv: Condvar,
     /// The push-to-talk key is down: nothing is played. Set by the key's owner, read here.
     held: Arc<AtomicBool>,
+    /// How loud the last piece handed to the device was, its RMS as `f32` bits: the orb moves with
+    /// it, and hands-free listening weighs the microphone against it (`wake.rs`).
+    level: Arc<AtomicU32>,
 }
 
 impl Shared {
+    fn new(held: Arc<AtomicBool>) -> Self {
+        Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held, level: Arc::default() }
+    }
+
     /// Fills `out` with the next mono samples, `step` voice samples per output sample (1 when the
     /// output runs at the voice's rate), and silence for what is not there yet. While the key is
     /// held it is all silence, and nothing is taken.
     pub fn pull(&self, out: &mut [f32], step: f64) {
+        self.fill(out, step);
+        self.level.store(crate::voice::rms(out).to_bits(), Ordering::Relaxed);
+    }
+
+    fn fill(&self, out: &mut [f32], step: f64) {
         if self.held.load(Ordering::SeqCst) {
             out.fill(0.0);
             return;
@@ -435,7 +449,7 @@ impl Speaker {
         on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
         on_error: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<Self, String> {
-        let shared = Arc::new(Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held });
+        let shared = Arc::new(Shared::new(held));
 
         let s = shared.clone();
         let failed = on_error.clone();
@@ -553,6 +567,11 @@ impl Speaker {
         self.shared.cv.notify_all();
     }
 
+    /// How loud the device is being fed: the RMS of the last piece it was handed, as `f32` bits.
+    pub fn level(&self) -> Arc<AtomicU32> {
+        self.shared.level.clone()
+    }
+
     /// From the last `say` that found nothing being said to its first sample on the device, once:
     /// a second call has nothing until another `say` has sounded.
     pub fn take_latency(&self) -> Option<Duration> {
@@ -587,8 +606,7 @@ impl Drop for Speaker {
 /// itself), else at its own rate with `pull` stepping between samples.
 pub fn default_output() -> Output {
     Box::new(|rate, shared| {
-        let device = cpal::default_host().default_output_device().ok_or("no speaker found")?;
-        let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default output".into());
+        let (device, name) = speaker()?;
         let supported = device.default_output_config().map_err(|e| format!("speaker {name}: {e}"))?;
         let format = supported.sample_format();
         let own: cpal::StreamConfig = supported.into();
@@ -603,6 +621,14 @@ pub fn default_output() -> Output {
         stream.play().map_err(|e| format!("speaker {name}: {e}"))?;
         Ok(Box::new(stream) as Box<dyn Any>)
     })
+}
+
+/// The default output device as the device it is now (`voice::as_itself`), and its name.
+pub(super) fn speaker() -> Result<(cpal::Device, String), String> {
+    let host = cpal::default_host();
+    let (device, _) = crate::voice::as_itself(&host, host.default_output_device().ok_or("no speaker found")?);
+    let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default output".into());
+    Ok((device, name))
 }
 
 fn open(device: &cpal::Device, config: cpal::StreamConfig, format: SampleFormat, shared: Arc<Shared>, step: f64) -> Result<cpal::Stream, String> {
@@ -762,8 +788,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_level_is_of_what_the_device_was_last_handed() {
+        let shared = Shared::new(Arc::default());
+        let level = || f32::from_bits(shared.level.load(Ordering::Relaxed));
+        lock(&shared.st).audio.extend([0.5, -0.5, 0.5, -0.5]);
+        let mut out = [0.0; 4];
+        shared.pull(&mut out, 1.0);
+        assert!((level() - 0.5).abs() < 1e-6, "{}", level());
+        shared.pull(&mut out, 1.0);
+        assert_eq!(level(), 0.0, "silence once it is all played");
+    }
+
+    #[test]
     fn the_key_going_down_mid_sentence_pauses_it_where_it_was() {
-        let shared = Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held: Arc::default() };
+        let shared = Shared::new(Arc::default());
         lock(&shared.st).audio.extend([1.0, 2.0, 3.0, 4.0]);
         let mut out = [0.0; 2];
         shared.pull(&mut out, 1.0);
@@ -796,7 +834,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_output_at_another_rate_steps_between_samples() {
-        let shared = Shared { st: Mutex::new(St::default()), cv: Condvar::new(), held: Arc::default() };
+        let shared = Shared::new(Arc::default());
         lock(&shared.st).audio.extend([0.0, 1.0, 2.0, 3.0]);
         // The voice at half the output's rate: each sample, then the midpoint to the next.
         let mut out = [9.0; 6];

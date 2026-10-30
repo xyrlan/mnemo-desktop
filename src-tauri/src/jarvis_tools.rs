@@ -1,9 +1,9 @@
 //! Jarvis's read tools (#505, decision 1): the closed set the panel runs for the model, exactly
 //! `READ_TOOLS` in `src/jarvis/client.ts`, with the arguments `TOOLS` declares in
 //! `src/jarvis/routing.ts`. Never a shell: git, files and search inside a project's root, mnemo's
-//! briefings, rules and sessions, and `gh` one read-only subcommand at a time (`gh`). Secret files
-//! are refused even inside a project (`paths`). What a tool returns is text for the model, at most
-//! `MAX_CHARS`, saying where it was cut.
+//! briefings, rules and sessions, the vault searched by words (`vault`), and `gh` one read-only
+//! subcommand at a time (`gh`). Secret files are refused even inside a project (`paths`). What a
+//! tool returns is text for the model, at most `MAX_CHARS`, saying where it was cut.
 //!
 //! A project is one of `jarvis::projects()`, named by the model through `jarvis::find`; an
 //! unknown one is an error that lists the known names, so the model can correct itself.
@@ -14,8 +14,9 @@
 mod files;
 mod gh;
 mod git;
-mod mnemo;
+pub(crate) mod mnemo;
 mod paths;
+mod vault;
 mod window;
 
 use crate::jarvis::JarvisProject;
@@ -25,7 +26,7 @@ use std::path::{Path, PathBuf};
 pub use window::focused_window;
 
 /// The read tools, as `READ_TOOLS` in `client.ts` names them.
-pub const READ_TOOLS: [&str; 14] = [
+pub const READ_TOOLS: [&str; 16] = [
     "git_status",
     "git_log",
     "git_diff",
@@ -34,11 +35,13 @@ pub const READ_TOOLS: [&str; 14] = [
     "search",
     "read_briefings",
     "query_rules",
+    "search_vault",
     "list_sessions",
     "gh_pr_list",
     "gh_pr_view",
     "gh_pr_checks",
     "gh_run_list",
+    "gh_issue_list",
     "gh_issue_view",
 ];
 
@@ -73,6 +76,7 @@ pub fn run(name: &str, args: &Value, ctx: &Ctx) -> Result<String, String> {
         "search" => files::search(project(ctx, &a)?, a.need_str("query")?),
         "read_briefings" => mnemo::briefings(vault(ctx)?, project(ctx, &a)?, a.str("since")?, &ctx.today),
         "query_rules" => mnemo::rules(vault(ctx)?, maybe_project(ctx, &a)?, a.need_str("query")?),
+        "search_vault" => vault::search(vault(ctx)?, maybe_project(ctx, &a)?, a.need_str("query")?),
         "list_sessions" => mnemo::sessions(&(ctx.sessions)()?, maybe_project(ctx, &a)?, &ctx.projects),
         "gh_pr_list" => match maybe_project(ctx, &a)? {
             Some(p) => gh::pr_list(ctx.gh, p),
@@ -81,6 +85,10 @@ pub fn run(name: &str, args: &Value, ctx: &Ctx) -> Result<String, String> {
         "gh_pr_view" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::PrView(a.number()?)),
         "gh_pr_checks" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::PrChecks(a.number()?)),
         "gh_run_list" => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::RunList),
+        "gh_issue_list" => match maybe_project(ctx, &a)? {
+            Some(p) => gh::issue_list(ctx.gh, p),
+            None => Ok(gh::issue_list_all(ctx.gh, &ctx.projects)),
+        },
         "gh_issue_view" => match a.number()? {
             Some(n) => gh::run(ctx.gh, project(ctx, &a)?, gh::Read::IssueView(n)),
             None => Err("gh_issue_view needs the issue's number".to_string()),
@@ -209,9 +217,11 @@ pub async fn jarvis_tool(name: String, args: Value) -> Result<String, String> {
 }
 
 /// `jarvis_focused_window()`: the title of the last window in front that was not this app;
-/// None off Windows, or when there is none.
+/// None off Windows, or when there is none. It is a request's first step, so it also starts
+/// building `search_vault`'s index (`vault::warm`).
 #[tauri::command]
 pub fn jarvis_focused_window() -> Option<String> {
+    vault::warm();
     focused_window()
 }
 
@@ -255,12 +265,15 @@ mod tests {
             ("search", json!({ "project": p, "query": "jarvis" })),
             ("read_briefings", json!({ "project": p, "since": "ontem" })),
             ("query_rules", json!({ "project": p, "query": "testes" })),
+            ("search_vault", json!({ "project": p, "query": "decision decisão tests testes" })),
+            ("search_vault", json!({ "query": "release versão version" })),
             ("list_sessions", json!({ "project": p })),
             ("gh_pr_list", json!({ "project": p })),
             ("gh_pr_list", json!({})),
             ("gh_pr_view", json!({ "project": p, "number": number })),
             ("gh_pr_checks", json!({ "project": p, "number": number })),
             ("gh_run_list", json!({ "project": p })),
+            ("gh_issue_list", json!({ "project": p })),
             ("gh_issue_view", json!({ "project": p, "number": number })),
         ];
         for (tool, args) in calls {

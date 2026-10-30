@@ -1,16 +1,18 @@
 //! Push-to-talk dictation (issue #10). `voice_start` opens the default input device;
 //! `voice_stop` closes it and transcribes the take locally with whisper.cpp. The model
 //! downloads once, on first use, into `~/.mnemo-desktop/models/`; nothing else leaves the
-//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. On macOS the
-//! model runs on the GPU (Metal), and `warm` loads it at launch so the first take does not wait;
-//! elsewhere nothing of whisper runs before the first press.
+//! machine. Where the transcript goes (caret, Monaco, PTY) is the frontend's call. The model runs
+//! on the GPU where there is one to use (`uses_gpu`: Metal on macOS, Vulkan on Windows), and
+//! `warm` loads it at launch so the first take does not wait; on the CPU nothing of whisper runs
+//! before the first press.
 //! A published build asks the CPU for `BASELINE` before it lets whisper run (#308).
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, TryLockError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, I24, U24};
@@ -25,8 +27,8 @@ const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 const MODEL_BYTES: u64 = 59_707_625;
 /// Points at any ggml whisper model and skips the download (tests, or a bigger model).
 const MODEL_ENV: &str = "MNEMO_WHISPER_MODEL";
-/// Keeps whisper on the CPU where it would use the GPU (Metal, on macOS): a bench, or a GPU
-/// that misbehaves.
+/// Keeps whisper on the CPU where it would use the GPU (Metal on macOS, Vulkan on Windows): a
+/// bench, or a GPU that misbehaves.
 const CPU_ENV: &str = "MNEMO_WHISPER_CPU";
 
 /// whisper.cpp only accepts 16 kHz mono.
@@ -61,6 +63,14 @@ impl Language {
     }
 }
 
+/// Dictation is recording: Jarvis's hands-free listening takes nothing meanwhile.
+static DICTATING: AtomicBool = AtomicBool::new(false);
+
+/// Whether dictation is recording a take now.
+pub fn dictating() -> bool {
+    DICTATING.load(Ordering::SeqCst)
+}
+
 #[derive(Default)]
 pub struct VoiceState {
     recording: Mutex<Option<Recording>>,
@@ -90,6 +100,9 @@ pub struct Captured {
     pub rate: u32,
 }
 
+/// Sees each piece of a take as it arrives, mono, at the input's rate (`Recording::tapped`).
+pub type Tap = Arc<dyn Fn(&[f32]) + Send + Sync>;
+
 /// What a take listens to, handed to an `Input` as it opens: where samples go, and where a
 /// failure that ends the take is reported.
 #[derive(Clone)]
@@ -97,19 +110,38 @@ pub struct Sink {
     samples: Arc<Mutex<Vec<f32>>>,
     lost: Arc<Mutex<Option<String>>>,
     on_lost: Arc<dyn Fn(&str) + Send + Sync>,
+    tap: Option<Tap>,
+    /// Whether the take keeps what it hears for `finish`: not when only the tap listens.
+    keep: bool,
+    /// Pieces pushed so far: a microphone that stops sending them is watched for (`Watch`).
+    pieces: Arc<AtomicU64>,
 }
 
 impl Sink {
-    /// Appends interleaved `channels`-wide frames, up to `cap` mono samples.
+    /// Appends interleaved `channels`-wide frames, up to `cap` mono samples, and hands them to the
+    /// tap.
     pub fn push<T>(&self, data: &[T], channels: usize, cap: usize)
     where
         T: Copy,
         f32: FromSample<T>,
     {
-        let mut b = lock(&self.samples);
-        if b.len() < cap {
-            mix_to_mono(data, channels, &mut b);
+        self.pieces.fetch_add(1, Ordering::Relaxed);
+        let Some(tap) = &self.tap else {
+            let mut b = lock(&self.samples);
+            if b.len() < cap {
+                mix_to_mono(data, channels, &mut b);
+            }
+            return;
+        };
+        let mut mono = Vec::with_capacity(data.len() / channels.max(1));
+        mix_to_mono(data, channels, &mut mono);
+        if self.keep {
+            let mut b = lock(&self.samples);
+            if b.len() < cap {
+                b.extend_from_slice(&mono);
+            }
         }
+        tap(&mono);
     }
 
     /// The input stopped delivering: kept for `finish`, and said at once through `on_lost`.
@@ -128,26 +160,68 @@ pub struct Opened {
     pub keep: Box<dyn std::any::Any>,
     pub rate: u32,
     pub device: String,
+    /// What to watch it for, beside the errors its stream reports; none for a stand-in.
+    pub watch: Option<Watch>,
 }
+
+/// A microphone as `Recording` watches it while it is open (`default_input`, on Windows). Opened
+/// as the device it is, its stream is told of no unplugging and no new default: an unplugged one
+/// just stops sending sound, and `NO_SOUND` of nothing is a lost microphone. A take that follows
+/// the default (hands-free) has also lost it once the system's default is another device.
+pub struct Watch {
+    /// The device's id.
+    pub id: String,
+    /// The id of the system's default microphone now.
+    pub default: Box<dyn Fn() -> Option<String> + Send>,
+}
+
+/// How often an open microphone is looked at (`Watch`).
+#[cfg(not(test))]
+const WATCH_EVERY: Duration = Duration::from_millis(500);
+#[cfg(test)]
+const WATCH_EVERY: Duration = Duration::from_millis(10);
+/// A microphone that sends nothing for this long is lost. WASAPI hands a shared capture stream a
+/// piece every 10 ms, silence included; a Bluetooth headset that switches profile takes a second
+/// or two.
+#[cfg(not(test))]
+const NO_SOUND: Duration = Duration::from_secs(3);
+#[cfg(test)]
+const NO_SOUND: Duration = Duration::from_millis(300);
 
 /// Opens an input on the capture thread: the default microphone, or a stand-in in tests.
 pub type Input = Box<dyn FnOnce(Sink) -> Result<Opened, String> + Send>;
 
 /// A live take. The cpal stream is not `Send`, so it lives on its own thread until the
-/// stop sender drops. Jarvis's push-to-talk key records through it too (`jarvis_voice.rs`).
+/// stop sender drops, as it does when the take is finished or dropped. Jarvis's push-to-talk key
+/// and its hands-free listening record through it too (`jarvis_voice.rs`).
 pub(crate) struct Recording {
     stop: mpsc::Sender<()>,
     thread: JoinHandle<Result<Captured, String>>,
     lost: Arc<Mutex<Option<String>>>,
     device: String,
+    /// The input's sample rate.
+    pub(crate) rate: u32,
 }
 
 impl Recording {
     /// `on_lost` hears a failure that ends the take as it happens, from the input's thread.
     pub(crate) fn start(input: Input, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<String, String>>();
+        Self::open(input, None, true, false, Arc::new(on_lost))
+    }
+
+    /// `start`, with `tap` seeing each piece as it comes. With `keep` false the take keeps
+    /// nothing: the tap is all that hears it, for as long as it runs. With `follow` the
+    /// microphone is lost once the system's default is another (`Watch`): hands-free listens
+    /// through whatever the default is, where a take held by its key stays on the one it began on.
+    pub(crate) fn tapped(input: Input, tap: Tap, keep: bool, follow: bool, on_lost: impl Fn(&str) + Send + Sync + 'static) -> Result<Self, String> {
+        Self::open(input, Some(tap), keep, follow, Arc::new(on_lost))
+    }
+
+    fn open(input: Input, tap: Option<Tap>, keep: bool, follow: bool, on_lost: Arc<dyn Fn(&str) + Send + Sync>) -> Result<Self, String> {
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(String, u32), String>>();
         let (stop, stop_rx) = mpsc::channel::<()>();
-        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost: Arc::new(on_lost) };
+        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost, tap, keep, pieces: Arc::default() };
+        let watcher = sink.clone();
         let lost = sink.lost.clone();
         let thread = std::thread::Builder::new()
             .name("voice-capture".into())
@@ -160,16 +234,16 @@ impl Recording {
                         return Err(e);
                     }
                 };
-                let _ = ready_tx.send(Ok(opened.device));
+                let _ = ready_tx.send(Ok((opened.device, opened.rate)));
                 // Returns once `stop` is dropped.
-                let _ = stop_rx.recv();
+                watch(&stop_rx, opened.watch, follow, &watcher);
                 drop(opened.keep);
                 let samples = std::mem::take(&mut *lock(&samples));
                 Ok(Captured { samples, rate: opened.rate })
             })
             .map_err(|e| format!("voice: {e}"))?;
         match ready_rx.recv() {
-            Ok(Ok(device)) => Ok(Self { stop, thread, lost, device }),
+            Ok(Ok((device, rate))) => Ok(Self { stop, thread, lost, device, rate }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err("voice: capture thread died".into()),
         }
@@ -187,6 +261,32 @@ impl Recording {
     }
 }
 
+/// Waits for the take to be stopped, looking at its microphone meanwhile (`Watch`): one that
+/// sends nothing for `NO_SOUND` is lost, and so, when the take follows the default, is one the
+/// system no longer has as its default. Once lost, it only waits.
+fn watch(stop: &mpsc::Receiver<()>, watch: Option<Watch>, follow: bool, sink: &Sink) {
+    if let Some(w) = watch {
+        let mut seen = (sink.pieces.load(Ordering::Relaxed), Instant::now());
+        loop {
+            if !matches!(stop.recv_timeout(WATCH_EVERY), Err(mpsc::RecvTimeoutError::Timeout)) {
+                return;
+            }
+            let pieces = sink.pieces.load(Ordering::Relaxed);
+            if pieces != seen.0 {
+                seen = (pieces, Instant::now());
+            } else if seen.1.elapsed() >= NO_SOUND {
+                sink.lose("it stopped sending sound");
+                break;
+            }
+            if follow && (w.default)().as_deref() != Some(w.id.as_str()) {
+                sink.lose("the system's default microphone is now another one");
+                break;
+            }
+        }
+    }
+    let _ = stop.recv();
+}
+
 /// What a take whose microphone went away says.
 pub fn lost_message(device: &str, why: &str) -> String {
     let why = why.trim().trim_end_matches('.');
@@ -200,9 +300,12 @@ fn ends_take(kind: cpal::ErrorKind) -> bool {
     matches!(kind, K::DeviceNotAvailable | K::StreamInvalidated | K::HostUnavailable | K::PermissionDenied)
 }
 
-/// The default input device, as cpal opens it.
+/// The default input device, as cpal opens it: on Windows, as the device it is now (`as_itself`),
+/// watched (`Watch`).
 pub(crate) fn default_input(sink: Sink) -> Result<Opened, String> {
-    let device = cpal::default_host().default_input_device().ok_or("no microphone found")?;
+    let host = cpal::default_host();
+    let (device, id) = as_itself(&host, host.default_input_device().ok_or("no microphone found")?);
+    let watch = id.map(|id| Watch { id, default: Box::new(|| cpal::default_host().default_input_device().and_then(|d| d.id().ok()).map(|id| id.to_string())) });
     let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default microphone".into());
     let supported = device.default_input_config().map_err(|e| format!("microphone {name}: {e}"))?;
     let rate = supported.sample_rate();
@@ -223,7 +326,29 @@ pub(crate) fn default_input(sink: Sink) -> Result<Opened, String> {
     }
     .map_err(|e| format!("microphone {name}: {e}"))?;
     stream.play().map_err(|e| format!("microphone {name}: {e}"))?;
-    Ok(Opened { keep: Box::new(stream), rate, device: name })
+    Ok(Opened { keep: Box::new(stream), rate, device: name, watch })
+}
+
+/// cpal's default device (`default`) as the device it is now, with its id, on Windows; elsewhere
+/// as it is, with none. cpal opens its default device through `ActivateAudioInterfaceAsync`,
+/// which runs on the system's thread pool, and watches it with a notification client whose
+/// `OnDeviceStateChanged` and `OnDeviceRemoved` call `CoInitializeEx` for a single-threaded
+/// apartment on the pool thread that runs them. After a headset was unplugged (2026-10-24), no
+/// default device would open again in that process ("Failed to get audio client",
+/// RPC_E_CHANGED_MODE), and the stream open on the microphone was told nothing
+/// (`jarvis_voice::tests::opens_with_the_pool_made_sta`). Opened as itself, a device needs
+/// neither; what cpal's watching would have said of a microphone, `Watch` sees.
+#[cfg(windows)]
+pub(crate) fn as_itself(host: &cpal::Host, default: cpal::Device) -> (cpal::Device, Option<String>) {
+    match default.id().ok().and_then(|id| host.device_by_id(&id).map(|d| (d, id.to_string()))) {
+        Some((device, id)) => (device, Some(id)),
+        None => (default, None),
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn as_itself(_host: &cpal::Host, default: cpal::Device) -> (cpal::Device, Option<String>) {
+    (default, None)
 }
 
 fn build_input<T>(device: &cpal::Device, config: cpal::StreamConfig, sink: Sink) -> Result<cpal::Stream, String>
@@ -362,6 +487,14 @@ pub fn is_silent(audio: &[f32]) -> bool {
         let rms = (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt();
         rms > FLOOR
     })
+}
+
+/// The root mean square of `samples`, 0 for none.
+pub fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
 /// Joins segment texts, dropping whisper's non-speech annotations (`[BLANK_AUDIO]`,
@@ -554,19 +687,143 @@ pub fn download(url: &str, path: &Path, total: u64, stall: Duration, mut progres
     std::fs::rename(&part, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Whether whisper runs on the GPU: Metal on macOS, unless `MNEMO_WHISPER_CPU` is set.
+/// Whether whisper runs on the GPU, unless `MNEMO_WHISPER_CPU` is set: Metal on macOS, and on
+/// Windows Vulkan, when its loader is there and finds a GPU (`vulkan::gpu`). Linux runs on the
+/// CPU.
 pub fn uses_gpu() -> bool {
-    cfg!(target_os = "macos") && std::env::var_os(CPU_ENV).is_none()
+    // First, whatever the answer: it is what keeps ggml off a Vulkan loader that is not there.
+    let vulkan = vulkan::gpu();
+    std::env::var_os(CPU_ENV).is_none() && (cfg!(target_os = "macos") || vulkan)
+}
+
+/// Vulkan on Windows. ggml looks at every backend it was built with the first time whisper asks
+/// for a device, the CPU's included, and its Vulkan backend then calls the loader, vulkan-1.dll.
+/// Only a GPU driver installs it, so it is delay-loaded (`build.rs`): absent, a call into it
+/// raises the delay-load helper's exception from inside ggml, which survives it only where ggml
+/// happens to catch everything. `gpu` makes sure there is no such call: when the loader cannot be
+/// loaded, or `MNEMO_WHISPER_CPU` is set, ggml is told to leave Vulkan out before whisper is
+/// first asked for anything.
+#[cfg(windows)]
+mod vulkan {
+    use std::ffi::{c_char, c_int, CStr};
+    use std::sync::OnceLock;
+
+    use whisper_rs::whisper_rs_sys as sys;
+
+    /// Read by ggml's registry, which then never calls into Vulkan.
+    const DISABLE: &CStr = c"GGML_DISABLE_VULKAN";
+
+    extern "C" {
+        fn _putenv_s(name: *const c_char, value: *const c_char) -> c_int;
+        #[cfg(test)]
+        fn getenv(name: *const c_char) -> *const c_char;
+    }
+
+    /// Sets `name` in the C runtime's environment, which ggml's `getenv` reads. `std::env::set_var`
+    /// writes the process's, which the runtime copied at start and does not read again.
+    pub(super) fn crt_set(name: &CStr, value: &CStr) {
+        // SAFETY: two NUL-terminated strings, which the runtime copies.
+        unsafe { _putenv_s(name.as_ptr(), value.as_ptr()) };
+    }
+
+    /// Whether whisper has a GPU through Vulkan. Asked once a run: the first answer has already
+    /// shaped ggml's registry.
+    pub fn gpu() -> bool {
+        static GPU: OnceLock<bool> = OnceLock::new();
+        *GPU.get_or_init(|| {
+            whisper_rs::install_logging_hooks();
+            if let Some(why) = off(std::env::var_os(super::CPU_ENV).is_some(), loader) {
+                crt_set(DISABLE, c"1");
+                log::info!("voice: whisper runs on the CPU: {why}");
+                return false;
+            }
+            let found = devices();
+            match found.first() {
+                Some(name) => log::info!("voice: whisper runs on the GPU through Vulkan: {name}"),
+                None => log::info!("voice: whisper runs on the CPU: Vulkan found no GPU"),
+            }
+            !found.is_empty()
+        })
+    }
+
+    /// Why ggml must leave Vulkan out, if it must: the CPU was asked for (`cpu`), which then
+    /// loads nothing of Vulkan, or its loader cannot be loaded.
+    pub(super) fn off(cpu: bool, loader: impl FnOnce() -> bool) -> Option<&'static str> {
+        if cpu {
+            Some("MNEMO_WHISPER_CPU is set")
+        } else if !loader() {
+            Some("no Vulkan loader (vulkan-1.dll)")
+        } else {
+            None
+        }
+    }
+
+    /// Loads Vulkan's loader the way the delay-load helper would look for it, and keeps it: the
+    /// helper then finds it already in the process.
+    fn loader() -> bool {
+        let name: Vec<u16> = "vulkan-1.dll".encode_utf16().chain([0]).collect();
+        // SAFETY: a NUL-terminated wide string; the module stays loaded for the process's life.
+        !unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(name.as_ptr()) }.is_null()
+    }
+
+    /// The GPUs ggml's registry lists, by name: what whisper picks from with `use_gpu`.
+    fn devices() -> Vec<String> {
+        use sys::{ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU as GPU, ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU as IGPU};
+        // SAFETY: ggml's registry, read-only; the names it hands out live as long as it does.
+        unsafe {
+            (0..sys::ggml_backend_dev_count())
+                .map(|i| sys::ggml_backend_dev_get(i))
+                .filter(|&d| matches!(sys::ggml_backend_dev_type(d), GPU | IGPU))
+                .map(|d| CStr::from_ptr(sys::ggml_backend_dev_description(d)).to_string_lossy().into_owned())
+                .collect()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_cpu_asked_for_looks_for_no_loader_and_a_missing_one_leaves_vulkan_out() {
+            assert_eq!(off(true, || panic!("the loader is not looked for")), Some("MNEMO_WHISPER_CPU is set"));
+            assert_eq!(off(false, || false), Some("no Vulkan loader (vulkan-1.dll)"));
+            assert_eq!(off(false, || true), None);
+        }
+
+        /// What `crt_set` writes is what a `getenv` in C, ggml's, reads.
+        #[test]
+        fn what_is_set_is_what_c_reads() {
+            let name = c"MNEMO_VOICE_CRT_PROBE";
+            // SAFETY: a NUL-terminated name; the pointer is read before anything sets it again.
+            assert!(unsafe { getenv(name.as_ptr()) }.is_null());
+            crt_set(name, c"1");
+            let got = unsafe { getenv(name.as_ptr()) };
+            assert!(!got.is_null() && unsafe { CStr::from_ptr(got) } == c"1");
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod vulkan {
+    pub fn gpu() -> bool {
+        false
+    }
 }
 
 pub fn load_context(path: &Path) -> Result<WhisperContext, String> {
     whisper_rs::install_logging_hooks();
     let p = path.to_str().ok_or("model path is not UTF-8")?;
     // Flash attention takes a third or more off the GPU's time on a take and makes the CPU 1.6
-    // times slower (measured on an M5), so it goes with the GPU.
+    // times slower (measured on an M5), so it goes with the GPU. On Vulkan it took dictation's
+    // median take from 0.26 s to 0.16 s (RTX 4070 Ti SUPER, `bench`).
     let gpu = uses_gpu();
     let mut params = WhisperContextParameters::default();
     params.use_gpu(gpu).flash_attn(gpu);
+    // One at a time. On Vulkan, models loaded at once while the device first starts up fail in
+    // ggml ("unknown exception during model load": three of four threads did); once it is up
+    // they load together. Dictation's, a voice note's and Jarvis's can all be loading at once.
+    static LOADING: Mutex<()> = Mutex::new(());
+    let _one = lock(&LOADING);
     WhisperContext::new_with_params(p, params).map_err(|e| format!("model {p}: {e}"))
 }
 
@@ -667,6 +924,24 @@ pub struct Shape<'a> {
     pub prompt: Option<&'a str>,
     /// Threads instead of dictation's (at most 8).
     pub threads: Option<usize>,
+    /// Only the first words, at most this many tokens, of audio a second or two long: whisper
+    /// encodes only as much of its 30 s window as the audio fills, writes one segment with no
+    /// timestamps, and never retries at a higher temperature. Jarvis's hands-free listening asks
+    /// this of an utterance's start, to hear whether it began with James's name
+    /// (`jarvis_voice/wake.rs`). Encoding part of the window makes whisper loop on a long take; a
+    /// few tokens cannot.
+    pub head: Option<i32>,
+    /// Set, whisper gives the run up where it is: what it was making is no longer wanted.
+    pub stop: Option<Arc<AtomicBool>>,
+}
+
+/// The part of whisper's 30 s window that `samples` of 16 kHz audio fill, in its encoder's
+/// positions (1500 for the window, 50 a second), rounded up to a multiple of 16. The encoder's
+/// time follows it: rounded to 64, 1.5 s of audio took 128 positions and a quarter more time than
+/// its 80.
+pub fn audio_ctx(samples: usize) -> i32 {
+    let positions = samples.div_ceil(WHISPER_RATE as usize / 50);
+    (positions.div_ceil(16) * 16).min(1500) as i32
 }
 
 /// Whisper's run over a take, `None` for silence, which it is not given.
@@ -696,6 +971,26 @@ fn decode<F: FnMut(i32) + 'static>(
     }
     if let Some(threads) = shape.threads {
         params.set_n_threads(threads.max(1) as _);
+    }
+    if let Some(stop) = &shape.stop {
+        // Not whisper-rs 0.16's `set_abort_callback_safe`: it hands whisper a boxed closure and
+        // calls it as the unboxed one, and every run aborted at once in the tests.
+        unsafe extern "C" fn stopped(stop: *mut std::ffi::c_void) -> bool {
+            // SAFETY: the flag of `shape.stop`, which outlives the run.
+            unsafe { (*(stop as *const AtomicBool)).load(Ordering::Relaxed) }
+        }
+        // SAFETY: `stopped` only reads the flag, which `shape` holds until `full` returns.
+        unsafe {
+            params.set_abort_callback(Some(stopped));
+            params.set_abort_callback_user_data(Arc::as_ptr(stop) as *mut std::ffi::c_void);
+        }
+    }
+    if let Some(tokens) = shape.head {
+        params.set_max_tokens(tokens);
+        params.set_single_segment(true);
+        params.set_no_timestamps(true);
+        params.set_temperature_inc(0.0);
+        params.set_audio_ctx(audio_ctx(padded.len()));
     }
     let mut state = ctx.create_state().map_err(|e| format!("whisper: {e}"))?;
     state.full(params, &padded).map_err(|e| format!("whisper: {e}"))?;
@@ -757,14 +1052,18 @@ pub fn warms_at_launch(gpu: bool, model_present: bool) -> bool {
 }
 
 /// At launch, on the GPU: loads and warms the model in the background when it is already on
-/// disk, so the first take waits for neither (`warms_at_launch`).
+/// disk, so the first take waits for neither (`warms_at_launch`). Whether there is a GPU is asked
+/// off the launch's thread too: on Windows that starts Vulkan.
 pub fn warm(app: &AppHandle) {
     let present = std::env::var_os(MODEL_ENV).is_some() || model_on_disk(&models_dir().join(MODEL_FILE));
-    if !warms_at_launch(uses_gpu(), present) {
+    if !present {
         return;
     }
     let app = app.clone();
     let spawned = std::thread::Builder::new().name("voice-warm".into()).spawn(move || {
+        if !warms_at_launch(uses_gpu(), present) {
+            return;
+        }
         let started = std::time::Instant::now();
         match model(&app) {
             Ok(_) => log::info!("voice: model ready in {:.1}s", started.elapsed().as_secs_f32()),
@@ -804,6 +1103,7 @@ pub async fn voice_start(app: AppHandle) -> Result<String, String> {
             })?;
             device = recording.device.clone();
             *slot = Some(recording);
+            DICTATING.store(true, Ordering::SeqCst);
         }
         let cold = match state.model.try_lock() {
             Ok(m) => m.is_none(),
@@ -831,6 +1131,7 @@ pub async fn voice_stop(app: AppHandle) -> Result<String, String> {
     blocking(move || {
         let state = app.state::<VoiceState>();
         let recording = lock(&state.recording).take().ok_or("not recording")?;
+        DICTATING.store(false, Ordering::SeqCst);
         let take = recording.finish()?;
         let audio = resample(&take.samples, take.rate, WHISPER_RATE);
         if is_silent(&audio) {
@@ -862,6 +1163,16 @@ pub(crate) fn test_model() -> PathBuf {
         Some(p) => PathBuf::from(p),
         None => ensure_model(&std::env::temp_dir().join("mnemo-desktop-models"), |_, _| {}).expect("model"),
     }
+}
+
+/// Whisper for one test at a time, held while it runs. A run takes up to 16 threads that spin
+/// while they wait on each other, and several runs at once on fewer cores than their threads
+/// slowed each from a second to minutes: on Windows CI, two hands-free tests waited past their
+/// deadline on a transcription (#527).
+#[cfg(test)]
+pub(crate) fn whisper_turn() -> MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    lock(&TURN)
 }
 
 #[cfg(test)]
@@ -998,6 +1309,14 @@ mod tests {
         assert_eq!(token_budget(8 * WHISPER_RATE as usize), 80);
         assert_eq!(token_budget(30 * WHISPER_RATE as usize), 256);
         assert_eq!(token_budget(300 * WHISPER_RATE as usize), 256);
+    }
+
+    #[test]
+    fn a_head_decode_encodes_only_what_the_audio_fills() {
+        // 1.5 s fills 75 of the window's 1500 positions: 80, rounded up to a multiple of 16.
+        assert_eq!(audio_ctx(WHISPER_RATE as usize * 3 / 2), 80);
+        assert_eq!(audio_ctx(1), 16);
+        assert_eq!(audio_ctx(40 * WHISPER_RATE as usize), 1500);
     }
 
     #[test]
@@ -1180,8 +1499,9 @@ mod tests {
         assert!(!warms_at_launch(false, true), "the CPU path waits for the first press");
         assert!(!warms_at_launch(true, false), "nothing downloads at launch");
         assert!(!warms_at_launch(false, false));
-        // Windows and Linux have no GPU path: their launch runs nothing of whisper.
-        if !cfg!(target_os = "macos") {
+        // Linux has no GPU path: its launch runs nothing of whisper. Windows has one where Vulkan
+        // finds a GPU (`vulkan`).
+        if cfg!(target_os = "linux") {
             assert!(!uses_gpu());
         }
     }
@@ -1199,7 +1519,7 @@ mod tests {
                 }
                 let _ = delivered.send(());
             });
-            Ok(Opened { keep: Box::new(feeder), rate: 48_000, device: "USB Mic".into() })
+            Ok(Opened { keep: Box::new(feeder), rate: 48_000, device: "USB Mic".into(), watch: None })
         })
     }
 
@@ -1229,6 +1549,111 @@ mod tests {
         rx.recv().unwrap();
         let take = rec.finish().unwrap();
         assert_eq!((take.samples.len(), take.rate), (4_800, 48_000));
+    }
+
+    /// A stand-in microphone watched as `id`, against the default `default` names. It sends a
+    /// piece `every` so often until it is closed; with none, nothing.
+    fn watched_input(id: &'static str, default: Arc<Mutex<String>>, every: Option<Duration>) -> Input {
+        struct Close(Arc<AtomicBool>);
+        impl Drop for Close {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        Box::new(move |sink: Sink| {
+            let open = Arc::new(AtomicBool::new(true));
+            let on = open.clone();
+            if let Some(every) = every {
+                std::thread::spawn(move || {
+                    while on.load(Ordering::SeqCst) {
+                        sink.push(&[0.1f32; 480], 1, usize::MAX);
+                        std::thread::sleep(every);
+                    }
+                });
+            }
+            let watch = Watch { id: id.into(), default: Box::new(move || Some(lock(&default).clone())) };
+            Ok(Opened { keep: Box::new(Close(open)), rate: 48_000, device: "USB Mic".into(), watch: Some(watch) })
+        })
+    }
+
+    fn told() -> (mpsc::Sender<String>, mpsc::Receiver<String>) {
+        mpsc::channel()
+    }
+
+    #[test]
+    fn a_microphone_that_stops_sending_sound_is_lost() {
+        let (tx, rx) = told();
+        let rec = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), None), move |why| {
+            let _ = tx.send(why.to_string());
+        })
+        .unwrap();
+        let why = rx.recv_timeout(Duration::from_secs(5)).expect("lost");
+        assert_eq!(why, "it stopped sending sound");
+        assert_eq!(rec.finish().map(|c| c.samples.len()).unwrap_err(), lost_message("USB Mic", "it stopped sending sound"));
+    }
+
+    #[test]
+    fn a_microphone_that_keeps_sending_is_kept_and_a_stand_in_is_not_watched() {
+        let (tx, rx) = told();
+        let sent = tx.clone();
+        let live = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), Some(Duration::from_millis(5))), move |why| {
+            let _ = sent.send(why.to_string());
+        })
+        .unwrap();
+        // Pieces far apart, but closer than `NO_SOUND`: still sending.
+        let sent = tx.clone();
+        let sparse = Recording::start(watched_input("usb", Arc::new(Mutex::new("usb".into())), Some(NO_SOUND / 3)), move |why| {
+            let _ = sent.send(why.to_string());
+        })
+        .unwrap();
+        // A stand-in sends nothing either, and is not watched.
+        let (fed, _) = mpsc::channel();
+        let stand_in = Recording::start(fake_input(0, None, fed), move |why| {
+            let _ = tx.send(why.to_string());
+        })
+        .unwrap();
+        assert_eq!(rx.recv_timeout(NO_SOUND * 4), Err(mpsc::RecvTimeoutError::Timeout));
+        assert!(live.finish().unwrap().samples.len() >= 480);
+        assert!(sparse.finish().is_ok());
+        assert!(stand_in.finish().is_ok());
+    }
+
+    #[test]
+    fn hands_free_follows_the_default_and_a_take_held_by_the_key_does_not() {
+        for follow in [true, false] {
+            let default = Arc::new(Mutex::new("headset".to_string()));
+            let (tx, rx) = told();
+            let tap: Tap = Arc::new(|_| {});
+            let rec = Recording::tapped(watched_input("headset", default.clone(), Some(Duration::from_millis(5))), tap, !follow, follow, move |why| {
+                let _ = tx.send(why.to_string());
+            })
+            .unwrap();
+            assert_eq!(rx.recv_timeout(NO_SOUND), Err(mpsc::RecvTimeoutError::Timeout), "follow {follow}");
+            *lock(&default) = "usb".into();
+            let got = rx.recv_timeout(if follow { Duration::from_secs(5) } else { NO_SOUND * 2 });
+            if follow {
+                assert_eq!(got.as_deref(), Ok("the system's default microphone is now another one"));
+            } else {
+                assert_eq!(got, Err(mpsc::RecvTimeoutError::Timeout));
+            }
+            drop(rec);
+        }
+    }
+
+    /// On Windows the default microphone opens as the device it is, watched against what the
+    /// default is (`as_itself`). A machine with no microphone (CI) has nothing to open.
+    #[cfg(windows)]
+    #[test]
+    fn the_default_microphone_opens_as_itself_and_is_watched() {
+        let Some(default) = cpal::default_host().default_input_device() else {
+            return eprintln!("no microphone here: nothing to open");
+        };
+        let id = default.id().unwrap().to_string();
+        let sink = Sink { samples: Arc::default(), lost: Arc::default(), on_lost: Arc::new(|_| {}), tap: None, keep: false, pieces: Arc::default() };
+        let opened = default_input(sink).expect("the default microphone opens");
+        let watch = opened.watch.expect("watched");
+        assert_eq!(watch.id, id);
+        assert_eq!((watch.default)(), Some(id));
     }
 
     #[test]
@@ -1274,7 +1699,8 @@ mod tests {
         let ctx = load_context(&path).expect("load");
         let loaded = t.elapsed().as_secs_f32();
         warm_up(&ctx).expect("warm up");
-        eprintln!("load {loaded:.2}s, warm up {:.2}s", t.elapsed().as_secs_f32() - loaded);
+        let on = if uses_gpu() { "GPU" } else { "CPU" };
+        eprintln!("on the {on}: load {loaded:.2}s, warm up {:.2}s", t.elapsed().as_secs_f32() - loaded);
         let mut names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1304,11 +1730,44 @@ mod tests {
         }
     }
 
+    /// Models loaded at once as a run's first loads all load (`load_context`): on Vulkan these
+    /// are what start the device up. That happens once a process, so they run in a fresh one:
+    /// this test binary again, running only `loads_at_once`.
+    #[test]
+    fn models_loaded_at_once_all_load() {
+        let path = test_model();
+        let out = crate::proc::command(std::env::current_exe().unwrap())
+            .args(["--exact", "voice::tests::loads_at_once", "--ignored", "--test-threads=1"])
+            .env(MODEL_ENV, &path)
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && said.contains("1 passed"), "{said}");
+    }
+
+    /// Four loads at once in a process that has loaded nothing; run by
+    /// `models_loaded_at_once_all_load`.
+    #[test]
+    #[ignore]
+    fn loads_at_once() {
+        let path = test_model();
+        let loads: Vec<_> = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || load_context(&path).map(drop))
+            })
+            .collect();
+        for load in loads {
+            load.join().unwrap().expect("load");
+        }
+    }
+
     /// Audio → transcript on two 2 s synthesized takes, English at 44.1 kHz and Portuguese
     /// at 48 kHz. Downloads the model on first run into the system temp dir, not `$HOME`,
     /// which other tests repoint.
     #[test]
     fn transcribes_the_fixtures() {
+        let _turn = whisper_turn();
         let path = test_model();
         let ctx = load_context(&path).expect("load");
         warm_up(&ctx).expect("warm up");

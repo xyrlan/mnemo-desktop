@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import type { Heard, LlmSetup, VoicePhase } from './client'
+import type { BrainConfig, Heard, LlmSetup, Research, VoicePhase } from './client'
 import type { Recent } from './infer'
 import type { ParentEvent, ParentRef, ParentState } from './parent'
 
@@ -13,6 +13,8 @@ export type Line =
   | { id: number; at: number; who: 'parent'; project: string; sessionId: string; text: string }
   /** What Jarvis is doing ("lendo git_status no mnemo"), or why it could not. */
   | { id: number; at: number; who: 'note'; text: string; error?: true }
+  /** The pages a quick search of the web read (jarvis-research). */
+  | { id: number; at: number; who: 'web'; text: string; sources: Research['sources'] }
 
 export type Setup = { kind: 'idle' } | LlmSetup | { kind: 'error'; message: string }
 
@@ -21,13 +23,32 @@ export type Parent = { ref: ParentRef; state: ParentState; summary: string | nul
 
 /** What the next request answers. `ask`: a question Jarvis asked (the project, which parent, or
  *  the model's `ask_user`); the answer goes with the request that raised it. `confirm`: a take
- *  heard with low confidence, repeated back before anything acts (#506). */
+ *  heard with low confidence whose call acts, repeated back before it runs (#506); a yes runs
+ *  `tool`. */
 export type Pending =
   | { kind: 'ask'; request: string; question: string }
-  | { kind: 'confirm'; heard: Heard }
+  | { kind: 'confirm'; heard: Heard; tool: string }
+
+/** A research James runs in the background (jarvis-research): `queued` behind the one running,
+ *  `running`, then `done` with what it found or `failed` with why. `spoken`: asked aloud, so its
+ *  outcome is said aloud. */
+export type ResearchRun = {
+  id: number
+  question: string
+  spoken: boolean
+  at: number
+  state: 'queued' | 'running' | 'done' | 'failed'
+  startedAt?: number
+  endedAt?: number
+  result?: Research
+  error?: string
+}
 
 export type JarvisState = {
   open: boolean
+  /** Who answers requests, as `jarvis_brain` last said; null until it has. */
+  brain: BrainConfig | null
+  /** The local model's setup. With Claude it starts only for the screen. */
   setup: Setup
   lines: Line[]
   /** A request is being worked on. */
@@ -40,16 +61,21 @@ export type JarvisState = {
   recent: Recent
   /** The last parent Jarvis opened, for "cancela" right after. */
   delegated: { sessionId: string; project: string; at: number } | null
+  /** The researches asked for, newest first: those still to end, and the last few ended. */
+  researches: ResearchRun[]
 }
 
 export type JarvisStore = StoreApi<JarvisState>
 
 /** The panel keeps the last lines only; the full record is the local log. */
 export const MAX_LINES = 200
+/** The researches ended that the panel keeps. */
+export const MAX_ENDED = 5
 
 export const createJarvisStore = (): JarvisStore =>
   createStore<JarvisState>(() => ({
     open: false,
+    brain: null,
     setup: { kind: 'idle' },
     lines: [],
     busy: false,
@@ -58,6 +84,7 @@ export const createJarvisStore = (): JarvisStore =>
     pending: null,
     recent: null,
     delegated: null,
+    researches: [],
   }))
 
 type NewLine = Line extends infer L ? (L extends Line ? Omit<L, 'id' | 'at'> : never) : never
@@ -97,6 +124,18 @@ export function parentLine(e: ParentEvent): string {
     case 'exited':
       return 'Parent encerrado.'
   }
+}
+
+/** Whether a research is still to end. */
+export const unended = (r: ResearchRun) => r.state === 'queued' || r.state === 'running'
+
+/** `run` added to `researches`, or put in place of the one with its id; ended ones past
+ *  `MAX_ENDED` dropped, the oldest first. */
+export function foldResearch(researches: ResearchRun[], run: ResearchRun): ResearchRun[] {
+  const had = researches.some((r) => r.id === run.id)
+  const all = had ? researches.map((r) => (r.id === run.id ? run : r)) : [run, ...researches]
+  let ended = 0
+  return all.filter((r) => unended(r) || ++ended <= MAX_ENDED)
 }
 
 /** The parents waiting on an approval, oldest wait first. */

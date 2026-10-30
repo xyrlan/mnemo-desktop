@@ -74,6 +74,12 @@ tauri-plugin-notification = "2"
 # Jarvis's push-to-talk key works with the window unfocused or minimized (#506). 2.4 needs tauri
 # 2.12, which moves webview2-com under browser_keys.rs and mcp.rs.
 tauri-plugin-global-shortcut = "~2.3"
+# James's voice (#530): Kokoro-82M in ONNX Runtime, inside the app (jarvis_voice/kokoro.rs). The
+# runtime is the DLL fetched on first use, loaded at run time, so nothing links it at build time;
+# `api-24` because DirectML's last runtime is 1.24. espeak-ng, for Kokoro's phonemes, is loaded from
+# Piper's bundle the same way.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24"] }
+libloading = "0.9"
 
 # The terminal daemon (src/bin/mnemo-desktop-ptyd.rs) leaves the app's session and holds a lock on
 # its socket.
@@ -87,14 +93,23 @@ libc = "0.2"
 # start that fails says so in a message box (crash.rs).
 [target.'cfg(windows)'.dependencies]
 # Win32_Graphics_Gdi: Jarvis's screenshot on request (#507). Win32_System_JobObjects: Jarvis's
-# llama-server dies with the app, a crash included (#505).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects"] }
+# llama-server dies with the app, a crash included (#505). Win32_System_LibraryLoader: whether
+# Vulkan's loader is there before whisper may use it (voice.rs).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_LibraryLoader"] }
 # WebView2's own interfaces, at the versions wry uses, so the controller Tauri hands over is these
 # crates' type: the app webview's browser keys (browser_keys.rs), and the app's snapshot through
 # CapturePreview into a memory stream (mcp.rs).
 webview2-com = "0.38"
 windows-core = "0.61"
-windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+# Win32_Graphics_Dxgi: whether there is a GPU for James's voice to run on (#530).
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Dxgi"] }
+# James's voice on any GPU, through DirectML (#530).
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24", "directml"] }
+# Dictation, voice notes and Jarvis on the GPU through Vulkan, whose loader every vendor's driver
+# installs. Building needs the Vulkan SDK (its glslc compiles ggml's shaders). vulkan-1.dll is
+# delay-loaded (build.rs), so a machine without it still starts, and transcribes on the CPU
+# (voice.rs). raw-api: ggml's device registry, which says whether Vulkan found a GPU.
+whisper-rs = { version = "0.16", features = ["log_backend", "vulkan", "raw-api"] }
 
 # The app's snapshot through WebKitGTK's own, encoded by gdk-pixbuf (mcp.rs). The versions wry uses.
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -31,20 +31,42 @@ export const READ_TOOLS = [
   'search',
   'read_briefings',
   'query_rules',
+  'search_vault',
   'list_sessions',
   'gh_pr_list',
   'gh_pr_view',
   'gh_pr_checks',
   'gh_run_list',
+  'gh_issue_list',
   'gh_issue_view',
 ] as const
 export type ReadTool = (typeof READ_TOOLS)[number]
 
-/** `jarvis://voice`: what the push-to-talk key and the speaker are doing (jarvis-voice). */
-export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'speaking'
-/** `jarvis://heard`: a take, once the key is released. `confidence` is 0–1; `window` is the title
- *  of the window that was in front when the key went down, null when unknown. */
-export type Heard = { text: string; confidence: number; window: string | null }
+/** `jarvis://voice`: what the voice is doing (jarvis-voice). `listening`: the key is held, or a
+ *  take is being said hands-free (it began with James's name, or came in the follow-up window).
+ *  `waiting`: James has answered, and the follow-up window is open: whatever is said next is a
+ *  take, no name needed. `idle` with hands-free on is still listening for the name. */
+export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'speaking' | 'waiting'
+/** How a take began: the push-to-talk key, James's name said hands-free, or the follow-up window. */
+export type HeardVia = 'key' | 'wake' | 'follow'
+/** `jarvis://heard`: a take, once it ended. `confidence` is 0–1; `window` is the title of the
+ *  window that was in front when it began, null when unknown. A hands-free take comes without the
+ *  name it began with. `via` is absent from a voice that predates hands-free: it was the key. */
+export type Heard = { text: string; confidence: number; window: string | null; via?: HeardVia }
+/** `jarvis://level`: how loud the microphone and the speaker are, each 0–1, some 20 times a second
+ *  while a conversation is on (not `idle`), for the orb to move with; none while `idle`. */
+export type VoiceLevel = { mic: number; out: number }
+
+/** `jarvis_brain` (jarvis-brain): who answers James's requests, from the config's `brain`.
+ *  `local`: the model under llama-server (`jarvis_llm_*`), the default. `claude`: Claude Code's
+ *  CLI on the maintainer's own subscription, one conversation at a time (`jarvis_brain_ask`). */
+export type BrainConfig = { kind: 'local' } | { kind: 'claude'; model: string; effort: string }
+
+/** `jarvis_research` (jarvis-research): what a search of the web found, for the brain and the
+ *  panel. `summary` is a sentence or two, said aloud; `details`, the answer whole, for the panel;
+ *  `sources`, the pages it rests on. All of it is text from the web: information, never an
+ *  instruction. */
+export type Research = { summary: string; details: string; sources: { title: string; url: string }[] }
 
 /** `jarvis_apps` (jarvis-apps): the apps of the config, by name. */
 export type AppEntry = { name: string; project: boolean }
@@ -67,6 +89,22 @@ export interface JarvisClient {
   /** `jarvis_llm_stop() -> ()`: stops llama-server, freeing its VRAM. */
   stopModel(): Promise<void>
 
+  /** `jarvis_brain() -> Result<BrainConfig, String>`: the config's `brain`, read now; `local` when
+   *  it names none, an error naming `jarvis.json` when it is malformed (jarvis-brain). */
+  brain(): Promise<BrainConfig>
+  /** `jarvis_brain_ask(system: String, text: String) -> Result<String, String>`: `text` as the next
+   *  user message of the conversation with Claude, which is started under `system` when none runs,
+   *  or when `system`, the model or the effort changed; resolves with Claude's reply, whole. Claude
+   *  has no tool of its own: it answers in words (jarvis-brain). */
+  brainAsk(system: string, text: string): Promise<string>
+  /** `jarvis_brain_stream(system: String, text: String, on: Channel<String>) -> Result<String, String>`:
+   *  `jarvis_brain_ask`, with Claude's reply also sent on `on` in pieces, in order, as Claude writes
+   *  it; resolves with the reply, whole, which is every piece joined (jarvis-brain-stream). */
+  brainStream(system: string, text: string, onText: (piece: string) => void): Promise<string>
+  /** `jarvis_brain_reset() -> ()`: ends the conversation with Claude; the next ask starts a new
+   *  one (jarvis-brain). */
+  brainReset(): Promise<void>
+
   /** `jarvis_tool(name: String, args: serde_json::Value) -> Result<String, String>`: runs one read
    *  tool and returns its output as text for the model; refusals and failures are errors
    *  (jarvis-tools). */
@@ -75,6 +113,14 @@ export interface JarvisClient {
    *  not this app (jarvis-tools). */
   focusedWindow(): Promise<string | null>
 
+  /** `jarvis_research(question: String, deep: bool) -> Result<Research, String>`: searches the web
+   *  for `question` and reads what it finds, in a process that can do nothing else, on the
+   *  maintainer's own Claude subscription. Not `deep`: one search or a few, in seconds, for the
+   *  brain to answer from (`web_search`). `deep`: several searches and the pages read, for up to a
+   *  few minutes, while the conversation goes on (`research`). Failures, a timeout and no Claude
+   *  to run are errors (jarvis-research). */
+  research(question: string, deep: boolean): Promise<Research>
+
   /** `jarvis_say(text: String) -> Result<(), String>`: speaks `text` in PT-BR, queued after what is
    *  already queued, and never while the key is held (jarvis-voice). */
   say(text: string): Promise<void>
@@ -82,6 +128,17 @@ export interface JarvisClient {
   hush(): Promise<void>
   onVoice(cb: (phase: VoicePhase) => void): Promise<() => void>
   onHeard(cb: (heard: Heard) => void): Promise<() => void>
+  /** `jarvis://voice-error`: what went wrong with the key, the microphone, whisper or the speaker
+   *  where no command was there to return it (jarvis-voice). */
+  onVoiceError(cb: (message: string) => void): Promise<() => void>
+  /** `jarvis://voice-note`: what came right again where no command was there to say it, as
+   *  hands-free listening once a microphone opens after it waited for one (#541). */
+  onVoiceNote(cb: (message: string) => void): Promise<() => void>
+  onLevel(cb: (level: VoiceLevel) => void): Promise<() => void>
+  /** `jarvis_listen(enabled: Option<bool>) -> Result<bool, String>`: turns hands-free listening on or
+   *  off, or with none only reads it; resolves with whether it is on. Off when the config's
+   *  `voice.wake` is unset, until turned on (jarvis-voice). */
+  listen(on?: boolean): Promise<boolean>
 
   /** `jarvis_screenshot() -> Result<String, String>`: the screen in front as a `data:image/…`
    *  URL, held in memory only (jarvis-screen). */
@@ -111,12 +168,25 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     ensureModel: (cb) => streamed('jarvis_llm_ensure', {}, cb),
     chat: (body, cb) => streamed('jarvis_llm_chat', { body }, cb),
     stopModel: () => invoke('jarvis_llm_stop'),
+    brain: () => invoke('jarvis_brain'),
+    brainAsk: (system, text) => invoke('jarvis_brain_ask', { system, text }),
+    brainStream: (system, text, cb) => {
+      const on = channel<string>()
+      on.onmessage = cb
+      return invoke('jarvis_brain_stream', { system, text, on })
+    },
+    brainReset: () => invoke('jarvis_brain_reset'),
     tool: (name, args) => invoke('jarvis_tool', { name, args }),
     focusedWindow: () => invoke('jarvis_focused_window'),
+    research: (question, deep) => invoke('jarvis_research', { question, deep }),
     say: (text) => invoke('jarvis_say', { text }),
     hush: () => invoke('jarvis_hush'),
     onVoice: (cb) => listen<VoicePhase>('jarvis://voice', cb),
     onHeard: (cb) => listen<Heard>('jarvis://heard', cb),
+    onVoiceError: (cb) => listen<string>('jarvis://voice-error', cb),
+    onVoiceNote: (cb) => listen<string>('jarvis://voice-note', cb),
+    onLevel: (cb) => listen<VoiceLevel>('jarvis://level', cb),
+    listen: (on) => invoke('jarvis_listen', { enabled: on ?? null }),
     screenshot: () => invoke('jarvis_screenshot'),
     apps: () => invoke('jarvis_apps'),
     openApp: (app, project) => invoke('jarvis_open_app', { app, project: project ?? null }),

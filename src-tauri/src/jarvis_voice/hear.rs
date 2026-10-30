@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 #[cfg(test)]
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use whisper_rs::WhisperContext;
 
@@ -43,42 +45,66 @@ macro_rules! whisper {
 /// time by four and made every model loop on a phrase, confidently: it is not used.
 pub const MODEL: Pinned = whisper!("ggml-small-q5_1.bin", 190_085_487, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb");
 
-/// Jarvis's model, loaded: the config's `voice.whisper` (a ggml model already on disk), else
-/// `MODEL`, fetched once into dictation's models dir.
-pub fn load(configured: Option<PathBuf>) -> Result<WhisperContext, String> {
+/// Jarvis's model on disk, for `voice::load_context`: the config's `voice.whisper` (a ggml model
+/// already there), else `MODEL`, fetched once into dictation's models dir. Nothing is fetched for
+/// a CPU whisper cannot run on.
+pub fn fetch(configured: Option<PathBuf>) -> Result<PathBuf, String> {
     voice::cpu_check()?;
     let mut said = u64::MAX;
-    let path = match configured {
-        Some(p) if p.is_file() => p,
-        Some(p) => return Err(format!("voice.whisper in jarvis.json: {} is not a file", p.display())),
-        // Said in the log every 64 MB: nothing on screen waits on it but the take.
+    match configured {
+        Some(p) if p.is_file() => Ok(p),
+        Some(p) => Err(format!("voice.whisper in jarvis.json: {} is not a file", p.display())),
+        // Said in the log every 64 MB: nothing on screen shows it.
         None => files::ensure(&files::models_dir(), &MODEL, |done, total| {
             if done >> 26 != said >> 26 || done == total {
                 said = done;
                 log::info!("jarvis voice: {} {done} of {total} bytes", MODEL.file);
             }
-        })?,
-    };
-    voice::load_context(&path)
+        }),
+    }
 }
 
 /// What Jarvis heard in a take at 16 kHz mono: the text and the decoder's confidence, 0–1. An
 /// empty text is a take with nothing said. `prompt` is `prompt`'s.
 pub fn hear(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<(String, f32), String> {
-    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt))
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt, None))
+}
+
+/// `hear`, given up once `stop` is set: hands-free hears a take at its pause, and again whole when
+/// it goes on past it (`wake.rs`).
+pub fn hear_until(ctx: &WhisperContext, audio: &[f32], prompt: &str, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape(prompt, Some(stop.clone())))
 }
 
 /// Up to 16 threads, where dictation stops at 8: a Jarvis take is short and the maintainer is
 /// waiting on it (large-v3-turbo over the set: 9.4 s a take with 8, 6.9 s with 16, on an
 /// i9-13900KS).
-fn shape(prompt: &str) -> voice::Shape<'_> {
+fn shape(prompt: &str, stop: Option<Arc<AtomicBool>>) -> voice::Shape<'_> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
-    voice::Shape { prompt: Some(prompt), threads: Some(threads) }
+    voice::Shape { prompt: Some(prompt), threads: Some(threads), head: None, stop }
+}
+
+/// Tokens of an utterance's start that `head` writes: "Fala, James, abre", enough to tell.
+const HEAD_TOKENS: i32 = 6;
+/// Threads of a check. Hands-free runs one or two per utterance it hears, all day, and whisper's
+/// threads spin while they wait on each other: measured with `MODEL` on an i9-13900KS over 1.2 s
+/// of speech (`wake_tests.rs`, `live_check_cost`), a check took 335 ms and 0.64 s of CPU on 2
+/// threads, 210 ms and 0.73 s on 4, 147 ms and 0.95 s on 8.
+const HEAD_THREADS: usize = 4;
+
+/// The first words of an utterance's start (16 kHz, a second or two), for whether it began with
+/// James's name (`wake.rs`): a short decode of only what is there, at most `HEAD_TOKENS` tokens.
+pub fn head(ctx: &WhisperContext, audio: &[f32], prompt: &str) -> Result<String, String> {
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(HEAD_THREADS);
+    let shape = voice::Shape { prompt: Some(prompt), threads: Some(threads), head: Some(HEAD_TOKENS), stop: None };
+    voice::transcribe_scored(ctx, audio, Language::Pt, &shape).map(|(text, _)| text)
 }
 
 /// The words of the maintainer's requests that are not Portuguese, which whisper, told the take
 /// is Portuguese, otherwise spells as Portuguese ("o jeito do desktop" for "o git do desktop").
-const JARGON: &str = "James, git, commit, PR, CI, checks, issue, README, branch, merge, diff, log, VS Code";
+pub const JARGON: &str = "James, git, commit, PR, CI, checks, issue, README, branch, merge, diff, log, VS Code";
+/// What comes before the projects' names in the prompt.
+pub const PROJECTS: &str = "Projetos";
 /// Whisper keeps at most 224 tokens of prompt; this many characters stays well inside that.
 const PROMPT_CHARS: usize = 480;
 
@@ -88,7 +114,7 @@ pub fn prompt(projects: &[crate::jarvis::JarvisProject]) -> String {
     let mut out = format!("{JARGON}.");
     let names = projects.iter().flat_map(|p| std::iter::once(&p.name).chain(&p.aliases));
     for (i, name) in names.enumerate() {
-        let piece = format!("{}{name}", if i == 0 { " Projetos: " } else { ", " });
+        let piece = if i == 0 { format!(" {PROJECTS}: {name}") } else { format!(", {name}") };
         if out.chars().count() + piece.chars().count() + 1 > PROMPT_CHARS {
             break;
         }
@@ -117,7 +143,7 @@ pub(crate) fn wav(path: &Path) -> Vec<f32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
 /// Words of a transcript for scoring: lower case, no punctuation.
@@ -183,6 +209,7 @@ mod tests {
         let g = voice::geometric_mean(&[0.0, 1.5, 0.9]);
         assert!((0.0..=1.0).contains(&g), "{g}");
 
+        let _turn = voice::whisper_turn();
         let ctx = voice::load_context(&voice::test_model()).expect("load");
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice");
         let (text, confidence) = hear(&ctx, &wav(&fixtures.join("ola.wav")), JARGON).unwrap();
@@ -202,6 +229,21 @@ mod tests {
             .collect();
         let (_, noise) = hear(&ctx, &babble, JARGON).unwrap();
         assert!((0.0..=1.0).contains(&noise) && noise < confidence, "{noise} vs {confidence}");
+    }
+
+    #[test]
+    fn a_head_is_the_first_words_only() {
+        let _turn = voice::whisper_turn();
+        let ctx = voice::load_context(&voice::test_model()).expect("load");
+        let talk = wav(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/voice/wake-talk.wav"));
+        let start = &talk[..voice::WHISPER_RATE as usize * 4];
+        let (whole, _) = hear(&ctx, start, JARGON).unwrap();
+        let head = head(&ctx, start, JARGON).unwrap();
+        let words = |s: &str| s.split_whitespace().count();
+        // Enough for a greeting, the name and a word ("Fala, James, abre"), and no more: whisper
+        // ends the segment on the token that reaches `HEAD_TOKENS`, one past it.
+        assert!((5..=7).contains(&words(&head)), "{head:?}");
+        assert!(words(&whole) > words(&head), "{whole:?} vs {head:?}");
     }
 
     /// Accuracy and latency of Jarvis's candidate models over a set of spoken requests, for the
@@ -242,7 +284,10 @@ mod tests {
             let t = std::time::Instant::now();
             let ctx = voice::load_context(Path::new(model)).expect("load");
             let loaded = t.elapsed().as_secs_f32();
+            // The first take also builds the GPU's pipelines: said apart, and not counted.
+            let t = std::time::Instant::now();
             let _ = hear(&ctx, &takes[0].1, &bench_prompt);
+            eprintln!("on the {}: first take {:.2}s", if voice::uses_gpu() { "GPU" } else { "CPU" }, t.elapsed().as_secs_f32());
             let (mut errors, mut total, mut exact) = (0usize, 0usize, 0usize);
             let mut times = vec![];
             let (mut sure_right, mut sure_wrong) = (vec![], vec![]);
