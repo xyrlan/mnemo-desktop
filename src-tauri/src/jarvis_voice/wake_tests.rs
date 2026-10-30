@@ -632,7 +632,8 @@ fn a_lost_microphone_is_opened_again_and_one_long_gone_is_waited_for() {
     r.until("tried while waiting", |_| lock(&tried).len() >= said_at + 3);
     {
         let t = lock(&tried);
-        let quick = t[2] - t[1];
+        // The quickest of the quick tries: one slow step on a loaded runner says nothing of the cadence.
+        let quick = t[1..said_at].windows(2).map(|w| w[1] - w[0]).min().unwrap();
         assert!(quick >= REOPEN_EVERY && quick < WAIT_EVERY, "{quick:?}");
         for gap in t.windows(2).skip(said_at - 1).map(|w| w[1] - w[0]) {
             assert!(gap >= WAIT_EVERY && gap < WAIT_EVERY * 5, "after the quick tries, one every {WAIT_EVERY:?}: {gap:?}");
