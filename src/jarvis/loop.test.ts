@@ -258,6 +258,20 @@ describe('reading', () => {
     ])
   })
 
+  test('a blank project is no project: the window in front still tells it', async () => {
+    const s = setup([calls('git_status', { project: ' ' }), said('Limpo.')], {
+      client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
+    })
+    await s.jarvis.ask('e o git?')
+    expect(s.tools).toEqual([['git_status', { project: 'tasklist' }]])
+  })
+
+  test("ask_user's project only describes its question: an unknown one is still asked", async () => {
+    const s = setup([calls('ask_user', { question: 'O system32 é um projeto novo?', reason: 'project_unknown', project: 'system32' })])
+    await s.jarvis.ask('lê o que a sessão do system32 fez')
+    expect(s.last()).toBe('O system32 é um projeto novo?')
+  })
+
   test(`reads stop after ${MAX_STEPS} steps`, async () => {
     const s = setup(Array.from({ length: MAX_STEPS }, () => calls('git_log', { project: 'tasklist' })))
     await s.jarvis.ask('lê tudo do tasklist')
