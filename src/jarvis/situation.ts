@@ -1,5 +1,6 @@
 import { pollWhileShown } from '../shell/while-shown'
-import type { JarvisClient } from './client'
+import type { JarvisClient, JarvisProject } from './client'
+import { canonicalProject } from './routing'
 
 /** The state of the projects, kept fresh in the background so the brain answers "como tá tudo?"
  *  with no tool call (jarvis-situation, #503): what runs (sessions, the children mnemo dispatched),
@@ -128,11 +129,28 @@ function clip(s: string, max: number): string {
 /** What a parent or child is called in a line: its name, else the start of its id. */
 const called = (name: string, id: string) => (name ? `"${clip(name, 40)}"` : id.slice(0, 8))
 
-/** The panorama from what was read: the budget's lines at most. */
-export function compose(sessions: Sessions | null, github: Github[] | 'failed' | null): string {
+/** The mark of a repository `list_sessions` shows that is none of the known projects (a session
+ *  started in `C:\Windows\System32`, say): the brain can report what the panorama shows of it,
+ *  and read nothing more, since every read tool takes a project. */
+export const OUTSIDE = '(fora dos projetos do James)'
+
+/** The panorama from what was read: the budget's lines at most. `projects`, the known ones, marks
+ *  the repositories that are none of them `OUTSIDE`; null while they are not known yet. */
+export function compose(sessions: Sessions | null, github: Github[] | 'failed' | null, projects: JarvisProject[] | null = null): string {
   const lines: string[] = []
   const repos = new Map<string, { name: string; parents: Parent[]; children: Child[]; gh: Github | null }>()
-  if (sessions?.ok) for (const [k, r] of sessions.byRepo) repos.set(k, { ...r, children: r.children.filter((c) => !FINISHED.has(c.state)), gh: null })
+  if (sessions?.ok)
+    for (const r of sessions.byRepo.values()) {
+      // Named as the loop names it: a project's alias is the project.
+      const k = projects ? canonicalProject(r.name, projects) : key(r.name)
+      const outside = projects !== null && !projects.some((p) => key(p.name) === k)
+      const children = r.children.filter((c) => !FINISHED.has(c.state))
+      const had = repos.get(k)
+      if (had) {
+        had.parents.push(...r.parents)
+        had.children.push(...children)
+      } else repos.set(k, { name: outside ? `${r.name} ${OUTSIDE}` : r.name, parents: [...r.parents], children, gh: null })
+    }
   if (Array.isArray(github))
     for (const g of github) {
       const r = repos.get(key(g.name))
@@ -220,11 +238,12 @@ function serial(read: () => Promise<void>): () => Promise<void> {
 export function createSituation(client: JarvisClient, now: () => number): Situation {
   let sessions: Sessions | null = null
   let github: Github[] | 'failed' | null = null
+  let known: JarvisProject[] | null = null
   let text = ''
   let at: number | null = null
 
   const update = () => {
-    const next = compose(sessions, github)
+    const next = compose(sessions, github, known)
     if (next === text) return
     // Once read, `compose` is never '' again: `at` stays null only until then.
     text = next
@@ -262,6 +281,8 @@ export function createSituation(client: JarvisClient, now: () => number): Situat
   const readGithub = serial(async () => {
     try {
       const projects = await client.projects()
+      // The projects are config, not state: a failed read keeps the last known for the mark.
+      known = projects
       github = await inTurns(projects, PROJECTS_AT_ONCE, (p) => readProject(p.name))
     } catch {
       github = 'failed'

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { JarvisClient, JarvisProject, ReadTool } from './client'
-import { CHECKS_MAX, GITHUB_EVERY_MS, LINE_CHARS, MAX_CHARS, MAX_LINES, SESSIONS_EVERY_MS, ciOf, compose, createSituation, parsePrs, parseSessions } from './situation'
+import { CHECKS_MAX, GITHUB_EVERY_MS, LINE_CHARS, MAX_CHARS, MAX_LINES, OUTSIDE, SESSIONS_EVERY_MS, ciOf, compose, createSituation, parsePrs, parseSessions } from './situation'
 
 // Fixtures written in the shapes the Rust read tools print (`jarvis_tools/mnemo.rs` `sessions`,
 // `gh.rs` `pr_lines`/`issue_lines`) and `gh pr checks` prints when not on a terminal. Made up.
@@ -117,6 +117,33 @@ describe('createSituation', () => {
     // A finished child is not running.
     expect(s.text()).not.toContain('Coisa antiga')
     expect(s.changedAt()).toBe(1000)
+  })
+
+  test('a repository that is none of the known projects is marked, and still asks for the maintainer', async () => {
+    const over = {
+      list_sessions: `${SESSIONS}\n\n## system32\n- parent dddddddd "solta": waiting (input needed), in C:\\Windows\\System32\n\n## TL\n- child 7a7a7a7a "Pelo apelido": working`,
+    }
+    const projects = [
+      { name: 'tasklist', aliases: ['tl'], root: '/r/t' },
+      { name: 'notes', aliases: [], root: '/r/n' },
+      { name: 'quiet', aliases: [], root: '/r/q' },
+    ]
+    const f = fake(over, projects)
+    const s = createSituation(f.client, () => 1)
+    await s.refresh()
+    const lines = s.text().split('\n')
+    expect(lines[0]).toContain(`; system32 ${OUTSIDE}: sessão "solta" esperando (input needed)`)
+    expect(lines).toContain(`system32 ${OUTSIDE}: 1 sessão (1 esperando).`)
+    // An alias is the project: its sessions join the project's line, unmarked.
+    expect(lines.find((l) => l.startsWith('tasklist:'))).toContain('3 filhos (2 trabalhando, 1 bloqueado)')
+    expect(s.text()).not.toMatch(/TL|tasklist \(fora|notes \(fora/)
+    expect(lines.every((l) => l.length <= LINE_CHARS)).toBe(true)
+    expect(s.text().length).toBeLessThanOrEqual(MAX_CHARS)
+
+    // The projects are config: a failed read of them keeps the mark.
+    f.state.projects = new Error('no vault')
+    await s.refresh()
+    expect(s.text()).toContain(`system32 ${OUTSIDE}: 1 sessão (1 esperando).`)
   })
 
   test('changedAt moves only when the text does', async () => {
