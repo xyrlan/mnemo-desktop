@@ -319,6 +319,14 @@ export function createJarvis({
     whichProject(turn, inferred.candidates)
     return null
   }
+  /** What the brain is told when it names a project that is none of the known ones and the words
+   *  do not name one (#542): no call runs on a project inferred in its place, nor on every one.
+   *  Null when the name is a known project, or when there is none. */
+  const unknownProject = (turn: Turn, given: unknown): string | null => {
+    if (typeof given !== 'string' || !given.trim() || knownProject(given, turn.projects)) return null
+    if (projectsIn(turn.words, turn.projects).length === 1) return null
+    return `Erro: "${given.trim()}" não é um projeto que eu conheço. Os projetos que conheço: ${turn.projects.map((p) => p.name).join(', ')}.`
+  }
 
   const gather = (turn: Turn, what: string, text: string) => {
     turn.gathered.push(`${what}:\n${text.length > PER_READ ? `${text.slice(0, PER_READ)}\n[…cortado]` : text}`)
@@ -632,6 +640,9 @@ export function createJarvis({
     turn.tool = tool
     turn.args = args
     turn.ranOn = undefined
+    // `ask_user`'s project only describes its question; every other call runs on the one it names.
+    const unknown = tool === 'ask_user' ? null : unknownProject(turn, args.project)
+    if (unknown) return unknown
     if (isRead(tool)) return read(turn, tool, args)
     if (tool === 'look_at_screen') return look(turn, String(args.question ?? ''))
     if (tool === 'web_search') return webSearch(turn, String(args.query ?? '').trim() || turn.req.text)
