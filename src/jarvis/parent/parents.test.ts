@@ -151,7 +151,7 @@ test('following: a waiting approval said and answered from the desktop, the end 
   expect((await a.parents.status('parent-1')).state).toBe('working')
 
   a.write('parent-1', lines([t.result('r1', 'tu1', 'ok'), t.said('a2', 'The tests pass now. Nothing else changed.'), t.end('e1')]))
-  expect(a.events.slice(2)).toEqual([{ kind: 'turn-ended', parent: ref, summary: 'The tests pass now.' }])
+  expect(a.events.slice(2)).toEqual([{ kind: 'turn-ended', parent: ref, summary: 'The tests pass now.', last: 'The tests pass now. Nothing else changed.' }])
 
   await a.parents.send('parent-1', 'abre um PR também')
   expect(a.typed.at(-1)).toEqual([1, 'abre um PR também'])
@@ -185,4 +185,29 @@ test('cancel ends the parent’s terminal and says it exited; a parent whose ter
   expect(a.parents.running()).toEqual([])
   await expect(a.parents.send('parent-2', 'x')).rejects.toThrow('has exited')
   await expect(a.parents.status('nobody')).rejects.toThrow('Jarvis opened no parent nobody')
+})
+
+test('sent or answered something, the same words back are an answer, not a repeat: said again', async () => {
+  const a = app()
+  const ref = await a.parents.open(OPEN)
+  const t = transcript()
+  const row = { session_id: 'parent-1', status: 'waiting', waiting_for: 'permission prompt' }
+  a.write('parent-1', lines([t.prompt('p1', 'the handoff'), t.tool('a1', 'tu1', 'Bash', { command: 'git push' })]))
+  a.poll([row], T0 + 60_000)
+  await a.parents.answer('parent-1', false)
+  // Denied, it asks for the same push again, read in one go after the answer.
+  a.write('parent-1', lines([t.result('r1', 'tu1', 'denied'), t.tool('a2', 'tu2', 'Bash', { command: 'git push' })]))
+  a.poll([row], a.clock() + 60_000)
+  expect(a.events.slice(1)).toEqual([
+    { kind: 'approval', parent: ref, question: 'Bash: git push' },
+    { kind: 'approval', parent: ref, question: 'Bash: git push' },
+  ])
+
+  await a.parents.answer('parent-1', true)
+  a.poll([], a.clock() + 120_000)
+  a.write('parent-1', lines([t.result('r2', 'tu2', 'ok'), t.said('a3', 'Pronto.'), t.end('e1')]))
+  await a.parents.send('parent-1', 'confere de novo')
+  // Its next turn, prompt and end read in one go, ends in the same words: said.
+  a.write('parent-1', lines([t.prompt('p2', 'confere de novo'), t.said('a4', 'Pronto.'), t.end('e2')]))
+  expect(a.events.filter((e) => e.kind === 'turn-ended').map((e) => e.parent)).toEqual([ref, ref])
 })

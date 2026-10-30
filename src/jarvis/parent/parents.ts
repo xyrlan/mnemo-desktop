@@ -194,7 +194,8 @@ export function makeParents(load: () => Promise<ParentDeps>): ParentsApi {
       const d = await deps()
       const e = known(sessionId)
       await d.sendPrompt(paneFor(d, e), text)
-      e.track = { ...e.track, state: 'working', question: null }
+      // What it says next answers this: the same words again are not a repeat.
+      e.track = { ...e.track, state: 'working', question: null, told: null }
     },
 
     async status(sessionId): Promise<ParentStatus> {
@@ -207,7 +208,7 @@ export function makeParents(load: () => Promise<ParentDeps>): ParentsApi {
       const e = known(sessionId)
       if (e.track.state !== 'approval') throw new Error(`The parent in ${e.ref.project} is waiting on no permission prompt`)
       await d.answerApproval(paneFor(d, e), allow)
-      e.track = { ...e.track, state: 'working', question: null, answeredAt: d.now() }
+      e.track = { ...e.track, state: 'working', question: null, answeredAt: d.now(), told: null }
     },
 
     async cancel(sessionId) {

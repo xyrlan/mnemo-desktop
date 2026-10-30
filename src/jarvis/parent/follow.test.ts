@@ -1,6 +1,6 @@
 import type { TranscriptRecord } from '../../conversation/types'
 import { transcript } from './fixtures'
-import { readTurn, ROW_LAG_MS, sentence, STARTING, step, type Row, type Said, type Track } from './follow'
+import { LAST_MAX, readTurn, ROW_LAG_MS, sentence, sentences, STARTING, step, type Row, type Said, type Track } from './follow'
 
 const HANDED: Track = { ...STARTING, handedOff: true, state: 'working' }
 
@@ -50,7 +50,7 @@ test('end of turn: Claude writes it, and Jarvis says it once, in one sentence of
     // Read again, nothing new: said once.
     { records: done, row: { status: 'idle' } },
   ])
-  expect(said).toEqual([{ kind: 'turn-ended', summary: 'Fixed the test in x.test.ts.' }])
+  expect(said).toEqual([{ kind: 'turn-ended', summary: 'Fixed the test in x.test.ts.', last: '**Fixed** the test in `x.test.ts`. Then I opened PR #4.\n\nDetails…' }])
   expect(track).toMatchObject({ state: 'idle', summary: 'Fixed the test in x.test.ts.', question: null })
 })
 
@@ -60,7 +60,7 @@ test('end of turn with no end written (a Grok history): a claude agents row read
   const last = t.next() - 1000
   // Read in the same breath as the last line: maybe from before it, not believed.
   expect(run([{ records, row: { status: 'idle' }, rowAt: last + 1000 }]).said).toEqual([])
-  expect(run([{ records, row: { status: 'idle' }, rowAt: last + ROW_LAG_MS + 1000 }]).said).toEqual([{ kind: 'turn-ended', summary: 'Done: the branch is pushed.' }])
+  expect(run([{ records, row: { status: 'idle' }, rowAt: last + ROW_LAG_MS + 1000 }]).said).toEqual([{ kind: 'turn-ended', summary: 'Done: the branch is pushed.', last: 'Done: the branch is pushed.' }])
   // An idle row while the parent has said nothing since the prompt is the TUI before it read it.
   expect(run([{ records: [t.prompt('p2', 'again')], row: { status: 'idle' }, rowAt: last + 60_000 }]).track.state).toBe('working')
 })
@@ -124,6 +124,55 @@ test('sentence: the first sentence, markdown dropped, capped', () => {
   expect(sentence('## Done\n\n- Fixed `a` and [b](http://x). More.')).toBe('Done Fixed a and b.')
   expect(sentence('no stop at all')).toBe('no stop at all')
   expect(sentence('x'.repeat(300))).toHaveLength(200)
+})
+
+test('sentences: the first n, a period inside a version or a time not ending one', () => {
+  const text = 'Subi a v2.1 às 7h38. O PR 524 passou. Falta o CI do Windows.'
+  expect(sentences(text, 2, 300)).toBe('Subi a v2.1 às 7h38. O PR 524 passou.')
+  expect(sentences(text, 1, 300)).toBe('Subi a v2.1 às 7h38.')
+  expect(sentences(text, 5, 300)).toBe(text)
+  expect(sentences(text, 2, 20)).toHaveLength(20)
+})
+
+test('end of turn: the last message goes with it, bounded; one with no words carries none', () => {
+  const t = transcript()
+  const long = `Relatório. ${'x'.repeat(3 * LAST_MAX)}`
+  const [ended] = run([{ records: [t.prompt('p1', 'the handoff'), t.said('a1', long), t.end('e1')], row: null }]).said
+  expect(ended).toMatchObject({ kind: 'turn-ended', summary: 'Relatório.' })
+  const last = (ended as Extract<Said, { kind: 'turn-ended' }>).last
+  expect(last).toHaveLength(LAST_MAX)
+  expect(last.startsWith('Relatório. xxx')).toBe(true)
+  expect(last.endsWith('…')).toBe(true)
+  expect(run([{ records: [t.prompt('p2', 'again'), t.end('e2')], row: null }]).said).toEqual([
+    { kind: 'turn-ended', summary: 'Terminou a vez sem dizer nada.', last: '' },
+  ])
+})
+
+test('a repeat is said once: the same end read again under new ids, the same prompt again with nothing in between', () => {
+  const t = transcript()
+  const first = run([{ records: [t.prompt('p1', 'the handoff'), t.said('a1', 'Pronto, PR aberto.'), t.end('e1')], row: null }])
+  expect(first.said).toHaveLength(1)
+  // A history read again with fresh ids: the same end, not said again.
+  const again = run([{ records: [t.prompt('p1b', 'the handoff'), t.said('a1b', 'Pronto, PR aberto.'), t.end('e1b')], row: null }], first.track)
+  expect(again.said).toEqual([])
+  // Seen working in between, the same words are a new turn's: said.
+  const p2 = t.prompt('p2', 'de novo')
+  const next = run(
+    [
+      { records: [p2, t.said('a2', 'Rodando.')], row: { status: 'busy' } },
+      { records: [p2, t.said('a3', 'Pronto, PR aberto.'), t.end('e2')], row: null },
+    ],
+    again.track,
+  )
+  expect(next.said).toEqual([{ kind: 'turn-ended', summary: 'Pronto, PR aberto.', last: 'Pronto, PR aberto.' }])
+
+  // A second call parked on the same prompt, read with no working in between: said once.
+  const row: Row = { status: 'waiting', waiting_for: 'permission prompt' }
+  const p = [t.prompt('p3', 'push'), t.tool('a4', 'tu1', 'Bash', { command: 'git push' })]
+  const asked = run([{ records: p, row }])
+  const twice = run([{ records: [...p, t.result('r1', 'tu1', 'denied'), t.tool('a5', 'tu2', 'Bash', { command: 'git push' })], row }], asked.track)
+  expect(asked.said).toEqual([{ kind: 'approval', question: 'Bash: git push' }])
+  expect(twice).toMatchObject({ said: [], track: { state: 'approval', asked: 'tu2' } })
 })
 
 /** The transcript clock's second `s`, ms. */

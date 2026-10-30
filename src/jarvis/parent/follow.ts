@@ -79,7 +79,10 @@ export function readTurn(records: TranscriptRecord[]): Turn {
 
 /** One sentence of `text`, for the panel and the voice: its first, markdown dropped, at most
  *  `max` characters. */
-export function sentence(text: string, max = 200): string {
+export const sentence = (text: string, max = 200): string => sentences(text, 1, max)
+
+/** The first `n` sentences of `text`, markdown dropped, at most `max` characters. */
+export function sentences(text: string, n: number, max: number): string {
   const plain = text
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]*)`/g, '$1')
@@ -88,9 +91,17 @@ export function sentence(text: string, max = 200): string {
     .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
-  const first = /^.*?[.!?…](?=\s|$)/.exec(plain)?.[0] ?? plain
+  const first = new RegExp(`^(?:.*?[.!?…](?=\\s|$)){1,${n}}`).exec(plain)?.[0] ?? plain
   return first.length > max ? `${first.slice(0, max - 1).trimEnd()}…` : first
 }
+
+/** How much of the parent's last message a turn's end carries, characters: enough for the brain
+ *  to answer "e aí, o que ele achou?" from a report of a page or so, without a long one taking
+ *  the next request over. Longer ones are cut, marked by "…". */
+export const LAST_MAX = 1_500
+
+/** `text`, at most `LAST_MAX` characters. */
+export const bounded = (text: string) => (text.length > LAST_MAX ? `${text.slice(0, LAST_MAX - 1).trimEnd()}…` : text)
 
 /** What Jarvis knows of a parent between reads. */
 export type Track = {
@@ -104,16 +115,19 @@ export type Track = {
   asked: string | null
   /** When `answer` last answered a prompt, ms: a row read before it still shows that prompt. */
   answeredAt: number | null
+  /** What was last said, as `told` writes it, since the parent was last seen working or was sent
+   *  or answered something: the same said again in between is a repeat. */
+  told: string | null
 }
 
-export const STARTING: Track = { state: 'starting', summary: null, question: null, handedOff: false, reported: null, asked: null, answeredAt: null }
+export const STARTING: Track = { state: 'starting', summary: null, question: null, handedOff: false, reported: null, asked: null, answeredAt: null, told: null }
 
 /** What a read of the parent saw. `rowAt`: when the row was read (the snapshot's `at`), ms; `row`
  *  null when the snapshot does not list the session. */
 export type Seen = { row: Row | null; rowAt: number | null; turn: Turn; exited: boolean }
 
 /** What Jarvis says of a move: a `ParentEvent` without its parent, which the caller adds. */
-export type Said = { kind: 'turn-ended'; summary: string } | { kind: 'asking' | 'approval'; question: string } | { kind: 'exited' }
+export type Said = { kind: 'turn-ended'; summary: string; last: string } | { kind: 'asking' | 'approval'; question: string } | { kind: 'exited' }
 
 /** `claude agents`' `waitingFor` (`fleet/model.ts`'s reading): a question, a permission, or
  *  nothing asked of anyone (`dialog open`: the person opened `/config`). A row from before it was
@@ -129,10 +143,25 @@ function waitingOn(row: Row): 'asking' | 'approval' | null {
  *  since. An unknown time is taken as current. */
 const after = (rowAt: number | null, ms: number | null) => rowAt === null || ms === null || rowAt > ms
 
-/** The parent's next state from `s`, and what Jarvis says of the move: the end of a turn once,
- *  with a sentence of its last message; a question or a permission prompt once per tool call; its
- *  exit. A row older than the last prompt or the last answer is not believed. */
+/** What `said` says, to tell a repeat. */
+const told = (said: Said) => (said.kind === 'turn-ended' ? `${said.kind}
+${said.last}` : said.kind === 'exited' ? said.kind : `${said.kind}
+${said.question}`)
+
+/** `step`, and a repeat said once: what says the same as the last said, with nothing moved
+ *  in between, is not said again (a history read again under new ids, a row that flaps). */
 export function step(t: Track, s: Seen): { track: Track; said: Said[] } {
+  const next = move(t, s)
+  const said = next.said.filter((x) => told(x) !== t.told)
+  const last = said.at(-1)
+  return { track: last ? { ...next.track, told: told(last) } : next.track, said }
+}
+
+/** The parent's next state from `s`, and what Jarvis says of the move: the end of a turn once,
+ *  with a sentence of its last message and the message itself, bounded; a question or a
+ *  permission prompt once per tool call; its exit. A row older than the last prompt or the last
+ *  answer is not believed. */
+function move(t: Track, s: Seen): { track: Track; said: Said[] } {
   if (t.state === 'exited') return { track: t, said: [] }
   if (s.exited) return { track: { ...t, state: 'exited', question: null }, said: [{ kind: 'exited' }] }
   if (!t.handedOff) return { track: t, said: [] }
@@ -144,7 +173,7 @@ export function step(t: Track, s: Seen): { track: Track; said: Said[] } {
   const waits = live ? waitingOn(live) : null
   if (waits && (turn.pending || !turn.promptId)) {
     const state: 'asking' | 'approval' = turn.pending?.ask ? 'asking' : waits
-    const question = turn.pending?.question || (state === 'asking' ? 'It has a question.' : 'It asks for a permission.')
+    const question = turn.pending?.question || (state === 'asking' ? 'Tem uma pergunta.' : 'Pede uma permissão.')
     const key = turn.pending?.id ?? `${state}@${turn.promptId}`
     const next = { ...t, state, question, asked: key }
     return { track: next, said: key === t.asked ? [] : [{ kind: state, question }] }
@@ -155,12 +184,12 @@ export function step(t: Track, s: Seen): { track: Track; said: Said[] } {
   const settled = live?.status === 'idle' && !!turn.text && after(s.rowAt, turn.lastAt === null ? null : turn.lastAt + ROW_LAG_MS)
   const ended = !!turn.promptId && !turn.pending && (turn.done || settled)
   if (ended) {
-    const summary = turn.text ? sentence(turn.text) : 'It ended its turn without a word.'
+    const summary = turn.text ? sentence(turn.text) : 'Terminou a vez sem dizer nada.'
     const key = turn.textId ?? turn.promptId
     const next = { ...t, state: 'idle' as const, summary, question: null, reported: key }
-    return { track: next, said: key === t.reported ? [] : [{ kind: 'turn-ended', summary }] }
+    return { track: next, said: key === t.reported ? [] : [{ kind: 'turn-ended', summary, last: bounded(turn.text ?? '') }] }
   }
 
-  if (turn.promptId || live?.status === 'busy') return { track: { ...t, state: 'working', question: null }, said: [] }
+  if (turn.promptId || live?.status === 'busy') return { track: { ...t, state: 'working', question: null, told: null }, said: [] }
   return { track: t, said: [] }
 }
