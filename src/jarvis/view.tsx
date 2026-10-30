@@ -69,6 +69,9 @@ const unlistenVoiceError = listening(() =>
     addLine(store, { who: 'note', text: `Voz: ${message}`, error: true })
   }),
 )
+// What came right again, as hands-free once a microphone opens after it waited for one: said in
+// the panel too, which it does not open.
+const unlistenVoiceNote = listening(() => tauriJarvis.onVoiceNote((message) => addLine(store, { who: 'note', text: `Voz: ${message}` })))
 
 function Jarvis() {
   return <JarvisPanel store={store} jarvis={jarvis} shortcut={shortcutLabel('jarvis.toggle')} />
@@ -83,5 +86,6 @@ import.meta.hot?.dispose(() => {
   void unlistenHeard.then((u) => u?.())
   void unlistenVoice.then((u) => u?.())
   void unlistenVoiceError.then((u) => u?.())
+  void unlistenVoiceNote.then((u) => u?.())
   unmount()
 })

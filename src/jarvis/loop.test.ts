@@ -59,6 +59,7 @@ function fakeClient(replies: Chunk[][], over: Partial<JarvisClient> = {}) {
     onVoice: async () => () => {},
     onHeard: async () => () => {},
     onVoiceError: async () => () => {},
+    onVoiceNote: async () => () => {},
     onLevel: async () => () => {},
     listen: async () => false,
     screenshot: async () => SHOT,
