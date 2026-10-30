@@ -20,6 +20,10 @@
 //!   `voice.wake.followMs` is one too (`via: follow`), and a goodbye there ends the conversation.
 //!   While James speaks only his name counts, and it hushes him. The key and dictation win over
 //!   it: while either listens, hands-free takes nothing.
+//! - **The cue** (#503): a take that is heard and goes on to James, the key's or a hands-free
+//!   one, plays a short soft sound at once (`speech::Speaker::cue`), so the maintainer knows James
+//!   heard them while he thinks. It is no speech and takes nothing from what he says. `"cue": false`
+//!   turns it off.
 //! - `jarvis://voice` says `idle`, `listening`, `transcribing`, `speaking` or `waiting` (the
 //!   follow-up window) as it changes, the first of those that is true, in that order of precedence
 //!   from `listening` down. `jarvis://level` carries the microphone's and the speaker's loudness,
@@ -127,7 +131,7 @@ impl Event {
 pub const DEFAULT_FOLLOW_MS: u64 = 8_000;
 
 /// The config's `voice` section.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// None: no key is registered.
     pub key: Option<String>,
@@ -138,6 +142,14 @@ pub struct Config {
     /// `voice.wake`: hands-free on at launch, with this follow-up window in ms. None: off until
     /// `jarvis_listen` turns it on.
     pub wake: Option<u64>,
+    /// `voice.cue`: the sound a take heard plays. On unless `false`.
+    pub cue: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { key: None, piper: None, whisper: None, kokoro: None, wake: None, cue: true }
+    }
 }
 
 /// Reads `voice` from `jarvis.json`'s parsed `section`. `exists` is whether there is a
@@ -177,7 +189,12 @@ pub fn parse_config(section: &serde_json::Value, exists: bool, home: &Path) -> R
         Some(serde_json::Value::String(s)) => Some(kokoro::voice(s)?.file.trim_end_matches(".bin").to_string()),
         Some(other) => return Err(format!("voice.kokoro in jarvis.json is {other}, not a voice such as {:?}", kokoro::DEFAULT_VOICE)),
     };
-    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")?, kokoro, wake })
+    let cue = match section.get("cue") {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::Bool(on)) => *on,
+        Some(other) => return Err(format!("voice.cue in jarvis.json is {other}, not true or false")),
+    };
+    Ok(Config { key, piper: path("piper")?, whisper: path("whisper")?, kokoro, wake, cue })
 }
 
 /// `key` as the plugin reads it, refused when it is dictation's, however it is spelled.
@@ -379,6 +396,8 @@ struct Joins {
     resumed: Vec<u64>,
     /// Stops the transcript of the last take that ended, once it is not wanted.
     stop: Option<Arc<AtomicBool>>,
+    /// The last take whose transcript reads as said to its end (`wake::Now::whole`).
+    whole: u64,
 }
 
 /// A take under way, and the window that was in front when it began.
@@ -417,6 +436,8 @@ pub struct JarvisVoice {
     /// whisper's threads spin while they wait on each other, and a take that went on overlapping
     /// the transcript of its first part took a minute in the tests, where alone it takes seconds.
     hearing: Mutex<()>,
+    /// A take heard plays the cue (`speech::Speaker::cue`).
+    cue: bool,
 }
 
 impl JarvisVoice {
@@ -436,7 +457,15 @@ impl JarvisVoice {
             joins: Mutex::default(),
             joined: Condvar::new(),
             hearing: Mutex::new(()),
+            cue: false,
         }
+    }
+
+    /// A take heard plays the cue, or with `false` does not. Off until this turns it on: the app
+    /// does, from `voice.cue`.
+    pub fn cue(mut self, on: bool) -> Self {
+        self.cue = on;
+        self
     }
 
     /// The follow-up window, `ms` long.
@@ -453,6 +482,20 @@ impl JarvisVoice {
 
     fn emit(&self, e: Event) {
         (self.phases.emit)(e)
+    }
+
+    /// The cue, for a take heard: the maintainer hears that they were heard. Played once the phase
+    /// has moved on, since the first one may wait for the speaker to be set up; with the key held,
+    /// once it is up, as speech is.
+    fn play_cue(&self) {
+        if !self.cue {
+            return;
+        }
+        match self.speaker() {
+            Ok(s) => s.cue(),
+            // Said where speech needs it; a cue alone says nothing.
+            Err(e) => log::debug!("jarvis voice: no cue: {e}"),
+        }
     }
 
     /// The key went down: the microphone opens, and nothing is said until it is up. A second
@@ -503,6 +546,7 @@ impl JarvisVoice {
     /// and stops James: the key pressed over him meant him to stop.
     pub fn finish(&self, take: Take) {
         let released = std::time::Instant::now();
+        let mut cue = false;
         let heard = take.recording.finish().and_then(|c| self.backend.hear(&c));
         self.backend.done();
         match heard {
@@ -515,7 +559,8 @@ impl JarvisVoice {
                 } else {
                     // The latency, never the words: the log is not Jarvis's conversation log.
                     log::info!("jarvis voice: heard {} words in {ms} ms, confidence {confidence:.2}", text.split_whitespace().count());
-                    self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window, via: HeardVia::Key }))
+                    self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window: take.window, via: HeardVia::Key }));
+                    cue = true;
                 }
             }
             Err(e) => {
@@ -524,6 +569,9 @@ impl JarvisVoice {
             }
         }
         self.phases.update(|f| f.transcribing = f.transcribing.saturating_sub(1));
+        if cue {
+            self.play_cue();
+        }
     }
 
     /// Fetches what the voice needs ahead of its first use (`Backend::prefetch`).
@@ -750,10 +798,21 @@ impl JarvisVoice {
         };
         self.backend.done();
         let ms = ended.elapsed().as_millis();
+        let heard = heard.map(|(text, confidence)| (outcome(&text, confidence, via, lead), confidence));
+        // Read as said to its end: the ears end the take now, and nothing joins it.
+        let whole = match &heard {
+            Ok((Outcome::Goodbye, _)) => true,
+            Ok((Outcome::Request(text), _)) => wake::whole(text),
+            _ => false,
+        };
+        if whole {
+            lock(&self.joins).whole = which.0;
+        }
         let went_on = self.went_on(which);
+        let waited = ended.elapsed().as_millis() - ms;
         // What the take was, said as `update` lands it: its length and the latency, never the words.
         let said = |what: &str, change: &dyn Fn(&mut Flags)| {
-            log::info!("jarvis voice: a {secs:.1} s hands-free take ({via:?}) {what} in {ms} ms");
+            log::info!("jarvis voice: a {secs:.1} s hands-free take ({via:?}) {what} in {ms} ms, then {waited} ms for its join");
             self.phases.update(|f| {
                 change(f);
                 f.transcribing = f.transcribing.saturating_sub(1);
@@ -763,7 +822,7 @@ impl JarvisVoice {
         if went_on {
             return said("went on past its pause", &|_| {});
         }
-        let (text, confidence) = match heard {
+        let (outcome, confidence) = match heard {
             Ok(heard) => heard,
             Err(e) => {
                 log::warn!("jarvis voice: {e}");
@@ -771,24 +830,48 @@ impl JarvisVoice {
                 return said("failed", &|_| {});
             }
         };
-        let text = wake::collapse(&text);
-        if wake::goodbye(&text) {
-            return said("said goodbye", &|f| f.waiting = false);
-        }
-        // Without the name it began with; in the window, without one it may have begun with.
-        let named = via == HeardVia::Wake || wake::call(&text).is_some();
-        let text = wake::request(&text, if via == HeardVia::Wake { lead } else { 0 });
-        if text.is_empty() || wake::no_speech(&text) || (!named && wake::unsure(&text, confidence)) {
+        let text = match outcome {
+            Outcome::Goodbye => return said("said goodbye", &|f| f.waiting = false),
             // The name alone: the window opens for what comes next. Nothing in the window, or only
             // what whisper writes for a cough, the keyboard or a hesitation: it closes, or a noisy
             // room would hold it open, one take after another.
-            let what = if named { "had nothing after the name" } else { "was no speech" };
-            return said(what, &|f| f.waiting = named && f.hands_free && !f.held);
-        }
+            Outcome::Nothing { named } => {
+                let what = if named { "had nothing after the name" } else { "was no speech" };
+                return said(what, &|f| f.waiting = named && f.hands_free && !f.held);
+            }
+            Outcome::Request(text) => text,
+        };
         log::info!("jarvis voice: heard {} words hands-free, confidence {confidence:.2}", text.split_whitespace().count());
         self.emit(Event::Heard(Heard { text, confidence: confidence.clamp(0.0, 1.0), window, via }));
         said("was heard", &|_| {});
+        self.play_cue();
     }
+}
+
+/// What a hands-free take's transcript comes to.
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    Goodbye,
+    /// No request: the name alone (`named`), or no speech.
+    Nothing { named: bool },
+    /// The request, without the name it began with.
+    Request(String),
+}
+
+/// What `text`, heard with `confidence` in a take that began `via` with `lead` words up to the
+/// name, comes to.
+fn outcome(text: &str, confidence: f32, via: HeardVia, lead: usize) -> Outcome {
+    let text = wake::collapse(text);
+    if wake::goodbye(&text) {
+        return Outcome::Goodbye;
+    }
+    // Without the name it began with; in the window, without one it may have begun with.
+    let named = via == HeardVia::Wake || wake::call(&text).is_some();
+    let text = wake::request(&text, if via == HeardVia::Wake { lead } else { 0 });
+    if text.is_empty() || wake::no_speech(&text) || (!named && wake::unsure(&text, confidence)) {
+        return Outcome::Nothing { named };
+    }
+    Outcome::Request(text)
 }
 
 /// After losing its microphone, hands-free opens the default one again this often, this many
@@ -877,8 +960,12 @@ impl Wired {
 
 impl wake::Host for Wired {
     fn now(&self) -> wake::Now {
+        let whole = {
+            let j = lock(&self.voice.joins);
+            j.ended > 0 && j.whole == j.ended
+        };
         let f = lock(&self.voice.phases.flags);
-        wake::Now { blocked: f.held || self.voice.backend.dictating(), speaking: f.speaking, waiting: f.waiting, pending: f.pending > 0 }
+        wake::Now { blocked: f.held || self.voice.backend.dictating(), speaking: f.speaking, waiting: f.waiting, pending: f.pending > 0, whole }
     }
 
     fn check(&self, audio: &[f32]) -> String {
@@ -1228,7 +1315,8 @@ pub fn start(app: &AppHandle) {
         Config::default()
     });
     let (key, wake) = (config.key.clone(), config.wake);
-    let voice = Arc::new(JarvisVoice::new(Box::new(Local::new(config)), emit).follow(wake.unwrap_or(DEFAULT_FOLLOW_MS)));
+    let cue = config.cue;
+    let voice = Arc::new(JarvisVoice::new(Box::new(Local::new(config)), emit).follow(wake.unwrap_or(DEFAULT_FOLLOW_MS)).cue(cue));
     app.manage(voice.clone());
     let mut prefetch = false;
     if let Some(key) = key {
@@ -1416,6 +1504,18 @@ mod tests {
     }
 
     #[test]
+    fn the_cue_is_on_unless_the_config_turns_it_off() {
+        let home = Path::new("/home/you");
+        let cue = |v: serde_json::Value| parse_config(&v, true, home).map(|c| c.cue);
+        assert_eq!(cue(json!({})), Ok(true));
+        assert_eq!(cue(json!({ "cue": null })), Ok(true));
+        assert_eq!(cue(json!({ "cue": true })), Ok(true));
+        assert_eq!(cue(json!({ "cue": false })), Ok(false));
+        assert!(cue(json!({ "cue": "off" })).unwrap_err().contains("voice.cue"));
+        assert!(Config::default().cue);
+    }
+
+    #[test]
     fn hands_free_is_on_at_launch_only_when_the_config_says_so() {
         let home = Path::new("/home/you");
         let wake = |v: serde_json::Value, exists: bool| parse_config(&v, exists, home).map(|c| c.wake);
@@ -1430,7 +1530,10 @@ mod tests {
         assert!(wake(json!({ "wake": { "followMs": 0 } }), true).is_err());
         assert!(wake(json!({ "wake": "yes" }), true).is_err());
         // docs/jarvis.example.json's own.
-        assert_eq!(wake(json!({ "key": DEFAULT_KEY, "wake": { "followMs": 8000 }, "orb": true }), true), Ok(Some(8_000)));
+        let example: serde_json::Value = serde_json::from_str(include_str!("../../docs/jarvis.example.json")).unwrap();
+        let c = parse_config(&example["voice"], true, home).unwrap();
+        assert_eq!((c.key.as_deref(), c.wake, c.cue), (Some(DEFAULT_KEY), Some(8_000), true));
+        assert_eq!(example["voice"]["cue"], json!(true), "the example shows the key that turns it off");
     }
 
     /// Until no take is being transcribed.
@@ -1662,6 +1765,85 @@ mod tests {
         transcribed(&voice);
         assert!(settled.elapsed() < Duration::from_millis(500), "{:?}", settled.elapsed());
         assert_eq!(texts(&events), ["abre o VS Code."]);
+    }
+
+    #[test]
+    fn a_transcript_that_reads_whole_tells_the_ears_and_the_name_alone_does_not() {
+        use wake::Host;
+        let (voice, events, counts) = scripted(false);
+        let wired = Wired { voice: voice.clone(), era: voice.era.load(Ordering::SeqCst) };
+        let whole = |n: usize| {
+            begun(&counts, n);
+            while counts.busy.load(Ordering::SeqCst) > 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // Its outcome lands just after the transcript.
+            std::thread::sleep(Duration::from_millis(30));
+            wired.now().whole
+        };
+        // "James, abre o VS Code.": whole, and heard once the ears say it is over.
+        wired.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+        assert!(whole(1));
+        assert!(texts(&events).is_empty(), "heard before the ears ended it");
+        wired.settled();
+        transcribed(&voice);
+        assert_eq!(texts(&events), ["abre o VS Code."]);
+        // The name alone waits for what comes after it.
+        wired.ended(vec![0.1; 1_000], 16_000, HeardVia::Wake, 1);
+        assert!(!whole(2));
+        // Going on, it is not whole until what it went on with is heard.
+        wired.resumed();
+        wired.ended(vec![0.1; 3_000], 16_000, HeardVia::Wake, 1);
+        assert!(!wired.now().whole);
+        assert!(whole(3));
+        wired.settled();
+        transcribed(&voice);
+        assert_eq!(texts(&events), ["abre o VS Code.", "abre o VS Code."]);
+
+        // A goodbye ends it too: nothing more is for James.
+        let (voice, _, _) = fake_voice(Ok(("Valeu, James.".into(), 0.9)));
+        let wired = Wired { voice: voice.clone(), era: voice.era.load(Ordering::SeqCst) };
+        voice.ended(vec![0.1; 4_800], 16_000, HeardVia::Follow, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !wired.now().whole {
+            assert!(std::time::Instant::now() < deadline, "a goodbye reads whole");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn a_take_heard_plays_the_cue_and_one_dropped_does_not() {
+        for (heard, cue, via, plays) in [
+            ("abre o PR 42", true, HeardVia::Key, true),
+            ("abre o PR 42", true, HeardVia::Follow, true),
+            ("Ah!", true, HeardVia::Key, false),
+            ("Obrigado.", true, HeardVia::Follow, false),
+            ("abre o PR 42", false, HeardVia::Key, false),
+            ("abre o PR 42", false, HeardVia::Follow, false),
+        ] {
+            let (voice, events, played) = fake_voice_with(Ok((heard.into(), 0.9)), cue);
+            if via == HeardVia::Key {
+                voice.press(mic(), None).unwrap();
+                voice.finish(voice.release().unwrap());
+            } else {
+                voice.phases.update(|f| f.hands_free = true);
+                voice.ended(vec![0.1; 4_800], 16_000, via, 0);
+                voice.settled();
+                transcribed(&voice);
+            }
+            if plays {
+                // A few hundred samples: the test's output pulls at the pace of the runner's sleeps.
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while lock(&played).len() < 300 {
+                    assert!(std::time::Instant::now() < deadline, "{heard:?} via {via:?}: no cue");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(500));
+                assert!(lock(&played).is_empty(), "{heard:?} via {via:?}, cue {cue}: a cue played");
+            }
+            assert!(!said(&events).contains(&Event::Phase(VoicePhase::Speaking)), "the cue is no speech");
+        }
     }
 
     #[test]
@@ -1983,10 +2165,15 @@ mod tests {
     }
 
     fn fake_voice(heard: Result<(String, f32), String>) -> (Arc<JarvisVoice>, Arc<Mutex<Vec<Event>>>, Arc<Mutex<Vec<f32>>>) {
+        fake_voice_with(heard, false)
+    }
+
+    /// `fake_voice`, playing the cue for a take heard when `cue`.
+    fn fake_voice_with(heard: Result<(String, f32), String>, cue: bool) -> (Arc<JarvisVoice>, Arc<Mutex<Vec<Event>>>, Arc<Mutex<Vec<f32>>>) {
         let events = Arc::new(Mutex::new(vec![]));
         let into = events.clone();
         let played = Arc::new(Mutex::new(vec![]));
-        let voice = JarvisVoice::new(Box::new(Fake { heard, played: played.clone() }), Arc::new(move |e| lock(&into).push(e)));
+        let voice = JarvisVoice::new(Box::new(Fake { heard, played: played.clone() }), Arc::new(move |e| lock(&into).push(e))).cue(cue);
         (Arc::new(voice), events, played)
     }
 }

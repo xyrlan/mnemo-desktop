@@ -3,7 +3,8 @@
 //! it. While the
 //! push-to-talk key is held the player sends silence and holds its place, so nothing is said over
 //! the maintainer, and the rest follows once the key is up. `hush` drops the queue and what is
-//! still unplayed.
+//! still unplayed. The cue (`Speaker::cue`) plays beside the queue, mixed over whatever is playing:
+//! it is no speech, so it neither waits its turn nor counts as James speaking.
 //!
 //! Piper, local, with a PT-BR voice, loads it in about 0.2 s, so a process is started ahead of time and waits on its
 //! stdin with the voice loaded: a sentence then starts sounding after its own synthesis only.
@@ -354,6 +355,10 @@ struct St {
     sounded: Option<Instant>,
     /// The last of those latencies.
     latency: Option<Duration>,
+    /// The cue not yet played, at the voice's rate, and where the player is in it: mixed over
+    /// `audio`, never in `speaking`.
+    cue: VecDeque<f32>,
+    cue_pos: f64,
 }
 
 impl St {
@@ -394,37 +399,78 @@ impl Shared {
         if st.asked.is_some() && st.sounded.is_none() && !st.audio.is_empty() {
             st.sounded = Some(Instant::now());
         }
-        if step == 1.0 {
-            for o in out.iter_mut() {
-                *o = st.audio.pop_front().unwrap_or(0.0);
-            }
-            return;
-        }
+        let st = &mut *st;
         for o in out.iter_mut() {
-            let i = st.pos as usize;
-            let a = st.audio.get(i).copied();
-            let b = st.audio.get(i + 1).copied();
-            *o = match (a, b) {
-                (Some(a), Some(b)) => {
-                    let f = (st.pos - i as f64) as f32;
-                    a + (b - a) * f
-                }
-                (Some(a), None) => a,
-                _ => 0.0,
-            };
-            if a.is_some() {
-                st.pos += step;
-            }
-            let whole = (st.pos as usize).min(st.audio.len());
-            if whole > 0 {
-                st.audio.drain(..whole);
-                st.pos -= whole as f64;
-            }
+            *o = next(&mut st.audio, &mut st.pos, step);
         }
-        if st.audio.is_empty() {
-            st.pos = 0.0;
+        if !st.cue.is_empty() {
+            for o in out.iter_mut() {
+                *o += next(&mut st.cue, &mut st.cue_pos, step);
+            }
         }
     }
+}
+
+/// The next sample out of `audio`, `step` of its samples on from the last (1 when the output runs
+/// at its rate), `pos` being where between `audio[0]` and `audio[1]` the output is; silence once
+/// it is all played. What is played is taken off it.
+fn next(audio: &mut VecDeque<f32>, pos: &mut f64, step: f64) -> f32 {
+    if step == 1.0 {
+        return audio.pop_front().unwrap_or(0.0);
+    }
+    let i = *pos as usize;
+    let a = audio.get(i).copied();
+    let b = audio.get(i + 1).copied();
+    let o = match (a, b) {
+        (Some(a), Some(b)) => {
+            let f = (*pos - i as f64) as f32;
+            a + (b - a) * f
+        }
+        (Some(a), None) => a,
+        _ => 0.0,
+    };
+    if a.is_some() {
+        *pos += step;
+    }
+    let whole = (*pos as usize).min(audio.len());
+    if whole > 0 {
+        audio.drain(..whole);
+        *pos -= whole as f64;
+    }
+    if audio.is_empty() {
+        *pos = 0.0;
+    }
+    o
+}
+
+/// The cue's notes: when each begins, in seconds, and its pitch. Two, a fifth apart and rising,
+/// as a "hm?" rises: heard as noticed, not as an alert.
+const CUE_NOTES: [(f32, f32); 2] = [(0.0, 784.0), (0.07, 1_174.7)];
+/// How long the cue is, and how loud at its loudest: a tenth of full scale, under James's voice.
+const CUE_SECS: f32 = 0.3;
+const CUE_PEAK: f32 = 0.1;
+
+/// The cue at `rate`: each note rises over 8 ms and dies away over some 45 ms, so it is a soft
+/// tap with no click, gone well before `CUE_SECS`.
+pub fn cue_sound(rate: u32) -> Vec<f32> {
+    let n = (rate as f32 * CUE_SECS) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / rate as f32;
+            let notes: f32 = CUE_NOTES
+                .iter()
+                .filter(|(at, _)| t >= *at)
+                .map(|&(at, hz)| {
+                    let t = t - at;
+                    let rise = (t / 0.008).min(1.0);
+                    rise * (-t / 0.045).exp() * (2.0 * std::f32::consts::PI * hz * t).sin()
+                })
+                .sum();
+            // The last 20 ms fade out, so nothing is cut short.
+            let fade = ((n - i) as f32 / (rate as f32 * 0.02)).min(1.0);
+            CUE_PEAK * notes * fade
+        })
+        .collect()
 }
 
 /// How long the output stays open after the last sound, so a reply that follows soon does not
@@ -435,6 +481,8 @@ const TICK: Duration = Duration::from_millis(20);
 
 pub struct Speaker {
     shared: Arc<Shared>,
+    /// The cue, at the voice's rate.
+    cue: Vec<f32>,
 }
 
 impl Speaker {
@@ -493,14 +541,16 @@ impl Speaker {
                 let mut said = false;
                 let mut quiet_since: Option<Instant> = None;
                 loop {
-                    let (speaking, audible, closed) = {
+                    let (speaking, audible, cueing, closed) = {
                         let mut st = lock(&s.st);
                         if let (Some(asked), Some(sounded)) = (st.asked, st.sounded) {
                             let latency = sounded.saturating_duration_since(asked);
                             log::info!("jarvis voice: first sound {} ms after jarvis_say", latency.as_millis());
                             (st.asked, st.sounded, st.latency) = (None, None, Some(latency));
                         }
-                        (st.speaking(), !s.held.load(Ordering::SeqCst) && !st.audio.is_empty(), st.closed)
+                        let held = s.held.load(Ordering::SeqCst);
+                        let cueing = !held && !st.cue.is_empty();
+                        (st.speaking(), cueing || (!held && !st.audio.is_empty()), cueing, st.closed)
                     };
                     if closed {
                         return;
@@ -519,6 +569,7 @@ impl Speaker {
                                 st.queue.clear();
                                 st.audio.clear();
                                 st.pos = 0.0;
+                                st.cue.clear();
                                 st.generation += 1;
                                 drop(st);
                                 on_error(e);
@@ -526,7 +577,7 @@ impl Speaker {
                             }
                         }
                     }
-                    if speaking {
+                    if speaking || cueing {
                         quiet_since = None;
                     } else if stream.is_some() {
                         let since = *quiet_since.get_or_insert_with(Instant::now);
@@ -538,7 +589,7 @@ impl Speaker {
                     let st = lock(&s.st);
                     // `said` too: a hush between the read above and this one has left nothing to say,
                     // and no one to wake the player for it to say so.
-                    if !st.speaking() && !said && stream.is_none() && !st.closed {
+                    if !st.speaking() && !said && stream.is_none() && st.cue.is_empty() && !st.closed {
                         // Nothing to say and nothing open: sleep until there is. While there is,
                         // the tick also notices the key coming up.
                         drop(s.cv.wait(st).unwrap_or_else(|e| e.into_inner()));
@@ -549,7 +600,7 @@ impl Speaker {
             })
             .map_err(|e| format!("jarvis voice: {e}"))?;
 
-        Ok(Speaker { shared })
+        Ok(Speaker { shared, cue: cue_sound(rate) })
     }
 
     /// Queues `text` after what is already queued.
@@ -563,6 +614,17 @@ impl Speaker {
             (st.asked, st.sounded) = (Some(Instant::now()), None);
         }
         st.queue.push_back(text);
+        drop(st);
+        self.shared.cv.notify_all();
+    }
+
+    /// Plays the cue now, over whatever is playing: what is queued keeps its place, and James is
+    /// not speaking for it. A cue still playing starts again. `hush` leaves it: a newer request
+    /// hushes the answer to the last, and its cue is for the new one.
+    pub fn cue(&self) {
+        let mut st = lock(&self.shared.st);
+        st.cue = self.cue.iter().copied().collect();
+        st.cue_pos = 0.0;
         drop(st);
         self.shared.cv.notify_all();
     }
@@ -749,6 +811,34 @@ pub(crate) mod tests {
         })
     }
 
+    /// `fake_output` at the device's own pace, 22 050 samples a second however long a sleep of
+    /// the runner's takes, as a device pulls: what the cue takes the time it would.
+    fn paced_output(heard: Arc<Mutex<Vec<f32>>>) -> Output {
+        Box::new(move |_rate, shared| {
+            let into = heard.clone();
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = stop.clone();
+            std::thread::spawn(move || {
+                let (start, mut pulled) = (Instant::now(), 0usize);
+                while !stopped.load(Ordering::SeqCst) {
+                    let due = (start.elapsed().as_secs_f64() * 22_050.0) as usize - pulled;
+                    let mut buf = vec![0f32; due];
+                    shared.pull(&mut buf, 1.0);
+                    pulled += due;
+                    lock(&into).extend(buf.iter().copied().filter(|&s| s != 0.0));
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            });
+            struct Stop(Arc<AtomicBool>);
+            impl Drop for Stop {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            Ok(Box::new(Stop(stop)) as Box<dyn Any>)
+        })
+    }
+
     fn speaker(held: bool) -> (Speaker, Arc<AtomicBool>, Arc<Mutex<Vec<f32>>>, mpsc::Receiver<bool>) {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let key = Arc::new(AtomicBool::new(held));
@@ -830,6 +920,113 @@ pub(crate) mod tests {
         // What comes after a hush is said as usual.
         s.say("e");
         until(|| lock(&heard).len() == 100);
+    }
+
+    #[test]
+    fn the_cue_is_mixed_over_speech_and_is_no_speech() {
+        let shared = Shared::new(Arc::default());
+        lock(&shared.st).audio.extend([0.5, 0.5, 0.5]);
+        lock(&shared.st).cue.extend([0.1, 0.2]);
+        let mut out = [9.0; 4];
+        shared.pull(&mut out, 1.0);
+        assert_eq!(out, [0.6, 0.7, 0.5, 0.0], "over what is said, which keeps its place");
+        // A cue alone, at another rate: stepped through as speech is, and nothing to say.
+        lock(&shared.st).cue.extend([0.0, 1.0]);
+        let st = lock(&shared.st);
+        assert!(!st.speaking());
+        drop(st);
+        let mut out = [9.0; 4];
+        shared.pull(&mut out, 0.5);
+        assert_eq!(out, [0.0, 0.5, 1.0, 1.0]);
+        // Held, nothing plays, the cue no more than speech.
+        lock(&shared.st).cue.extend([0.3]);
+        shared.held.store(true, Ordering::SeqCst);
+        shared.pull(&mut out, 1.0);
+        assert_eq!(out, [0.0; 4]);
+    }
+
+    #[test]
+    fn the_cue_plays_by_itself_and_a_hush_leaves_it() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let (tx, speaking) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let on_speaking = Arc::new(move |b| {
+            let _ = lock(&tx).send(b);
+        });
+        let s = Speaker::start(22_050, Arc::default(), fake_synth(), paced_output(heard.clone()), on_speaking, Arc::new(|e| panic!("{e}"))).unwrap();
+        s.cue();
+        let nonzero = cue_sound(22_050).iter().filter(|&&x| x != 0.0).count();
+        until(|| lock(&heard).len() == nonzero);
+        assert!(speaking.recv_timeout(Duration::from_millis(100)).is_err(), "James is not speaking for it");
+        // Said, then hushed with the cue: what was said goes, the cue plays on. Thirty texts,
+        // 0.14 s of speech, for the player to see him speaking however a runner sleeps; still
+        // fewer samples than the cue, so a hush that dropped it would leave too few.
+        let before = lock(&heard).len();
+        for _ in 0..30 {
+            s.say("abc");
+        }
+        assert_eq!(speaking.recv_timeout(Duration::from_secs(5)), Ok(true));
+        s.cue();
+        s.hush();
+        until(|| lock(&heard).len() >= before + nonzero);
+        assert!(lock(&s.shared.st).audio.is_empty());
+    }
+
+    #[test]
+    fn the_cue_waits_for_the_key_and_keeps_the_device_open_while_it_plays() {
+        // An output that says how often it was opened.
+        let (heard, opened) = (Arc::new(Mutex::new(Vec::new())), Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+        let mut inner = paced_output(heard.clone());
+        let count = opened.clone();
+        let output: Output = Box::new(move |rate, shared| {
+            count.fetch_add(1, Ordering::SeqCst);
+            inner(rate, shared)
+        });
+        let key = Arc::new(AtomicBool::new(true));
+        let s = Speaker::start(22_050, key.clone(), fake_synth(), output, Arc::new(|_| {}), Arc::new(|e| panic!("{e}"))).unwrap();
+        let nonzero = cue_sound(22_050).iter().filter(|&&x| x != 0.0).count();
+        // Held: nothing, then all of it once the key is up.
+        s.cue();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(lock(&heard).is_empty());
+        key.store(false, Ordering::SeqCst);
+        until(|| lock(&heard).len() == nonzero);
+        // Played as the device's linger after speech runs out: it stays open for the cue.
+        s.say("a");
+        until(|| lock(&heard).len() == nonzero + 100);
+        // The cue then plays on 150 ms past the linger.
+        std::thread::sleep(LINGER - Duration::from_millis(150));
+        s.cue();
+        until(|| lock(&heard).len() == 2 * nonzero + 100);
+        assert_eq!(opened.load(Ordering::SeqCst), 1, "opened once");
+    }
+
+    #[test]
+    fn a_cue_with_no_device_to_play_it_is_said_once() {
+        let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = errors.clone();
+        let output: Output = Box::new(|_, _| Err("no speaker found".into()));
+        let s = Speaker::start(22_050, Arc::default(), fake_synth(), output, Arc::new(|_| {}), Arc::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }))
+        .unwrap();
+        s.cue();
+        until(|| errors.load(Ordering::SeqCst) >= 1);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(errors.load(Ordering::SeqCst), 1);
+        assert!(lock(&s.shared.st).cue.is_empty(), "dropped, not held for a device that may never come");
+    }
+
+    #[test]
+    fn the_cue_is_short_soft_and_starts_and_ends_at_rest() {
+        for rate in [22_050, 24_000] {
+            let cue = cue_sound(rate);
+            assert_eq!(cue.len(), (rate as f32 * CUE_SECS) as usize);
+            let peak = cue.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            // Soft: a tenth of full scale or so, under James's voice.
+            assert!((0.03..=0.12).contains(&peak), "{peak}");
+            assert!(cue[0].abs() < 1e-3 && cue[cue.len() - 1].abs() < 1e-4, "no click");
+        }
     }
 
     #[test]

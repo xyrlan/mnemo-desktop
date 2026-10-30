@@ -99,6 +99,8 @@ struct Whisper {
     prompt: String,
     dictating: Arc<AtomicBool>,
     checks: Arc<AtomicUsize>,
+    /// Transcripts of takes made.
+    transcripts: Arc<AtomicUsize>,
 }
 
 impl Backend for Whisper {
@@ -107,7 +109,9 @@ impl Backend for Whisper {
         hear::hear(&self.ctx, &hear::to_whisper(&take.samples, take.rate), &self.prompt)
     }
     fn hear_until(&self, take: &Captured, stop: &Arc<AtomicBool>) -> Result<(String, f32), String> {
-        hear::hear_until(&self.ctx, &hear::to_whisper(&take.samples, take.rate), &self.prompt, stop)
+        let heard = hear::hear_until(&self.ctx, &hear::to_whisper(&take.samples, take.rate), &self.prompt, stop);
+        self.transcripts.fetch_add(1, Ordering::SeqCst);
+        heard
     }
     fn check(&self, audio: &[f32]) -> Result<String, String> {
         self.checks.fetch_add(1, Ordering::SeqCst);
@@ -131,6 +135,7 @@ struct Rig {
     events: Arc<Mutex<Vec<Event>>>,
     dictating: Arc<AtomicBool>,
     checks: Arc<AtomicUsize>,
+    transcripts: Arc<AtomicUsize>,
     _one: std::sync::MutexGuard<'static, ()>,
 }
 
@@ -145,15 +150,16 @@ fn rig_with(follow_ms: u64, more: impl FnOnce(JarvisVoice) -> JarvisVoice) -> Ri
     let one = voice::whisper_turn();
     let events = Arc::new(Mutex::new(vec![]));
     let into = events.clone();
-    let (dictating, checks) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
+    let (dictating, checks, transcripts) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
     let backend = Whisper {
         ctx: voice::load_context(&voice::test_model()).expect("model"),
         prompt: hear::prompt(&[]),
         dictating: dictating.clone(),
         checks: checks.clone(),
+        transcripts: transcripts.clone(),
     };
     let voice = more(JarvisVoice::new(Box::new(backend), Arc::new(move |e| lock(&into).push(e))).follow(follow_ms));
-    Rig { voice: Arc::new(voice), events, dictating, checks, _one: one }
+    Rig { voice: Arc::new(voice), events, dictating, checks, transcripts, _one: one }
 }
 
 fn fixture(name: &str) -> Vec<f32> {
@@ -230,6 +236,13 @@ impl Rig {
             assert!(Instant::now() < deadline, "{what}: {:?}", said(&self.events));
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// Until `n` transcripts are made, and what was made of the last has landed: the tests play
+    /// faster than whisper hears, and this is whisper keeping up.
+    fn transcribed(&self, n: usize) {
+        self.until("a transcript", |r| r.transcripts.load(Ordering::SeqCst) >= n);
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     /// Until no take is being transcribed.
@@ -345,6 +358,24 @@ fn at_pause(audio: &[f32], nth: usize) -> (&[f32], &[f32]) {
 }
 
 #[test]
+fn a_whole_request_is_heard_without_waiting_out_the_join() {
+    let r = rig(8_000);
+    let (mut ears, wired) = r.ears();
+    r.play(&mut ears, &wired, &room(0.5));
+    r.play(&mut ears, &wired, voiced(&fixture("wake-start")));
+    // Handed on at its pause, and transcribed: "quais PRs estão abertos no desktop?" is all of it.
+    r.play(&mut ears, &wired, &room(0.62));
+    r.transcribed(1);
+    assert!(r.heard().is_empty(), "heard before the ears ended it");
+    // 1 s of silence after the last word, where the join would have waited 1.7 s.
+    r.play(&mut ears, &wired, &room(0.38));
+    r.until("heard", |r| r.heard().len() == 1);
+    assert!(r.heard()[0].text.contains("abertos"), "{:?}", r.heard());
+    r.settled();
+    assert_eq!(r.phases(), [VoicePhase::Listening, VoicePhase::Transcribing, VoicePhase::Idle]);
+}
+
+#[test]
 fn a_breath_after_the_name_is_the_same_take() {
     let r = rig(8_000);
     let (mut ears, wired) = r.ears();
@@ -361,6 +392,43 @@ fn a_breath_after_the_name_is_the_same_take() {
     assert!(h[0].via == HeardVia::Wake && h[0].text.contains("PRs") && h[0].text.contains("abertos"), "{h:?}");
     // What was made of the first part was given up, and that is no error.
     assert!(!said(&r.events).iter().any(|e| matches!(e, Event::Error(_))), "{:?}", said(&r.events));
+}
+
+/// `audio` from its first frame the gate hears as voiced to its last: no silence of its own around
+/// it, so that the test's is all there is.
+fn voiced(audio: &[f32]) -> &[f32] {
+    let frame = RATE / 50;
+    let loud: Vec<bool> = audio.chunks(frame).map(|f| voice::rms(f) > 0.0015).collect();
+    let first = loud.iter().position(|&v| v).unwrap_or(0);
+    let last = loud.iter().rposition(|&v| v).map_or(0, |l| l + 1);
+    &audio[first * frame..(last * frame).min(audio.len())]
+}
+
+/// Whether `part`, said alone, reads as a request said to its end.
+fn reads_whole(r: &Rig, part: &[f32]) -> bool {
+    let take = Captured { samples: part.iter().copied().chain(room(0.2)).collect(), rate: RATE as u32 };
+    let (text, confidence) = r.voice.backend.hear(&take).unwrap();
+    matches!(outcome(&text, confidence, HeardVia::Wake, 1), Outcome::Request(q) if wake::whole(&q))
+}
+
+#[test]
+fn a_breath_is_never_cut_with_whisper_keeping_up() {
+    let r = rig(8_000);
+    let (mut ears, wired) = r.ears();
+    r.play(&mut ears, &wired, &room(0.5));
+    let audio = fixture("wake-start");
+    // Cut where the first half reads whole by itself, as whisper closes one ("James, quais PRs
+    // estão abertos?"): a breath of 0.72 s there, the transcript made while it lasts. The gate
+    // hears the end of a word a little before the test's level does, and the breath is that much
+    // longer to it.
+    let (start, rest) = (2..=5).map(|n| at_pause(&audio, n)).find(|(start, _)| reads_whole(&r, start)).expect("a half that reads whole");
+    r.play(&mut ears, &wired, &voiced(start).iter().copied().chain(room(0.62)).collect::<Vec<_>>());
+    r.transcribed(1);
+    r.play(&mut ears, &wired, &room(0.1).into_iter().chain(voiced(rest).iter().copied()).collect::<Vec<_>>());
+    r.play(&mut ears, &wired, &room(2.0));
+    r.settled();
+    let h = r.heard();
+    assert!(h.len() == 1 && h[0].text.contains("desktop"), "{:?}", said(&r.events));
 }
 
 #[test]
@@ -881,14 +949,15 @@ impl Backend for InRoom {
 
 type Stamped = Arc<Mutex<Vec<(Instant, Event)>>>;
 
-/// The voice in `room`, hands-free on, its events stamped; once the model has loaded.
+/// The voice in `room`, hands-free on and its cue on the room's speaker, its events stamped; once
+/// the model has loaded.
 fn live_voice(room: &Arc<Room>) -> (Arc<JarvisVoice>, Stamped) {
     let events: Stamped = Arc::default();
     let into = events.clone();
     let backend = InRoom { local: Local::new(Config::default()), room: room.clone() };
     backend.load().unwrap();
     let mic = room.clone();
-    let voice = Arc::new(JarvisVoice::new(Box::new(backend), Arc::new(move |e| lock(&into).push((Instant::now(), e)))).mic(move || mic.mic()));
+    let voice = Arc::new(JarvisVoice::new(Box::new(backend), Arc::new(move |e| lock(&into).push((Instant::now(), e)))).mic(move || mic.mic()).cue(true));
     voice.listen(Some(true)).unwrap();
     std::thread::sleep(Duration::from_secs(2));
     (voice, events)
@@ -950,39 +1019,59 @@ fn cpu_over(secs: u64, run: impl FnOnce()) -> f32 {
     100.0 * cpu.as_secs_f32() / wall.as_secs_f32()
 }
 
+/// From the end of speech to `jarvis://heard`, in real time over `REQUESTS`, and then the same
+/// requests with a breath of `BREATHS` after the name and in the middle: whether each is still one
+/// take, all of it.
 #[test]
 #[ignore]
 fn live_latency() {
+    const BREATHS: [f32; 3] = [0.8, 1.0, 1.2];
     let room = Arc::new(Room::default());
     let (_voice, events) = live_voice(&room);
     let files = speech::ensure_files(None).unwrap();
     let mut piper = speech::Piper::new(&files);
-    // Each request, and what of it comes up to the name and with it: Piper saying that alone
-    // says where the name ends.
-    for (text, lead) in [
-        ("Djêims, quais PRs estão abertos no desktop?", "Djêims."),
-        ("Djêims, o CI do PR quinhentos e vinte passou?", "Djêims."),
-        ("Fala, Djêims, abre o VS Code no mnemo.", "Fala, Djêims."),
-        ("Djêims, o que tem no log do mnemo desde ontem?", "Djêims."),
-        ("Ei Djêims, quantas issues abertas tem o site?", "Ei Djêims."),
-        ("Djêims, roda os testes do desktop e me diz se passou.", "Djêims."),
-    ] {
+    let heard_since = |since: Instant| -> Vec<(Instant, Heard)> {
+        lock(&events).iter().filter(|(t, _)| *t >= since).filter_map(|(t, e)| if let Event::Heard(h) = e { Some((*t, h.clone())) } else { None }).collect()
+    };
+    let mut latencies = vec![];
+    for text in REQUESTS {
         let audio = piper_say(&mut piper, files.rate, text);
-        let (start, end) = speech_in(&audio);
-        let name_end = speech_in(&piper_say(&mut piper, files.rate, lead)).1;
+        let (_, end) = speech_in(&audio);
         let began = room.say(&audio);
-        let at = |s: f32| began + Duration::from_secs_f32(s);
-        let listening = when(&events, began, |e| *e == Event::Phase(VoicePhase::Listening)).map(|(t, _)| t);
         let heard = when(&events, began, |e| matches!(e, Event::Heard(_)));
-        let ms = |t: Option<Instant>, from: Instant| t.map_or("never".into(), |t| format!("{} ms", ms_between(from, t)));
-        eprintln!(
-            "speech {start:.2}-{end:.2} s, name ends {name_end:.2} s | name -> listening {} | end of speech -> heard {} | {:?}",
-            ms(listening, at(name_end)),
-            ms(heard.as_ref().map(|(t, _)| *t), at(end)),
-            heard.map(|(_, e)| e)
-        );
-        std::thread::sleep(Duration::from_secs(1));
+        let ms = heard.as_ref().map(|(t, _)| ms_between(began + Duration::from_secs_f32(end), *t));
+        std::thread::sleep(Duration::from_secs(3));
+        let takes = heard_since(began);
+        eprintln!("end of speech -> heard {ms:?} ms, {} take(s): {:?}", takes.len(), takes.iter().map(|(_, h)| &h.text).collect::<Vec<_>>());
+        latencies.extend(ms);
     }
+    latencies.sort();
+    eprintln!("end of speech -> heard over {} requests: median {} ms, {:?}", latencies.len(), latencies[latencies.len() / 2], latencies);
+
+    let (mut cases, mut whole) = (0, 0);
+    for text in REQUESTS {
+        let audio = piper_say(&mut piper, files.rate, text);
+        let at = pauses(&audio);
+        // After the name, and the pause nearest the middle of what follows it.
+        let middle = at.iter().copied().skip(1).min_by_key(|&p| p.abs_diff((at[0] + audio.len()) / 2));
+        for (where_, cut) in [("after the name", Some(at[0])), ("in the middle", middle)] {
+            let Some(cut) = cut else { continue };
+            for breath in BREATHS {
+                let mut said = audio[..cut].to_vec();
+                said.extend(vec![0.0; (breath * RATE as f32) as usize]);
+                said.extend_from_slice(&audio[cut..]);
+                let began = room.say(&said);
+                std::thread::sleep(Duration::from_secs_f32(said.len() as f32 / RATE as f32 + 3.0));
+                let takes = heard_since(began);
+                // One take, and about as long as the request: whisper mishears a word or two.
+                let one = takes.len() == 1 && takes[0].1.text.split_whitespace().count() + 2 >= text.split_whitespace().count();
+                cases += 1;
+                whole += usize::from(one);
+                eprintln!("{} {breath:.1} s {where_}: {:?}", if one { "one take " } else { "CUT      " }, takes.iter().map(|(_, h)| &h.text).collect::<Vec<_>>());
+            }
+        }
+    }
+    eprintln!("a breath within a request: {whole} of {cases} stayed one take");
 }
 
 #[test]
@@ -1056,6 +1145,76 @@ fn live_check_cost() {
     }
 }
 
+/// Requests Piper says for the measurements of how a take ends: one sentence each, with the
+/// name, and the last in two sentences.
+const REQUESTS: &[&str] = &[
+    "Djêims, quais PRs estão abertos no desktop?",
+    "Djêims, abre o VS Code no mnemo e roda os testes.",
+    "Djêims, o CI do PR quinhentos e vinte passou?",
+    "Djêims, me diz o que mudou no log do mnemo desde ontem.",
+    "Djêims, quantas issues abertas tem o site?",
+    "Djêims, manda um filho corrigir o teste que quebrou no desktop.",
+    "Djêims, o que você acha de trocar o modelo do whisper por um maior?",
+    "Djêims, pesquisa na web qual é a versão mais nova do Tauri.",
+    "Djêims, abre o PR quarenta e dois no navegador, por favor.",
+    "Djêims, lê pra mim o último briefing do desktop.",
+    "Djêims, tem algum filho rodando agora?",
+    "Djêims, para tudo e me fala como estão os filhos.",
+    "Djêims, abre o PR quarenta e dois. Depois roda os testes do desktop.",
+];
+
+/// Where `audio` pauses between words: each start of 40 ms or more under a tenth of its level,
+/// between its first and last word.
+fn pauses(audio: &[f32]) -> Vec<usize> {
+    let frame = RATE / 50;
+    let voiced: Vec<bool> = audio.chunks(frame).map(|f| voice::rms(f) > 0.03).collect();
+    let (Some(first), Some(last)) = (voiced.iter().position(|&v| v), voiced.iter().rposition(|&v| v)) else { return vec![] };
+    (first..last).filter(|&i| voiced[i] && !voiced[i + 1] && voiced.get(i + 2) == Some(&false)).map(|i| (i + 1) * frame).collect()
+}
+
+/// For each of `REQUESTS`, cut at each of its pauses: whether what whisper makes of the part
+/// before the cut reads `whole`, which would end the take there were the breath longer than the
+/// pause and the transcript; and whether the whole request does, which ends it with no join. The
+/// tests' model, and `MNEMO_JARVIS_MODEL` (Jarvis's own) when it is set.
+/// `cargo test --release --lib jarvis_voice::wake_tests::live_breaths -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn live_breaths() {
+    let files = speech::ensure_files(None).unwrap();
+    let mut piper = speech::Piper::new(&files);
+    let mut models = vec![voice::test_model()];
+    if let Some(m) = std::env::var_os("MNEMO_JARVIS_MODEL") {
+        models.push(PathBuf::from(m));
+    }
+    let prompt = hear::prompt(&[]);
+    let said: Vec<(&str, Vec<f32>)> = REQUESTS.iter().map(|t| (*t, piper_say(&mut piper, files.rate, t))).collect();
+    for model in models {
+        let ctx = voice::load_context(&model).unwrap();
+        eprintln!("== {}", model.display());
+        let (mut cuts, mut cut_whole, mut ends) = (0, 0, 0);
+        for (text, audio) in &said {
+            let read = |audio: &[f32]| {
+                let mut audio = audio.to_vec();
+                audio.extend(room(0.2));
+                let (heard, confidence) = hear::hear(&ctx, &audio, &prompt).unwrap();
+                let outcome = outcome(&heard, confidence, HeardVia::Wake, 1);
+                let whole = matches!(&outcome, Outcome::Request(r) if wake::whole(r));
+                (heard, whole)
+            };
+            let (heard, whole) = read(audio);
+            ends += usize::from(whole);
+            eprintln!("{} {text:?} -> {heard:?}", if whole { "WHOLE" } else { "     " });
+            for at in pauses(audio) {
+                let (heard, whole) = read(&audio[..at]);
+                cuts += 1;
+                cut_whole += usize::from(whole);
+                eprintln!("  {} cut at {:.2} s: {heard:?}", if whole { "CUT" } else { "   " }, at as f32 / RATE as f32);
+            }
+        }
+        eprintln!("{ends} of {} requests read whole; {cut_whole} of {cuts} cuts read whole", said.len());
+    }
+}
+
 fn num_threads() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
 }
@@ -1117,4 +1276,191 @@ fn live_conversation_on_speakers() {
     assert_eq!(heard, 4, "four takes, and the goodbye none");
     assert_eq!(lock(&events).iter().rev().find_map(|(_, e)| if let Event::Phase(p) = e { Some(*p) } else { None }), Some(VoicePhase::Idle));
     voice.listen(Some(false)).unwrap();
+}
+
+// ---------------------------------------------------------------------------------------
+// The trace of a live run: what `live_latency` plays, with every name check and every event of
+// the ears written down, so that a request lost in a run can be read back step by step.
+
+type Trace = Arc<Mutex<Vec<(Instant, String)>>>;
+
+fn note(trace: &Trace, line: String) {
+    lock(trace).push((Instant::now(), line));
+}
+
+/// The voice's own `Wired`, writing down what the ears tell it and ask of it, with `Now` then.
+struct Traced {
+    wired: Wired,
+    trace: Trace,
+}
+
+impl wake::Host for Traced {
+    fn now(&self) -> wake::Now {
+        self.wired.now()
+    }
+    fn check(&self, audio: &[f32]) -> String {
+        let text = self.wired.check(audio);
+        note(&self.trace, format!("check {:.2} s -> {text:?}, a call: {:?}; {:?}", audio.len() as f32 / RATE as f32, wake::call(&text).is_some(), self.wired.now()));
+        text
+    }
+    fn began(&self, via: HeardVia) {
+        note(&self.trace, format!("began {via:?}; {:?}", self.wired.now()));
+        self.wired.began(via)
+    }
+    fn ended(&self, audio: Vec<f32>, rate: u32, via: HeardVia, lead: usize) {
+        note(&self.trace, format!("ended {via:?}, {:.2} s, lead {lead}; {:?}", audio.len() as f32 / rate as f32, self.wired.now()));
+        self.wired.ended(audio, rate, via, lead)
+    }
+    fn resumed(&self) {
+        note(&self.trace, format!("resumed; {:?}", self.wired.now()));
+        self.wired.resumed()
+    }
+    fn settled(&self) {
+        note(&self.trace, format!("settled; {:?}", self.wired.now()));
+        self.wired.settled()
+    }
+    fn dropped(&self) {
+        note(&self.trace, format!("dropped; {:?}", self.wired.now()));
+        self.wired.dropped()
+    }
+    fn closed(&self) {
+        note(&self.trace, format!("closed; {:?}", self.wired.now()));
+        self.wired.closed()
+    }
+}
+
+/// Jarvis's voice on this machine in `room`, writing down each whole take's transcript.
+struct TracedRoom {
+    local: Local,
+    room: Arc<Room>,
+    trace: Trace,
+}
+
+impl Backend for TracedRoom {
+    fn warm(&self) {
+        self.local.warm()
+    }
+    fn hear(&self, take: &Captured) -> Result<(String, f32), String> {
+        let heard = self.local.hear(take);
+        note(&self.trace, format!("transcript of {:.2} s: {heard:?}", take.samples.len() as f32 / take.rate as f32));
+        heard
+    }
+    fn done(&self) {
+        self.local.done()
+    }
+    fn check(&self, audio: &[f32]) -> Result<String, String> {
+        self.local.check(audio)
+    }
+    fn load(&self) -> Result<(), String> {
+        self.local.load()
+    }
+    fn speaker(
+        &self,
+        held: Arc<AtomicBool>,
+        on_speaking: Arc<dyn Fn(bool) + Send + Sync>,
+        on_error: Arc<dyn Fn(String) + Send + Sync>,
+    ) -> Result<speech::Speaker, String> {
+        let files = speech::ensure_files(None)?;
+        let piper = speech::Piper::new(&files);
+        speech::Speaker::start(files.rate, held, piper.into_synth(), self.room.speaker(), on_speaking, on_error)
+    }
+}
+
+/// `live_latency`'s requests and breaths in real time, `MNEMO_JARVIS_RUNS` runs of it (3 unless
+/// set), a fresh voice each run: each case's takes, and the trace of each case that lost its
+/// request whole. What a check decoded is in the trace: this is the test's output, never the
+/// app's log.
+/// `cargo test --release --lib jarvis_voice::wake_tests::live_trace -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn live_trace() {
+    const BREATHS: [f32; 3] = [0.8, 1.0, 1.2];
+    let runs: usize = std::env::var("MNEMO_JARVIS_RUNS").ok().and_then(|r| r.parse().ok()).unwrap_or(3);
+    let files = speech::ensure_files(None).unwrap();
+    let mut piper = speech::Piper::new(&files);
+    let said: Vec<(&str, Vec<f32>)> = REQUESTS.iter().map(|t| (*t, piper_say(&mut piper, files.rate, t))).collect();
+    let mut cases = vec![];
+    for (text, audio) in &said {
+        cases.push((format!("{text:?} as said"), audio.clone()));
+    }
+    for (text, audio) in &said {
+        let at = pauses(audio);
+        let middle = at.iter().copied().skip(1).min_by_key(|&p| p.abs_diff((at[0] + audio.len()) / 2));
+        for (where_, cut) in [("after the name", Some(at[0])), ("in the middle", middle)] {
+            let Some(cut) = cut else { continue };
+            for breath in BREATHS {
+                let mut with = audio[..cut].to_vec();
+                with.extend(vec![0.0; (breath * RATE as f32) as usize]);
+                with.extend_from_slice(&audio[cut..]);
+                cases.push((format!("{text:?}, {breath:.1} s {where_}"), with));
+            }
+        }
+    }
+    let mut lost_all = 0;
+    for run in 1..=runs {
+        let room = Arc::new(Room::default());
+        let trace: Trace = Arc::default();
+        let backend = TracedRoom { local: Local::new(Config::default()), room: room.clone(), trace: trace.clone() };
+        backend.load().unwrap();
+        let into = trace.clone();
+        let emit: Emit = Arc::new(move |e| {
+            if !matches!(e, Event::Level(_)) {
+                note(&into, format!("event {e:?}"));
+            }
+        });
+        let voice = Arc::new(live_cue(JarvisVoice::new(Box::new(backend), emit)));
+        // Hands-free as `listen` runs it, its ears on `Traced`.
+        voice.phases.update(|f| f.hands_free = true);
+        let (tx, rx) = mpsc::channel::<(Vec<f32>, f32)>();
+        let phases = voice.phases.clone();
+        let tap: voice::Tap = Arc::new(move |mono: &[f32]| {
+            phases.levels.mic.store(voice::rms(mono).to_bits(), Ordering::Relaxed);
+            let _ = tx.send((mono.to_vec(), phases.levels.out()));
+        });
+        let recording = voice::Recording::tapped(room.mic(), tap, false, true, |_| {}).unwrap();
+        let host = Traced { wired: Wired { voice: voice.clone(), era: voice.era.load(Ordering::SeqCst) }, trace: trace.clone() };
+        let rate = recording.rate;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let ears = std::thread::spawn(move || {
+            let mut ears = wake::Ears::new(rate, DEFAULT_FOLLOW_MS);
+            while !stopped.load(Ordering::SeqCst) {
+                if let Ok((piece, out)) = rx.recv_timeout(Duration::from_millis(200)) {
+                    ears.feed(&piece, out, &host);
+                }
+            }
+        });
+        std::thread::sleep(Duration::from_secs(2));
+
+        let (mut lost, mut split, mut one) = (0, 0, 0);
+        for (name, audio) in &cases {
+            note(&trace, format!("--- {name}"));
+            let began = room.say(audio);
+            std::thread::sleep(Duration::from_secs_f32(audio.len() as f32 / RATE as f32 + 3.0));
+            let takes = lock(&trace).iter().filter(|(t, l)| *t >= began && l.starts_with("event Heard")).count();
+            match takes {
+                0 => {
+                    lost += 1;
+                    eprintln!("run {run} LOST {name}");
+                    let start = began - Duration::from_secs(6);
+                    for (t, l) in lock(&trace).iter().filter(|(t, _)| *t >= start) {
+                        eprintln!("    {:+6} ms {l}", ms_between(began, *t));
+                    }
+                }
+                1 => one += 1,
+                _ => split += 1,
+            }
+        }
+        eprintln!("run {run}: {} cases, {one} one take, {split} in two or more, {lost} lost", cases.len());
+        lost_all += lost;
+        stop.store(true, Ordering::SeqCst);
+        ears.join().unwrap();
+        drop(recording);
+    }
+    eprintln!("{runs} runs: {lost_all} lost");
+}
+
+/// The cue on, as the app has it.
+fn live_cue(v: JarvisVoice) -> JarvisVoice {
+    v.cue(true)
 }
