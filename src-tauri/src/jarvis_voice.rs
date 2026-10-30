@@ -24,7 +24,7 @@
 //!   follow-up window) as it changes, the first of those that is true, in that order of precedence
 //!   from `listening` down. `jarvis://level` carries the microphone's and the speaker's loudness,
 //!   0–1, 20 times a second while it is not `idle`. `jarvis://voice-error` says what went wrong
-//!   where no command was there to return it.
+//!   where no command was there to return it, and `jarvis://voice-note` what came right again.
 //!
 //! Files are fetched at launch once the key or hands-free is on, else on first use, each checked
 //! against its sha256 (`files.rs`).
@@ -103,6 +103,8 @@ pub enum Event {
     Phase(VoicePhase),
     Heard(Heard),
     Error(String),
+    /// Something the panel is told that went right, as hands-free listening again (`lost`).
+    Note(String),
     Level(VoiceLevel),
 }
 
@@ -112,6 +114,7 @@ impl Event {
             Event::Phase(_) => "jarvis://voice",
             Event::Heard(_) => "jarvis://heard",
             Event::Error(_) => "jarvis://voice-error",
+            Event::Note(_) => "jarvis://voice-note",
             Event::Level(_) => "jarvis://level",
         }
     }
@@ -796,35 +799,67 @@ const REOPEN_EVERY: Duration = Duration::from_secs(1);
 #[cfg(test)]
 const REOPEN_EVERY: Duration = Duration::from_millis(20);
 const REOPEN_TRIES: u32 = 10;
+/// Then it waits for one, opening the default this often for as long as it is not turned off or
+/// on: a microphone Windows lists again a minute later (#541) is heard within this. With none
+/// there a try only asks the system for its default input (`voice::default_input`), the look an
+/// open microphone's `voice::Watch` takes every 500 ms, so waiting costs nothing to feel; and
+/// someone who plugs a microphone back in waits no longer than this for James.
+#[cfg(not(test))]
+const WAIT_EVERY: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const WAIT_EVERY: Duration = Duration::from_millis(100);
 
-/// The microphone hands-free listens to went away: it listens through the default one again, or,
-/// when none opens within `REOPEN_TRIES`, says so and is off. Turned off or on again meanwhile, it
-/// is left as it was turned.
+/// The microphone hands-free listens to went away: it listens through the default one again.
+/// When none opens within `REOPEN_TRIES` it says it is waiting for one and goes on trying every
+/// `WAIT_EVERY`, and says so once one opens. Turned off or on again meanwhile, it is left as it was
+/// turned; the voice gone (the app quitting), it stops.
 fn lost(voice: &Weak<JarvisVoice>, era: u64, why: &str) {
-    let Some(voice) = voice.upgrade() else { return };
-    if voice.era.load(Ordering::SeqCst) != era {
-        return;
+    match voice.upgrade() {
+        Some(v) if v.era.load(Ordering::SeqCst) == era => {}
+        _ => return,
     }
     let why = why.trim().trim_end_matches('.').to_string();
+    // Held weakly while it sleeps: nothing keeps the voice alive to wait for a microphone.
+    let voice = voice.clone();
     // Off its own thread: this runs on the input's.
     std::thread::spawn(move || {
-        if voice.era.load(Ordering::SeqCst) != era {
-            return;
+        match voice.upgrade() {
+            Some(v) if v.era.load(Ordering::SeqCst) == era => {
+                let _ = v.listen(Some(false));
+            }
+            _ => return,
         }
-        let _ = voice.listen(Some(false));
         log::warn!("jarvis voice: hands-free lost its microphone: {why}");
-        for _ in 0..REOPEN_TRIES {
-            let era = voice.era.load(Ordering::SeqCst);
-            std::thread::sleep(REOPEN_EVERY);
-            if voice.era.load(Ordering::SeqCst) != era {
+        for tried in 0.. {
+            let waiting = tried >= REOPEN_TRIES;
+            let era = match voice.upgrade() {
+                Some(v) => {
+                    if tried == REOPEN_TRIES {
+                        log::warn!("jarvis voice: hands-free is waiting for a microphone, trying every {} s", WAIT_EVERY.as_secs_f32());
+                        v.emit(Event::Error(format!("the microphone stopped: {why}. Hands-free is waiting for a microphone and listens again once one opens.")));
+                    }
+                    v.era.load(Ordering::SeqCst)
+                }
+                None => return,
+            };
+            std::thread::sleep(if waiting { WAIT_EVERY } else { REOPEN_EVERY });
+            let Some(v) = voice.upgrade() else { return };
+            if v.era.load(Ordering::SeqCst) != era {
                 return;
             }
-            match voice.listen(Some(true)) {
-                Ok(_) => return log::info!("jarvis voice: hands-free listens again"),
+            match v.listen(Some(true)) {
+                Ok(_) => {
+                    log::info!("jarvis voice: hands-free listens again");
+                    if waiting {
+                        v.emit(Event::Note("a microphone opened: hands-free listens again.".into()));
+                    }
+                    return;
+                }
+                // Every few seconds for as long as it waits: the log says it once, above.
+                Err(e) if waiting => log::debug!("jarvis voice: hands-free: {e}"),
                 Err(e) => log::info!("jarvis voice: hands-free: {e}"),
             }
         }
-        voice.emit(Event::Error(format!("the microphone stopped: {why}. Hands-free listening is off.")));
     });
 }
 
@@ -1182,7 +1217,7 @@ pub fn start(app: &AppHandle) {
         let _ = match e {
             Event::Phase(p) => emitter.emit(name, p),
             Event::Heard(h) => emitter.emit(name, h),
-            Event::Error(m) => emitter.emit(name, m),
+            Event::Error(m) | Event::Note(m) => emitter.emit(name, m),
             Event::Level(l) => emitter.emit(name, l),
         };
     });

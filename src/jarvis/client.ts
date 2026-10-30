@@ -131,6 +131,9 @@ export interface JarvisClient {
   /** `jarvis://voice-error`: what went wrong with the key, the microphone, whisper or the speaker
    *  where no command was there to return it (jarvis-voice). */
   onVoiceError(cb: (message: string) => void): Promise<() => void>
+  /** `jarvis://voice-note`: what came right again where no command was there to say it, as
+   *  hands-free listening once a microphone opens after it waited for one (#541). */
+  onVoiceNote(cb: (message: string) => void): Promise<() => void>
   onLevel(cb: (level: VoiceLevel) => void): Promise<() => void>
   /** `jarvis_listen(enabled: Option<bool>) -> Result<bool, String>`: turns hands-free listening on or
    *  off, or with none only reads it; resolves with whether it is on. Off when the config's
@@ -181,6 +184,7 @@ export function makeJarvisClient(invoke: Invoke, channel: <T>() => ChannelLike<T
     onVoice: (cb) => listen<VoicePhase>('jarvis://voice', cb),
     onHeard: (cb) => listen<Heard>('jarvis://heard', cb),
     onVoiceError: (cb) => listen<string>('jarvis://voice-error', cb),
+    onVoiceNote: (cb) => listen<string>('jarvis://voice-note', cb),
     onLevel: (cb) => listen<VoiceLevel>('jarvis://level', cb),
     listen: (on) => invoke('jarvis_listen', { enabled: on ?? null }),
     screenshot: () => invoke('jarvis_screenshot'),

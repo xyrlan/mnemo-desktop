@@ -587,7 +587,7 @@ fn hands_free_moves_to_a_new_default_microphone_and_a_held_key_stays() {
 }
 
 #[test]
-fn a_lost_microphone_is_opened_again_and_one_that_never_opens_is_said() {
+fn a_lost_microphone_is_opened_again_and_one_long_gone_is_waited_for() {
     let errors = |r: &Rig| lock(&r.events).iter().filter(|e| matches!(e, Event::Error(_))).count();
     let mic = TestMic::default();
     let opens = mic.clone();
@@ -603,7 +603,56 @@ fn a_lost_microphone_is_opened_again_and_one_that_never_opens_is_said() {
     assert_eq!(errors(&r), 0, "nothing to say: it listens as before");
     drop(r);
 
-    // Unplugged for good: no microphone opens again, and that is said once the tries are over.
+    // Unplugged for longer than the quick tries: hands-free says it waits for a microphone, not
+    // that it is off, and listens again once one opens, without a restart (#541).
+    let mic = TestMic::default();
+    let (back, tried) = (Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(Vec::<Instant>::new())));
+    let r = rig_with(8_000, {
+        let (opens, back, tried) = (mic.clone(), back.clone(), tried.clone());
+        move |v| {
+            v.mic(move || {
+                let first = lock(&tried).is_empty();
+                lock(&tried).push(Instant::now());
+                if first || back.load(Ordering::SeqCst) {
+                    opens.input()
+                } else {
+                    Box::new(|_| Err("no microphone found".into()))
+                }
+            })
+        }
+    });
+    r.voice.listen(Some(true)).unwrap();
+    lock(&mic.sink).clone().unwrap().lose("the device was removed");
+    r.until("said", |r| errors(&r) == 1);
+    let said_at = lock(&tried).len();
+    assert_eq!(said_at, 1 + REOPEN_TRIES as usize, "said once the quick tries are over");
+    assert!(matches!(&lock(&r.events).iter().find(|e| matches!(e, Event::Error(_))), Some(Event::Error(m)) if m.contains("the device was removed") && m.contains("waiting for a microphone")));
+    assert_eq!(r.voice.listen(None), Ok(false), "waiting, it hears nothing");
+    // It goes on trying, at the slower cadence.
+    r.until("tried while waiting", |_| lock(&tried).len() >= said_at + 3);
+    {
+        let t = lock(&tried);
+        let quick = t[2] - t[1];
+        assert!(quick >= REOPEN_EVERY && quick < WAIT_EVERY, "{quick:?}");
+        for gap in t.windows(2).skip(said_at - 1).map(|w| w[1] - w[0]) {
+            assert!(gap >= WAIT_EVERY && gap < WAIT_EVERY * 5, "after the quick tries, one every {WAIT_EVERY:?}: {gap:?}");
+        }
+    }
+    assert_eq!(errors(&r), 1, "said once");
+    back.store(true, Ordering::SeqCst);
+    r.until("on again", |r| r.voice.listen(None) == Ok(true));
+    assert_eq!(mic.opened.load(Ordering::SeqCst), 2);
+    r.until("said it listens again", |r| lock(&r.events).iter().any(|e| matches!(e, Event::Note(m) if m.contains("listens again"))));
+    mic.say(&room(0.5));
+    mic.say(&fixture("wake-start"));
+    mic.say(&room(2.0));
+    r.until("heard", |r| r.heard().len() == 1);
+    let opened = lock(&tried).len();
+    std::thread::sleep(WAIT_EVERY * 2);
+    assert_eq!(lock(&tried).len(), opened, "listening, it stops trying");
+    drop(r);
+
+    // Turned off while it waits: it stays off, and stops trying.
     let mic = TestMic::default();
     let (opens, tries) = (mic.clone(), Arc::new(AtomicUsize::new(0)));
     let counted = tries.clone();
@@ -612,10 +661,13 @@ fn a_lost_microphone_is_opened_again_and_one_that_never_opens_is_said() {
     });
     r.voice.listen(Some(true)).unwrap();
     lock(&mic.sink).clone().unwrap().lose("the device was removed");
-    r.until("said", |r| errors(&r) == 1);
-    assert_eq!(tries.load(Ordering::SeqCst), 1 + REOPEN_TRIES as usize);
+    r.until("waiting", |r| errors(&r) == 1);
+    r.voice.listen(Some(false)).unwrap();
+    let after = tries.load(Ordering::SeqCst);
+    std::thread::sleep(WAIT_EVERY * 3);
+    assert!(tries.load(Ordering::SeqCst) <= after + 1, "it stopped trying");
     assert_eq!(r.voice.listen(None), Ok(false));
-    assert!(matches!(&lock(&r.events).iter().find(|e| matches!(e, Event::Error(_))), Some(Event::Error(m)) if m.contains("the device was removed")));
+    assert!(!lock(&r.events).iter().any(|e| matches!(e, Event::Note(_))));
     drop(r);
 
     // Turned off while it tries: it stays off.
