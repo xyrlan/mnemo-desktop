@@ -171,7 +171,7 @@ describe('reading', () => {
   })
 
   test('with no project to be told, Jarvis asks, and the answer runs the request', async () => {
-    const s = setup([calls('git_status', { project: 'nope' }), calls('git_status', { project: 'tasklist' }), said('Limpo.')])
+    const s = setup([calls('git_status', {}), calls('git_status', { project: 'tasklist' }), said('Limpo.')])
     await s.jarvis.ask('como está o git?')
     expect(s.tools).toEqual([])
     expect(s.last()).toBe('Em qual projeto? Conheço mnemo-desktop, tasklist.')
@@ -197,16 +197,79 @@ describe('reading', () => {
   })
 
   test("the model's project beats the window in front", async () => {
-    const s = setup([calls('gh_pr_list', { project: 'mnemo-desktop' }), said('Um PR.'), calls('git_status', { project: 'nope' }), said('ok')], {
+    const s = setup([calls('gh_pr_list', { project: 'mnemo-desktop' }), said('Um PR.'), calls('git_status', {}), said('ok')], {
       client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
     })
     await s.jarvis.ask('quais PRs do meu app estão abertos?')
-    // A pick that is no known project leaves it to the window.
+    // No pick leaves it to the window.
     await s.jarvis.ask('e o git?')
     expect(s.tools).toEqual([
       ['gh_pr_list', { project: 'mnemo-desktop' }],
       ['git_status', { project: 'tasklist' }],
     ])
+  })
+
+  const UNKNOWN = 'Erro: "system32" não é um projeto que eu conheço. Os projetos que conheço: mnemo-desktop, tasklist.'
+
+  test('a project the model names that is none of the known ones reaches no tool, and the model is told the known ones (#542)', async () => {
+    const s = setup([calls('read_briefings', { project: 'system32' }), said('Não conheço o system32 como projeto.')], {
+      client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
+    })
+    s.store.setState({ recent: { project: 'mnemo-desktop', at: t } })
+    await s.jarvis.ask('o que fez a sessão do system32?')
+    expect(s.tools).toEqual([])
+    expect(s.bodies[1].messages.at(-1)).toMatchObject({ role: 'tool', content: UNKNOWN })
+    expect(s.last()).toBe('Não conheço o system32 como projeto.')
+    // Nothing was settled on: the recent project stays as it was.
+    expect(s.store.getState().recent).toEqual({ project: 'mnemo-desktop', at: t })
+  })
+
+  test('an unknown project on a tool that takes an optional one does not run it on every project', async () => {
+    const s = setup([calls('list_sessions', { project: 'system32' }), said('ok')])
+    await s.jarvis.ask('quais sessões rodam no system32?')
+    expect(s.tools).toEqual([])
+    expect(s.bodies[1].messages.at(-1)).toMatchObject({ role: 'tool', content: UNKNOWN })
+  })
+
+  test('an unknown project does not act either: no parent, no app, no page, no parent stopped', async () => {
+    for (const [tool, args] of [
+      ['delegate_to_parent', { project: 'system32', request: 'corrige o teste' }],
+      ['open_in_browser', { project: 'system32', page: 'repo' }],
+      ['open_app', { app: 'VS Code', project: 'system32' }],
+      ['stop_parent', { project: 'system32' }],
+      ['parent_status', { project: 'system32' }],
+    ] as const) {
+      const s = setup([calls(tool, args), said('ok')], { live: [ref('a', 'tasklist')], client: { focusedWindow: async () => 'tasklist' } })
+      await s.jarvis.ask('faz isso no system32')
+      expect(s.parents.opened).toEqual([])
+      expect(s.parents.cancelled).toEqual([])
+      expect(s.opened).toEqual([])
+      expect(s.bodies[1].messages.at(-1)).toMatchObject({ role: 'tool', content: UNKNOWN })
+    }
+  })
+
+  test('the words naming a known project still win over an unknown name, and an alias is known', async () => {
+    const s = setup([calls('git_log', { project: 'system32' }), said('ok'), calls('git_log', { project: 'Tarefas' }), said('ok')])
+    await s.jarvis.ask('o que mudou no desktop?')
+    await s.jarvis.ask('e o que mudou?')
+    expect(s.tools).toEqual([
+      ['git_log', { project: 'mnemo-desktop' }],
+      ['git_log', { project: 'tasklist' }],
+    ])
+  })
+
+  test('a blank project is no project: the window in front still tells it', async () => {
+    const s = setup([calls('git_status', { project: ' ' }), said('Limpo.')], {
+      client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
+    })
+    await s.jarvis.ask('e o git?')
+    expect(s.tools).toEqual([['git_status', { project: 'tasklist' }]])
+  })
+
+  test("ask_user's project only describes its question: an unknown one is still asked", async () => {
+    const s = setup([calls('ask_user', { question: 'O system32 é um projeto novo?', reason: 'project_unknown', project: 'system32' })])
+    await s.jarvis.ask('lê o que a sessão do system32 fez')
+    expect(s.last()).toBe('O system32 é um projeto novo?')
   })
 
   test(`reads stop after ${MAX_STEPS} steps`, async () => {
@@ -774,6 +837,16 @@ function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as
 }
 
 describe('with Claude', () => {
+  test('Claude naming a project that is none of the known ones is told so, and reads nothing (#542)', async () => {
+    const s = withClaude(['{"tool": "read_briefings", "args": {"project": "system32"}}', 'O system32 não é um projeto que eu acompanhe.'], {
+      client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
+    })
+    await s.jarvis.ask('lê o que a sessão do system32 fez')
+    expect(s.tools).toEqual([])
+    expect(s.asks[1].text).toContain('Saída de read_briefings:\nErro: "system32" não é um projeto que eu conheço. Os projetos que conheço: mnemo-desktop, tasklist.')
+    expect(s.last()).toBe('O system32 não é um projeto que eu acompanhe.')
+  })
+
   test('a yes to what was discussed hands the parent the task Claude wrote, the words and the conversation', async () => {
     const task = 'No tasklist, corrigir o teste de upload que falha no Windows: o servidor falso responde depois de 5 s. Aumentar o tempo limite do teste e abrir um PR.'
     const s = withClaude([
