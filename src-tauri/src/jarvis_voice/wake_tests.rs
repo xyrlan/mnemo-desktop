@@ -686,6 +686,22 @@ fn a_lost_microphone_is_opened_again_and_one_long_gone_is_waited_for() {
     assert!(tries.load(Ordering::SeqCst) <= after + 1, "it stopped trying");
     assert_eq!(r.voice.listen(None), Ok(false));
     assert_eq!(errors(&r), 0);
+    drop(r);
+
+    // The voice gone while it waits (the app quitting): nothing holds it, and no one goes on trying.
+    let mic = TestMic::default();
+    let (opens, tries) = (mic.clone(), Arc::new(AtomicUsize::new(0)));
+    let counted = tries.clone();
+    let r = rig_with(8_000, move |v| {
+        v.mic(move || if counted.fetch_add(1, Ordering::SeqCst) == 0 { opens.input() } else { Box::new(|_| Err("no microphone found".into())) })
+    });
+    r.voice.listen(Some(true)).unwrap();
+    lock(&mic.sink).clone().unwrap().lose("the device was removed");
+    r.until("waiting", |r| errors(&r) == 1);
+    drop(r);
+    let after = tries.load(Ordering::SeqCst);
+    std::thread::sleep(WAIT_EVERY * 3);
+    assert!(tries.load(Ordering::SeqCst) <= after + 1, "it stopped trying");
 }
 
 #[test]
