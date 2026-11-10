@@ -1,4 +1,4 @@
-import { macChord, pasteBytes, terminalChord, terminalKey } from './keymap'
+import { macChord, pasteBytes, putPaste, terminalChord, terminalKey } from './keymap'
 
 const ev = (key: string, o: Partial<Parameters<typeof macChord>[0]> = {}) => ({ key, metaKey: true, altKey: false, ctrlKey: false, shiftKey: false, ...o })
 
@@ -107,4 +107,23 @@ test('a Mac reads exactly what macChord reads, and Ctrl+C / Ctrl+V stay the shel
   expect(terminalKey(mac('c', { metaKey: false, ctrlKey: true }), 'mac', 'picked')).toEqual({ pass: true })
   expect(terminalKey(mac('v', { metaKey: false, ctrlKey: true }), 'mac', '')).toEqual({ pass: true })
   expect(terminalKey(mac('v', { type: 'keyup' }), 'mac', '')).toEqual({ pass: true })
+})
+
+describe('putting a paste into the terminal', () => {
+  const put = (bytes: string) => {
+    const pasted: string[] = []
+    const written: string[] = []
+    putPaste(bytes, { paste: (text) => pasted.push(text) }, (b) => written.push(b))
+    return { pasted, written }
+  }
+
+  test('text goes through the terminal’s own paste, whole, and is not written raw', () => {
+    const long = Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\r\n')
+    expect(put(long)).toEqual({ pasted: [long], written: [] })
+    expect(put('ls -la')).toEqual({ pasted: ['ls -la'], written: [] })
+  })
+
+  test('the image’s Ctrl+V is a key: written as it is, never pasted', () => {
+    expect(put('\x16')).toEqual({ pasted: [], written: ['\x16'] })
+  })
 })
