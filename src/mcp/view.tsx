@@ -5,10 +5,8 @@
  *  (`./app`). */
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { toast } from '@/ui'
 import { listSessions, readTerminal } from './app'
 import { drive } from './drive'
-import { sayServing, type Serving } from './serving'
 import { callTool, type Content, type ToolDeps } from './tools'
 
 type Ask = { ask: number; method: string; params?: Record<string, unknown> }
@@ -32,12 +30,8 @@ const unlisten = listen<Ask>('mcp://ask', async ({ payload }) => {
   await invoke('mcp_answer', { ask: payload.ask, content, error }).catch((e) => console.warn('mcp: answer lost', e))
 })
 
-// The app binds the socket once someone is listening for its questions; where it cannot
-// (Windows), it says so here, the first time only.
-void unlisten
-  .then(() => invoke<Serving>('mcp_socket_path'))
-  .then((serving) => sayServing(serving, toast.warning))
-  .catch((e) => console.warn('mcp: not serving', e))
+// The app binds the socket once someone is listening for its questions.
+void unlisten.then(() => invoke('mcp_socket_path')).catch((e) => console.warn('mcp: not serving', e))
 
 import.meta.hot?.dispose(() => {
   void unlisten.then((off) => off())

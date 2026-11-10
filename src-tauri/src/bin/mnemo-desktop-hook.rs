@@ -4,7 +4,9 @@
 //!
 //! It reads the event's JSON from stdin, keeps the few fields the app reads, and sends them
 //! to the running app over `~/.mnemo-desktop/agent-hooks.sock` as one JSON line, without
-//! waiting for an answer. Claude waits on every hook, so this one never costs it anything:
+//! waiting for an answer: a Unix socket, or on Windows the file that names the app's pipe
+//! (`src/ipc.rs`, included here by path). Claude waits on every hook, so this one never costs
+//! it anything:
 //! it prints nothing (a `SessionStart` or `UserPromptSubmit` hook's stdout would land in the
 //! model's context), always exits 0 (a `Stop` hook's exit 2 would keep Claude going), gives
 //! up after `DEADLINE` whatever it is stuck on, and is silent when the app is closed. Like
@@ -15,6 +17,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
+
+// The client's half is all this binary uses.
+#[allow(dead_code)]
+#[path = "../ipc.rs"]
+mod ipc;
 
 /// Keep in step with `mnemo_desktop_lib::agent_hooks::SOCKET_ENV`.
 const SOCKET_ENV: &str = "MNEMO_DESKTOP_HOOK_SOCKET";
@@ -64,17 +71,13 @@ fn envelope(event: &str, stdin: &[u8], at: u64) -> String {
     json!({ "event": event, "at": at, "input": input }).to_string()
 }
 
-#[cfg(unix)]
 fn send(line: &str) {
     use std::io::Write;
     // No listener: connect fails at once (the file is missing, or nobody accepts on it).
-    let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path()) else { return };
+    let Ok(mut stream) = ipc::Stream::connect(&socket_path()) else { return };
     let _ = stream.set_write_timeout(Some(SEND_TIMEOUT));
     let _ = writeln!(stream, "{line}");
 }
-
-#[cfg(not(unix))]
-fn send(_line: &str) {}
 
 fn main() {
     std::thread::spawn(|| {

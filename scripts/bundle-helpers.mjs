@@ -6,8 +6,11 @@
  * quietly do nothing.
  *
  *   node scripts/bundle-helpers.mjs [<bundle>…]    check these, or every bundle `tauri build` left
+ *   node scripts/bundle-helpers.mjs --installed <dir>   check what the Windows installer put in <dir>
  *
- * Used by `pnpm run install-app` before it installs, and by CI after it bundles.
+ * Used by `pnpm run install-app` before it installs, and by CI after it bundles. Windows'
+ * one bundle is an installer, which nothing here can list: CI installs it and checks the
+ * folder it filled.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
@@ -40,6 +43,24 @@ export function missingHelpers(kind, files) {
   const dir = BIN_DIR[kind]
   const have = new Set(files.map((f) => f.replace(/^\.\//, '').replace(/\/+$/, '')))
   return [APP_BIN, ...HELPERS].filter((name) => !have.has(`${dir}/${name}`))
+}
+
+/**
+ * What of the app and its helpers a Windows install lacks: each is an `.exe` in the install
+ * folder itself, the app's among them, so a helper can only pass by being beside it.
+ * @param files  the names in the install folder, not those of its subfolders.
+ */
+export function missingInstalled(files) {
+  const have = new Set(files)
+  return [APP_BIN, ...HELPERS].map((name) => `${name}.exe`).filter((exe) => !have.has(exe))
+}
+
+/** One line for the install folder `dir`; true when it has everything. */
+export function checkInstalled(dir, log = console.log) {
+  const missing = missingInstalled(readdirSync(dir))
+  if (missing.length) log(`${dir}: missing ${missing.join(', ')}`)
+  else log(`${dir}: ${HELPERS.map((h) => `${h}.exe`).join(', ')} beside ${APP_BIN}.exe`)
+  return missing.length === 0
 }
 
 /** A directory's files, recursively, relative to it and with `/` whatever the OS says. */
@@ -101,6 +122,13 @@ export function check(bundles, log = console.log) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const root = dirname(dirname(fileURLToPath(import.meta.url)))
   let bundles = process.argv.slice(2)
+  if (bundles[0] === '--installed') {
+    if (bundles.length !== 2) {
+      console.error('usage: node scripts/bundle-helpers.mjs --installed <dir>')
+      process.exit(2)
+    }
+    process.exit(checkInstalled(bundles[1]) ? 0 : 1)
+  }
   if (!bundles.length) {
     const meta = JSON.parse(
       execFileSync('cargo', ['metadata', '--no-deps', '--format-version', '1', '--manifest-path', 'src-tauri/Cargo.toml'], {
