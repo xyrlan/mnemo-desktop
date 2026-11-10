@@ -89,7 +89,7 @@ export interface JarvisClient {
   /** `jarvis_llm_stop() -> ()`: stops llama-server, freeing its VRAM. */
   stopModel(): Promise<void>
 
-  /** `jarvis_brain() -> Result<BrainConfig, String>`: the config's `brain`, read now; `local` when
+  /** `jarvis_brain() -> Result<BrainConfig, String>`: the config's `brain`, read now; Claude when
    *  it names none, an error naming `jarvis.json` when it is malformed (jarvis-brain). */
   brain(): Promise<BrainConfig>
   /** `jarvis_brain_ask(system: String, text: String) -> Result<String, String>`: `text` as the next

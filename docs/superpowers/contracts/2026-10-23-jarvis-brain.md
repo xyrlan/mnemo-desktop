@@ -39,7 +39,7 @@ permission prompts. None of that changes.
 - `src/jarvis/speech.ts` holds `forSpeech(text)`: what is said aloud of a reply, with markdown,
   code, hashes, ids and addresses taken out, and the reply cut at a sentence past 320 characters.
 - `docs/jarvis.example.json`'s `brain` section reads `{ "kind": "claude", "model": "sonnet",
-  "effort": "low" }`. With no section, the brain is `local`. For `claude`, the model defaults
+  "effort": "low" }`. With no section, the brain was `local` (since 2026-11-10 it is Claude; `local` has to be asked for). For `claude`, the model defaults
   to `sonnet` and the effort to `low`.
 
 **What was measured** with a throwaway probe on this machine, Claude Code 2.1.310, on a long-lived

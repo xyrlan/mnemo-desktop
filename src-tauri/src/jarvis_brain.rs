@@ -1,8 +1,9 @@
 //! James's brain (jarvis-brain): who answers his requests, and Claude when that is Claude.
 //!
-//! `jarvis_brain` reads the config's `brain` section on every call: none is `local`, the model
-//! under llama-server (`jarvis_llm`); `{ "kind": "claude", "model": …, "effort": … }` is Claude
-//! through Claude Code's CLI, on the maintainer's own subscription.
+//! `jarvis_brain` reads the config's `brain` section on every call. Claude, through Claude Code's
+//! CLI on the maintainer's own subscription, is who answers unless the config says otherwise:
+//! no section, or `{ "kind": "claude", "model": …, "effort": … }`. `{ "kind": "local" }` is the
+//! model under llama-server (`jarvis_llm`), and only that asks for it.
 //!
 //! With Claude there is one conversation for the app: a long-lived `claude -p` speaking
 //! stream-json on its stdin and stdout. The first ask starts it and it lives across asks, so a
@@ -62,13 +63,16 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 // ---------------------------------------------------------------------------------------
 // Config
 
-/// The config's `brain` section as `BrainConfig`: none (`Null`) is `local`; `kind` is `local` or
+/// The config's `brain` section as `BrainConfig`: none (`Null`), or one that names no `kind`, is
+/// Claude (until 2026-11-10 none was `local`, and an installed app whose `jarvis.json` predated
+/// the section tried to start a local model nobody had asked for); `kind` is `local` or
 /// `claude`; `model` and `effort` are taken as written, `sonnet` and `low` when absent. Anything
 /// else, an unknown key included, is an error naming `jarvis.json`.
 pub fn parse(section: &serde_json::Value) -> Result<BrainConfig, String> {
     use serde_json::Value;
     let obj = match section {
-        Value::Null => return Ok(BrainConfig::Local),
+        // No section is Claude, on the defaults: the local model is a choice the config makes.
+        Value::Null => return Ok(BrainConfig::Claude { model: DEFAULT_MODEL.to_string(), effort: DEFAULT_EFFORT.to_string() }),
         Value::Object(o) => o,
         other => return Err(format!("jarvis.json: brain must be an object like {{ \"kind\": \"claude\" }}, not {other}")),
     };
@@ -87,7 +91,8 @@ pub fn parse(section: &serde_json::Value) -> Result<BrainConfig, String> {
         Some(Value::String(k)) if k == "local" => Ok(BrainConfig::Local),
         Some(Value::String(k)) if k == "claude" => Ok(BrainConfig::Claude { model, effort }),
         Some(other) => Err(format!("jarvis.json: brain.kind is \"local\" or \"claude\", not {other}")),
-        None => Err("jarvis.json: brain names no kind (\"local\" or \"claude\")".to_string()),
+        // A section that names a model or an effort and no kind is Claude's: those are its settings.
+        None => Ok(BrainConfig::Claude { model, effort }),
     }
 }
 
@@ -496,7 +501,7 @@ pub fn ask(system: &str, text: &str) -> Result<String, String> {
 pub fn stream(system: &str, text: &str, on: &mut dyn FnMut(&str)) -> Result<String, String> {
     let (model, effort) = match config()? {
         BrainConfig::Claude { model, effort } => (model, effort),
-        BrainConfig::Local => return Err(format!("the brain is local (no \"brain\" of kind \"claude\" in {}), so there is no Claude to ask", crate::jarvis::config_path().display())),
+        BrainConfig::Local => return Err(format!("the brain is local (\"brain\" of kind \"local\" in {}), so there is no Claude to ask", crate::jarvis::config_path().display())),
     };
     let key = Key { system: system.to_string(), model, effort, account: account() };
     let dir = brain_dir();

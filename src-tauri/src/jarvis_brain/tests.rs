@@ -13,8 +13,12 @@ fn the_config_serializes_as_the_client_types_it() {
 }
 
 #[test]
-fn no_section_is_local_and_claude_defaults_to_sonnet_at_low_effort() {
-    assert_eq!(parse(&json!(null)), Ok(BrainConfig::Local));
+fn no_section_is_claude_at_its_defaults_and_local_is_only_what_the_config_asks_for() {
+    let claude = |model: &str, effort: &str| Ok(BrainConfig::Claude { model: model.into(), effort: effort.into() });
+    assert_eq!(parse(&json!(null)), claude("sonnet", "low"), "no section: Claude, never a local model nobody asked for");
+    assert_eq!(parse(&json!({})), claude("sonnet", "low"));
+    assert_eq!(parse(&json!({ "model": "haiku" })), claude("haiku", "low"), "a model with no kind is Claude's model");
+    assert_eq!(parse(&json!({ "effort": "high" })), claude("sonnet", "high"));
     assert_eq!(parse(&json!({ "kind": "local" })), Ok(BrainConfig::Local));
     assert_eq!(parse(&json!({ "kind": "local", "model": "opus" })), Ok(BrainConfig::Local), "a model kept for later is no mistake");
     assert_eq!(parse(&json!({ "kind": "claude" })), Ok(BrainConfig::Claude { model: "sonnet".into(), effort: "low".into() }));
@@ -26,7 +30,6 @@ fn no_section_is_local_and_claude_defaults_to_sonnet_at_low_effort() {
 fn anything_else_is_an_error_naming_the_config() {
     for (section, says) in [
         (json!("claude"), "brain must be an object"),
-        (json!({}), "brain names no kind"),
         (json!({ "kind": "gpt" }), "brain.kind is \"local\" or \"claude\", not \"gpt\""),
         (json!({ "kind": 1 }), "brain.kind"),
         (json!({ "kind": "claude", "model": "" }), "brain.model must be a name"),
