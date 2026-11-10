@@ -202,6 +202,7 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
         <section className="stage-term" data-live aria-label="Terminal">
           <TermBar session={s}>
             <ChangesButton session={s} />
+            <EndSession key={s.id} id={s.id} />
             <RoomButton wide={wide} />
           </TermBar>
           <div className="stage-live">
@@ -324,6 +325,41 @@ function ChangesButton({ session: s }: { session: Session }) {
     <button type="button" className="stage-hint" data-stage-changes aria-pressed={open} onClick={() => go({ panel: open ? null : 'changes', command: false })}>
       changes
     </button>
+  )
+}
+
+/** Closes the session whose terminal is on stage: ends its terminal here, and with it the
+ *  session's process. Asked once first, on the same button, because what runs in it stops. A
+ *  refusal is said beside it. The maintainer asked for this on his first day with the new
+ *  front: there was no plain way to close a parent session. */
+export function EndSession({ id }: { id: string }) {
+  const [end, setEnd] = useState<'idle' | 'asked' | 'busy'>('idle')
+  const [refused, setRefused] = useState<string | null>(null)
+  const close = async () => {
+    if (end === 'busy') return
+    if (end === 'idle') return setEnd('asked')
+    setEnd('busy')
+    let why: string | null = null
+    try {
+      const outcome = await actions().close(id)
+      if (!outcome.ok) why = outcome.why
+    } catch (err) {
+      why = err instanceof Error ? err.message : String(err)
+    }
+    setRefused(why)
+    setEnd('idle')
+  }
+  return (
+    <>
+      {refused && (
+        <span className="stage-term-note" role="status">
+          not closed: {refused}
+        </span>
+      )}
+      <button type="button" className="stage-hint" data-stage-close={end} disabled={end === 'busy'} onClick={() => void close()} onBlur={() => end === 'asked' && setEnd('idle')}>
+        {end === 'idle' ? 'close session' : end === 'asked' ? 'close it, and end what runs in it?' : 'closing…'}
+      </button>
+    </>
   )
 }
 
