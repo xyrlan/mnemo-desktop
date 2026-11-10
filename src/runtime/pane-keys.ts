@@ -11,7 +11,6 @@ import { asksAbout } from '../cockpit/approve'
 import { keyFor, promptOnScreen, type Choice } from '../cockpit/prompt'
 import { inputBox } from '../mission/as-me'
 import { questionOnScreen, type Question } from '../mission/ask'
-import { splitAsk } from '../mission/types'
 
 export type PaneDeps = {
   /** What terminal `pane` shows now, scrollback included; undefined when it cannot be read. */
@@ -48,13 +47,14 @@ export function sameOption(onScreen: string, onCard: string): boolean {
 }
 
 /** Presses `choice` on the permission prompt pane `pane` shows. `card`: what the card says it asks
- *  about (`Bash: cd … && …`), null when the card knows only that it waits. */
+ *  about, as the world gives it (a command, a file: `Pending.detail`), null when the card knows
+ *  only that it waits. */
 export async function pressPermission(d: PaneDeps, pane: number, choice: Choice, card: string | null): Promise<void> {
   const lines = await screenOf(d, pane)
   if (questionOnScreen(lines)) throw new Error('It is showing a question, not a permission prompt: nothing was pressed.')
   const prompt = promptOnScreen(lines)
   if (!prompt) throw new Error('No permission prompt is on its screen now: nothing was pressed.')
-  if (card !== null && !asksAbout(prompt, splitAsk(card).command)) throw new Error('The prompt on its screen is not the one this card shows: nothing was pressed.')
+  if (card !== null && !asksAbout(prompt, card)) throw new Error('The prompt on its screen is not the one this card shows: nothing was pressed.')
   const key = keyFor(prompt.options, choice)
   if (key === null) throw new Error('This prompt does not offer "don\'t ask again": nothing was pressed.')
   await d.write(pane, key)

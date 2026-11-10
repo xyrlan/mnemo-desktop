@@ -49,6 +49,7 @@ import { sessionOf, worldStore } from '../world/store'
 import { createActions, type Did } from './actions'
 import { runtimeStore } from './current'
 import { createHosting } from './hosting'
+import { createRedraw } from './redraw'
 import { sessionIdOf } from './rows'
 import { stopChild } from './stop'
 import { createTerminals } from './Terminals'
@@ -301,7 +302,21 @@ export function start(): () => void {
       setNexusRoutes(shipRoutes)
     },
   ]
+  // The stage was drawn before the runtime started: it looks again (`./redraw`).
+  const redraw = createRedraw({
+    staged() {
+      const r = routeStore.getState().route
+      return r.view === 'console' ? sessionOf(world(), r.session) : undefined
+    },
+    canHost: hosting.canHost,
+    again() {
+      const w = worldStore.getState()
+      if (w.ready) w.set({ ...w.world })
+    },
+  })
+  stops.push(hosting.subscribe(redraw))
   runtimeStore.setState({ runtime: { canHost: hosting.canHost, Terminal: terminals.LiveTerminal, hosted: hosting.hosted, subscribe: hosting.subscribe, focus: terminals.focus } })
+  redraw()
 
   return () => {
     runtimeStore.setState({ runtime: null })

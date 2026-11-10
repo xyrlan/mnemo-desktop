@@ -125,6 +125,25 @@ describe('answering what waits', () => {
     expect(b.did).toEqual(['write 12 "2"'])
   })
 
+  test("a permission in one of the app's terminals is pressed there, when the prompt is the card's", async () => {
+    const b = bench()
+    const child = b.session('Webhook signature check')
+    const item = b.waiting(child)
+    const prompt = (command: string) => [RULE, ' Bash command', '', `   ${command}`, '', ' Do you want to proceed?', ' ❯ 1. Yes', "   2. Yes, and don't ask again for git push commands", '   3. No, and tell Claude what to do differently (esc)']
+    const card = (detail: string | null) => void (b.state.world = { ...b.state.world, pending: b.state.world.pending.map((x) => (x.id === item.id ? { ...x, detail } : x)) })
+    b.inPane(child, 9, prompt('git push origin fix/issue-412'))
+
+    card('git push origin fix/issue-412')
+    expect(await b.actions.answer(item.id, 2)).toEqual({ ok: true, note: 'Always allow' })
+    card('git push --force origin main')
+    expect(await b.actions.answer(item.id, 1)).toEqual({ ok: false, why: expect.stringContaining('not the one this card shows') })
+    // A card that carries only what `claude agents` says names no call: the prompt there is pressed.
+    b.setChild(child.short, { waiting_for: 'permission prompt' })
+    card('permission prompt')
+    expect(await b.actions.answer(item.id, 3)).toEqual({ ok: true, note: 'Deny' })
+    expect(b.did).toEqual(['write 9 "2"', 'write 9 "3"'])
+  })
+
   test('a session that runs outside the app is answered in its own terminal', async () => {
     const b = bench()
     const item = b.waiting(b.session('Order status history'))

@@ -17,7 +17,7 @@ const PERMISSION = [
   "   2. Yes, and don't ask again for npm test commands in /Users/you/work/atlas-api",
   '   3. No, and tell Claude what to do differently (esc)',
 ]
-const CARD = 'Bash: cd /Users/you/work/atlas-api && npm test'
+const CARD = 'cd /Users/you/work/atlas-api && npm test'
 
 /** Its multiple-choice dialog. */
 const QUESTION = [
@@ -61,7 +61,7 @@ describe('a permission prompt in a terminal of the app', () => {
 
   test('the prompt on screen must be the one the card shows', async () => {
     const { d, did } = pane(PERMISSION)
-    await expect(pressPermission(d, 7, 'yes', 'Bash: git push origin main')).rejects.toThrow('not the one this card shows')
+    await expect(pressPermission(d, 7, 'yes', 'git push origin main')).rejects.toThrow('not the one this card shows')
     expect(did).toEqual([])
   })
 

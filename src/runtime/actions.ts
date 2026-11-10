@@ -168,7 +168,9 @@ export function createActions(p: ActionPaths): Actions {
         }
         case 'permission': {
           const pick = promptChoice(choice)
-          if (pane !== null) return tried(() => pressPermission(p.pane, pane, pick, item.detail), choice.label)
+          // A card that knows only what `claude agents` says (`permission prompt`) names no call.
+          const about = item.detail && item.detail !== childRow(p.snapshot(), s)?.waiting_for ? item.detail : null
+          if (pane !== null) return tried(() => pressPermission(p.pane, pane, pick, about), choice.label)
           if (!child) return no('It runs outside the app: answer it in its own terminal.')
           try {
             return did(await p.child.answerPrompt(child, pick), choice.label)

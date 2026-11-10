@@ -1,25 +1,27 @@
 // The runtime's states on the stage (src/runtime/): a session's real terminal where the
-// transcript would be drawn. The runtime runs only in a live world, and the live world is its own
-// piece, so each scenario starts the app live (no `mnemo.world`) and then hands the world store
-// the synthetic world marked live: the sessions are the sample's, the terminals are the
-// fixture's.
+// transcript would be drawn. The runtime runs only in a live world, so these start the app live
+// (no `mnemo.world`): the live world builds its sessions from what the fixture answers for the
+// core (a mission snapshot, the feed), and the terminals are the fixture's too. Every name,
+// prompt and path is invented.
 //
 //   next-runtime-terminal   a session one of the app's terminals runs, held the moment it is on stage
 //   next-runtime-attach     a live child, attached to once it has stayed on stage
 //   next-runtime-attaching  the same child while its attach starts
 //   next-runtime-detached   its terminal let go of while it was on stage
-//   next-runtime-orbit      off Console: the terminals stay held, hidden
 import { scenario } from '../scenario.mjs'
-import { appIpc } from '../fixtures/app.mjs'
-import { sessions, sessionTitled } from '../fixtures/next.mjs'
+import { appIpc, HOME } from '../fixtures/app.mjs'
 
 const ESC = '\x1b['
 const c = (code, s) => `${ESC}${code}m${s}${ESC}0m`
 const RULE = c('2', '─'.repeat(72))
 
-const byId = (id) => sessions.find((s) => s.id === id)
-const PARENT = sessionTitled('Order status history')
-const CHILD = sessionTitled('Tenant in every cache key')
+const ROOT = `${HOME}/work/atlas-api`
+const PARENT = 'a1f0c3d2-7b54-4e19-9c06-2d8e5f7a1b30'
+const CHILD = 'c6d082fb-3e41-4a7c-8f25-90b1d4e6a7c2'
+const WORKTREE = `${ROOT}-wt-tenant`
+const QUESTION = 'The orders table has 2.1M rows. Backfill the new column online in batches, or take a short maintenance window?'
+const OPTIONS = ['Online, in batches (Recommended)', 'Maintenance window', 'Skip the backfill']
+const now = Date.now()
 
 /** Claude Code's screen in a terminal of the app: the session asks its question. */
 const ASKING = [
@@ -38,11 +40,11 @@ const ASKING = [
   ` ${c('1', 'The orders table has 2.1M rows. Backfill the new column online in batches,')}`,
   ` ${c('1', 'or take a short maintenance window?')}`,
   '',
-  ` ${c('36', '❯ 1. Online, in batches (Recommended)')}`,
+  ` ${c('36', `❯ 1. ${OPTIONS[0]}`)}`,
   `      ${c('2', 'No downtime; the backfill runs for about 40 minutes and can be paused.')}`,
-  '   2. Maintenance window',
+  `   2. ${OPTIONS[1]}`,
   `      ${c('2', 'Simpler migration, roughly 6 minutes of read-only mode.')}`,
-  '   3. Skip the backfill',
+  `   3. ${OPTIONS[2]}`,
   `      ${c('2', 'Leave old rows null and handle it in code.')}`,
   '   4. Type something.',
   '   5. Chat about this',
@@ -73,26 +75,50 @@ const WORKING = [
   `  ${c('2', '⏵⏵ accept edits on · ctrl+z to detach')}`,
 ].join('\r\n')
 
-/** The world store given the synthetic world as this machine's. */
-const worldIsLive = (page) =>
-  page.evaluate(async () => {
-    const { worldStore } = await import('/src/world/store.ts')
-    const { sampleWorld } = await import('/src/world/sample.ts')
-    worldStore.getState().set({ ...sampleWorld(), source: 'live', errors: [] })
-  })
-
 const route = (r) => ({ 'mnemo.next': '1', 'mnemo.route': '#' + new URLSearchParams(r).toString() })
 const bytes = (text) => [...new TextEncoder().encode(text)]
+
+/** What the core says of the fleet: one session the maintainer talks to, which asks a question,
+ *  and one child it dispatched, at work in its own worktree. */
+const fleet = {
+  mission_snapshot: () => ({
+    repos: [
+      {
+        root: ROOT,
+        name: 'atlas-api',
+        parents: [{ session_id: PARENT, pid: 4001, name: 'Order status history column', status: 'waiting', cwd: ROOT, waiting_for: 'input needed', account: 'default' }],
+        missions: [],
+        children: [
+          { id: CHILD.slice(0, 8), session_id: CHILD, name: 'issue-398', state: 'working', tempo: 'active', needs: null, detail: 'threading the tenant through the cache key', suggested_reply: null, cwd: WORKTREE, tokens: 90_000, live: true, updated_at: new Date(now - 60_000).toISOString(), intent: 'Work on issue #398 in this repo: the cache key must carry the tenant', branch: 'fix/tenant-cache-key', timeline_len: 12, parent_session: PARENT, account: 'default' },
+        ],
+      },
+    ],
+    errors: [],
+    at: new Date(now).toISOString(),
+  }),
+  mission_looked: {},
+  nexus_feed: () => ({
+    sessions: {
+      [PARENT]: { activity: null, said: { text: 'The migration is written and tested on a copy. I need one decision from you before running the backfill.', at: now - 14 * 60_000 }, context: 94_000, model: 'claude-opus-5-5', topic: 'add a status_history column to orders and backfill it', title: 'Order status history column', contract: null, ask: { question: QUESTION, options: OPTIONS } },
+      [CHILD.slice(0, 8)]: { activity: { tool: 'Bash', target: 'pnpm vitest run src/cache', at: now - 40_000, running: true }, said: { text: 'The key is built in one place. I am threading the tenant through it and its three callers.', at: now - 3 * 60_000 }, context: 72_000, model: 'claude-sonnet-5-5', topic: null, title: 'Tenant in every cache key', contract: null, ask: null },
+    },
+    prs: {},
+    rate: null,
+    at: now,
+  }),
+  worktree_list: () => [],
+  pty_write: null,
+  pty_resize: null,
+  pty_kill: null,
+}
 
 /** One of the app's terminals runs the parent: kept in the workspace from the last run, its shell
  *  still running, so the restore brings it back and the stage draws it from the core's screen. */
 const hostedParent = {
-  workspace_read: { version: 1, tabs: [], panes: {}, activeTab: null, offscreen: [{ pane: 1, cwd: byId(PARENT).cwd, sessionId: PARENT, title: byId(PARENT).title }] },
-  pty_list: () => [{ id: 1, cwd: byId(PARENT).cwd, pid: 4001, alive: true }],
+  ...fleet,
+  workspace_read: { version: 1, tabs: [], panes: {}, activeTab: null, offscreen: [{ pane: 1, cwd: ROOT, sessionId: PARENT, title: 'Order status history column' }] },
+  pty_list: () => [{ id: 1, cwd: ROOT, pid: 4001, alive: true }],
   pty_attach: () => bytes(ASKING),
-  pty_write: null,
-  pty_resize: null,
-  pty_kill: null,
   pty_pid: 4001,
   chrome_session: () => PARENT,
   chrome_pane_runs: () => 'claude',
@@ -103,79 +129,37 @@ const hostedParent = {
 scenario('next-runtime-terminal', {
   storage: route({ v: 'console', s: PARENT }),
   ipc: appIpc(hostedParent),
-  drive: async (page) => {
-    await worldIsLive(page)
-    await page.waitForSelector('[data-live-terminal] .xterm')
-  },
+  drive: (page) => page.waitForSelector('[data-live-terminal] .xterm'),
 })
-
-scenario('next-runtime-orbit', {
-  storage: route({ v: 'orbit', s: PARENT }),
-  ipc: appIpc(hostedParent),
-  drive: worldIsLive,
-})
-
-/** The mission snapshot the child's row comes from: a live background child of the sample's
- *  first parent, in its own worktree. */
-const snapshot = () => {
-  const child = byId(CHILD)
-  const parent = byId(child.parent)
-  return {
-    repos: [
-      {
-        root: parent.cwd,
-        name: 'atlas-api',
-        parents: [{ session_id: parent.id, pid: 4100, name: parent.title, status: 'busy', cwd: parent.cwd, waiting_for: null, account: 'default' }],
-        missions: [],
-        children: [
-          { id: child.short, session_id: child.id, name: 'issue-398', state: 'working', tempo: 'active', needs: null, detail: 'threading the tenant', suggested_reply: null, cwd: child.cwd, tokens: 90_000, live: true, updated_at: null, intent: null, branch: null, timeline_len: 12, parent_session: parent.id, account: 'default' },
-        ],
-      },
-    ],
-    errors: [],
-    at: '2026-11-09T21:30:00Z',
-  }
-}
 
 /** The attach's PTY: `spawned` says when the core answers the spawn. */
 const attach = (spawned) => ({
-  mission_snapshot: snapshot,
-  mission_looked: {},
+  ...fleet,
   pty_spawn: async ({ onOutput }) => {
     await spawned()
     setTimeout(() => void onOutput.sendBytes(WORKING), 60)
     return 50
   },
-  pty_write: null,
-  pty_resize: null,
-  pty_kill: null,
   pty_pid: 4050,
 })
 
 scenario('next-runtime-attach', {
   storage: route({ v: 'console', s: CHILD }),
   ipc: appIpc(attach(async () => {})),
-  drive: async (page) => {
-    await worldIsLive(page)
-    await page.waitForSelector('[data-live-terminal] .xterm')
-  },
+  drive: (page) => page.waitForSelector('[data-live-terminal] .xterm'),
 })
 
 scenario('next-runtime-attaching', {
   storage: route({ v: 'console', s: CHILD }),
   // The core has not answered the spawn yet.
   ipc: appIpc(attach(() => new Promise(() => {}))),
-  drive: async (page) => {
-    await worldIsLive(page)
-    await page.waitForSelector('[data-live-terminal][data-terminal-state="held"]')
-  },
+  drive: (page) => page.waitForSelector('[data-live-terminal][data-terminal-state="held"]'),
 })
 
 scenario('next-runtime-detached', {
   storage: route({ v: 'console', s: CHILD }),
   ipc: appIpc(attach(async () => {})),
   drive: async (page) => {
-    await worldIsLive(page)
     await page.waitForSelector('[data-live-terminal] .xterm')
     // The app's close chord on the terminal on stage: its attach is let go, and not taken back.
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+w' : 'Control+Shift+W')
