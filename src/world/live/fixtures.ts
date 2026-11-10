@@ -168,6 +168,7 @@ export function fakeSources(snapshot: Snapshot = { repos: [], errors: [], at: ''
   const accounts = counted(held<LiveInput['accounts']>({ state: null, usage: {}, error: null }))
   const pulses = counted(held<PulseEvent[]>([]))
   const hosted = counted(held<string[]>([]))
+  const asked = counted(held<Record<string, number>>({}))
   // Each answer is a fresh copy, as an answer from the core is, of what was asked about only.
   const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
   const only = <T,>(all: Record<string, T>, keys: string[]): Record<string, T> => fresh(Object.fromEntries(Object.entries(all).filter(([key]) => keys.includes(key))))
@@ -178,6 +179,7 @@ export function fakeSources(snapshot: Snapshot = { repos: [], errors: [], at: ''
     accounts,
     pulses,
     hosted,
+    asked,
     async feed(asks) {
       state.asked.feed.push(asks)
       if (state.feedFails) throw new Error(state.feedFails)
@@ -210,5 +212,5 @@ export function fakeSources(snapshot: Snapshot = { repos: [], errors: [], at: ''
     for (const t of state.ticks) if (t.ms === ms && !t.stopped) await t.tick()
     await settle()
   }
-  return { sources, state, mission, missionError, fleet, accounts, pulses, hosted, settle, run }
+  return { sources, state, mission, missionError, fleet, accounts, pulses, hosted, asked, settle, run }
 }

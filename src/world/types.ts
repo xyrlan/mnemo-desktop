@@ -129,6 +129,18 @@ export interface Pending {
   suggestedReply: string | null
   pr: PullRequest | null
   since: number | null
+  /** A question that is one of several its dialog asks in a row, then submits on a review. */
+  step?: AskStep
+}
+
+export interface AskStep {
+  /** The call's id: what `asked` (`src/world/live/asked.ts`) keeps its place by. */
+  ask: string
+  /** The question this item is, from 0; `of` when it is the review. */
+  at: number
+  of: number
+  /** Each question's first option, by which a terminal's screen says which one it is on. */
+  firsts: string[]
 }
 
 export interface PlanLimit {

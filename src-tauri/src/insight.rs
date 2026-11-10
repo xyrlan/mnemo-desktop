@@ -286,8 +286,25 @@ pub struct AskOption {
 pub struct PendingAsk {
     pub id: String,
     pub at: u64,
+    /// The first question and its options.
     pub question: String,
     pub options: Vec<AskOption>,
+    /// Every question of the call, the first included, in the order its dialog asks them: a
+    /// dialog of several ends on a review that submits them.
+    #[serde(default)]
+    pub questions: Vec<AskQuestion>,
+}
+
+/// One question of a call that asks several.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AskQuestion {
+    /// The short name its tab carries in the dialog.
+    pub header: String,
+    pub question: String,
+    pub options: Vec<AskOption>,
+    /// It takes several answers, ticked in the terminal.
+    pub multi: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

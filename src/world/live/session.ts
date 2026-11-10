@@ -4,7 +4,7 @@
 // learned on the real fleet (`src/nexus/ship.ts`).
 
 import { childNext, parentNext } from '../../fleet/model'
-import type { Insight, ToolCall, ToolKind, Trail } from '../../insight/types'
+import type { AskQuestion, Insight, ToolCall, ToolKind, Trail } from '../../insight/types'
 import { needKind, permissionAsk, splitAsk, type ChildSession, type Pr } from '../../mission/types'
 import { isRateLimited } from '../../nexus/robot'
 import { ciAt, firstSentence, RUNNING_MAX_MS, STRANDED_MS, WORK_GAP_MS } from '../../nexus/ship'
@@ -62,19 +62,27 @@ function mark(text: string): string {
   return h.toString(36)
 }
 
-/** The unanswered question, from the insight (which knows each choice's description) or the feed. */
+/** The unanswered question, from the insight (which knows each choice's description, and every
+ *  question of a call that asks several) or the feed. */
 interface Ask {
   id: string
   at: number | null
   question: string
   options: { label: string; description: string | null }[]
+  /** Every question of the call when it asks more than one; else empty. */
+  questions: AskQuestion[]
 }
 
 function askOf(f: SessionFeed | null, i: Insight | null): Ask | null {
-  if (i?.pendingAsk) return { id: i.pendingAsk.id, at: i.pendingAsk.at, question: i.pendingAsk.question, options: i.pendingAsk.options }
-  if (f?.ask) return { id: mark(f.ask.question), at: null, question: f.ask.question, options: f.ask.options.map((label) => ({ label, description: null })) }
+  const a = i?.pendingAsk
+  if (a) return { id: a.id, at: a.at, question: a.question, options: a.options, questions: a.questions && a.questions.length > 1 ? a.questions : [] }
+  if (f?.ask) return { id: mark(f.ask.question), at: null, question: f.ask.question, options: f.ask.options.map((label) => ({ label, description: null })), questions: [] }
   return null
 }
+
+/** The tool a question is asked with. Claude Code first says such a call waits on a permission,
+ *  and the hooks repeat it; it is a question all the same. */
+const ASK_TOOL = 'AskUserQuestion'
 
 /** The last tool call: the feed's (read this second), else the insight's newest. */
 function lastCall(f: SessionFeed | null, i: Insight | null): { tool: string; target: string; at: number; running: boolean } | null {
@@ -172,6 +180,8 @@ export interface Around {
   trails: Record<string, Trail>
   pulses: PulseEvent[]
   hosted: ReadonlySet<string>
+  /** Where each dialog of several questions is, by its call's id (`./asked.ts`). */
+  asked: Readonly<Record<string, number>>
   /** The kind of each account, by id: which CLI runs a session on it. */
   kinds: ReadonlyMap<string, string>
   now: number
@@ -193,6 +203,30 @@ const pendingOf = (s: Session, kind: PendingKind, mark: string, p: Omit<Pending,
   reply: kind !== 'merge',
   ...p,
 })
+
+/** The item of an unanswered question. A call that asks several is one item per question, in
+ *  the dialog's order, then one for the review that submits them: each has its own id, so the
+ *  card of the one just answered is not the card of the next. */
+function questionOf(session: Session, ask: Ask, around: Around, suggestedReply: string | null, since: number | null): Pending {
+  const rest = { suggestedReply, pr: null, since: ask.at ?? since }
+  const n = ask.questions.length
+  if (n < 2) return pendingOf(session, 'question', ask.id, { text: ask.question, detail: null, choices: choicesFor('question', ask.options, null), ...rest })
+  const at = Math.min(Math.max(around.asked[ask.id] ?? 0, 0), n)
+  const step = { ask: ask.id, at, of: n, firsts: ask.questions.map((q) => q.options[0]?.label ?? '') }
+  if (at === n) {
+    const review = pendingOf(session, 'question', `${ask.id}.review`, { text: 'Submit the answers?', detail: `All ${n} questions are answered: its terminal shows them for review.`, choices: [{ key: 1, label: 'Submit answers', hint: null, tone: 'good' }], ...rest })
+    return { ...review, reply: false, step }
+  }
+  const q = ask.questions[at]
+  const where = `Question ${at + 1} of ${n}${q.header ? ` · ${q.header}` : ''}`
+  const item = pendingOf(session, 'question', at ? `${ask.id}.${at}` : ask.id, {
+    text: q.question,
+    detail: q.multi ? `${where}. It takes several answers: tick them in its terminal.` : where,
+    choices: q.multi ? [] : choicesFor('question', q.options, null),
+    ...rest,
+  })
+  return { ...item, reply: !q.multi, step }
+}
 
 /* ---------------------------------------------------------------- a child -- */
 
@@ -270,10 +304,12 @@ export function childSession(seat: ChildSeat, around: Around): Built {
   if (state === 'need') {
     const waits = view?.waitingFor ?? needKind(c)
     const suggestedReply = c.suggested_reply ?? null
-    if (ask) pending = pendingOf(session, 'question', ask.id, { text: ask.question, detail: null, choices: choicesFor('question', ask.options, null), suggestedReply, pr: null, since: ask.at ?? since })
+    const asked = !abandoned && waits === 'permission' ? permissionAsk(c) : null
+    const { tool, command } = asked ? splitAsk(asked) : { tool: null, command: '' }
+    if (ask) pending = questionOf(session, ask, around, suggestedReply, since)
+    // The question is asked and not read yet: it is still no permission.
+    else if (tool === ASK_TOOL) pending = pendingOf(session, 'question', mark(asked ?? ''), { text: command || 'It asks a question.', detail: null, choices: [], suggestedReply, pr: null, since })
     else if (!abandoned && waits === 'permission') {
-      const asked = permissionAsk(c)
-      const { tool, command } = asked ? splitAsk(asked) : { tool: null, command: '' }
       const text = tool ? `Allow ${tool}?` : asked || 'It asks for permission.'
       pending = pendingOf(session, 'permission', mark(asked ?? ''), { text, detail: tool ? command : (c.waiting_for ?? null), choices: choicesFor('permission', [], null), suggestedReply: null, pr: null, since })
     } else {
@@ -340,15 +376,20 @@ export function parentSession(seat: ParentSeat, around: Around): Built {
   let pending: Pending | null = null
   if (state === 'need') {
     const ask = askOf(f, i)
-    const waits = (view ? view.waitingFor : parentNext(p, undefined).waitingFor) ?? (ask ? 'question' : 'permission')
-    if (waits === 'question') {
-      const text = ask?.question ?? 'It asks for your input.'
-      pending = pendingOf(session, 'question', ask?.id ?? 'input', { text, detail: null, choices: choicesFor('question', ask?.options ?? [], null), suggestedReply: null, pr: null, since: ask?.at ?? lastAt })
+    // `claude agents` says a permission is asked, not for what: the call still awaiting its
+    // result is the one it asks about.
+    const call = lastCall(f, i)
+    const asked = call?.running ? call : null
+    // A question the transcript holds is the question, whatever kind of wait is reported: the
+    // call that asks one is first said to wait on a permission.
+    const asking = asked?.tool === ASK_TOOL
+    const waits = ask || asking ? 'question' : ((view ? view.waitingFor : parentNext(p, undefined).waitingFor) ?? 'permission')
+    if (ask) pending = questionOf(session, ask, around, null, lastAt)
+    else if (waits === 'question') {
+      // Asked and not read yet (its words are the call's target), or only known to be asked.
+      const text = (asking && asked?.target) || 'It asks for your input.'
+      pending = pendingOf(session, 'question', asking && asked?.target ? mark(asked.target) : 'input', { text, detail: null, choices: [], suggestedReply: null, pr: null, since: lastAt })
     } else {
-      // `claude agents` says a permission is asked, not for what: the call still awaiting its
-      // result is the one it asks about.
-      const call = lastCall(f, i)
-      const asked = call?.running ? call : null
       pending = pendingOf(session, 'permission', mark(asked ? `${asked.tool} ${asked.target}` : ''), { text: asked ? `Allow ${asked.tool}?` : 'It asks for permission.', detail: asked?.target || null, choices: choicesFor('permission', [], null), suggestedReply: null, pr: null, since: asked?.at ?? lastAt })
     }
   }

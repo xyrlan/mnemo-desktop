@@ -16,9 +16,10 @@ import type { SessionSpec } from '../nexus/drawer/open'
 import { otherRepo } from '../nexus/command/find'
 import type { Actions, DispatchOptions, Outcome } from '../world/actions'
 import { sessionOf } from '../world/store'
-import type { Choice, Pending, Session, World } from '../world/types'
+import type { AskStep, Choice, Pending, Session, World } from '../world/types'
 import type { Hosting } from './hosting'
-import { answerInWords, pickOption, pressPermission, sendPrompt, type PaneDeps } from './pane-keys'
+import { setAsked } from '../world/live/asked'
+import { answerInWords, dialogAt, pickOption, pressPermission, sendPrompt, submitReview, type PaneDeps } from './pane-keys'
 import { childRow, isRunning, knownRoots, missionRow, prOf, prRow, repoRoot } from './rows'
 
 /** How one of the app's own jobs or answers went (`Outcome` in `src/nexus/command/run.ts`). */
@@ -100,6 +101,29 @@ export function createActions(p: ActionPaths): Actions {
   /** The repo a child works in, from its own folder: its parent's can be another one. */
   const rootOf = (s: Session, child?: ChildSession) => (child ? repoRoot(child.cwd, knownRoots(p.snapshot())) : (s.root ?? s.cwd))
 
+  /** A dialog of several questions whose terminal shows another of them than the card (he
+   *  answered one in the terminal): the card is moved to it and nothing is typed. Null when the
+   *  screen shows the card's own question, or cannot say. */
+  async function elsewhere(pane: number, step: AskStep): Promise<Outcome | null> {
+    let on: number | null
+    try {
+      on = await dialogAt(p.pane, pane, step.firsts)
+    } catch {
+      return null
+    }
+    if (on === null || on === step.at) return null
+    setAsked(step.ask, on)
+    return no(on === step.of ? 'Its terminal is already on the review of this dialog: the card shows it now. Nothing was typed.' : 'Its terminal is on another question of this dialog: the card shows it now. Nothing was typed.')
+  }
+
+  /** An answer typed into a dialog of several questions moves it to its next one, and past the
+   *  last to its review. `submits`: what answered it submits the review itself, so the last
+   *  answer ends the dialog. */
+  function answered(step: AskStep | undefined, out: Outcome, submits = false): Outcome {
+    if (out.ok && step && step.at + (submits ? 1 : 0) < step.of) setAsked(step.ask, step.at + 1)
+    return out
+  }
+
   /** Speaks to a session in the maintainer's own words: his turn, wherever it runs. */
   async function reply(sessionId: string, text: string): Promise<Outcome> {
     const words = text.trim()
@@ -109,6 +133,11 @@ export function createActions(p: ActionPaths): Actions {
     if (waitsOn(s, 'permission')) return no('It asks a permission: allow or deny it first.')
     const asks = waitsOn(s, 'question')
     const pane = p.hosting.paneOf(s.id)
+    if (pane !== null && asks?.step) {
+      const moved = await elsewhere(pane, asks.step)
+      if (moved) return moved
+      return answered(asks.step, await tried(() => answerInWords(p.pane, pane, words)))
+    }
     if (pane !== null) return tried(() => (asks ? answerInWords(p.pane, pane, words) : sendPrompt(p.pane, pane, words)))
     const child = childRow(p.snapshot(), s)
     if (child) {
@@ -162,8 +191,19 @@ export function createActions(p: ActionPaths): Actions {
       switch (item.kind) {
         case 'question': {
           const index = item.choices.indexOf(choice)
-          if (pane !== null) return tried(() => pickOption(p.pane, pane, index, choice.label), choice.label)
-          if (child) return tried(() => p.child.answerQuestion(child, index), choice.label)
+          const step = item.step
+          if (pane !== null) {
+            if (step) {
+              const moved = await elsewhere(pane, step)
+              if (moved) return moved
+              if (step.at === step.of) return tried(() => submitReview(p.pane, pane), choice.label)
+            }
+            return answered(step, await tried(() => pickOption(p.pane, pane, index, choice.label), choice.label))
+          }
+          // A child reached through its attach: that answers the question on its screen and, after
+          // the last one, submits the review itself (`src/mission/ask.ts`).
+          if (child && step && step.at === step.of) return no('Its answers are on their review: submit them in its terminal.')
+          if (child) return answered(step, await tried(() => p.child.answerQuestion(child, index), choice.label), true)
           return no('It runs outside the app: answer it in its own terminal.')
         }
         case 'permission': {

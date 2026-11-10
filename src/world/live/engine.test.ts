@@ -74,7 +74,7 @@ describe('when the live world is handed over', () => {
 
   test('nothing after it was stopped, and nothing is listened to any more', async () => {
     const live = await started()
-    expect(live.state.subscribed).toBe(6)
+    expect(live.state.subscribed).toBe(7)
     live.stop()
     expect(live.state.subscribed).toBe(0)
     expect(live.state.ticks.every((t) => t.stopped)).toBe(true)
@@ -174,6 +174,30 @@ describe('something changed', () => {
     expect(sessionOf(live.last(), PARENT)!.state).toBe('need')
     expect(live.last().pending.map((p) => [p.session, p.kind])).toEqual([[PARENT, 'permission']])
     expect(live.state.asked.feed).toHaveLength(1)
+  })
+
+  test('a dialog of several questions that moved on is a new world, with its next question waiting', async () => {
+    const option = (label: string) => ({ label, description: '' })
+    const questions = [
+      { header: 'Where', question: 'Where is it changed?', options: [option('Subscription')], multi: false },
+      { header: 'Codes', question: 'Which codes?', options: [option('Standard ones')], multi: false },
+    ]
+    const fake = fakeSources(snapshotOf([repo({ parents: [parent({ status: 'waiting', waiting_for: 'input needed' })] })]))
+    fake.state.insights[PARENT] = insight({ pendingAsk: { id: 'toolu_3', at: NOW - MIN, question: questions[0].question, options: questions[0].options, questions } })
+    const worlds: World[] = []
+    createLive(fake.sources, (w) => worlds.push(w))
+    await fake.settle()
+    const waits = () => worlds[worlds.length - 1].pending.map((p) => p.text)
+    expect(waits()).toEqual(['Where is it changed?'])
+
+    fake.asked.set({ toolu_3: 1 })
+    await fake.settle()
+    expect(waits()).toEqual(['Which codes?'])
+    // the same place said again builds nothing
+    const built = builds()
+    fake.asked.set({ toolu_3: 1 })
+    await fake.settle()
+    expect(builds()).toBe(built)
   })
 
   test('a snapshot and the fleet that reads it, changing in one turn, are one new world', async () => {

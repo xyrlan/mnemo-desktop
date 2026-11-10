@@ -44,7 +44,7 @@ describe('startLive', () => {
     const worlds: World[] = []
     const stop = startLive((w) => worlds.push(w))
     await settle()
-    expect(fake.current!.state.subscribed).toBe(6)
+    expect(fake.current!.state.subscribed).toBe(7)
     stop()
     expect(fake.current!.state.subscribed).toBe(0)
     fake.current!.mission.set(snapshotOf([repo({ parents: [parent({ status: 'idle' })] })]))

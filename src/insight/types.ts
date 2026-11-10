@@ -109,8 +109,21 @@ export interface Words {
 export interface PendingAsk {
   id: string
   at: number
+  /** The first question and its options. */
   question: string
   options: { label: string; description: string }[]
+  /** Every question of the call, the first included, in the order its dialog asks them; a
+   *  dialog of several ends on a review that submits them. Absent from a core older than it. */
+  questions?: AskQuestion[]
+}
+
+export interface AskQuestion {
+  /** The short name its tab carries in the dialog. */
+  header: string
+  question: string
+  options: { label: string; description: string }[]
+  /** It takes several answers, ticked in the terminal. */
+  multi: boolean
 }
 
 export interface Insight {

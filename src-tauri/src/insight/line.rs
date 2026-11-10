@@ -373,11 +373,21 @@ impl Input {
 
     /// The first question of an `AskUserQuestion`, and its options as `(label, description)`.
     pub fn question(&self) -> Option<(String, Vec<(String, String)>)> {
-        let q = self.questions.as_ref()?.as_array()?.first()?;
-        let question = q.get("question")?.as_str()?.to_string();
+        self.asked().into_iter().next().map(|q| (q.question, q.options))
+    }
+
+    /// Every question of an `AskUserQuestion`, in the order its dialog asks them. One with no
+    /// `question` text is left out.
+    pub fn asked(&self) -> Vec<Asked> {
         let word = |o: &Value, key: &str| o.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
-        let options = q.get("options").and_then(Value::as_array).map(|all| all.iter().map(|o| (o.as_str().map(str::to_string).unwrap_or_else(|| word(o, "label")), word(o, "description"))).collect());
-        Some((question, options.unwrap_or_default()))
+        let Some(all) = self.questions.as_ref().and_then(Value::as_array) else { return Vec::new() };
+        all.iter()
+            .filter_map(|q| {
+                let question = q.get("question")?.as_str()?.to_string();
+                let options = q.get("options").and_then(Value::as_array).map(|all| all.iter().map(|o| (o.as_str().map(str::to_string).unwrap_or_else(|| word(o, "label")), word(o, "description"))).collect());
+                Some(Asked { header: word(q, "header"), question, options: options.unwrap_or_default(), multi: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false) })
+            })
+            .collect()
     }
 
     /// What the call is about, in one line: the first of the keys `capture.py` tries that the
@@ -395,6 +405,16 @@ impl Input {
         let keys = [&self.command, &self.file_path, &self.pattern, &self.url, &self.query, &self.skill, &self.slug, &self.topic, &self.description, &self.prompt, &self.path, &self.notebook_path, &self.action];
         short(keys.into_iter().find_map(said).unwrap_or_default(), CHARS)
     }
+}
+
+/// One question of an `AskUserQuestion` call, as its input wrote it.
+pub struct Asked {
+    pub header: String,
+    pub question: String,
+    /// `(label, description)`.
+    pub options: Vec<(String, String)>,
+    /// It takes several answers.
+    pub multi: bool,
 }
 
 /// The page a browser tool's result says it ran on, as `(title, url)`: the tab its

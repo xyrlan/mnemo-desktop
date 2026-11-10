@@ -439,3 +439,90 @@ describe('what happened', () => {
     expect(again.events.some((e) => e.kind === 'answered')).toBe(false)
   })
 })
+
+describe('a question is a question, whatever kind of wait is reported', () => {
+  const ASKS = { tool: 'AskUserQuestion', target: 'Where does the operator change the service?', at: NOW - MIN, running: true }
+  const option = (label: string) => ({ label, description: `what ${label} means` })
+  const parentWaiting = (more: Partial<LiveInput>) =>
+    build({ repos_: [repo({ parents: [parent({ status: 'waiting', waiting_for: 'permission prompt' })] })], agents: { [PARENT]: { state: 'needs-you', waitingFor: 'permission', title: '' } }, ...more })
+
+  test('a parent said to wait on a permission, whose transcript holds an unanswered question, shows the question', () => {
+    const ask = { id: 'toolu_1', at: NOW - MIN, question: 'Where does the operator change the service?', options: [option('On the subscription'), option('Only on the kit')] }
+    const [item] = waiting(parentWaiting({ insights: { [PARENT]: insight({ pendingAsk: ask }) } }), PARENT)
+    expect([item.kind, item.text]).toEqual(['question', ask.question])
+    expect(item.choices.map((c) => [c.key, c.label, c.hint])).toEqual([[1, 'On the subscription', 'what On the subscription means'], [2, 'Only on the kit', 'what Only on the kit means']])
+    expect(item.step).toBeUndefined()
+  })
+
+  test('before the question is read, the call that asks it is still no permission: its words, and no choice to press', () => {
+    const [item] = waiting(parentWaiting({ feed: { sessions: { [PARENT]: feedOf({ activity: ASKS }) }, prs: {} } }), PARENT)
+    expect([item.kind, item.text, item.choices]).toEqual(['question', ASKS.target, []])
+    expect(item.reply).toBe(true)
+    // any other call said to wait on a permission is one
+    const [other] = waiting(parentWaiting({ feed: { sessions: { [PARENT]: feedOf({ activity: { ...ASKS, tool: 'Bash', target: 'git push' } }) }, prs: {} } }), PARENT)
+    expect([other.kind, other.text]).toEqual(['permission', 'Allow Bash?'])
+  })
+
+  test('a child whose need names the asking tool waits with a question too', () => {
+    const world = withChildren([child({ tempo: 'blocked', needs: 'approve AskUserQuestion: Which schema is current?', waiting_for: 'permission prompt' })])
+    const [item] = waiting(world, CHILD)
+    expect([item.kind, item.text, item.choices]).toEqual(['question', 'Which schema is current?', []])
+  })
+})
+
+describe('a dialog of several questions', () => {
+  const option = (label: string) => ({ label, description: '' })
+  const ask = {
+    id: 'toolu_2',
+    at: NOW - MIN,
+    question: 'Where is it changed?',
+    options: [option('Subscription'), option('Kit')],
+    questions: [
+      { header: 'Where', question: 'Where is it changed?', options: [option('Subscription'), option('Kit')], multi: false },
+      { header: 'Codes', question: 'Which codes?', options: [option('Ask the agency'), option('Standard ones')], multi: false },
+      { header: '', question: 'Which checks?', options: [option('lint'), option('types')], multi: true },
+    ],
+  }
+  const at = (asked: Record<string, number>) =>
+    waiting(build({ repos_: [repo({ parents: [parent({ status: 'waiting', waiting_for: 'input needed' })] })], insights: { [PARENT]: insight({ pendingAsk: ask }) }, asked }), PARENT)[0]
+
+  test('is one item per question, in its order, each with its own id and where it stands', () => {
+    const first = at({})
+    expect([first.text, first.detail]).toEqual(['Where is it changed?', 'Question 1 of 3 · Where'])
+    expect(first.choices.map((c) => c.label)).toEqual(['Subscription', 'Kit'])
+    expect(first.step).toEqual({ ask: 'toolu_2', at: 0, of: 3, firsts: ['Subscription', 'Ask the agency', 'lint'] })
+
+    const second = at({ toolu_2: 1 })
+    expect([second.text, second.detail]).toEqual(['Which codes?', 'Question 2 of 3 · Codes'])
+    expect(second.choices.map((c) => c.label)).toEqual(['Ask the agency', 'Standard ones'])
+    // the card of the question just answered is not the card of the next
+    expect(second.id).not.toBe(first.id)
+    expect(second.since).toBe(first.since)
+  })
+
+  test('a question that takes several answers offers none: they are ticked in its terminal', () => {
+    const third = at({ toolu_2: 2 })
+    expect(third.text).toBe('Which checks?')
+    expect(third.detail).toBe('Question 3 of 3. It takes several answers: tick them in its terminal.')
+    expect([third.choices, third.reply]).toEqual([[], false])
+  })
+
+  test('ends on the review that submits them, and a place past it is the review', () => {
+    for (const n of [3, 9]) {
+      const review = at({ toolu_2: n })
+      expect([review.kind, review.text]).toEqual(['question', 'Submit the answers?'])
+      expect(review.choices).toEqual([{ key: 1, label: 'Submit answers', hint: null, tone: 'good' }])
+      expect([review.reply, review.step?.at]).toEqual([false, 3])
+    }
+  })
+
+  test('another call is at its first question, whatever is kept of this one', () => {
+    expect(at({ toolu_other: 2 }).text).toBe('Where is it changed?')
+  })
+
+  test('a call with one question is the question alone', () => {
+    const one_ = { ...ask, questions: [ask.questions[0]] }
+    const [item] = waiting(build({ repos_: [repo({ parents: [parent({ status: 'waiting', waiting_for: 'input needed' })] })], insights: { [PARENT]: insight({ pendingAsk: one_ }) }, asked: { toolu_2: 1 } }), PARENT)
+    expect([item.text, item.detail, item.step]).toEqual(['Where is it changed?', null, undefined])
+  })
+})
