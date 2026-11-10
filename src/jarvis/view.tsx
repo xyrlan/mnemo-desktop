@@ -1,7 +1,8 @@
 /** James, Jarvis's assistant (#503, #505): `App.tsx` imports every `src/<dir>/view.tsx`, and this
  *  one starts the loop (`./loop`) over the Rust client and the parents, registers
  *  `jarvis.toggle` and `jarvis.listen`, hears `jarvis://heard` and the voice's errors, runs the
- *  orb (`./orb/control`) and mounts the panel in the shell's overlay slot. */
+ *  orb (`./orb/control`) and mounts the panel in the shell's overlay slot. The store is the app's
+ *  one James (`./panel/james`), which the frame's top bar reads too (`JamesPresence`). */
 import { notifyAgent } from '../agents/notify'
 import { shortcutLabel } from '../actions/chords'
 import { register } from '../actions/registry'
@@ -10,12 +11,12 @@ import { tauriJarvis } from './client'
 import { createJarvis } from './loop'
 import { tauriOrb } from './orb/api'
 import { createOrbControl } from './orb/control'
+import { frameStilled } from '../notify/overlay'
+import { jamesStore as store } from './panel/james'
 import { JarvisPanel } from './panel/Panel'
 import { createParents } from './parent'
 import { forSpeech } from './speech'
-import { addLine, createJarvisStore } from './store'
-
-const store = createJarvisStore()
+import { addLine } from './store'
 
 let focused = typeof document !== 'undefined' && document.hasFocus()
 const onFocus = () => void (focused = true)
@@ -28,8 +29,8 @@ const jarvis = createJarvis({ client: tauriJarvis, parents: createParents(), sto
 register({ id: 'jarvis.toggle', title: 'James (open / close)', run: () => store.setState((s) => ({ open: !s.open })) })
 
 // James on screen while a conversation is on, without the panel (#506): with it on, a take no
-// longer opens the panel; the chord and the launcher do.
-const orb = createOrbControl({ store, api: tauriOrb, spoken: forSpeech })
+// longer opens the panel; the chord and his presence do.
+const orb = createOrbControl({ store, api: tauriOrb, spoken: forSpeech, still: frameStilled })
 
 register({
   id: 'jarvis.listen',

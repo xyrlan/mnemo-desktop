@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useStore } from 'zustand'
+import { Kbd, Label, StateMark } from '../../ds'
+import { useOverlayRoot } from '../../notify/overlay'
+import type { SessionState } from '../../world/types'
 import type { BrainConfig, Research } from '../client'
 import type { Jarvis } from '../loop'
 import type { ParentState } from '../parent'
 import { approvals, unended, type JarvisStore, type Line, type Parent, type ResearchRun, type Setup } from '../store'
-import '../../nexus/ui/ui.css'
+import { alive, presenceHosts, presenceOf } from './james'
+import { JamesOrb } from './Orb'
+import { Presence } from './Presence'
 import './panel.css'
 
 type Props = {
   store: JarvisStore
   jarvis: Pick<Jarvis, 'ask' | 'answer' | 'ensure' | 'openUrl'>
-  /** `jarvis.toggle`'s chord, printed on the launcher; none while it has no chord. */
+  /** `jarvis.toggle`'s chord, shown on his presence; none while it has no chord. */
   shortcut?: string
 }
 
@@ -48,13 +53,25 @@ const STATE: Record<ParentState, string> = {
   exited: 'exited',
 }
 
+/** A parent is a session: the shape and hue of the state it is in. */
+const PARENT_SIGN: Record<ParentState, SessionState> = { starting: 'working', working: 'working', idle: 'idle', asking: 'need', approval: 'need', exited: 'ended' }
+
+/** A state's shape, beside a word of the panel's own: the mark's own word stays unread. */
+function Sign({ state }: { state: SessionState }) {
+  return (
+    <span className="jv-sign" aria-hidden="true">
+      <StateMark state={state} />
+    </span>
+  )
+}
+
 function SetupCard({ setup, onStart }: { setup: Setup; onStart(): void }) {
   if (setup.kind === 'ready') return null
   if (setup.kind === 'idle')
     return (
       <div className="jv-setup" data-kind="idle">
-        <p className="nx-muted">The local model starts with the first request. The first time it downloads about 7 GB.</p>
-        <button type="button" className="nx-btn" onClick={onStart}>
+        <p>The local model starts with the first request. The first time it downloads about 7 GB.</p>
+        <button type="button" className="jv-btn" onClick={onStart}>
           Prepare now
         </button>
       </div>
@@ -63,7 +80,7 @@ function SetupCard({ setup, onStart }: { setup: Setup; onStart(): void }) {
     return (
       <div className="jv-setup" data-kind="error" role="alert">
         <p>{setup.message}</p>
-        <button type="button" className="nx-btn" onClick={onStart}>
+        <button type="button" className="jv-btn" onClick={onStart}>
           Try again
         </button>
       </div>
@@ -89,14 +106,17 @@ function Approval({ parent, onAnswer }: { parent: Parent; onAnswer(allow: boolea
   return (
     <div className="jv-approval" data-session={parent.ref.sessionId}>
       <div className="jv-approval-head">
-        <b>{parent.ref.project}</b> waits on your approval
+        <Sign state="need" />
+        <span>
+          <b>{parent.ref.project}</b> waits on your approval
+        </span>
       </div>
       <p className="jv-approval-q">{parent.question}</p>
       <div className="jv-approval-actions">
-        <button type="button" className="nx-btn" data-tone="danger" onClick={() => onAnswer(false)}>
+        <button type="button" className="jv-btn" data-tone="bad" onClick={() => onAnswer(false)}>
           Deny
         </button>
-        <button type="button" className="nx-btn" data-tone="go" onClick={() => onAnswer(true)}>
+        <button type="button" className="jv-btn" data-tone="good" onClick={() => onAnswer(true)}>
           Allow
         </button>
       </div>
@@ -110,6 +130,10 @@ const RESEARCH_STATE: Record<ResearchRun['state'], string> = {
   done: 'done',
   failed: 'failed',
 }
+
+/** A research's state as a shape: a ring while it queues, the working dot, a triangle once it
+ *  found its answer, a cross when it failed. */
+const RESEARCH_SIGN: Record<ResearchRun['state'], SessionState> = { queued: 'idle', running: 'working', done: 'ready', failed: 'stalled' }
 
 const hostOf = (url: string) => {
   try {
@@ -144,6 +168,7 @@ function ResearchCard({ run, open, onOpen }: { run: ResearchRun; open: boolean; 
   return (
     <article className="jv-research" data-state={run.state} data-id={run.id}>
       <div className="jv-research-head">
+        <Sign state={RESEARCH_SIGN[run.state]} />
         <span className="jv-research-state">{RESEARCH_STATE[run.state]}</span>
         <span className="jv-research-q" title={run.question}>
           {run.question}
@@ -193,8 +218,11 @@ function LineRow({ line, onOpen }: { line: Line; onOpen(url: string): void }) {
 
 /** James on screen (#505): the conversation, the model's setup, the parents Jarvis opened and an
  *  approval any of them waits on, his researches (jarvis-research), and a field to type to him.
- *  Docked on the right, over the ship and under a Nexus window. */
-export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
+ *  Docked on the right, over whatever front is mounted and under a Nexus window.
+ *
+ *  Closed, it is nothing where a top bar has his presence (`JamesPresence`); where none has, it
+ *  docks that presence in the corner, so there is always a way in. */
+export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element | null {
   const open = useStore(store, (s) => s.open)
   const brain = useStore(store, (s) => s.brain)
   const setup = useStore(store, (s) => s.setup)
@@ -204,6 +232,10 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   const busy = useStore(store, (s) => s.busy)
   const voice = useStore(store, (s) => s.voice)
   const asking = useStore(store, (s) => s.pending !== null)
+  const moving = useStore(store, (s) => alive(presenceOf(s).state))
+  const hosted = useStore(presenceHosts, (s) => s.hosts > 0)
+  const panel = useOverlayRoot('jv-panel')
+  const dock = useOverlayRoot('jv-dock')
   const [draft, setDraft] = useState('')
   const field = useRef<HTMLTextAreaElement>(null)
   const list = useRef<HTMLOListElement>(null)
@@ -221,19 +253,14 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   const openUrl = (url: string) => void jarvis.openUrl(url)
   // The newest research ended shows its answer whole; older ones fold theirs.
   const newestEnded = researches.find((r) => !unended(r))?.id
-  if (!open)
+  if (!open) {
+    if (hosted) return null
     return (
-      <button
-        type="button"
-        className="nx jv-launcher"
-        data-waiting={waiting.length ? '' : undefined}
-        aria-label="Open James"
-        title={shortcut ? `James (${shortcut})` : 'James'}
-        onClick={() => store.setState({ open: true })}
-      >
-        J{waiting.length ? <span className="jv-badge">{waiting.length}</span> : null}
-      </button>
+      <div {...dock}>
+        <Presence store={store} shortcut={shortcut} />
+      </div>
     )
+  }
 
   const send = () => {
     const text = draft.trim()
@@ -243,17 +270,20 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
   }
 
   return (
-    <section className="nx jv-panel" role="complementary" aria-label="James" data-voice={voice}>
-      <div className="nx-window-bar">
-        <h2 className="nx-window-title">James</h2>
-        <span className="nx-window-sub" data-testid="jv-setup-word" data-brain={brain?.kind ?? 'local'}>
-          {brainWord(brain, setup)}
-          {voice !== 'idle' ? ` · ${voice}` : ''}
-        </span>
-        <button type="button" className="nx-window-close" aria-label="Close" title="Close (Esc)" onClick={close}>
-          ×
+    <section {...panel} role="complementary" aria-label="James" data-voice={voice}>
+      <header className="jv-head">
+        <JamesOrb alive={moving} />
+        <div className="jv-id">
+          <h2 className="jv-name">James</h2>
+          <span className="jv-word" data-testid="jv-setup-word" data-brain={brain?.kind ?? 'local'}>
+            {brainWord(brain, setup)}
+            {voice !== 'idle' ? ` · ${voice}` : ''}
+          </span>
+        </div>
+        <button type="button" className="jv-close" aria-label="Close" title="Close (Esc)" onClick={close}>
+          <Kbd>Esc</Kbd>
         </button>
-      </div>
+      </header>
       {/* With Claude the local model only sees the screen: its card shows once a look starts it. */}
       {!(brain?.kind === 'claude' && setup.kind === 'idle') && <SetupCard setup={setup} onStart={() => void jarvis.ensure()} />}
       {waiting.map((p) => (
@@ -261,9 +291,12 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
       ))}
       {parents.length > 0 && (
         <div className="jv-parents">
-          <h3 className="nx-section">Parents</h3>
+          <h3 className="jv-section">
+            <Label>Parents</Label>
+          </h3>
           {parents.map((p) => (
-            <div key={p.ref.sessionId} className="nx-row jv-parent" data-state={p.state}>
+            <div key={p.ref.sessionId} className="jv-parent" data-state={p.state}>
+              <Sign state={PARENT_SIGN[p.state]} />
               <b>{p.ref.project}</b>
               <span className="jv-parent-state">{STATE[p.state]}</span>
               <span className="jv-parent-req" title={p.ref.request}>
@@ -275,18 +308,26 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
       )}
       {researches.length > 0 && (
         <div className="jv-researches">
-          <h3 className="nx-section">Research</h3>
+          <h3 className="jv-section">
+            <Label>Research</Label>
+          </h3>
           {researches.map((r) => (
             <ResearchCard key={r.id} run={r} open={r.id === newestEnded} onOpen={openUrl} />
           ))}
         </div>
       )}
       <ol ref={list} className="jv-lines" aria-live="polite">
-        {lines.length === 0 && <li className="jv-empty nx-muted">Type to James in Portuguese. He reads; anything that writes goes to a parent session.</li>}
+        {lines.length === 0 && <li className="jv-empty">Type to James in Portuguese. He reads; anything that writes goes to a parent session.</li>}
         {lines.map((l) => (
           <LineRow key={l.id} line={l} onOpen={openUrl} />
         ))}
-        {busy && <li className="jv-line jv-thinking nx-muted">…</li>}
+        {busy && (
+          <li className="jv-thinking" aria-label="James is thinking">
+            <i />
+            <i />
+            <i />
+          </li>
+        )}
       </ol>
       <form
         className="jv-compose"
@@ -295,9 +336,12 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
           send()
         }}
       >
+        <span className="jv-prompt" aria-hidden="true">
+          ›
+        </span>
         <textarea
           ref={field}
-          className="nx-input jv-field"
+          className="jv-field"
           rows={2}
           value={draft}
           placeholder={asking ? 'Answer James…' : 'Ask James…'}
@@ -313,7 +357,7 @@ export function JarvisPanel({ store, jarvis, shortcut }: Props): JSX.Element {
             }
           }}
         />
-        <button type="submit" className="nx-btn" disabled={!draft.trim()}>
+        <button type="submit" className="jv-send" disabled={!draft.trim()}>
           Send
         </button>
       </form>

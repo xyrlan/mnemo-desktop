@@ -1,5 +1,5 @@
 import type { VoicePhase } from '../client'
-import { HIDDEN, LINGER_MS, lookOf, stepShow, type Shown } from './show'
+import { HIDDEN, LINGER_MS, LOOK_WORD, lookOf, stepShow, type Shown } from './show'
 
 test('each phase has its look, and an idle voice shows only while a request is worked on', () => {
   expect(lookOf('listening', false)).toBe('listening')
@@ -80,4 +80,10 @@ test('the same input gives back the same state, so nothing is re-sent', () => {
   const over = stepShow(s, null, 100)
   expect(stepShow(over, null, 200)).toBe(over)
   expect(stepShow(HIDDEN, null, 300)).toBe(HIDDEN)
+})
+
+test("every look has its word, and the follow-up window is James still listening", () => {
+  expect(LOOK_WORD).toEqual({ listening: "listening", thinking: "thinking", speaking: "speaking", waiting: "go on" })
+  // The word under the orb is the word beside his name: one vocabulary.
+  for (const voice of ["listening", "transcribing", "speaking", "waiting"] as const) expect(LOOK_WORD[lookOf(voice, false)!]).toBeTruthy()
 })
