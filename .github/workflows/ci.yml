@@ -123,6 +123,10 @@ jobs:
           ls -l "$dir"
           # The app by its name: the helpers are installed beside it, and one of them would pass too.
           test -f "$dir/mnemo-desktop.exe"
+          # The pseudoconsole the panes run on (src-tauri/vendor/conpty): its conpty.dll starts the
+          # OpenConsole.exe in the x64 folder beside it, and the round-trip below runs on them.
+          test -f "$dir/conpty.dll"
+          test -f "$dir/x64/OpenConsole.exe"
           MNEMO_DESKTOP_SMOKE=1 "$dir/mnemo-desktop.exe"
       # The desktop MCP server and the agent hook are programs the installed app starts from
       # beside itself, on Windows too since they reach it over a named pipe (src/ipc.rs).
