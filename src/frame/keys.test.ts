@@ -114,6 +114,8 @@ describe('where a press landed', () => {
 
   test('Enter finds the terminal on stage, or the box that speaks to the session', () => {
     document.body.innerHTML = '<nav><input id="other"></nav><section data-stage><div data-pending="question"><input id="card"></div><textarea id="say"></textarea></section>'
+    // from a field that is not the stage's (the command line, say), Enter still goes in
+    document.querySelector<HTMLElement>('#other')!.focus()
     expect(focusTerminal(document)).toBe('focused')
     expect(document.activeElement?.id).toBe('say')
     expect(focusTerminal(document)).toBe('already')
@@ -121,6 +123,27 @@ describe('where a press landed', () => {
     document.body.innerHTML = '<section data-stage><div class="xterm"><textarea class="xterm-helper-textarea" id="term"></textarea></div><textarea id="say"></textarea></section>'
     expect(focusTerminal(document)).toBe('focused')
     expect(document.activeElement?.id).toBe('term')
+  })
+
+  test('the stage’s own way in is used when it has one, and its answer is the frame’s', () => {
+    document.body.innerHTML = '<section data-stage><textarea id="say"></textarea><input id="other"></section>'
+    let asked = 0
+    expect(focusTerminal(document, () => (asked++, true))).toBe('focused')
+    expect(focusTerminal(document, () => (asked++, false))).toBe('none')
+    expect(asked).toBe(2)
+    // it was the stage's to place the caret: the frame did not
+    expect(document.activeElement).toBe(document.body)
+    // with the caret already in the stage's box the stage is not asked again
+    document.querySelector<HTMLElement>('#say')!.focus()
+    expect(focusTerminal(document, () => (asked++, true))).toBe('already')
+    expect(asked).toBe(2)
+  })
+
+  test('the caret in a waiting card’s field is not in the terminal', () => {
+    document.body.innerHTML = '<section data-stage><div data-pending="question"><input id="card"></div><textarea id="say"></textarea></section>'
+    document.querySelector<HTMLElement>('#card')!.focus()
+    expect(focusTerminal(document)).toBe('focused')
+    expect(document.activeElement?.id).toBe('say')
   })
 
   test('a stage with nothing to type into, or only a waiting card’s field, has no terminal', () => {

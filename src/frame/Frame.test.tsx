@@ -9,7 +9,7 @@ import type { Session } from '../world/types'
 import { Frame, MOVE_MS, continuity, contraction } from './Frame'
 import { sheetStore } from './KeySheet'
 import { motionStore, setReduced } from './motion'
-import { accountInFront, countsByState, until } from './TopBar'
+import { accountInFront, countsByState, fitFleet, until } from './TopBar'
 
 // Every view is another piece's. Here each is the least that shows where the frame put it and
 // what it was given, so these tests hold before and after the real ones land.
@@ -39,6 +39,8 @@ vi.mock('../roster', () => ({
   ),
 }))
 vi.mock('../stage', () => ({
+  // no way in of its own: the frame finds the terminal itself
+  focusTerminal: undefined,
   Stage: () => (
     <section data-stage data-testid="stage">
       <div className="xterm">
@@ -227,6 +229,27 @@ describe('the fleet-wide keys, on the page', () => {
     expect(route().view).toBe('score')
   })
 
+  test('Esc leaves a text field, so the bare keys work again', async () => {
+    await draw()
+    const field = host.querySelector<HTMLInputElement>('input[aria-label="find"]')!
+    await act(async () => field.focus())
+    expect(await key(field, 'Escape')).toBe(false)
+    expect(document.activeElement).not.toBe(field)
+    await key(document.body, 't')
+    expect(route().view).toBe('score')
+  })
+
+  test('a field that hands the caret on at Esc keeps what it chose', async () => {
+    await draw()
+    const field = host.querySelector<HTMLInputElement>('input[aria-label="find"]')!
+    const entry = host.querySelector<HTMLButtonElement>('nav[data-testid="roster"] button')!
+    // as the stage's box does: Esc gives the caret to the stage
+    field.addEventListener('keydown', (e) => e.key === 'Escape' && entry.focus())
+    await act(async () => field.focus())
+    await key(field, 'Escape')
+    expect(document.activeElement).toBe(entry)
+  })
+
   test('typed into the terminal, a key is the session’s', async () => {
     await draw()
     const term = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!
@@ -351,6 +374,27 @@ describe('the top bar', () => {
     const [was, ended] = [count('working'), count('ended')]
     await act(async () => void (await actions().stop(working.id)))
     expect([count('working'), count('ended')]).toEqual([was - 1, ended + 1])
+  })
+
+  test('the words of the states give way when the bar has no room for them, and come back', async () => {
+    await draw()
+    const fleet = host.querySelector<HTMLElement>('.frame-fleet')!
+    const sizes = { scroll: 900, client: 900 }
+    Object.defineProperty(fleet, 'scrollWidth', { get: () => sizes.scroll })
+    Object.defineProperty(fleet, 'clientWidth', { get: () => sizes.client })
+    fitFleet(fleet)
+    expect(fleet.hasAttribute('data-tight')).toBe(false)
+    // something else in the bar grew: the fleet is given less than it needs
+    sizes.client = 600
+    fitFleet(fleet)
+    expect(fleet.hasAttribute('data-tight')).toBe(true)
+    // it is measured again whenever the bar is drawn, so the words return with the room
+    sizes.client = 900
+    await act(async () => worldStore.getState().set({ ...world(), pending: [] }))
+    expect(fleet.hasAttribute('data-tight')).toBe(false)
+    sizes.client = 600
+    await act(async () => go({ view: 'score' }))
+    expect(fleet.hasAttribute('data-tight')).toBe(true)
   })
 
   test('says how many wait, and its key walks them', async () => {

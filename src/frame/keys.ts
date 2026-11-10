@@ -217,16 +217,19 @@ export function press(e: Press, where: Where, fleet: Fleet): boolean {
 }
 
 /** Puts the caret in the terminal on stage: the live terminal when the stage hosts one, else
- *  the box that speaks to the session under its drawn transcript. */
-export function focusTerminal(root: ParentNode | null): 'focused' | 'already' | 'none' {
+ *  the box that speaks to the session under its drawn transcript. `own` is the stage's own way
+ *  in, when it has one; without it the frame looks for the field itself. */
+export function focusTerminal(root: ParentNode | null, own?: () => boolean): 'focused' | 'already' | 'none' {
   const stage = root?.querySelector('[data-stage]')
   if (!stage) return 'none'
+  const at = document.activeElement
+  // The caret is in the stage's terminal, or in the box that speaks to it, already.
+  if (at && stage.contains(at) && !at.closest('[data-pending]') && ['terminal', 'field'].includes(whereOf(at))) return 'already'
+  if (own) return own() ? 'focused' : 'none'
   const fields = [...stage.querySelectorAll<HTMLElement>('.xterm-helper-textarea, [data-live-terminal][tabindex], [data-live-terminal] [tabindex], textarea, input[type="text"], input:not([type])')]
   // A waiting card's own field is `R`'s, not Enter's.
   const target = fields.find((el) => !el.closest('[data-pending]'))
   if (!target) return 'none'
-  const active = document.activeElement
-  if (active === target || (active && stage.contains(active) && whereOf(active) === 'terminal')) return 'already'
   target.focus()
   return document.activeElement === target ? 'focused' : 'none'
 }

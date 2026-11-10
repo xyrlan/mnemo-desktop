@@ -1,6 +1,7 @@
 // The top bar: the mark, the three views, how many wait, the fleet by state, each account's
 // plan windows, the motion switch, and which world this is.
 
+import { useLayoutEffect, useRef } from 'react'
 import { Kbd, Mark, Meter, StateMark } from '../ds'
 import { WORD } from '../world/format'
 import { go, useRoute, type View } from '../world/route'
@@ -78,14 +79,37 @@ function Plans() {
 /** What to call a world that is not this machine: a word, and what follows it where there is room. */
 const SOURCE = { sample: ['sample', ' world'], capture: ['capture', ''], live: ['', ''] } as const
 
+/** Marks the fleet `data-tight` when its words do not fit beside everything else in the bar.
+ *  The rest of the bar keeps its width (how many wait, the accounts), so the words are what
+ *  gives: a state is still its shape and its number. */
+export function fitFleet(fleet: HTMLElement): void {
+  fleet.removeAttribute('data-tight')
+  if (fleet.scrollWidth > fleet.clientWidth + 1) fleet.setAttribute('data-tight', '')
+}
+
 export function TopBar() {
   const world = useWorld((w) => w)
   const view = useRoute((r) => r.view)
   const reduced = useReduced()
+  const bar = useRef<HTMLElement>(null)
+  const fleet = useRef<HTMLDivElement>(null)
+
+  // Measured after every draw, and again when the window or a neighbour changes width (the
+  // count of what waits is another piece's and redraws on its own). Never on a timer.
+  useLayoutEffect(() => {
+    const el = fleet.current
+    if (!el || !bar.current) return
+    fitFleet(el)
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(() => fitFleet(el))
+    watch.observe(bar.current)
+    for (const child of bar.current.children) if (child !== el) watch.observe(child)
+    return () => watch.disconnect()
+  })
   const at = VIEWS.findIndex((v) => v.view === view)
   const [source, more] = SOURCE[worldSource()]
   return (
-    <header className="frame-top" data-top-bar>
+    <header ref={bar} className="frame-top" data-top-bar>
       <div className="frame-brand">
         <Mark size={28} className="frame-mark" />
         <b className="frame-wordmark">mnemo</b>
@@ -102,7 +126,7 @@ export function TopBar() {
 
       <WaitingCount />
 
-      <div className="frame-fleet">
+      <div ref={fleet} className="frame-fleet">
         {countsByState(world).map(({ state, count }) => (
           <span key={state} className="frame-fl" data-state={state} data-zero={count ? undefined : true}>
             <StateMark state={state} />

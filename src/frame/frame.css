@@ -21,7 +21,7 @@
   flex: none; display: flex; align-items: center; gap: 1.1em; height: var(--frame-top); padding: 0 var(--frame-pad);
   border-bottom: 1px solid var(--line); min-width: 0; white-space: nowrap;
 }
-@media (min-width: 2300px) { .mn .frame-top { gap: 1.75em; } }
+@media (min-width: 2300px) { .mn .frame-top { gap: 1.45em; } }
 
 .mn .frame-brand { display: flex; align-items: center; gap: 0.75em; flex: none; }
 .mn .frame-mark { width: 1.9em; height: 1.9em; flex: none; filter: drop-shadow(0 0 6px rgb(255 255 255 / 0.45)); }
@@ -55,14 +55,16 @@
 .mn .frame-waiting[data-clear] { border-color: var(--line-2); color: var(--ink-3); box-shadow: none; }
 .mn .frame-waiting-clear { width: 0.6em; height: 0.6em; border: 1px solid var(--ink-3); border-radius: 50%; }
 
-/* The fleet by state: shape, number, and the word where there is room for it. */
-.mn .frame-fleet { display: flex; align-items: center; gap: 0.9em; min-width: 0; overflow: hidden; }
-@media (min-width: 2300px) { .mn .frame-fleet { gap: 1.35em; } }
+/* The fleet by state: shape, number, and the word when the bar has room for it
+   (`data-tight`, measured in TopBar.tsx: the room depends on what else the bar holds). */
+.mn .frame-fleet { display: flex; align-items: center; gap: 1.2em; min-width: 0; overflow: hidden; }
+.mn .frame-fleet[data-tight] { gap: 0.9em; }
+.mn .frame-fl { flex: none; }
 .mn .frame-fl { display: inline-flex; align-items: center; gap: 0.5em; color: var(--ink-3); }
 .mn .frame-fl .mn-state { font-size: 0.9em; }
 .mn .frame-fl b { color: var(--ink); font-size: 1em; font-weight: 600; }
-.mn .frame-fl-word { display: none; font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
-@media (min-width: 2300px) { .mn .frame-fl-word { display: inline; } }
+.mn .frame-fl-word { font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .frame-fleet[data-tight] .frame-fl-word { display: none; }
 .mn .frame-fl[data-zero] { opacity: 0.4; }
 .mn .frame-fl[data-zero] .mn-state-glyph { animation: none; }
 

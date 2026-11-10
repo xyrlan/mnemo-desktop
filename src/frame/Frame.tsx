@@ -10,11 +10,12 @@ import { CommandLine, escapeCommand, openCommand } from '../command'
 import { Starfield } from '../ds'
 import { Instruments } from '../instruments'
 import { OrbitView } from '../orbit'
+import { Panels } from '../panels'
 import { nextPending } from '../pending'
 import { Roster } from '../roster'
 import { startRuntime } from '../runtime'
 import { ScoreView } from '../score'
-import { Stage } from '../stage'
+import { Stage, focusTerminal as focusStage } from '../stage'
 import { go, routeStore, useRoute, type View } from '../world/route'
 import { startWorld } from '../world/start'
 import { rosterOrder, sessionOf, useWorld, worldSource, worldStore } from '../world/store'
@@ -168,8 +169,13 @@ export function Frame() {
       nextPending,
       answerArmed,
       replyArmed,
-      focusTerminal: () => focusTerminal(root.current),
-      leaveField: () => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined),
+      focusTerminal: () => focusTerminal(root.current, focusStage),
+      leaveField: () => {
+        // A field that already handed the caret on is left alone: the stage's box gives it to
+        // the stage, so the stage's own keys go on working.
+        const at = document.activeElement
+        if (at instanceof HTMLElement && whereOf(at) === 'field') at.blur()
+      },
       openCommand: () => openCommand(),
       escapeCommand,
       sheet: { isOpen: () => sheetStore.getState().open, set: (open) => sheetStore.setState({ open }) },
@@ -224,6 +230,8 @@ export function Frame() {
         <Unread />
         <main className="frame-main">
           <Views />
+          {/* The open panel, over the views and under the top bar and the foot. */}
+          <Panels />
         </main>
         <footer className="frame-foot">
           <CommandLine />

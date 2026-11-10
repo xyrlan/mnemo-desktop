@@ -1,0 +1,41 @@
+/* The sheet every panel opens in. A panel's own styles live in its folder, prefixed with its id. */
+
+.mn-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(44em, 92vw);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: rgb(0 0 0 / 0.86);
+  backdrop-filter: blur(14px);
+  border-left: 1px solid var(--line-2);
+  box-shadow: -40px 0 80px rgb(0 0 0 / 0.6);
+  animation: mn-panel-in var(--slow) var(--ease);
+}
+.mn-panel[data-size='wide'] { width: min(84em, 96vw); }
+
+@keyframes mn-panel-in {
+  from { transform: translateX(2em); opacity: 0; }
+}
+
+.mn-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2em;
+  padding: 1.4em 1.6em 1.1em;
+  border-bottom: 1px solid var(--line);
+}
+.mn-panel-title {
+  margin: 0 0 0.35em;
+  font: 700 1.5em/1 var(--display);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  text-shadow: var(--glow-soft);
+}
+.mn-panel-close { display: inline-flex; align-items: center; gap: 0.6em; color: var(--ink-3); font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn-panel-close:hover { color: var(--ink); }
+.mn-panel-body { min-height: 0; overflow: auto; padding: 1.4em 1.6em 2em; }

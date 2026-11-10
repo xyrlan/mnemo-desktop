@@ -193,3 +193,36 @@ rebuild the world when nothing changed, and it must not hand views a new object 
 session whose data did not change. A script or a test compares the world it builds against
 `docs/superpowers/prototypes/redesign/capture.py` on the same machine and says where they
 differ and why.
+
+## The panels (dispatched beside the first wave)
+
+`src/panels/index.tsx` is the host: a panel registers itself with `registerPanel` from its
+own folder, `route.panel` names the open one, Esc closes it. A panel is what one of the
+ship's windows becomes: the same capability, in the new identity, with fewer steps.
+
+Panels are the one part of the front that does not read `World`: they show the projects,
+the vault and the settings, which are not sessions. Each uses the stores and clients the
+ship's window uses today (the table below), unchanged, and takes none of that window's JSX.
+Where a window kept a store or a hook inside a view file, the panel moves it into its own
+folder and leaves the window's copy alone: the ship still runs on this branch.
+
+Everything in "What every piece holds to" applies, with two differences: a panel's preview
+scenarios answer the commands its stores ask (the ship's own scenarios for these windows in
+`tools/preview/scenarios/` show how, and `next()` takes those answers as its second
+argument), and its tests run on the stores, not on the sample world.
+
+| panel | what it must do | where the ship does it today |
+| --- | --- | --- |
+| `projects` | every repo the app knows; a new session, a shell and its saved commands in one keystroke each; add, clone, open a folder | `src/nexus/windows/projects/`, `homeStore`, `settingsStore`, `quick-commands/` |
+| `missions` | each repo's open issues and pull requests; dispatch one or several with model, effort, may and advisor; dispatch a contract; what was launched and how it is going, kept while the app runs; land a finished mission | `src/nexus/windows/missions/`, `homeStore`, `missionStore`, `cockpitStore`, `github/actions.ts`, `tasks/model.ts` |
+| `changes` | the files a session's worktree changed, and the diff of each (a wide panel) | `src/nexus/windows/changes/`, `src/nexus/drawer/changes.tsx`, `diff/` |
+| `memory` | the vault: activity, health, pages, inbox; the rules by project (a wide panel) | `src/nexus/windows/memory/`, `vault`, `rightbar/memory.ts`, `memory/client.ts` |
+| `learned` | what mnemo learned lately, kept or dropped | `src/nexus/windows/learned/`, `learned/` |
+| `accounts` | each account, its plan windows and resets, switch, add, rename, remove, sign in | `src/nexus/windows/accounts/`, `src/nexus/accounts/`, `accounts/` |
+| `setup` | the tools the app needs, installed or not, and installing them | `src/nexus/windows/setup/`, `setup/` |
+| `settings` | every setting the ship's window has, and the about line | `src/nexus/windows/settings/`, `settings/`, `about/` |
+
+Acting on sessions from a panel goes through `actions()` (a new session, a shell, a
+dispatch): `actions().newSession(root)`, `newShell(root)`, `dispatch(root, issues, options)`,
+`dispatchContract(root, path, options)`, `land(root, feature)`. In a preview scenario those
+are the sample world's and only record what was asked.

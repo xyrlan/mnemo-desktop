@@ -1,0 +1,110 @@
+/* What waits: the card (src/pending/PendingCard.tsx) and the top bar's count
+   (WaitingCount.tsx). Scoped to the frame's `.mn` root; sizes in em, so the frame's three root
+   sizes scale it and a host that sets a smaller type gets a smaller card. Nothing here moves at
+   rest: the entrance and the echo play once, on transform and opacity. */
+
+/* The kind's signal, which is the hue of the state it puts its session in. */
+.mn .pending { --k: var(--need); }
+.mn .pending[data-tone='ready'] { --k: var(--ready); }
+.mn .pending[data-tone='stalled'] { --k: var(--stalled); }
+
+.mn .pending-kind { display: inline-flex; align-items: baseline; gap: 0.55em; flex: none; font: 700 0.72em/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--k); }
+.mn .pending-shape { flex: none; width: 0.9em; height: 0.9em; fill: currentColor; align-self: center; }
+.mn .pending-age { flex: none; margin-left: auto; font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* A pull request's checks: a shape and the words, then the hue. */
+.mn .pending-ci { flex: none; font: 500 0.82em/1 var(--text); color: var(--ink-3); white-space: nowrap; }
+.mn .pending-ci::before { content: ''; display: inline-block; width: 0.55em; height: 0.55em; border: 1px solid currentColor; border-radius: 50%; }
+.mn .pending-ci > span { margin-left: 0.5em; }
+.mn .pending-ci[data-ci='green'] { color: var(--ready); }
+.mn .pending-ci[data-ci='green']::before { background: currentColor; }
+.mn .pending-ci[data-ci='red'] { color: var(--stalled); }
+.mn .pending-ci[data-ci='red']::before { background: currentColor; border-radius: 0; }
+.mn .pending-ci[data-ci='running'] { color: var(--working); }
+.mn .pending-ci[data-ci='running']::before { border-style: dashed; }
+
+/* Listed: one line under its session, until it is the armed one. */
+.mn .pending-line { container-type: inline-size; contain-intrinsic-inline-size: 24em; display: flex; align-items: baseline; gap: 0.7em; width: 100%; min-width: 0; padding: 0.45em 0.75em; border: 1px solid var(--line); border-left: 2px solid var(--k); color: var(--ink-3); text-align: left; white-space: nowrap; transition: border-color var(--fast), background var(--fast); }
+.mn .pending-line:hover, .mn .pending-line:focus-visible { border-color: var(--line-2); border-left-color: var(--k); background: var(--surface); outline: none; }
+.mn .pending-pr { flex: none; font: 0.86em/1 var(--mono); color: var(--ink-2); }
+.mn .pending-line-text { flex: 1 1 0; min-width: 2em; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); font-size: 0.92em; }
+.mn .pending-count { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 0.82em; color: var(--ink-3); }
+.mn .pending-line .pending-age { margin-left: 0; min-width: 2.4em; text-align: right; }
+/* A narrow entry keeps the kind, the words and the age, and lets the rest go. */
+@container (max-width: 30em) { .mn .pending-line .pending-count { display: none; } }
+@container (max-width: 24em) { .mn .pending-line .pending-ci > span { display: none; } }
+.mn .pending-line[data-settled] .pending-count { display: block; }
+.mn .pending-line[data-settled] { border-left-color: var(--ink-3); }
+.mn .pending-line[data-settled] .pending-kind { color: var(--ink-3); }
+
+/* Armed: the whole of it, with its choices as keys. */
+.mn section.pending { position: relative; min-width: 0; padding: 0.75em 0.95em 0.9em; border: 1px solid var(--k); border-left-width: 2px; background: rgb(0 0 0 / 0.86); box-shadow: 0 0 1.6em -0.45em var(--k), inset 0 0 2.2em -1.3em var(--k); text-align: left; }
+.mn section.pending[data-entered] { animation: pending-arm var(--slow) var(--ease); }
+@keyframes pending-arm { from { transform: translateX(-0.4em); opacity: 0.4; } }
+
+.mn .pending-head { display: flex; align-items: baseline; gap: 0.8em; }
+.mn .pending-text { max-width: 54em; max-height: 10.5em; margin: 0.6em 0 0.75em; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--ink); line-height: 1.5; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.mn .pending-text[data-printed] { font: 0.92em/1.55 var(--mono); }
+.mn .pending-detail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35em 1em; margin: -0.35em 0 0.75em; font: 0.86em/1.4 var(--mono); color: var(--ink-3); }
+.mn .pending-link { font: inherit; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 0.25em; overflow-wrap: anywhere; text-align: left; }
+.mn .pending-link:hover, .mn .pending-link:focus-visible { color: var(--ink); text-decoration-color: var(--ink); outline: none; }
+
+/* As many columns as the card has room for: one in a roster entry, a row at the stage's foot. */
+.mn .pending-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18em), 1fr)); gap: 0.4em; }
+.mn .pending-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; align-content: start; gap: 0.15em 0.7em; min-width: 0; padding: 0.5em 0.8em 0.5em 0.5em; border: 1px solid var(--line); border-radius: 0.4em; color: var(--ink-2); text-align: left; transition: border-color var(--fast), background var(--fast), opacity var(--fast); }
+.mn .pending-choice:hover:not(:disabled), .mn .pending-choice:focus-visible { border-color: var(--ink-2); background: var(--surface); outline: none; }
+.mn .pending-choice:disabled { cursor: default; opacity: 0.4; }
+.mn .pending-choice[data-sending] { opacity: 1; border-color: var(--k); }
+.mn .pending-label { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.mn .pending-hint { grid-column: 2; font-size: 0.88em; line-height: 1.4; color: var(--ink-3); overflow-wrap: anywhere; }
+/* A filled key goes on; a hollow one turns back (deny, stop, send back): told apart without the hue. */
+.mn .pending-choice .mn-kbd { font-size: 0.78em; color: #000; background: var(--k); border-color: var(--k); }
+.mn .pending-choice[data-tone='bad'] .mn-kbd { color: var(--ink); background: none; border-color: var(--ink-3); }
+.mn .pending-choice[data-tone='bad'] .pending-label { color: var(--ink-2); }
+.mn .pending-own { border-style: dashed; }
+.mn .pending-own .mn-kbd { color: var(--ink-2); background: none; border-color: var(--line-2); }
+.mn .pending-own .pending-label { color: var(--ink-2); font-weight: 400; }
+.mn .pending-own .pending-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* In your words: the field stands where its key stood, across the card. */
+.mn .pending-words { margin-top: 0.4em; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35em 0.7em; padding: 0.55em 0.8em; border: 1px solid var(--ink-2); border-radius: 0.4em; background: var(--surface); }
+.mn .pending-words:focus-within { border-color: var(--ink); box-shadow: var(--glow-soft); }
+.mn .pending-prompt { flex: none; color: var(--k); font: 700 1em/1.5 var(--mono); }
+.mn .pending-words textarea { flex: 1 1 16em; min-width: 0; max-height: 9em; padding: 0; border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: inherit; line-height: 1.5; field-sizing: content; }
+.mn .pending-words textarea::placeholder { color: var(--ink-3); }
+.mn .pending-words-keys { display: inline-flex; align-items: center; gap: 0.5em; flex: none; margin-left: auto; font-size: 0.82em; color: var(--ink-3); white-space: nowrap; }
+.mn .pending-words-keys em { margin-right: 0.6em; font-style: normal; color: var(--ink-2); }
+.mn .pending-words[data-sending] { opacity: 0.6; }
+
+/* Answered: the card goes quiet and says what was taken. */
+.mn section.pending[data-settled] { border-color: var(--line-2); border-left-color: var(--ink-2); box-shadow: none; }
+.mn section.pending[data-settled] .pending-kind { color: var(--ink-3); }
+.mn section.pending[data-settled] .pending-text { color: var(--ink-3); }
+.mn .pending-settled { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.75em; margin: 0; color: var(--ink-3); }
+.mn .pending-settled > i { font-style: normal; color: var(--ink); }
+.mn .pending-settled-word { font: 700 0.72em/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2); }
+.mn .pending-settled-said { max-height: 4.5em; overflow: hidden; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.mn .pending-settled-note { font-size: 0.88em; overflow-wrap: anywhere; }
+
+/* Refused: said where the answer was given, as the action said it. */
+.mn .pending-trouble { display: flex; align-items: baseline; gap: 0.6em; margin: 0.65em 0 0; padding: 0.4em 0.7em; border-left: 2px solid var(--stalled); background: var(--surface); color: var(--ink); font-size: 0.92em; line-height: 1.45; overflow-wrap: anywhere; }
+.mn .pending-trouble > i { flex: none; font-style: normal; color: var(--stalled); }
+
+/* The top bar's count. */
+.mn .pending-waiting { position: relative; display: inline-flex; align-items: center; gap: 0.75em; flex: none; height: 2.8em; padding: 0 1.1em 0 1em; border: 1px solid var(--need); border-radius: 99em; color: var(--need); font: 600 0.72em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap; box-shadow: 0 0 1.6em color-mix(in srgb, var(--need) 22%, transparent), inset 0 0 1em color-mix(in srgb, var(--need) 8%, transparent); transition: box-shadow var(--fast); }
+.mn button.pending-waiting:hover, .mn button.pending-waiting:focus-visible { outline: none; box-shadow: 0 0 2em color-mix(in srgb, var(--need) 45%, transparent), inset 0 0 1em color-mix(in srgb, var(--need) 14%, transparent); }
+.mn .pending-waiting > b { font-size: 1.6em; letter-spacing: 0; }
+.mn .pending-waiting .mn-kbd { font-size: 1em; color: inherit; border-color: currentColor; }
+.mn .pending-marks { display: inline-flex; align-items: center; gap: 0.6em; letter-spacing: 0; }
+.mn .pending-marks > .pending-shape { color: var(--need); opacity: 0.45; transition: opacity var(--fast), transform var(--fast); }
+.mn .pending-marks > .pending-shape[data-tone='ready'] { color: var(--ready); }
+.mn .pending-marks > .pending-shape[data-tone='stalled'] { color: var(--stalled); }
+.mn .pending-marks > .pending-shape[data-on] { opacity: 1; transform: scale(1.3); filter: drop-shadow(0 0 0.3em currentColor); }
+.mn .pending-more { color: var(--ink-3); }
+.mn .pending-waiting[data-clear] { border-color: var(--line-2); color: var(--ink-3); box-shadow: none; }
+.mn .pending-clear-mark { width: 0.8em; height: 0.8em; border: 1px solid var(--ink-3); border-radius: 50%; }
+/* The answer that was just taken, said once over the count, then gone. */
+.mn .pending-echo { position: absolute; inset: -1px; display: flex; align-items: center; justify-content: center; gap: 0.6em; padding: 0 1em; border: 1px solid var(--ink-2); border-radius: inherit; background: var(--void); color: var(--ink); opacity: 0; pointer-events: none; animation: pending-echo 2600ms var(--ease) both; }
+.mn .pending-echo > i { flex: none; font-style: normal; }
+.mn .pending-echo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes pending-echo { 0% { opacity: 0; transform: scale(0.96); } 8%, 78% { opacity: 1; transform: none; } 100% { opacity: 0; } }
