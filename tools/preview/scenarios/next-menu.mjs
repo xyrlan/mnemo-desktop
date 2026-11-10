@@ -151,8 +151,8 @@ scenario('next-menu-chip', { ...console_(), drive: (page) => rightClick(page, `[
 scenario('next-menu-edge', {
   ...next({ v: 'orbit' }),
   drive: async (page) => {
-    // As far into the corner as a session is drawn, the menu asked for by key against it, then
-    // the same at the pointer: both stay inside the window.
+    // Asked for three pixels from the window's corner, as a right-click there would: all of it
+    // stays inside the window.
     const size = page.viewportSize()
     await page.evaluate(async (id) => {
       const { openMenu } = await import('/src/menu/index.ts')

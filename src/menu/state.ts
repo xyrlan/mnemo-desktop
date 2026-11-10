@@ -6,7 +6,7 @@
 import { create } from 'zustand'
 import { sayOutcome } from '../command/line'
 import type { Outcome } from '../world/actions'
-import { keyOf, type Item, type Target } from './model'
+import type { Item, Target } from './model'
 
 /** Where the menu stands: at the pointer, or against the element that draws what it is on. */
 export type Place = { x: number; y: number } | { box: { left: number; top: number; right: number; bottom: number } }
@@ -55,12 +55,6 @@ export function closeMenu(): void {
   const at = typeof document === 'undefined' ? null : document.activeElement
   menuStore.setState({ open: null, ...REST })
   if (to instanceof HTMLElement && to.isConnected && (!at || at === document.body || inMenu(at))) to.focus({ preventScroll: true })
-}
-
-/** Whether the menu is open on this very thing. */
-export const isOpenOn = (target: Target): boolean => {
-  const open = menuStore.getState().open
-  return !!open && keyOf(open.target) === keyOf(target)
 }
 
 /** Puts an item in hand. Looking away from a question takes it back, and from a line being

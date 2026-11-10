@@ -245,7 +245,7 @@ async function copyPart(texts: Record<string, string>, parts: Part[], part: stri
 }
 
 /** How many frames the Missions panel is given to draw a project's part: under a second. */
-export const MISSIONS_FRAMES = 40
+const MISSIONS_FRAMES = 40
 
 /** The search for a project's part of the Missions panel that is going on: a newer one ends it. */
 let looking = 0
