@@ -53,7 +53,8 @@
 @media (min-width: 2300px) { .mn { font-size: 16px; } }
 
 .mn *, .mn *::before, .mn *::after { box-sizing: border-box; }
-.mn button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+/* `:where` keeps this reset under any class: a button that is a pill keeps the pill's type. */
+:where(.mn) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: inherit; cursor: pointer; }
 .mn ::selection { background: rgb(255 255 255 / 0.22); }
 
 .mn [data-state='need'] { --state: var(--need); }
@@ -72,40 +73,7 @@
   animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
 }
 
-/* The primitives of src/ds/index.tsx */
-.mn-label { font: 600 0.72em/1 var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
-.mn-num { font-family: var(--display); font-variant-numeric: tabular-nums; }
-.mn-mono { font-family: var(--mono); }
+/* What takes the keyboard says so, the same way everywhere. */
+.mn :focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
 
-.mn-state { display: inline-flex; align-items: baseline; gap: 0.45em; color: var(--state); white-space: nowrap; }
-.mn-state-glyph { display: inline-block; font-style: normal; line-height: 1; }
-.mn-state[data-state='working'] .mn-state-glyph { animation: mn-breathe 1.6s ease-in-out infinite; }
-.mn-state[data-state='need'] .mn-state-glyph { animation: mn-blink 1.2s steps(2, end) infinite; }
-.mn-state-word { font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
-@keyframes mn-breathe { 50% { opacity: 0.45; transform: scale(0.82); } }
-@keyframes mn-blink { 50% { opacity: 0.4; } }
-
-.mn-kbd { display: inline-grid; place-items: center; min-width: 1.6em; height: 1.6em; padding: 0 0.4em; border: 1px solid var(--line-2); border-radius: 0.3em; font: 600 0.72em/1 var(--display); letter-spacing: 0.06em; color: var(--ink-2); }
-
-.mn-pill { display: inline-flex; align-items: center; gap: 0.5em; height: 2em; padding: 0 0.9em; border: 1px solid var(--line-2); border-radius: 999px; font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; transition: background var(--fast), color var(--fast), border-color var(--fast); }
-.mn-pill[data-active='true'] { background: var(--ink); color: var(--void); border-color: var(--ink); box-shadow: var(--glow-soft); }
-button.mn-pill:hover { border-color: var(--ink); color: var(--ink); }
-.mn-pill[data-tone='need'] { border-color: var(--need); color: var(--need); }
-.mn-pill[data-tone='memory'] { border-color: var(--memory); color: var(--memory); }
-
-.mn-meter { display: inline-block; position: relative; height: 2px; background: var(--line); vertical-align: middle; }
-.mn-meter > i { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width var(--slow) var(--ease); }
-.mn-meter[data-tone='hot'] > i { box-shadow: var(--glow-soft); }
-
-.mn-ring { display: inline-grid; place-items: center; position: relative; }
-.mn-ring > svg { position: absolute; inset: 0; transform: rotate(-90deg); }
-.mn-ring circle { fill: none; }
-.mn-ring .track { stroke: var(--line); }
-.mn-ring .fill { stroke: var(--ink); stroke-linecap: round; transition: stroke-dashoffset var(--slow) var(--ease); }
-
-.mn-figure { display: inline-block; color: var(--ink); }
-.mn-figure line { stroke: currentColor; stroke-width: 1; opacity: 0.55; }
-.mn-figure circle { fill: currentColor; }
-
-.mn-stars { position: absolute; inset: 0; pointer-events: none; }
-.mn-lattice { display: block; width: 100%; height: 100%; }
+/* The primitives' own styles are in primitives.css, which src/ds/index.tsx brings with it. */
