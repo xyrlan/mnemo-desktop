@@ -295,10 +295,14 @@ describe('starting', () => {
     const o = { model: 'opus', effort: 'high', may: 'pr', advisor: 'fable' }
     expect(await b.actions.dispatch('/r', [12, 14], o)).toEqual({ ok: true, note: 'Dispatched #12 #14.' })
     expect(await b.actions.dispatchContract('/r', 'docs/contracts/x.md', { may: 'push' })).toEqual({ ok: true, note: 'Dispatched docs/contracts/x.md.' })
-    expect(b.did).toEqual([`dispatch /r 12,14 ${JSON.stringify(o)}`, 'contract /r docs/contracts/x.md {"may":"push"}'])
+    const ran = [`dispatch /r 12,14 ${JSON.stringify(o)}`, 'contract /r docs/contracts/x.md {"may":"push"}']
+    expect(b.did).toEqual(ran)
+    // With no issue and with no contract, nothing runs.
+    expect((await b.actions.dispatch('/r', [])).ok).toBe(false)
+    expect((await b.actions.dispatchContract('/r', '  ')).ok).toBe(false)
+    expect(b.did).toEqual(ran)
     b.fail.dispatch = 'the same dispatch is already running'
     expect(await b.actions.dispatch('/r', [12])).toEqual({ ok: false, why: '#12 not dispatched: the same dispatch is already running' })
-    expect((await b.actions.dispatch('/r', [])).ok).toBe(false)
   })
 })
 
@@ -359,7 +363,10 @@ describe('what a session saw, and what opens outside', () => {
     const shot = s.web.shots[0]
     expect(await b.actions.shot(s.id, shot.id)).toBe(`data:${shot.mediaType};base64,AAAA`)
     expect(b.did).toEqual([`shot ${s.id} ${s.account} ${shot.id}`])
+    // One the session never took is not asked for.
     expect(await b.actions.shot(s.id, 'gone.png')).toBeNull()
+    expect(await b.actions.shot('nobody', shot.id)).toBeNull()
+    expect(b.did).toHaveLength(1)
     b.fail.shot = 'not read yet'
     expect(await b.actions.shot(s.id, shot.id)).toBeNull()
   })

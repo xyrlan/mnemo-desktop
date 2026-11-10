@@ -77,7 +77,7 @@ describe('a permission prompt in a terminal of the app', () => {
     const idle = pane(box(''))
     await expect(pressPermission(idle.d, 7, 'yes', null)).rejects.toThrow('No permission prompt is on its screen')
     const ended = pane(PERMISSION, false)
-    await expect(pressPermission(ended.d, 7, 'yes', CARD)).rejects.toThrow('Nothing runs in its terminal')
+    await expect(pressPermission(ended.d, 7, 'yes', CARD)).rejects.toThrow('Claude is not running in its terminal')
     const unknown = pane(PERMISSION, new Error('Cannot tell whether Claude is running in that terminal'))
     await expect(pressPermission(unknown.d, 7, 'yes', CARD)).rejects.toThrow('Cannot tell')
     const unread = pane(undefined)

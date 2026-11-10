@@ -47,8 +47,9 @@ export type Way =
 
 /** What `LiveTerminal` draws for a session. */
 export type TerminalView =
-  /** `pty`: the terminal to draw; null while its attach starts. */
-  | { state: 'held'; tab: string; pty: number | null; error: string | null }
+  /** `key`: the session host's key, the same whatever its tab is called. `pty`: the terminal to
+   *  draw; null while its attach starts. */
+  | { state: 'held'; tab: string; key: string; pty: number | null; error: string | null }
   /** A child about to be attached to (`ATTACH_SETTLE_MS`). */
   | { state: 'waiting' }
   /** Its terminal was let go while it was on stage; `open` takes it back. */
@@ -71,6 +72,9 @@ export type HostingDeps = {
     endSession(pane: PaneId): Promise<void>
   }
   route: { get(): Route; subscribe(fn: () => void): () => void }
+  /** The session key of the terminal `LiveTerminal` draws now, or null: what is on screen is what
+   *  is drawn. Without it, the stage is taken to draw what the route names. */
+  drawn?(): string | null
   /** Hears the world and the app's terminals change. */
   watch(fn: () => void): () => void
   /** The account a session runs on, as a row that lists it says: a resume runs there. */
@@ -97,6 +101,9 @@ export function createHosting(d: HostingDeps) {
   /** Tabs of the attaches opened for the stage, oldest first. */
   let attached: string[] = []
   let timer: unknown = null
+  /** A hold is being made: the host has the session before the tab says so, and a look in
+   *  between would see a terminal with no tab. The look that follows sees both. */
+  let showing = false
   const listeners = new Set<() => void>()
   const tell = () => listeners.forEach((fn) => fn())
 
@@ -120,7 +127,7 @@ export function createHosting(d: HostingDeps) {
     const all = tabs()
     const s = session(id)
     const sid = s?.id ?? id
-    const direct = all.find((t) => t.id === sid || t.id === id) ?? all.find((t) => t.sessionId !== null && t.sessionId === sid)
+    const direct = all.find((t) => t.id === sid) ?? all.find((t) => t.sessionId !== null && t.sessionId === sid)
     if (direct) return direct
     if (!s) return null
     const pane = d.sessions.paneOf(s.id)
@@ -173,17 +180,24 @@ export function createHosting(d: HostingDeps) {
       cwd: s.cwd ?? child?.cwd ?? null,
       ...(source ? { source } : {}),
     }
-    d.drawer.open(tab, way.kind === 'pane' ? { pane: way.pane } : { child: way.child })
-    if (way.kind === 'attach') {
-      attached = [...attached.filter((id) => id !== tab.id), tab.id]
-      trim()
+    showing = true
+    try {
+      d.drawer.open(tab, way.kind === 'pane' ? { pane: way.pane } : { child: way.child })
+      if (way.kind === 'attach') {
+        attached = [...attached.filter((id) => id !== tab.id), tab.id]
+        trim()
+      }
+    } finally {
+      showing = false
     }
     return heldTab(s.id)
   }
 
-  /** The drawer's state says what is on screen: the staged session's tab shown, or nothing. */
+  /** The drawer's state says what is on screen: the staged session's tab while its terminal is
+   *  drawn, or nothing. */
   function settle() {
-    const tab = staged ? heldTab(staged) : null
+    const on = staged ? heldTab(staged) : null
+    const tab = on && (!d.drawn || d.drawn() === on.key) ? on : null
     const n = d.nexus.getState()
     if (tab) {
       if (n.activeTab !== tab.id || n.collapsed) n.activateTab(tab.id)
@@ -199,6 +213,7 @@ export function createHosting(d: HostingDeps) {
   /** Reads the route and holds what the stage needs. Run at every change of the route, the world,
    *  the app's terminals and the tabs; each run is cheap and changes nothing when nothing did. */
   function look() {
+    if (showing) return
     const r = d.route.get()
     const id = r.view === 'console' ? r.session : null
     if (id !== staged) {
@@ -249,7 +264,7 @@ export function createHosting(d: HostingDeps) {
       const tab = heldTab(id)
       if (tab) {
         const h = d.host.getState().sessions[tab.key!]
-        return { state: 'held', tab: tab.id, pty: h?.pty ?? null, error: h?.error ?? null }
+        return { state: 'held', tab: tab.id, key: tab.key!, pty: h?.pty ?? null, error: h?.error ?? null }
       }
       const s = session(id)
       if (!s) return { state: 'none' }

@@ -57,7 +57,7 @@ describe('the stage', () => {
     const pane = b.run(s)
     expect(b.nexus().tabs).toEqual([])
     b.go({ view: 'console', session: s.id })
-    expect(b.hosting.view(s.id)).toEqual({ state: 'held', tab: s.id, pty: pane, error: null })
+    expect(b.hosting.view(s.id)).toEqual({ state: 'held', tab: s.id, key: `pane:${pane}`, pty: pane, error: null })
     expect(onScreen()).toEqual([s.id])
     expect(b.pty.log).toEqual([])
   })
@@ -92,8 +92,10 @@ describe('the stage', () => {
     const s = b.session('Tenant in every cache key')
     b.go({ view: 'console', session: s.id })
     for (let i = 0; i < 5; i++) b.changed()
+    expect(vi.getTimerCount()).toBe(1)
     await settle()
     for (let i = 0; i < 5; i++) b.changed()
+    expect(vi.getTimerCount()).toBe(0)
     await settle()
     expect(spawns()).toBe(1)
   })
@@ -127,7 +129,7 @@ describe('the stage', () => {
   test('a shell the app holds is shown by its own id', () => {
     b.drawer.open({ id: 'session:90', kind: 'session', key: null, readOnly: null, label: 'shell', sessionId: null, cwd: '/Users/you/work' }, { pane: 90 })
     b.go({ view: 'console', session: 'session:90' })
-    expect(b.hosting.view('session:90')).toEqual({ state: 'held', tab: 'session:90', pty: 90, error: null })
+    expect(b.hosting.view('session:90')).toEqual({ state: 'held', tab: 'session:90', key: 'pane:90', pty: 90, error: null })
     expect(onScreen()).toEqual(['session:90'])
     expect(b.hosting.paneOf('session:90')).toBe(90)
   })
@@ -159,6 +161,20 @@ describe('the stage', () => {
 })
 
 describe('what the rest of the app reads', () => {
+  test('on screen is what the stage draws: a terminal held but not drawn yet is not', () => {
+    b.stop()
+    b = hostingBench(undefined, { drawn: null })
+    const s = b.session('Order status history')
+    const pane = b.run(s)
+    b.go({ view: 'console', session: s.id })
+    expect(b.hosting.view(s.id)).toMatchObject({ state: 'held' })
+    expect(onScreen()).toEqual([])
+    b.draw(`pane:${pane}`)
+    expect(onScreen()).toEqual([s.id])
+    b.draw(null)
+    expect(onScreen()).toEqual([])
+  })
+
   test('dictation types into the terminal on stage, and nowhere when none is', () => {
     const s = b.session('Order status history')
     const pane = b.run(s)

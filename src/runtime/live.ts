@@ -7,6 +7,8 @@
 // restore of the tabs kept from the last run, the session ids learned from running terminals;
 // those start as that module loads, flag or no flag). Nothing of it is changed.
 
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { invoke } from '@tauri-apps/api/core'
 import { homeDir } from '@tauri-apps/api/path'
 import { activeAgent } from '../agent/active'
@@ -40,7 +42,6 @@ import { sessionHost } from '../session/app-host'
 import { settingsStore } from '../settings/app-store'
 import { setup } from '../setup/app-store'
 import { afterStartup } from '../shell/after-startup'
-import { mountInSlot } from '../shell/slots'
 import TerminalPane from '../terminal/view'
 import { setActions, type DispatchOptions } from '../world/actions'
 import { go, routeStore } from '../world/route'
@@ -107,8 +108,27 @@ const knownRoots = () => knownRepos(fleetStore.getState().repos, homeStore.getSt
 
 let settingsRead = false
 
+/** The app's one toaster, which the ship's view mounted in the shell's slot: every `toast(...)`
+ *  lands in it. Here it is drawn in a root of the runtime's own, beside the page: a shell slot
+ *  is for a folder `App.tsx` imports a `view.tsx` of, and the runtime is started by the frame. */
+function toaster(): () => void {
+  const at = document.createElement('div')
+  at.setAttribute('data-runtime-toasts', '')
+  document.body.appendChild(at)
+  const root = createRoot(at)
+  root.render(createElement(NexusToasts))
+  // Not while React is committing the tree that asked for the stop.
+  return () =>
+    void setTimeout(() => {
+      root.unmount()
+      at.remove()
+    }, 0)
+}
+
 /** Starts the runtime. Returns how to stop it. */
 export function start(): () => void {
+  // The hosting asks what is drawn; the terminals ask the hosting what to draw.
+  const drawing: { terminals?: ReturnType<typeof createTerminals> } = {}
   const hosting = createHosting({
     world,
     snapshot,
@@ -117,8 +137,10 @@ export function start(): () => void {
     drawer: liveDrawer.drawer,
     sessions: liveSessions,
     route: { get: () => routeStore.getState().route, subscribe: (fn) => routeStore.subscribe(fn) },
+    drawn: () => drawing.terminals?.drawn() ?? null,
     watch(fn) {
       const stops = [
+        drawing.terminals?.onDrawn(fn) ?? (() => {}),
         worldStore.subscribe(fn),
         missionStore.subscribe((s, p) => void (s.snapshot !== p.snapshot && fn())),
         layout.subscribe((s, p) => void (s.panes !== p.panes && fn())),
@@ -137,10 +159,7 @@ export function start(): () => void {
     terminal: TerminalPane,
     close: (tab) => void liveDrawer.drawer.close(tab),
   })
-  const Pool = terminals.Pool
-  function RuntimeTerminals() {
-    return <Pool />
-  }
+  drawing.terminals = terminals
 
   /** On Console's stage: a session of the world, or a terminal the app holds by its own id. */
   const stage = (id: string) => go({ view: 'console', session: sessionOf(world(), id)?.id ?? id, pending: null, panel: null })
@@ -272,8 +291,7 @@ export function start(): () => void {
   })
 
   const stops = [
-    mountInSlot('overlay', NexusToasts),
-    mountInSlot('overlay', RuntimeTerminals),
+    toaster(),
     setActions(actions),
     hosting.start(),
     stopFirstRun,

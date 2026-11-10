@@ -70,8 +70,10 @@ describe('once one runs', () => {
     expect(canHost(session)).toBe(true)
     expect(hosts.result.current).toBe(true)
     expect(list.result.current.map((h) => h.id)).toEqual(['session:3'])
+    // The same list while nothing changed, however often its reader is drawn.
     const before = list.result.current
     f.tell()
+    list.rerender()
     expect(list.result.current).toBe(before)
 
     expect(focusTerminal()).toBe(true)

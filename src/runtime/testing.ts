@@ -80,8 +80,9 @@ export function fakePty() {
 
 /** The hosting, over the real drawer, session host and nexus store. `run(session, pane)` says one
  *  of the app's terminals runs that session; `go` moves the route; `changed` says the world or
- *  the terminals did. */
-export function hostingBench(world: World = liveWorld()) {
+ *  the terminals did. With a `stage`, what is on screen is what `draw` says the stage draws;
+ *  without one, what the route names. */
+export function hostingBench(world: World = liveWorld(), stage?: { drawn: string | null }) {
   /** `agentFor`: the session a row says runs on another account. */
   const state: { world: World; snapshot: Snapshot; agentFor?: string } = { world, snapshot: snapshotOf(world) }
   const p = fakePty()
@@ -124,6 +125,7 @@ export function hostingBench(world: World = liveWorld()) {
     drawer,
     sessions,
     route: { get: () => route, subscribe: (fn) => (routed.add(fn), () => void routed.delete(fn)) },
+    ...(stage ? { drawn: () => stage.drawn } : {}),
     watch: (fn) => (watching.add(fn), () => void watching.delete(fn)),
     agentOf: (id) => (id === state.agentFor ? { kind: 'grok', config_dir: '/Users/you/.grok-work' } : null),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -153,6 +155,11 @@ export function hostingBench(world: World = liveWorld()) {
     go(patch: Partial<Route>) {
       route = { ...route, ...patch }
       routed.forEach((fn) => fn())
+    },
+    /** The stage draws the terminal of session key `at` (a bench made with a `stage`). */
+    draw(at: string | null) {
+      if (stage) stage.drawn = at
+      watching.forEach((fn) => fn())
     },
     /** The world, the snapshot or the terminals changed. */
     changed() {

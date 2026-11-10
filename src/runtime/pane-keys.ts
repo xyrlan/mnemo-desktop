@@ -27,7 +27,7 @@ export type PaneDeps = {
 
 /** The screen of a pane that still runs its agent. Rejects, nothing typed, when it does not. */
 async function screenOf(d: PaneDeps, pane: number): Promise<string[]> {
-  if (!(await d.runsClaude(pane))) throw new Error('Nothing runs in its terminal any more: nothing was typed.')
+  if (!(await d.runsClaude(pane))) throw new Error('Claude is not running in its terminal: nothing was typed.')
   const lines = await d.screen(pane)
   if (!lines) throw new Error('Its screen could not be read: answer it in its terminal.')
   return lines

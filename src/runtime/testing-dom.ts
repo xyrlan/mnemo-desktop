@@ -38,8 +38,10 @@ export function renderHook<T>(hook: () => T) {
     result.current = hook()
     return null
   }
-  const r = render(createElement(Probe))
-  return { result, unmount: r.unmount }
+  let n = 0
+  const r = render(createElement(Probe, { key: 'probe' }))
+  // Drawn again with nothing changed, as a parent's render would.
+  return { result, rerender: () => r.rerender(createElement(Probe, { key: 'probe', n: ++n } as object)), unmount: r.unmount }
 }
 
 /** Takes everything drawn out of the document. */
