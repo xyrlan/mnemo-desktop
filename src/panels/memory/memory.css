@@ -147,7 +147,7 @@
 /* the run bar and what ran */
 .mn .memory-foot { display: grid; gap: 0.6em; border-top: 1px solid var(--line); padding-top: 0.8em; }
 .mn .memory-runbar > .mn-label { margin-right: 0.4em; color: var(--memory); }
-.mn .memory-log { max-height: 13em; overflow: auto; display: grid; gap: 0.6em; }
+.mn .memory-log { position: relative; max-height: 13em; overflow: auto; display: grid; gap: 0.6em; }
 .mn .memory-run { display: grid; gap: 0.4em; }
 .mn .memory-why { display: grid; gap: 0.3em; padding: 0.6em 0.9em; border-left: 1px solid var(--line-2); font-size: 0.86em; }
 .mn .memory-why-row { display: flex; flex-wrap: wrap; gap: 0.2em 1em; }
@@ -162,5 +162,5 @@
   .mn .memory-tile-value { font-size: 1.25em; }
   .mn .memory-tile-detail { display: none; }
   .mn .memory-chips { max-height: 1.9em; }
-  .mn .memory-log { max-height: 8.5em; }
+  .mn .memory-log { max-height: 9.5em; }
 }

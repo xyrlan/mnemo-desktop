@@ -337,6 +337,13 @@ describe('a rule', () => {
     expect(t.external).toEqual(['https://example.org/notes'])
   })
 
+  test('a link in a page is followed from the keyboard too: Enter on it', async () => {
+    await key('Enter', document.querySelector('[data-wiki="idempotency-key"]')!)
+    expect(vault.getState().selected).toBe(RULES[1].path)
+    await key('Enter', document.querySelector('[data-href]')!)
+    expect(t.external).toEqual(['https://example.org/notes'])
+  })
+
   test('Edit and Open folder go outside the app with the page and its folder', async () => {
     await click(button('Edit'))
     await click(button('Open folder'))

@@ -267,21 +267,22 @@ function inline(nodes: Inline[], h: LinkHandlers): ReactNode {
         return <em key={i}>{inline(n.children, h)}</em>
       case 'wiki':
         return (
-          <button key={i} type="button" className="sp-md-wiki" data-wiki={n.target} onClick={() => h.onWiki(n.target)}>
+          <a key={i} className="sp-md-wiki" role="link" tabIndex={0} data-wiki={n.target} onClick={() => h.onWiki(n.target)} onKeyDown={(e) => e.key === 'Enter' && h.onWiki(n.target)}>
             {n.label}
-          </button>
+          </a>
         )
       case 'link':
         return (
-          <button key={i} type="button" className="sp-md-link" data-href={n.href} onClick={() => h.onLink(n.href)}>
+          <a key={i} className="sp-md-link" role="link" tabIndex={0} data-href={n.href} onClick={() => h.onLink(n.href)} onKeyDown={(e) => e.key === 'Enter' && h.onLink(n.href)}>
             {inline(n.children, h)}
-          </button>
+          </a>
         )
     }
   })
 }
 
-/** A vault page's body. The page's text is parsed into a tree (`vault/md.ts`) and drawn as
+/** A vault page's body. A link is an anchor without an address, so it wraps with its sentence and
+ *  the page's route (kept in the URL's hash) is never touched. The page's text is parsed into a tree (`vault/md.ts`) and drawn as
  *  elements, so none of it reaches the page as HTML. */
 export function Markdown({ text, ...h }: { text: string } & LinkHandlers) {
   return (

@@ -317,7 +317,9 @@ scenario('next-panel-memory-rule', {
     await tab('Rules')(page)
     await page.locator('[data-project="lumen-web"]').click()
     await page.locator('[data-rule="optimistic-ui-rolls-back-on-409"]').click()
-    await page.getByRole('button', { name: 'Why', exact: true }).click()
+    // Pressed where it is: Playwright's own click first scrolls its target to the middle of every
+    // box that can scroll, the frame's root among them.
+    await page.getByRole('button', { name: 'Why', exact: true }).dispatchEvent('click')
   },
 })
 scenario('next-panel-memory-pages', {

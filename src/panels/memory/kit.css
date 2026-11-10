@@ -137,7 +137,8 @@
 .mn .sp-md pre code { background: none; padding: 0; color: var(--ink-2); }
 .mn .sp-md blockquote { padding-left: 1em; border-left: 1px solid var(--line-2); color: var(--ink-3); }
 .mn .sp-md hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
-.mn .sp-md-wiki, .mn .sp-md-link { display: inline; text-align: left; border-bottom: 1px solid currentColor; line-height: 1.2; }
+.mn .sp-md-wiki, .mn .sp-md-link { cursor: pointer; border-bottom: 1px solid currentColor; }
+.mn .sp-md-wiki:focus-visible, .mn .sp-md-link:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
 .mn .sp-md-wiki { color: var(--memory); }
 .mn .sp-md-link { color: var(--ink); }
 .mn .sp-md-wiki:hover, .mn .sp-md-link:hover { text-shadow: var(--glow-soft); }

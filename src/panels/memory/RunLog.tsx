@@ -70,14 +70,15 @@ function WhyList({ entry }: { entry: LogEntry }) {
 /** Every action run from the panel, newest last. */
 export function RunLog() {
   const log = useVault((s) => s.log)
-  const end = useRef<HTMLDivElement>(null)
-  // Braced: in Chromium `scrollIntoView` returns a promise, which React would call as the cleanup.
+  const box = useRef<HTMLDivElement>(null)
+  // The newest run from its first line: its command and how it ended, then what it printed.
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'end' })
+    const last = box.current?.lastElementChild
+    if (box.current && last instanceof HTMLElement) box.current.scrollTop = last.offsetTop
   }, [log])
   if (log.length === 0) return null
   return (
-    <div className="memory-log" aria-label="Runs">
+    <div ref={box} className="memory-log" aria-label="Runs">
       {log.map((e) => {
         const r = e.result
         const ok = r?.code === 0
@@ -99,7 +100,6 @@ export function RunLog() {
           </div>
         )
       })}
-      <div ref={end} />
     </div>
   )
 }
