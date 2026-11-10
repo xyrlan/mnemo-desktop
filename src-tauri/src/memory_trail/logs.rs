@@ -28,12 +28,9 @@ pub trait Sum: Default {
 
 type Row = Map<String, Value>;
 
-/// mnemo reads its logs with undecodable bytes replaced, and so does this.
+/// The object a line holds. mnemo reads its logs with undecodable bytes replaced, and so does this.
 fn row(line: &[u8]) -> Option<Row> {
-    match serde_json::from_str(&String::from_utf8_lossy(line)).ok()? {
-        Value::Object(row) => Some(row),
-        _ => None,
-    }
+    serde_json::from_str(&String::from_utf8_lossy(line)).ok()
 }
 
 fn text<'a>(row: &'a Row, key: &str) -> Option<&'a str> {
@@ -290,6 +287,13 @@ mod tests {
         assert_eq!(r.outcomes, HashMap::from([("emitted".to_string(), 1)]));
         let alpha = PulseEvent { at, kind: "injected".into(), slug: "alpha".into(), session_id: Some("s1".into()), project: Some("app".into()) };
         assert_eq!(r.events, vec![alpha.clone(), PulseEvent { slug: "beta".into(), ..alpha }]);
+    }
+
+    #[test]
+    fn a_row_with_rules_is_emitted_whatever_reason_it_carries() {
+        let r: Reflex = sum(&[r#"{"session_id": "s", "emitted": ["a"], "silence_reason": "deduped", "ts": "2026-11-10T03:00:00Z"}"#]);
+        assert_eq!(r.outcomes, HashMap::from([("emitted".to_string(), 1)]));
+        assert_eq!((r.sessions["s"].injected.len(), r.sessions["s"].held.len()), (1, 0));
     }
 
     #[test]

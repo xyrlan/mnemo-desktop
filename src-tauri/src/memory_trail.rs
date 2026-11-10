@@ -290,10 +290,15 @@ mod tests {
 
     /// The offset is `memory_feed`'s code over again, which that module tests by setting the
     /// machine's zone on CI. Here it is held against what .NET says of the zone the machine is
-    /// in: on a machine away from UTC, that is its sign and size.
+    /// in: on a machine away from UTC, that is its sign and size. Not on CI, where the runner
+    /// is on UTC and that other test moves the zone while this one would be reading it twice.
     #[cfg(windows)]
     #[test]
     fn windows_reads_the_offset_the_system_reports() {
+        if std::env::var_os("CI").is_some() {
+            eprintln!("skipped: CI's runner is on UTC, and another test sets its zone meanwhile");
+            return;
+        }
         let ask = "[int64][TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now).TotalMilliseconds";
         let out = crate::proc::command("powershell").args(["-NoProfile", "-NonInteractive", "-Command", ask]).output().expect("powershell");
         let said: i64 = String::from_utf8_lossy(&out.stdout).trim().parse().expect("an offset from powershell");

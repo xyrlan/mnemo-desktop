@@ -242,6 +242,8 @@ mod tests {
         append(&live, "f\r\nnext\r\n");
         log.poll(Some(&rot), &live, &mut io, keep);
         assert_eq!(all(&log), ["whole", "half\r", "next\r"]);
+        // The line that had no end is read again with it, and nothing before it is.
+        assert_eq!(io.bytes, 9 + 12);
     }
 
     #[test]
@@ -272,6 +274,11 @@ mod tests {
         std::fs::rename(&live, &rot).unwrap();
         log.poll(Some(&rot), &live, &mut io, keep);
         assert_eq!((all(&log), io.bytes), (vec!["a"], 2));
+        // Touched, not written: it is looked at, found to be the file read, and not read again.
+        let later = SystemTime::now() + std::time::Duration::from_secs(5);
+        File::options().write(true).open(&rot).unwrap().set_modified(later).unwrap();
+        assert!(log.poll(Some(&rot), &live, &mut io, keep));
+        assert_eq!((all(&log), io), (vec!["a"], Io { opens: 3, bytes: 2 }));
         append(&live, "b\n");
         log.poll(Some(&rot), &live, &mut io, keep);
         assert_eq!(all(&log), ["a", "b"]);
