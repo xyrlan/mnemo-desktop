@@ -3,8 +3,8 @@
 import { expect, test } from 'vitest'
 
 /** The orb's page loads none of the app (#506): `orb.html`'s script, and everything it imports,
- *  stays inside `src/jarvis/orb/` but for Tauri's own API. A type-only import costs nothing at run
- *  time, so it may reach further. */
+ *  stays inside `src/jarvis/orb/` but for Tauri's own API and the identity's two typefaces it
+ *  sets words in. A type-only import costs nothing at run time, so it may reach further. */
 
 type Fs = { readFileSync(path: string, encoding: string): string }
 const read = async (path: string) => ((await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as Fs).readFileSync(path, 'utf8')
@@ -57,7 +57,17 @@ test('the orb’s page loads nothing from the app’s views, terminals or stores
   const { files, packages } = await graph('src/jarvis/orb/main.ts')
   expect(files.every((f) => f.startsWith('src/jarvis/orb/')), files.join(', ')).toBe(true)
   expect(files).not.toContain('src/jarvis/orb/control.ts')
-  expect(packages).toEqual(['@tauri-apps/api/event'])
+  expect([...packages].sort()).toEqual(['@fontsource-variable/geist', '@fontsource-variable/jura', '@tauri-apps/api/event'])
+})
+
+test('the orb’s page has the canvas, the word and the caption its script draws into', async () => {
+  const html = await read('orb.html')
+  const main = await read('src/jarvis/orb/main.ts')
+  const asked = [...main.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1])
+  expect(asked.sort()).toEqual(['caption', 'orb', 'state'])
+  for (const id of asked) expect(html, id).toMatch(new RegExp(`id="${id}"`))
+  // Transparent, so only the orb is seen over the desktop.
+  expect(html).toMatch(/background:\s*transparent/)
 })
 
 test('the build makes orb.html an entry beside index.html', async () => {

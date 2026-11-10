@@ -1,0 +1,80 @@
+/* Dictation in the new identity (`src/ds/tokens.css`): the indicator at the foot of the window
+   (`Indicator.tsx`), the badge on what a voice note was dropped on (`FileWork.tsx`), and the
+   grapes both wear (`Grapes.tsx`). Each is a `.mn` root of its own (`src/notify/overlay.ts`).
+
+   z 85: over every window (60), confirmation (61), menu (70), notification card (75) and toast
+   (80), so Stop shows and takes the click while a field in one of them is dictated into.
+
+   Motion is `transform` and `opacity`; at rest nothing runs. The grapes breathe only while the
+   microphone starts or a take is transcribed. */
+
+.mn.voice-ind, .mn.voice-work {
+  position: fixed; z-index: 85;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--void);
+  box-shadow: 0 0.8em 2.6em #000;
+  color: var(--ink);
+}
+
+.mn.voice-ind {
+  inset: auto auto 3.4em 50%;
+  max-width: min(44em, calc(100vw - 2em));
+  border-radius: 1.5em;
+  transform: translateX(-50%);
+  transition: border-color var(--fast);
+}
+.mn.voice-ind[data-shape='card'] { width: min(32em, calc(100vw - 2em)); border-radius: 0.6em; }
+.mn.voice-ind[data-phase='listening'] { border-color: var(--ink-2); box-shadow: 0 0.8em 2.6em #000, var(--glow-soft); }
+.mn.voice-ind[data-tone='error'] { border-color: var(--stalled); }
+
+/* The badge is placed by what it was dropped on (inline `left`, `top`), and takes no click. */
+.mn.voice-work { inset: auto; border-radius: 0.6em; transform: translateX(-50%); pointer-events: none; }
+
+.mn .voice-row { display: flex; align-items: center; gap: 0.7em; min-height: 2.9em; padding: 0 1em 0 0.7em; }
+.mn.voice-ind[data-phase='starting'] .voice-row, .mn.voice-ind[data-phase='listening'] .voice-row { padding-right: 0.45em; }
+.mn.voice-ind[data-tone='error'] .voice-row { align-items: flex-start; padding: 0.7em 0.5em 0.7em 0.7em; }
+
+.mn .voice-text { min-width: 0; overflow: hidden; font: 600 0.78em/1.2 var(--display); letter-spacing: 0.16em; text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap; }
+/* An error is a sentence, shown whole. */
+.mn .voice-text[data-whole] { flex: 1; overflow: visible; font: 400 0.92em/1.45 var(--text); letter-spacing: 0; text-transform: none; white-space: normal; overflow-wrap: anywhere; color: var(--stalled); user-select: text; }
+.mn .voice-device { flex: 0 1 auto; min-width: 3em; overflow: hidden; font-size: 0.86em; color: var(--ink-3); text-overflow: ellipsis; white-space: nowrap; }
+
+.mn .voice-rule { flex: none; width: 1px; height: 1.3em; background: var(--line-2); }
+.mn .voice-stop {
+  display: inline-flex; flex: none; align-items: center; gap: 0.6em;
+  height: 2em; padding: 0 0.6em 0 0.7em;
+  border: 1px solid var(--line-2); border-radius: 99em;
+  font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2);
+  transition: border-color var(--fast), color var(--fast);
+}
+.mn .voice-stop:hover, .mn .voice-stop:focus-visible { border-color: var(--ink); color: var(--ink); outline: none; }
+.mn .voice-square { width: 0.7em; height: 0.7em; background: currentColor; }
+.mn .voice-keys { display: inline-flex; gap: 0.25em; }
+.mn .voice-keys .mn-kbd { font-size: 1em; letter-spacing: 0; text-transform: none; }
+.mn .voice-hold { display: inline-flex; flex: none; align-items: center; gap: 0.6em; padding-right: 0.55em; font-size: 0.78em; color: var(--ink-3); white-space: nowrap; }
+.mn .voice-hold .mn-kbd { font-size: 0.92em; }
+.mn .voice-dismiss { flex: none; width: 1.8em; height: 1.8em; font-size: 1.1em; line-height: 1; text-align: center; color: var(--ink-3); transition: color var(--fast); }
+.mn .voice-dismiss:hover, .mn .voice-dismiss:focus-visible { color: var(--ink); }
+
+/* What a take said, lingering under the row; then the model's download. */
+.mn .voice-said { margin: 0; padding: 0.6em 1em 0.7em; overflow: hidden; border-top: 1px solid var(--line); font-size: 0.92em; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+.mn .voice-download { padding: 0.6em 1em 0.8em; border-top: 1px solid var(--line); font-size: 0.86em; color: var(--ink-2); }
+.mn .voice-bar { height: 3px; overflow: hidden; background: var(--line); }
+.mn .voice-download .voice-bar { margin-top: 0.6em; }
+.mn.voice-work .voice-bar { margin: 0 1em 0.7em; }
+.mn .voice-bar > div { height: 100%; background: var(--ink); box-shadow: 0 0 8px rgb(255 255 255 / 0.9); }
+
+/* The grapes. */
+.mn .voice-grapes { display: flex; flex: none; align-items: center; justify-content: center; gap: 1px; width: 3.2em; height: 1.7em; overflow: hidden; }
+.mn .voice-grapes > span { flex: none; width: 0.3em; height: 0.3em; border-radius: 50%; background: currentColor; opacity: 0.85; transition: transform 100ms ease-out; }
+.mn .voice-grapes[data-breathing] { animation: voice-breathe 1.6s ease-in-out infinite; }
+.mn.voice-ind[data-tone='error'] .voice-grapes { color: var(--stalled); }
+@keyframes voice-breathe { 50% { opacity: 0.35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mn .voice-grapes[data-breathing] { animation: none; }
+  .mn .voice-grapes > span { transition: none; }
+}
+.mn[data-motion='reduced'] .voice-grapes[data-breathing] { animation: none; }
+.mn[data-motion='reduced'] .voice-grapes > span { transition: none; }

@@ -2,7 +2,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { ParentRef } from '../parent'
 import { addLine, createJarvisStore, foldParent, foldResearch, type JarvisStore, type ResearchRun } from '../store'
+import { presenceHosts } from './james'
 import { JarvisPanel } from './Panel'
+import { JamesPresence } from './Presence'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -12,11 +14,21 @@ let store: JarvisStore
 const jarvis = { ask: vi.fn(async () => {}), answer: vi.fn(async () => {}), ensure: vi.fn(async () => true), openUrl: vi.fn(async (_url: string) => {}) }
 const ref = (sessionId: string, project: string): ParentRef => ({ sessionId, project, root: `/Users/you/code/${project}`, request: 'corrige o login', host: 'claude', startedAt: 0 })
 
+// jsdom plays no clip: what the orb asks of its clip is recorded instead.
+const clip = { play: vi.fn(async () => {}), pause: vi.fn() }
+let reduced = false
+
 beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
   store = createJarvisStore()
+  clip.play.mockClear()
+  clip.pause.mockClear()
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(clip.play)
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(clip.pause)
+  reduced = false
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: reduced && query.includes('reduce'), addEventListener() {}, removeEventListener() {} }))
   jarvis.ask.mockClear()
   jarvis.answer.mockClear()
   jarvis.ensure.mockClear()
@@ -26,6 +38,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   host.remove()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 const draw = () => act(() => root.render(<JarvisPanel store={store} jarvis={jarvis} shortcut="Ctrl+Shift+J" />))
@@ -33,21 +47,119 @@ const $ = <T extends Element = HTMLElement>(sel: string) => host.querySelector<T
 const button = (text: string) => [...host.querySelectorAll('button')].find((b) => b.textContent === text)
 const click = (el: Element | null | undefined) => act(() => void (el as HTMLElement).click())
 
-test('closed, it is a launcher that opens it', () => {
-  draw()
-  expect($('.jv-panel')).toBeNull()
-  const launcher = $('button[aria-label="Open James"]')!
-  expect(launcher.title).toBe('James (Ctrl+Shift+J)')
-  click(launcher)
-  expect(store.getState().open).toBe(true)
-  expect($('[aria-label="James"]')).not.toBeNull()
-  expect(document.activeElement).toBe($('textarea'))
+describe('closed', () => {
+  const presence = () => $<HTMLButtonElement>('.jv-dock button')
+
+  test('with no top bar that has him, his presence is docked and opens the panel', () => {
+    draw()
+    expect($('.jv-panel')).toBeNull()
+    expect(presence()!.title).toBe('James (Ctrl+Shift+J)')
+    expect(presence()!.getAttribute('aria-expanded')).toBe('false')
+    click(presence())
+    expect(store.getState().open).toBe(true)
+    expect($('[aria-label="James"]')).not.toBeNull()
+    expect($('.jv-dock')).toBeNull()
+    expect(document.activeElement).toBe($('textarea'))
+  })
+
+  test('the docked presence counts the approvals waiting', () => {
+    store.setState({ parents: foldParent([], { kind: 'approval', parent: ref('a', 'tasklist'), question: 'Push?' }) })
+    draw()
+    expect(presence()!.querySelector('.jv-presence-need')!.textContent).toBe('1')
+    expect(presence()!.getAttribute('aria-label')).toBe('James: 1 approval waits')
+  })
+
+  test('where a top bar has his presence, the panel docks no second one; it comes back when the bar goes', () => {
+    const bar = document.body.appendChild(document.createElement('div'))
+    const top = createRoot(bar)
+    act(() => top.render(<JamesPresence />))
+    expect(presenceHosts.getState().hosts).toBe(1)
+    draw()
+    expect(host.innerHTML).toBe('')
+
+    act(() => top.unmount())
+    bar.remove()
+    expect(presenceHosts.getState().hosts).toBe(0)
+    expect(presence()).not.toBeNull()
+  })
 })
 
-test('the launcher counts the approvals waiting', () => {
-  store.setState({ parents: foldParent([], { kind: 'approval', parent: ref('a', 'tasklist'), question: 'Push?' }) })
-  draw()
-  expect($('.jv-launcher')!.textContent).toBe('J1')
+describe('his orb, in the panel', () => {
+  const orb = () => $('[data-asset="james-orb"]')!
+
+  test('is the clip, the WebM first and the MP4 second, with its first frame as poster', () => {
+    store.setState({ open: true })
+    draw()
+    expect(orb().tagName).toBe('VIDEO')
+    expect([...orb().querySelectorAll('source')].map((s) => s.type)).toEqual(['video/webm', 'video/mp4'])
+    expect(orb().getAttribute('poster')).toMatch(/james-orb-first\.jpg$/)
+    expect((orb() as HTMLVideoElement).loop).toBe(true)
+  })
+
+  test('at rest it is still: the clip is never played', () => {
+    store.setState({ open: true })
+    draw()
+    expect(clip.play).not.toHaveBeenCalled()
+    expect(orb().hasAttribute('data-alive')).toBe(false)
+  })
+
+  test.each([
+    ['listens', { voice: 'listening' }],
+    ['transcribes what he heard', { voice: 'transcribing' }],
+    ['works on a request', { busy: true }],
+    ['speaks', { voice: 'speaking' }],
+  ] as const)('it turns while James %s, and holds when he stops', (_, state) => {
+    store.setState({ open: true })
+    draw()
+    act(() => store.setState(state))
+    expect(clip.play).toHaveBeenCalledTimes(1)
+    expect(orb().hasAttribute('data-alive')).toBe(true)
+
+    clip.pause.mockClear()
+    act(() => store.setState({ voice: 'idle', busy: false }))
+    expect(clip.pause).toHaveBeenCalledTimes(1)
+    expect(clip.play).toHaveBeenCalledTimes(1)
+    expect(orb().hasAttribute('data-alive')).toBe(false)
+  })
+
+  test('it holds while he only waits for a follow-up', () => {
+    store.setState({ open: true, voice: 'waiting' })
+    draw()
+    expect(clip.play).not.toHaveBeenCalled()
+  })
+
+  test('with motion reduced it is its first frame, and no clip is loaded', () => {
+    reduced = true
+    store.setState({ open: true, voice: 'speaking' })
+    draw()
+    expect(orb().tagName).toBe('IMG')
+    expect(orb().getAttribute('src')).toMatch(/james-orb-first\.jpg$/)
+    expect($('video')).toBeNull()
+    expect(clip.play).not.toHaveBeenCalled()
+    // Still, it says he is alive as it says it moving: lit, and dim again at rest.
+    expect(orb().hasAttribute('data-alive')).toBe(true)
+    act(() => store.setState({ voice: 'idle' }))
+    expect(orb().hasAttribute('data-alive')).toBe(false)
+  })
+
+  test("the frame's motion switch stills it too, and gives it back", async () => {
+    const frame = document.body.appendChild(document.createElement('div'))
+    frame.className = 'mn'
+    frame.dataset.view = 'console'
+    frame.dataset.motion = 'reduced'
+    store.setState({ open: true, voice: 'speaking' })
+    draw()
+    expect(orb().tagName).toBe('IMG')
+    expect($('.jv-panel')!.getAttribute('data-motion')).toBe('reduced')
+    expect(clip.play).not.toHaveBeenCalled()
+
+    // The switch is turned off: the attribute goes, and the orb turns again.
+    await act(async () => frame.removeAttribute('data-motion'))
+    expect(orb().tagName).toBe('VIDEO')
+    expect($('.jv-panel')!.hasAttribute('data-motion')).toBe(false)
+    expect(clip.play).toHaveBeenCalledTimes(1)
+    frame.remove()
+  })
 })
 
 test('Enter sends what was typed; Shift+Enter does not', () => {

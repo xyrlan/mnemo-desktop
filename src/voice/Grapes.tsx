@@ -1,5 +1,4 @@
 // adapted from stablyai/orca src/renderer/src/components/dictation/DictationGrapes.tsx (MIT, 122b8c25)
-import { cn } from '@/ui/cn'
 
 const GRAPES = [
   { base: 0.64, response: 0.45, lift: 1 },
@@ -20,26 +19,18 @@ type Props = {
   transitioning: boolean
 }
 
+/** Dictation's mark: nine dots that rise with the voice, and breathe while it starts or
+ *  transcribes (`voice.css`). */
 export function Grapes({ level, active, transitioning }: Props) {
   const normalizedLevel = Math.min(1, Math.max(0, level))
 
   return (
-    <div
-      data-testid="dictation-grapes"
-      aria-hidden="true"
-      className={cn('flex h-6 w-11 shrink-0 items-center justify-center gap-px overflow-hidden', transitioning && 'animate-pulse motion-reduce:animate-none')}
-    >
+    <div data-testid="dictation-grapes" aria-hidden="true" className="voice-grapes" data-breathing={transitioning || undefined}>
       {GRAPES.map((grape, index) => {
         const energy = active ? normalizedLevel : 0
         const scale = grape.base + energy * grape.response
         const verticalOffset = energy * grape.lift * 2
-        return (
-          <span
-            key={index}
-            className="size-1 shrink-0 rounded-full bg-current opacity-80 transition-transform duration-100 ease-out motion-reduce:transition-none"
-            style={{ transform: `translateY(${verticalOffset}px) scale(${scale})` }}
-          />
-        )
+        return <span key={index} style={{ transform: `translateY(${verticalOffset}px) scale(${scale})` }} />
       })}
     </div>
   )

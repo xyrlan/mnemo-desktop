@@ -1,7 +1,6 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TooltipProvider } from '@/ui'
 import { createVoice, type Phase, type Voice } from './controller'
 import type { VoiceClient } from './client'
 import { Indicator } from './Indicator'
@@ -43,11 +42,7 @@ async function draw() {
   const errors: unknown[] = []
   const spy = vi.spyOn(console, 'error').mockImplementation((...a) => void errors.push(a))
   await act(async () => {
-    root.render(
-      <TooltipProvider>
-        <Indicator store={voice.store} shortcut={['⌘', 'E']} hold={['⌥', 'Space']} onStop={onStop} onDismiss={onDismiss} />
-      </TooltipProvider>,
-    )
+    root.render(<Indicator store={voice.store} shortcut={['⌘', 'E']} hold={['⌥', 'Space']} onStop={onStop} onDismiss={onDismiss} />)
   })
   spy.mockRestore()
   expect(errors).toEqual([])
@@ -72,14 +67,40 @@ describe('dictation indicator', () => {
     expect(indicator()?.dataset.phase).toBe('listening')
     expect(status()).toBe('Listening: MacBook Pro Microphone')
     expect(host.querySelector('[data-testid="dictation-device"]')?.textContent).toBe('MacBook Pro Microphone')
-    expect(indicator()!.className).toContain('rounded-full')
+    expect(indicator()!.dataset.shape).toBe('pill')
     expect(indicator()!.hasAttribute('data-ui')).toBe(true)
+    // A root of the new identity of its own: it is drawn outside the frame's.
+    expect(indicator()!.classList.contains('mn')).toBe(true)
 
     await act(async () => voice.end())
     expect(status()).toBe('Dictated')
     expect(stopButton()).toBeNull()
     expect(host.querySelector('p')?.textContent).toBe('hello world')
-    expect(indicator()!.className).toContain('rounded-xl')
+    expect(indicator()!.dataset.shape).toBe('card')
+  })
+
+  it('shows the keys that stop a take beside Stop, while it is open', async () => {
+    await draw()
+    set({ kind: 'listening', device: null })
+    const keys = () => [...host.querySelectorAll('.voice-keys')].map((group) => [...group.querySelectorAll('kbd')].map((k) => k.textContent))
+    expect(keys()).toEqual([
+      ['⌘', 'E'],
+      ['⌥', 'Space'],
+    ])
+    // The toggle's keys are Stop's own; the hold chord is released, not pressed.
+    expect(stopButton()!.textContent).toBe('Stop⌘E')
+    expect(host.querySelector('.voice-hold')!.textContent).toBe('or release⌥Space')
+    set({ kind: 'transcribing' })
+    expect(keys()).toEqual([])
+  })
+
+  it('names no key it was not given', async () => {
+    await act(async () => root.render(<Indicator store={voice.store} shortcut={[]} onStop={onStop} />))
+    set({ kind: 'listening', device: null })
+    expect(host.querySelectorAll('kbd')).toHaveLength(0)
+    expect(host.querySelector('.voice-keys')).toBeNull()
+    expect(stopButton()!.textContent).toBe('Stop')
+    expect(host.querySelector('.voice-hold')).toBeNull()
   })
 
   it('shows Starting mic… with Stop, and Stop calls back without moving focus', async () => {
@@ -112,11 +133,11 @@ describe('dictation indicator', () => {
 
     set({ kind: 'note', text: 'no speech heard' })
     expect(status()).toBe('no speech heard')
-    expect(indicator()!.className).not.toContain('text-destructive')
+    expect(indicator()!.hasAttribute('data-tone')).toBe(false)
 
     set({ kind: 'error', message: 'no microphone found' })
     expect(alert()).toBe('no microphone found')
-    expect(indicator()!.className).toContain('text-destructive')
+    expect(indicator()!.dataset.tone).toBe('error')
   })
 
   it('a listening take with no device name says only Listening', async () => {
@@ -132,9 +153,8 @@ describe('dictation indicator', () => {
     set({ kind: 'error', message: long })
     const text = host.querySelector<HTMLElement>('[data-testid="dictation-text"]')!
     expect(text.textContent).toBe(long)
-    expect(text.className).not.toContain('truncate')
-    expect(text.className).toContain('whitespace-normal')
-    expect(indicator()!.className).toContain('rounded-xl')
+    expect(text.hasAttribute('data-whole')).toBe(true)
+    expect(indicator()!.dataset.shape).toBe('card')
     expect(stopButton()).toBeNull()
     const button = dismissButton()!
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
@@ -164,23 +184,31 @@ describe('dictation indicator', () => {
     expect(indicator()).toBeNull()
   })
 
-  it("draws over every window, confirmation, menu and Triage, under its own tooltip", async () => {
-    await draw()
-    set({ kind: 'listening', device: null })
-    const z = Number(/(?:^|\s)z-\[(\d+)\]/.exec(indicator()!.className)?.[1])
+  it('draws over every window, confirmation, menu and Triage, over the notification cards and James, under a tooltip', async () => {
     // Read from the sheets that set them, so a layer raised there fails here. `node:` is put
     // together so tsc does not resolve a package the project has no types for.
     const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as unknown as { readFileSync(path: string, encoding: string): string }
     const read = (file: string) => fs.readFileSync(file, 'utf8')
+    const z = (sheet: string, selector: string) => Number(new RegExp(`${selector.replace(/[.[\]]/g, '\\$&')}[^{}]*\\{[^}]*?z-index:\\s*(\\d+)`).exec(sheet)?.[1])
+    const voice = read('src/voice/voice.css')
     const ui = read('src/nexus/ui/ui.css')
     const theme = read('src/theme.css')
-    const rule = (selector: string) => Number(new RegExp(`\\${selector}\\s*\\{[^}]*?z-index:\\s*(\\d+)`).exec(ui)?.[1])
     const token = (name: string) => Number(new RegExp(`--z-index-${name}:\\s*(\\d+)`).exec(theme)?.[1])
-    const below = { window: rule('.nx-backdrop'), confirmation: rule('.nx-confirm-layer'), menu: rule('.nx-menu'), triage: token('modal') }
+    // The indicator and the file badge share the layer.
+    const mine = z(voice, '.mn.voice-ind, .mn.voice-work')
+    const below = {
+      window: z(ui, '.nx-backdrop'),
+      confirmation: z(ui, '.nx-confirm-layer'),
+      menu: z(ui, '.nx-menu'),
+      triage: token('modal'),
+      cards: z(read('src/notify/notify.css'), '.mn.note-stack'),
+      james: z(read('src/jarvis/panel/panel.css'), '.mn.jv-panel'),
+      panels: z(read('src/panels/panels.css'), '.mn'),
+    }
     for (const [layer, under] of Object.entries(below)) {
       expect(under, layer).toBeGreaterThan(0)
-      expect(z, layer).toBeGreaterThan(under)
+      expect(mine, layer).toBeGreaterThan(under)
     }
-    expect(z).toBeLessThan(token('tooltip'))
+    expect(mine).toBeLessThan(token('tooltip'))
   })
 })

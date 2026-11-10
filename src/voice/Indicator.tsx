@@ -1,15 +1,15 @@
 // adapted from stablyai/orca src/renderer/src/components/dictation/DictationIndicator.tsx (MIT, 122b8c25)
-import { Square, X } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand/vanilla'
-import { Button, Kbd, KbdGroup, Tooltip, TooltipContent, TooltipTrigger } from '@/ui'
-import { cn } from '@/ui/cn'
+import { Kbd } from '../ds'
+import { useOverlayRoot } from '../notify/overlay'
 import type { Phase, VoiceState } from './controller'
 import { Grapes } from './Grapes'
+import './voice.css'
 
 type Props = {
   store: StoreApi<VoiceState>
-  /** The toggle's keys, shown in the Stop button's tooltip: `['⌘', 'E']`. */
+  /** The toggle's keys, shown on the Stop button: `['⌘', 'E']`. */
   shortcut: readonly string[]
   /** The hold chord's keys, shown beside the toggle's: `['⌥', 'Space']`. */
   hold?: readonly string[]
@@ -20,11 +20,11 @@ type Props = {
 
 function Keys({ keys }: { keys: readonly string[] }) {
   return (
-    <KbdGroup>
+    <span className="voice-keys">
       {keys.map((k) => (
         <Kbd key={k}>{k}</Kbd>
       ))}
-    </KbdGroup>
+    </span>
   )
 }
 
@@ -46,13 +46,15 @@ function label(phase: Exclude<Phase, { kind: 'idle' }>, downloading: boolean): s
   }
 }
 
-/** Orca's dictation indicator, floating above the status bar: the grapes, what dictation is
- *  doing, the microphone it listens to and a Stop button while a take is open. After the take,
- *  the transcript lingers under it for a moment (Orca's partial-transcript row; whisper has only
- *  the final text). An error is shown whole, wrapped, and stays until dismissed. */
+/** The dictation indicator, floating at the foot of the window in the new identity
+ *  (`./voice.css`): the grapes, what dictation is doing, the microphone it listens to, and Stop
+ *  with the keys that stop it while a take is open. After the take, the transcript lingers under
+ *  it for a moment (whisper has only the final text). An error is shown whole, wrapped, and stays
+ *  until dismissed. */
 export function Indicator({ store, shortcut, hold = [], onStop, onDismiss }: Props) {
   const phase = useStore(store, (s) => s.phase)
   const download = useStore(store, (s) => s.download)
+  const root = useOverlayRoot('voice-ind')
   if (phase.kind === 'idle') return null
 
   const open = phase.kind === 'starting' || phase.kind === 'listening'
@@ -65,89 +67,59 @@ export function Indicator({ store, shortcut, hold = [], onStop, onDismiss }: Pro
   const stopLabel = 'Stop dictation'
 
   return (
-    // z 85: over every window (60), confirmation (61), menu (70), notification card (75), toast
-    // (80) and Triage (`z-modal`), so Stop shows and takes the click while a field in one is dictated
-    // into. Its tooltip (`z-tooltip`, 90) stays above it.
-    <div
-      data-ui=""
-      data-testid="dictation-indicator"
-      data-phase={phase.kind}
-      className={cn(
-        'fixed bottom-12 left-1/2 z-[85] -translate-x-1/2 overflow-hidden',
-        'border border-border bg-popover/95 text-sm text-popover-foreground shadow-floating backdrop-blur',
-        'transition-[width,border-radius,opacity] duration-200 ease-out motion-reduce:transition-none',
-        wide ? 'w-[min(28rem,calc(100vw-2rem))] rounded-xl' : 'max-w-[min(28rem,calc(100vw-2rem))] rounded-full',
-        isError && 'border-destructive/40 text-destructive',
-      )}
-    >
-      <div className={cn('flex min-h-10 items-center gap-2 px-2', !open && !isError && 'pr-3', isError && 'py-2')}>
+    // z 85 (`voice.css`): over every window (60), confirmation (61), menu (70), notification card
+    // (75), toast (80) and Triage (`z-modal`), so Stop shows and takes the click while a field in
+    // one is dictated into.
+    <div data-ui="" data-testid="dictation-indicator" data-phase={phase.kind} data-shape={wide ? 'card' : 'pill'} data-tone={isError ? 'error' : undefined} {...root}>
+      <div className="voice-row">
         <Grapes level={0} active={busy} transitioning={phase.kind === 'starting' || phase.kind === 'transcribing'} />
-        <span
-          aria-hidden
-          data-testid="dictation-text"
-          className={cn('min-w-0 font-medium', isError ? 'flex-1 whitespace-normal break-words select-text' : 'truncate')}
-        >
+        <span aria-hidden data-testid="dictation-text" className="voice-text" data-whole={isError || undefined}>
           {text}
         </span>
         {device ? (
-          <span aria-hidden data-testid="dictation-device" title={device} className="min-w-0 truncate text-xs text-muted-foreground">
+          <span aria-hidden data-testid="dictation-device" title={device} className="voice-device">
             {device}
           </span>
         ) : null}
-        <span role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'} aria-atomic="true" className="sr-only">
+        <span role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'} aria-atomic="true" className="mn-sr">
           {device ? `${text}: ${device}` : text}
         </span>
         {isError && onDismiss ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Dismiss"
-            className="shrink-0 self-start text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={onDismiss}
-          >
-            <X className="size-3" />
-          </Button>
+          <button type="button" aria-label="Dismiss" title="Dismiss" className="voice-dismiss" onMouseDown={(event) => event.preventDefault()} onClick={onDismiss}>
+            ×
+          </button>
         ) : null}
         {open ? (
           <>
-            <span aria-hidden className="ml-0.5 h-4 w-px shrink-0 bg-border" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={stopLabel}
-                  className="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  // Keep focus where the text is going.
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={onStop}
-                >
-                  <Square className="size-3 fill-current" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={6} className="flex items-center gap-1.5">
-                {stopLabel}
-                {shortcut.length > 0 ? <Keys keys={shortcut} /> : null}
-                {hold.length > 0 ? (
-                  <>
-                    or release
-                    <Keys keys={hold} />
-                  </>
-                ) : null}
-              </TooltipContent>
-            </Tooltip>
+            <i aria-hidden className="voice-rule" />
+            <button
+              type="button"
+              aria-label={stopLabel}
+              title={stopLabel}
+              className="voice-stop"
+              // Keep focus where the text is going.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onStop}
+            >
+              <i aria-hidden className="voice-square" />
+              Stop
+              {shortcut.length > 0 ? <Keys keys={shortcut} /> : null}
+            </button>
+            {hold.length > 0 ? (
+              <span aria-hidden className="voice-hold">
+                or release
+                <Keys keys={hold} />
+              </span>
+            ) : null}
           </>
         ) : null}
       </div>
-      {transcript ? <p className="truncate border-t border-border px-3 py-2 text-xs text-muted-foreground">{transcript}</p> : null}
+      {transcript ? <p className="voice-said">{transcript}</p> : null}
       {download !== null ? (
-        <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+        <div className="voice-download">
           Downloading speech model {Math.floor(download * 100)}%
-          <div className="mt-1.5 h-0.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${download * 100}%` }} />
+          <div className="voice-bar">
+            <div style={{ width: `${download * 100}%` }} />
           </div>
         </div>
       ) : null}
