@@ -1,0 +1,36 @@
+/* What mnemo learned: `learned-`. A side panel read top to bottom; the decision stays at its foot. */
+
+.mn .learned { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.4em; align-content: start; min-height: 100%; }
+.mn .learned-head { padding-bottom: 1em; border-bottom: 1px solid var(--line); }
+.mn .learned-lead { margin: 0; font-size: 1.05em; line-height: 1.55; color: var(--ink-2); max-width: 38em; }
+.mn .learned-lead b { color: var(--ink); font-weight: 600; }
+.mn .learned-sub { display: block; font: 400 0.88em/1.4 var(--text); letter-spacing: 0; }
+
+.mn .learned-consent { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.3em; padding: 1.4em 1.5em 1.6em; border: 1px solid var(--line-2); border-left: 1px solid var(--memory); background: linear-gradient(90deg, rgb(196 181 253 / 0.07), transparent 60%); }
+.mn .learned-figures { display: flex; flex-wrap: wrap; gap: 1em 3.2em; }
+.mn .learned-figure { display: grid; gap: 0.5em; }
+.mn .learned-figure-value { font-size: 3.4em; font-weight: 300; line-height: 0.9; color: var(--ink-2); }
+.mn .learned-figure[data-tone='memory'] .learned-figure-value { color: var(--memory); text-shadow: 0 0 26px rgb(196 181 253 / 0.5); }
+
+.mn .learned-bar { display: grid; gap: 0.6em; }
+.mn .learned-bar .sp-row { align-items: baseline; }
+.mn .learned-bar-n { font-size: 2.2em; font-weight: 300; line-height: 1; color: var(--memory); }
+.mn .learned-bar-n > i { font-style: normal; font-size: 0.4em; color: var(--ink-3); letter-spacing: 0.04em; }
+.mn .learned-bar .sp-bar { height: 3px; }
+
+.mn .learned-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.3em; }
+.mn .learned-group-head { padding-bottom: 0.5em; border-bottom: 1px solid var(--line); }
+.mn .learned-rows { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); }
+.mn .learned-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.2em 0.9em; padding: 0.7em 0.3em; border-bottom: 1px solid var(--line); }
+.mn .learned-row > .sp-out { grid-column: 2 / -1; margin-top: 0.4em; }
+.mn .learned-keep { padding-top: 0.15em; }
+.mn .learned-pick { display: block; text-align: left; min-width: 0; transition: opacity var(--fast); }
+.mn .learned-pick:hover .sp-name { text-shadow: var(--glow-soft); }
+.mn .learned-fate { font: 600 0.66em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--memory); padding-top: 0.5em; }
+.mn .learned-row[data-dropped] .learned-pick { opacity: 0.45; }
+.mn .learned-row[data-dropped] .sp-name { text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.mn .learned-row[data-dropped] .learned-fate { color: var(--stalled); }
+
+.mn .learned-foot { position: sticky; bottom: -2em; display: grid; gap: 0.7em; padding: 1.4em 0 2em; margin-bottom: -2em; background: linear-gradient(transparent, #000 1.2em); font-size: 0.93em; }
+.mn .learned-failed { display: block; margin-top: 0.3em; }
+.mn .learned-failed code { font: 400 0.9em var(--mono); color: var(--ink); }

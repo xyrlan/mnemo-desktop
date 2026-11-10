@@ -1,0 +1,20 @@
+/* The Settings panel: `settings-`. One setting a row: what it is and does on the left, how it
+   is chosen on the right; a setting that needs the room takes the row under its text. */
+
+.mn .settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2em; align-content: start; }
+.mn .settings .sp-section { gap: 0; }
+.mn .settings-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.8em 1.6em; padding: 1em 0; border-bottom: 1px solid var(--line); }
+.mn .settings-item[data-wide] { grid-template-columns: minmax(0, 1fr); }
+.mn .settings-text { display: grid; gap: 0.3em; min-width: 0; }
+.mn .settings-name { font: 600 1.05em/1.25 var(--display); letter-spacing: 0.06em; }
+.mn .settings-what { font-size: 0.9em; line-height: 1.45; max-width: 34em; }
+.mn .settings-what code { font: 400 0.92em var(--mono); color: var(--ink-2); }
+.mn .settings-err { color: var(--stalled); font-size: 0.9em; }
+.mn .settings-pick { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7em; justify-items: end; }
+.mn .settings-item[data-wide] .settings-pick { justify-items: stretch; }
+.mn .settings-form { gap: 0.5em; min-width: 0; }
+.mn .settings-repos { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6em; }
+.mn .settings-repo { display: grid; grid-template-columns: 11em minmax(0, 1fr); align-items: center; gap: 1em; }
+.mn .settings-repo-name { display: grid; min-width: 0; }
+.mn .settings-repo-name .sp-mono { font-size: 0.76em; }
+.mn .settings-about { padding-top: 0.2em; }
