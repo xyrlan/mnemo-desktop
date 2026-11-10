@@ -1,5 +1,6 @@
 /* A session's real terminal on the stage (src/runtime/Terminals.tsx). The terminal keeps the
-   readable palette it has (src/terminal/terminal.css); this is only the box around it. */
+   readable palette it has (src/terminal/terminal.css); this is only the box it is drawn in, and
+   what is said in that box while there is no terminal to draw. */
 
 .mn .runtime-terminal {
   position: relative;
@@ -8,15 +9,9 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 0.35em;
-  /* The terminal's own ground, so no seam shows between its rows and its box. */
+  /* The terminal's own ground, so no seam shows between its rows and its box. The frame around
+     it is the stage's. */
   background: var(--bg, #0f1116);
-  transition: border-color var(--fast) var(--ease);
-}
-/* The one that takes the keys says so with its edge, never with a colour of its own. */
-.mn .runtime-terminal[data-active]:focus-within {
-  border-color: var(--line-2);
 }
 
 .mn .runtime-slot {
