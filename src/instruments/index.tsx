@@ -3,7 +3,7 @@
 // one session; all three at once when the column has the room, one at a time under three
 // headers when it has not. `read.ts` works out what each says; this file lays them out.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { actions } from '../world/actions'
 import { tokens as tok } from '../world/format'
 import { go, routeStore, useRoute, type Reading } from '../world/route'
@@ -56,6 +56,7 @@ function Readings({ world, session, at, enter }: { world: World; session: Sessio
   const reading = useRoute((r) => r.reading)
   const root = useRef<HTMLElement>(null)
   const layout = useLayout(root)
+  const uid = useId()
 
   const m = useMemo(() => momentOf(world, at), [world, at])
   const context = useMemo(() => contextReading(world, session, at), [world, session, at])
@@ -91,10 +92,11 @@ function Readings({ world, session, at, enter }: { world: World; session: Sessio
     }
   }, [reading])
 
-  // Keys are the instruments' only while focus is inside them, and never in a field.
+  // Keys are the instruments' only while focus is inside them, and never in a field or under
+  // a screenshot shown large (its keys reach here through React's tree, not the page's).
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return
-    if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable], .xterm')) return
+    if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable], .xterm, .instruments-veil')) return
     const step = e.key === ']' ? 1 : e.key === '[' ? -1 : 0
     if (!step) return
     e.preventDefault()
@@ -145,14 +147,14 @@ function Readings({ world, session, at, enter }: { world: World; session: Sessio
             return (
               <section key={k} className="instruments-inst" data-inst={k} data-open={shown || undefined} data-front={reading === k || undefined}>
                 <h2 className="instruments-h">
-                  <button type="button" className="instruments-head" aria-expanded={shown} aria-controls={`instruments-${k}`} onClick={() => showReading(k)}>
+                  <button type="button" className="instruments-head" aria-expanded={shown} aria-controls={`${uid}-${k}`} onClick={() => showReading(k)}>
                     <i className="instruments-head-mark" aria-hidden="true" />
                     <span className="instruments-head-t">{TITLE[k]}</span>
                     <span className="instruments-head-sum">{headline[k]}</span>
                   </button>
                 </h2>
                 {shown && (
-                  <div id={`instruments-${k}`} className="instruments-body" data-enter={enter || undefined} tabIndex={0} role="region" aria-label={TITLE[k]}>
+                  <div id={`${uid}-${k}`} className="instruments-body" data-enter={enter || undefined} tabIndex={0} role="region" aria-label={TITLE[k]}>
                     {body[k]()}
                   </div>
                 )}

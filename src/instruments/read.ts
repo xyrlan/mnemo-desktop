@@ -219,7 +219,8 @@ export function contextReading(world: World, session: Session, at?: number | nul
   const unborn = m.past && session.startedAt != null && m.t < session.startedAt
   const tokens = contextAt(session, m)
   const window = ctx.window
-  const percent = tokens == null ? null : !m.past && ctx.percent != null ? ctx.percent : window > 0 ? (tokens / window) * 100 : null
+  const measured = tokens != null && window > 0 ? (tokens / window) * 100 : null
+  const percent = m.past ? measured : (ctx.percent ?? measured)
   const share = spentShare(session, m)
   const scale = (n: number) => Math.round(n * share)
 

@@ -41,6 +41,15 @@ describe('context and tokens, now', () => {
     expect(r.share).toBe(1)
   })
 
+  test('how full is what the world says, and worked out from the tokens when it does not say', () => {
+    const said = withSession(retries, { context: { ...retries.context, tokens: null, percent: 42 } })
+    expect(contextReading(said.world, said.session)).toMatchObject({ percent: 42, tokens: null, free: null })
+    const unsaid = withSession(retries, { context: { ...retries.context, tokens: 250_000, percent: null } })
+    expect(contextReading(unsaid.world, unsaid.session).percent).toBe(25)
+    const neither = withSession(retries, { context: { ...retries.context, tokens: null, percent: null } })
+    expect(contextReading(neither.world, neither.session).percent).toBeNull()
+  })
+
   test('is hot from 80% full', () => {
     expect(contextReading(world, titled('Dark theme contrast')).hot).toBe(true)
     const at79 = withSession(retries, { context: { ...retries.context, percent: 79.9 } })

@@ -108,6 +108,8 @@ describe('a narrow column', () => {
     expect(open()).toEqual(['context'])
     expect(head('context').getAttribute('aria-expanded')).toBe('true')
     expect(head('memory').getAttribute('aria-expanded')).toBe('false')
+    // a header names the reading it opens, and two instruments on one page do not share names
+    expect(head('context').getAttribute('aria-controls')).toBe($('.instruments-body').id)
     expect($$('.instruments-head').length).toBe(3)
   })
 
@@ -410,12 +412,15 @@ describe('sight', () => {
     expect(text(light()!.querySelector('figcaption')!)).toContain(t('Orders · Lumen http://localhost:5173/orders 1 of 2'))
     press(light()!, 'ArrowLeft')
     expect(text(light()!.querySelector('figcaption')!)).toContain(t('2 of 2'))
-    // a key that is not the picture's goes on to the fleet
+    // a key that is not the picture's goes on to the fleet, and does not turn the reading under it
     press(light()!, 'n')
+    press(light()!, ']')
+    expect(reading()).toBe('sight')
+    expect(light()).not.toBeNull()
     press(light()!, 'Escape')
     expect(light()).toBeNull()
     expect(document.activeElement).toBe(thumbs[1])
-    expect(fleet).toEqual(['n'])
+    expect(fleet).toEqual(['n', ']'])
     window.removeEventListener('keydown', listen)
   })
 
