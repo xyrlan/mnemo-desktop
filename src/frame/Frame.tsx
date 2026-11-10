@@ -8,6 +8,7 @@ import '../ds/tokens.css'
 import { Kbd, Label, Pill, Starfield, StateMark } from '../ds'
 import { Instruments } from '../instruments'
 import { OrbitView } from '../orbit'
+import { Panels } from '../panels'
 import { Roster } from '../roster'
 import { startRuntime } from '../runtime'
 import { ScoreView } from '../score'
@@ -71,6 +72,7 @@ export function Frame() {
             </div>
           )}
           {route.view === 'score' && <ScoreView />}
+          <Panels />
         </main>
       </div>
     </div>
