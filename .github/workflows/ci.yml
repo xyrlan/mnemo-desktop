@@ -76,7 +76,8 @@ jobs:
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       # The bundles a release ships, checked for the helper binaries the app looks for beside
-      # itself (scripts/bundle-helpers.mjs). Windows runs no terminal daemon or hook socket.
+      # itself (scripts/bundle-helpers.mjs). Windows' one bundle is an installer: what it
+      # installs is checked once it has run, below.
       - if: runner.os == 'macOS'
         run: pnpm tauri build --ci --bundles app
       - if: runner.os == 'Linux'
@@ -123,6 +124,21 @@ jobs:
           # The app by its name: the helpers are installed beside it, and one of them would pass too.
           test -f "$dir/mnemo-desktop.exe"
           MNEMO_DESKTOP_SMOKE=1 "$dir/mnemo-desktop.exe"
+      # The desktop MCP server and the agent hook are programs the installed app starts from
+      # beside itself, on Windows too since they reach it over a named pipe (src/ipc.rs).
+      - name: helpers in the install
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          node scripts/bundle-helpers.mjs --installed "$(cygpath -w "$LOCALAPPDATA")\mnemo"
+          # Each start copies the two to the state dir, which is where Claude Code runs them
+          # from (mcp::relink): each has to run from a folder with nothing else in it.
+          dir="$(cygpath "$LOCALAPPDATA")/mnemo"
+          alone="$RUNNER_TEMP/helpers-alone"
+          mkdir -p "$alone"
+          cp "$dir/mnemo-desktop-mcp.exe" "$dir/mnemo-desktop-hook.exe" "$alone/"
+          "$alone/mnemo-desktop-mcp.exe" --help > /dev/null
+          echo '{"session_id":"ci","hook_event_name":"Stop"}' | "$alone/mnemo-desktop-hook.exe" Stop
       # desktop_app_snapshot takes a picture of a real webview (#363): WKWebView, WebView2 and
       # WebKitGTK each have their own call. The built app takes one of its own window, and fails
       # when it gets no image.

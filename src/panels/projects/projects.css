@@ -1,0 +1,68 @@
+/* The Projects panel. Every size is in em of the frame's root size. */
+
+.mn .mn-projects { display: flex; flex-direction: column; gap: 0.9em; min-height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-projects:focus, .mn .mn-projects:focus-visible { outline: none; }
+
+.mn .mn-projects-bar { display: flex; align-items: center; gap: 0.7em; }
+.mn .mn-projects-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.7em; height: 2.6em; padding: 0 0.8em; border: 1px solid var(--line); background: var(--surface); transition: border-color var(--fast); }
+.mn .mn-projects-field:focus-within { border-color: var(--ink); }
+.mn .mn-projects input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: 400 1em/1 var(--text); }
+.mn .mn-projects input.mn-mono { font-family: var(--mono); font-size: 0.92em; }
+.mn .mn-projects input::placeholder { color: var(--ink-4); }
+.mn .mn-projects-into { flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.85em; }
+
+.mn .mn-projects-btn { display: inline-flex; align-items: center; gap: 0.55em; height: 2.6em; padding: 0 1em; border: 1px solid var(--line-2); color: var(--ink-2); font: 600 0.78em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; transition: border-color var(--fast), color var(--fast), background var(--fast); }
+.mn .mn-projects-btn:hover:not(:disabled), .mn .mn-projects-btn:focus-visible { border-color: var(--ink); color: var(--ink); outline: 0; }
+.mn .mn-projects-btn:disabled { opacity: 0.35; cursor: default; }
+.mn .mn-projects-btn[data-tone='go'] { border-color: var(--ink-2); color: var(--ink); }
+.mn .mn-projects-row[data-on] .mn-projects-btn[data-tone='go'] { background: var(--ink); border-color: var(--ink); color: var(--void); box-shadow: var(--glow-soft); }
+.mn .mn-projects-row[data-on] .mn-projects-btn[data-tone='go'] .mn-kbd { border-color: rgb(0 0 0 / 0.4); color: var(--void); }
+
+.mn .mn-projects-link, .mn .mn-projects-folds button { display: inline-flex; align-items: center; gap: 0.55em; color: var(--ink-3); font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .mn-projects-link:hover, .mn .mn-projects-folds button:hover { color: var(--ink); }
+
+.mn .mn-projects-said { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; margin: 0; padding: 0.7em 0.9em; border-left: 2px solid var(--ink-2); background: var(--surface); color: var(--ink-2); }
+.mn .mn-projects-said[data-tone='bad'] { border-left-color: var(--stalled); color: var(--ink); }
+.mn .mn-projects-said button { color: var(--ink-3); }
+.mn .mn-projects-said button:hover { color: var(--ink); }
+
+.mn .mn-projects-empty { margin: 3em 0; text-align: center; color: var(--ink-3); }
+
+.mn .mn-projects-list { display: flex; flex-direction: column; margin: 0 -1.6em; border-top: 1px solid var(--line); }
+.mn .mn-projects-row { scroll-margin: 2.5em 0; position: relative; display: flex; flex-direction: column; gap: 0.75em; padding: 1.1em 1.6em 1.2em; border-bottom: 1px solid var(--line); }
+/* The cursor: a lit row and the beam at its edge, as the roster marks the entry on stage. */
+.mn .mn-projects-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--ink); box-shadow: var(--glow-soft); opacity: 0; transform: scaleY(0.4); transition: opacity var(--fast), transform var(--slow) var(--ease); }
+.mn .mn-projects-row[data-on] { background: var(--surface); }
+.mn .mn-projects-row[data-on]::before { opacity: 1; transform: none; }
+
+.mn .mn-projects-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1.5em; }
+.mn .mn-projects-name { font: 600 1.25em/1.15 var(--display); letter-spacing: 0.06em; color: var(--ink-2); overflow-wrap: anywhere; }
+.mn .mn-projects-row[data-on] .mn-projects-name { color: var(--ink); text-shadow: var(--glow-soft); }
+.mn .mn-projects-path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.82em; }
+
+.mn .mn-projects-live { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35em; }
+.mn .mn-projects-none { color: var(--ink-4); font-size: 0.9em; }
+.mn .mn-projects-session { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 0.6em; max-width: 100%; text-align: left; color: var(--ink-2); }
+.mn .mn-projects-session:hover .mn-projects-title, .mn .mn-projects-session:focus-visible .mn-projects-title { color: var(--ink); text-decoration: underline; text-underline-offset: 0.25em; }
+.mn .mn-projects-session:focus-visible { outline: 0; }
+.mn .mn-projects-session > .mn-figure { opacity: 0.8; }
+.mn .mn-projects-session > .mn-state { grid-column: 2; }
+.mn .mn-projects-title { grid-column: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .mn-projects-session > .mn-label { grid-column: 4; }
+
+.mn .mn-projects-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; }
+.mn .mn-projects-acts .mn-projects-btn { height: 2.3em; }
+.mn .mn-projects-cmd { display: inline-flex; align-items: stretch; }
+.mn .mn-projects-cmd .mn-projects-btn { text-transform: none; letter-spacing: 0.04em; font-size: 0.85em; border-right: 0; }
+.mn .mn-projects-x { display: inline-grid; place-items: center; width: 1.9em; border: 1px solid var(--line-2); color: var(--ink-4); }
+.mn .mn-projects-x:hover, .mn .mn-projects-x:focus-visible { color: var(--ink); border-color: var(--ink); outline: 0; }
+
+.mn .mn-projects-draft { display: flex; align-items: center; gap: 0.6em; }
+.mn .mn-projects-draft input { flex: 0 0 9em; height: 2.3em; padding: 0 0.7em; border: 1px solid var(--line-2); background: var(--surface); }
+.mn .mn-projects-draft input.mn-projects-command { flex: 1 1 auto; }
+.mn .mn-projects-draft input:focus { border-color: var(--ink); }
+.mn .mn-projects-draft .mn-projects-btn { height: 2.3em; }
+
+.mn .mn-projects-folds { display: flex; gap: 2em; margin-top: auto; padding-top: 0.6em; }

@@ -7,3 +7,11 @@ app-icon.png
 
 # Brainstorm mockups (superpowers visual companion)
 .superpowers/
+
+# Redesign concept prototypes: the real capture and the screenshots sessions took
+docs/superpowers/prototypes/redesign/data.js
+docs/superpowers/prototypes/redesign/shots/
+__pycache__/
+
+# The real capture a dev build may draw (scripts/world-sample.mjs --real)
+public/world.capture.json

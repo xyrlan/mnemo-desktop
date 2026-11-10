@@ -103,6 +103,15 @@ pub mod usage;
 // -- nexus feed (src/nexus_feed.rs): what Nexus v2 reads beyond the snapshot --
 pub mod nexus_feed;
 
+// -- insight (src/insight.rs): what a session spent, holds, did, saw and loaded --
+pub mod insight;
+
+// -- memory trail (src/memory_trail.rs): what mnemo gave each session, and held back --
+pub mod memory_trail;
+
+// -- ipc (src/ipc.rs): the helpers' transport to the app, on every system --
+pub mod ipc;
+
 // -- app dir (src/app_dir.rs) --
 pub mod app_dir;
 
@@ -371,6 +380,14 @@ pub fn run() {
 
             // -- nexus commands --
             nexus_feed::nexus_feed,
+
+            // -- insight commands --
+            insight::session_insight,
+            insight::insight_shot,
+
+            // -- memory trail commands --
+            memory_trail::memory_trail,
+            memory_trail::vault_pulse,
 
             // -- install review commands --
             install_review::install_review_project,

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" font-family="system-ui, sans-serif">
+  <rect width="1280" height="800" fill="#f6f7f9"/>
+  <rect width="1280" height="56" fill="#fff"/><rect y="56" width="1280" height="1" fill="#e3e5ea"/>
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#111">Lumen</text><text x="120" y="36" font-size="14" fill="#555">Orders / #8841</text>
+  <text x="32" y="108" font-size="26" font-weight="700" fill="#111">Order #8841</text>
+  <rect x="32" y="136" width="760" height="300" rx="10" fill="#fff" stroke="#e3e5ea"/>
+  <text x="56" y="176" font-size="13" fill="#888">CUSTOMER</text><text x="56" y="202" font-size="16" fill="#222">Ana Ribeiro</text>
+  <text x="56" y="250" font-size="13" fill="#888">ITEMS</text><text x="56" y="276" font-size="15" fill="#222">2 × Brownie box · 1 × Cold brew</text>
+  <text x="56" y="324" font-size="13" fill="#888">STATUS</text><rect x="52" y="338" width="86" height="26" rx="13" fill="#e7f6ee"/><text x="70" y="356" font-size="14" fill="#17804a">Paid</text>
+  <rect x="816" y="136" width="432" height="300" rx="10" fill="#fff" stroke="#e3e5ea"/>
+  <text x="840" y="176" font-size="13" fill="#888">HISTORY</text>
+  <g font-size="14" fill="#333"><text x="840" y="212">21:04 · created</text><text x="840" y="240">21:05 · payment authorised</text><text x="840" y="268">21:05 · paid</text><text x="840" y="296" fill="#888">21:19 · edited (optimistic, confirmed)</text></g>
+  <rect x="32" y="460" width="160" height="40" rx="8" fill="#111"/><text x="66" y="486" font-size="14" fill="#fff">Edit order</text>
+  <rect x="204" y="460" width="160" height="40" rx="8" fill="#fff" stroke="#d0d4dc"/><text x="246" y="486" font-size="14" fill="#333">Cancel</text>
+</svg>

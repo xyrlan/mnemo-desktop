@@ -1,0 +1,210 @@
+/* The stage: Console's middle column (src/stage/index.tsx). Hairlines on black, colour only
+   as a state. Composed for 2560×1440; sizes are in `em` of the frame's root size, and the
+   stage reads its own box (a container), not the window, so it holds whatever columns the
+   frame gives it. */
+
+.mn .stage {
+  --stage-xs: max(10px, 0.6875em);
+  --stage-s: max(11px, 0.75em);
+  --stage-m: max(11.5px, 0.8125em);
+  --stage-hair: rgb(255 255 255 / 0.09);
+  container: stage / size;
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  outline: 0;
+  line-height: 1.45;
+}
+.mn .stage button:focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
+.mn .stage .mn-kbd { font-size: var(--stage-xs); }
+
+.mn .stage-in { --stage-pad: 1.5em; height: 100%; display: flex; flex-direction: column; min-height: 0; padding: 0 var(--stage-pad); }
+
+/* Changing session lets the stage rise; nothing enters on the first draw. */
+.mn .stage-enter > * { animation: stage-rise var(--slow) var(--ease) backwards; }
+.mn .stage-enter > :nth-child(2) { animation-delay: 30ms; }
+.mn .stage-enter > :nth-child(3) { animation-delay: 60ms; }
+.mn .stage-enter > :nth-child(4) { animation-delay: 90ms; }
+.mn .stage-enter > :nth-child(5) { animation-delay: 120ms; }
+.mn .stage-enter .stage-figure .mn-figure { animation: stage-turn-in 700ms var(--ease) backwards; }
+@keyframes stage-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes stage-turn-in { from { opacity: 0; transform: rotate(-50deg) scale(0.86); } }
+
+/* ── nothing on stage ── */
+.mn .stage-none { height: 100%; display: grid; place-content: center; justify-items: center; gap: 1.1em; text-align: center; padding: 1.5em; }
+.mn .stage-none-line { margin: 0; font: 500 1.7em/1.2 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); text-shadow: var(--glow-soft); }
+.mn .stage-none-hint { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.4em; font-size: var(--stage-s); color: var(--ink-3); }
+
+/* ── the head: figure, name, facts ── */
+.mn .stage-head { position: relative; display: flex; align-items: center; gap: 1.6em; padding: 1.6em 0 1.3em; flex: none; }
+.mn .stage-field {            /* the light the session stands in: rings from its figure, a glow behind its name */
+  position: absolute; inset: 0 calc(var(--stage-pad) * -1); pointer-events: none;
+  --at: calc(var(--stage-pad) + 3.5em) 50%;
+  background:
+    radial-gradient(60% 120% at 22% 0%, rgb(255 255 255 / 0.09), transparent 70%),
+    radial-gradient(circle at var(--at), transparent 5.6em, rgb(255 255 255 / 0.1) 5.6em, rgb(255 255 255 / 0.1) calc(5.6em + 1px), transparent calc(5.6em + 1px)),
+    radial-gradient(circle at var(--at), transparent 9em, rgb(255 255 255 / 0.055) 9em, rgb(255 255 255 / 0.055) calc(9em + 1px), transparent calc(9em + 1px)),
+    radial-gradient(circle at var(--at), transparent 14em, rgb(255 255 255 / 0.03) 14em, rgb(255 255 255 / 0.03) calc(14em + 1px), transparent calc(14em + 1px));
+  border-bottom: 1px solid var(--line);
+}
+.mn .stage-figure { position: relative; width: 7em; height: 7em; flex: none; }
+.mn .stage-figure > svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; }
+.mn .stage-figure-ticks line { stroke: var(--ink-4); stroke-width: 0.6; }
+.mn .stage-figure-track { stroke: var(--line-2); stroke-width: 1; }
+.mn .stage-figure-fill { stroke: #fff; stroke-width: 2.2; filter: drop-shadow(0 0 3px rgb(255 255 255 / 0.7)); transition: stroke-dasharray var(--slow) var(--ease); }
+.mn .stage-figure-fill[data-hot] { stroke-width: 3; filter: drop-shadow(0 0 6px #fff); }
+.mn .stage-figure > .mn-figure { inset: 23%; width: 54%; height: 54%; color: #fff; filter: drop-shadow(0 0 6px rgb(255 255 255 / 0.6)); }
+/* the ring of ticks turns, slowly, while the session works: one composited layer */
+.mn .stage[data-state='working'] .stage-figure-ticks { animation: stage-turn 90s linear infinite; }
+@keyframes stage-turn { to { transform: rotate(360deg); } }
+
+.mn .stage-id { position: relative; min-width: 0; flex: 1; }
+.mn .stage-kick { display: flex; align-items: baseline; gap: 0.9em; min-width: 0; font-size: var(--stage-s); color: var(--ink-3); white-space: nowrap; }
+.mn .stage-project { font: 600 1em/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2); flex: none; }
+.mn .stage-of { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mn .stage-link { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 0.2em; }
+.mn .stage-link:hover { color: var(--ink); }
+.mn .stage-short { margin-left: auto; color: var(--ink-4); font-size: 0.92em; flex: none; }
+.mn .stage-title { margin: 0.26em 0 0.37em; font: 500 2.15em/1.15 var(--display); letter-spacing: 0.1em; text-transform: uppercase; text-shadow: var(--glow); overflow-wrap: anywhere; text-wrap: balance; }
+.mn .stage-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65em 0.8em; font-size: var(--stage-s); color: var(--ink-3); }
+.mn .stage-state { display: inline-flex; align-items: center; height: 1.75em; padding: 0 0.85em 0 0.75em; margin-right: 0.3em; border: 1px solid var(--state); border-radius: 99px; font-size: 1.3333em; }
+.mn .stage-fact { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mn .stage-fact[data-tone='pill'] { display: inline-flex; align-items: center; height: 2.3333em; padding: 0 1em; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); }
+.mn .stage-fact[data-tone='pill'].mn-mono { font-size: 0.92em; height: 2.536em; }
+.mn .stage-fact[data-tone='quiet'] { padding: 0 0.25em; }
+
+/* ── the family: parent, then each child; left and right walk it ── */
+.mn .stage-family { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.45em 0.5em; margin: 0.8em 0; flex: none; min-width: 0; max-height: 7.6em; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.mn .stage-family-keys { display: inline-flex; align-items: center; gap: 0.2em; flex: none; margin-right: 0.3em; height: 2.1em; }
+.mn .stage-family-none { align-self: center; display: inline-flex; align-items: center; gap: 0.45em; color: var(--ink-4); font-size: var(--stage-s); }
+.mn .stage-chip { position: relative; display: inline-flex; align-items: center; gap: 0.75em; height: 2.8em; padding: 0 1.05em; border: 1px solid var(--line); border-radius: 0.6em; color: var(--ink-2); font-size: var(--stage-s); flex: 0 1 auto; min-width: 0; max-width: 100%; text-align: left; transition: border-color var(--fast), background var(--fast), color var(--fast); }
+.mn .stage-chip:hover { border-color: var(--line-2); }
+.mn .stage-chip[aria-current='true'] { border-color: #fff; color: #fff; background: var(--surface-2); box-shadow: 0 0 18px -4px rgb(255 255 255 / 0.5); }
+.mn .stage-chip[data-state='ended']:not([aria-current='true']) { opacity: 0.55; }
+.mn .stage-chip-role { font: 600 0.92em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.mn .stage-chip-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .stage-chip-waits { font: 700 0.92em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--need); white-space: nowrap; }
+
+/* ── what it is doing now ── */
+.mn .stage-now { position: relative; display: flex; align-items: baseline; gap: 1em; padding: 0.75em 1em; flex: none; border: 1px solid var(--line); border-left: 2px solid var(--state, var(--ink-3)); overflow: hidden; }
+.mn .stage-now > .mn-label { flex: none; }
+.mn .stage-now-text { flex: 1; min-width: 0; color: var(--ink); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.mn .stage-now-kind { margin-right: 0.8em; font: 600 var(--stage-xs)/1 var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--state, var(--ink-3)); }
+.mn .stage-now-target { color: var(--ink-3); }
+.mn .stage-now-none { color: var(--ink-4); }
+.mn .stage-now-age { color: var(--ink-3); font-size: var(--stage-s); flex: none; }
+.mn .stage-now[data-running]::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; pointer-events: none; background: linear-gradient(90deg, transparent, rgb(125 211 252 / 0.1), transparent); animation: stage-sweep 2.8s linear infinite; }
+@keyframes stage-sweep { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+
+/* ── the rhythm of its tool calls ── */
+.mn .stage-pulse { padding: 0.9em 0 0.2em; flex: none; }
+.mn .stage-pulse-head { display: flex; align-items: baseline; gap: 0.75em; font-size: var(--stage-s); color: var(--ink-3); white-space: nowrap; }
+.mn .stage-pulse-head > b { color: var(--ink); font-size: 1.3333em; }
+/* a kind that does not fit goes whole, never cut */
+.mn .stage-pulse-kinds { margin-left: auto; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 1.3em; height: 1.5em; line-height: 1.5; overflow: hidden; font-size: 0.92em; }
+.mn .stage-pulse-kinds b { color: var(--ink-2); font-size: 1.09em; }
+.mn .stage-pulse-bars { position: relative; height: 2.4em; margin-top: 0.45em; border-bottom: 1px solid var(--line-2); }
+.mn .stage-pulse-bars i { position: absolute; bottom: 0; background: var(--ink-2); min-width: 1px; }
+.mn .stage-pulse-axis { display: flex; justify-content: space-between; padding-top: 0.35em; font-size: var(--stage-xs); color: var(--ink-4); }
+
+/* ── the terminal: the live one, or the transcript drawn from the world ── */
+.mn .stage-term { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0.7em 0 1em; border: 1px solid var(--line); background: linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 9em); }
+.mn .stage-term::before {            /* corner ticks */
+  content: ''; position: absolute; inset: -1px; pointer-events: none;
+  background:
+    linear-gradient(var(--ink-2), var(--ink-2)) top left / 0.9em 1px, linear-gradient(var(--ink-2), var(--ink-2)) top left / 1px 0.9em,
+    linear-gradient(var(--ink-2), var(--ink-2)) top right / 0.9em 1px, linear-gradient(var(--ink-2), var(--ink-2)) top right / 1px 0.9em,
+    linear-gradient(var(--ink-2), var(--ink-2)) bottom left / 0.9em 1px, linear-gradient(var(--ink-2), var(--ink-2)) bottom left / 1px 0.9em,
+    linear-gradient(var(--ink-2), var(--ink-2)) bottom right / 0.9em 1px, linear-gradient(var(--ink-2), var(--ink-2)) bottom right / 1px 0.9em;
+  background-repeat: no-repeat;
+}
+.mn .stage-term[data-typing] { border-color: var(--ink-3); }
+.mn .stage-term-bar { display: flex; align-items: center; gap: 0.9em; height: 2.2em; padding: 0 1em; border-bottom: 1px solid var(--stage-hair); flex: none; min-width: 0; white-space: nowrap; }
+.mn .stage-term-cwd { flex: none; max-width: 50%; color: var(--ink-3); font-size: var(--stage-xs); overflow: hidden; text-overflow: ellipsis; }
+.mn .stage-term-note { min-width: 0; color: var(--ink-4); font-size: var(--stage-xs); overflow: hidden; text-overflow: ellipsis; }
+.mn .stage-term-hints { margin-left: auto; display: inline-flex; align-items: center; gap: 1.1em; flex: none; }
+.mn .stage-hint { display: inline-flex; align-items: center; gap: 0.5em; color: var(--ink-4); font-size: var(--stage-xs); transition: color var(--fast); }
+.mn .stage-hint .mn-kbd { font-size: 1em; }
+.mn button.stage-hint:hover { color: var(--ink-2); }
+.mn .stage-term[data-typing] .stage-hint { color: var(--ink-2); }
+.mn .stage-live { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.mn .stage-live > * { flex: 1; min-height: 0; min-width: 0; }
+
+/* bottom-anchored without a script: the newest line is the one in view */
+.mn .stage-term-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; display: flex; flex-direction: column-reverse; }
+.mn .stage-log { padding: 0.8em 1em 0.6em; }
+.mn .stage-line, .mn .stage-line-note { font-family: var(--mono); font-size: var(--stage-m); line-height: 1.6; }
+.mn .stage-line-note { margin: 0; color: var(--ink-4); padding: 0 0 0.4em 4.7em; }
+.mn .stage-line { display: grid; grid-template-columns: 3.4em 0.8em minmax(0, 1fr) auto; gap: 0 0.5em; align-items: baseline; }
+.mn .stage-line-time { color: var(--ink-4); font-size: 0.92em; white-space: nowrap; }
+.mn .stage-line-dot { width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--ink-3); align-self: center; }
+.mn .stage-line[data-failed] .stage-line-dot { background: var(--stalled); border-radius: 0; }
+.mn .stage-line[data-failed] .stage-line-took { color: var(--stalled); }
+.mn .stage-line-call { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
+.mn .stage-line-call b { color: var(--ink); font-weight: 700; margin-right: 0.7em; }
+.mn .stage-line-took { color: var(--ink-4); font-size: 0.92em; padding-left: 1em; white-space: nowrap; }
+.mn .stage-line-you { margin: 0.55em 0; padding: 0.45em 0; background: rgb(255 255 255 / 0.05); border-left: 1px solid var(--ink-2); }
+.mn .stage-line-you .stage-line-time { padding-left: 0.6em; }
+.mn .stage-line-sign { color: var(--ink); font-weight: 700; }
+.mn .stage-line-said { grid-column: 3 / 5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 1em; }
+.mn .stage-line-says { margin: 0.5em 0; }
+.mn .stage-line-says .stage-line-dot { background: #fff; box-shadow: 0 0 8px rgb(255 255 255 / 0.8); align-self: start; margin-top: 0.62em; }
+.mn .stage-line-label { margin-right: 0.9em; font: 600 0.85em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+.mn .stage-line-runs .stage-line-dot { background: var(--working); animation: stage-blink 1.2s ease-in-out infinite; }
+.mn .stage-line-runs .stage-line-call b, .mn .stage-line-runs .stage-line-took { color: var(--working); }
+@keyframes stage-blink { 50% { opacity: 0.35; } }
+/* what waits, at the transcript's foot: the same card every view draws */
+.mn .stage-line-waits { margin: 0.7em 0 0.3em 3.9em; }
+
+.mn .stage-reply { display: flex; align-items: center; gap: 0.7em; margin: 0 1em; padding: 0.55em 0.8em; border: 1px solid var(--line-2); border-radius: 0.5em; flex: none; cursor: text; transition: border-color var(--fast), box-shadow var(--fast); }
+.mn .stage-term[data-typing] .stage-reply { border-color: #fff; box-shadow: 0 0 18px -6px #fff; }
+.mn .stage-reply-sign { font-size: var(--stage-m); font-weight: 700; }
+.mn .stage-reply input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--ink); font: inherit; font-size: var(--stage-m); caret-color: #fff; }
+.mn .stage-reply input::placeholder { color: var(--ink-4); }
+.mn .stage-refused { margin: 0.5em 1.1em 0; font-size: var(--stage-s); color: var(--ink); overflow-wrap: anywhere; }
+.mn .stage-refused-k { margin-right: 0.8em; font: 700 0.92em/1 var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--stalled); }
+.mn .stage-status { padding: 0.45em 1.1em 0.6em; min-height: 2.6em; color: var(--ink-3); font-size: var(--stage-xs); flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── the terminal has the room (`route.wide`): the head folds to one band, the pulse goes ── */
+.mn .stage-in[data-wide] .stage-head { padding: 0.9em 0 0.8em; gap: 1.2em; }
+.mn .stage-in[data-wide] .stage-figure { width: 4.6em; height: 4.6em; }
+.mn .stage-in[data-wide] .stage-field { --at: calc(var(--stage-pad) + 2.3em) 50%; }
+.mn .stage-in[data-wide] .stage-title { font-size: 1.5em; margin: 0.3em 0 0.4em; }
+.mn .stage-in[data-wide] .stage-family { margin: 0.6em 0; max-height: 2.8em; }
+.mn .stage-in[data-wide] .stage-pulse { display: none; }
+.mn .stage-in[data-wide] .stage-now { padding: 0.5em 1em; }
+.mn .stage-in[data-wide] .stage-now-text { -webkit-line-clamp: 1; }
+.mn .stage-in[data-wide] .stage-term { margin-top: 0.6em; }
+
+/* ── a short stage: the head gives height back to the terminal ── */
+@container stage (max-height: 62em) {
+  .mn .stage-head { padding: 1em 0 0.9em; gap: 1.2em; }
+  .mn .stage-figure { width: 5.4em; height: 5.4em; }
+  .mn .stage-field { --at: calc(var(--stage-pad) + 2.7em) 50%; }
+  .mn .stage-title { font-size: 1.75em; margin: 0.25em 0 0.35em; }
+  .mn .stage-family { margin: 0.6em 0; max-height: 7.5em; }
+  .mn .stage-chip { height: 2.4em; }
+  .mn .stage-family-keys { height: 1.8em; }
+  .mn .stage-now { padding: 0.55em 0.9em; }
+  .mn .stage-now-text { -webkit-line-clamp: 2; }
+  .mn .stage-pulse { padding-top: 0.6em; }
+  .mn .stage-pulse-bars { height: 1.6em; }
+}
+
+/* ── a narrow stage ── */
+@container stage (max-width: 50em) {
+  .mn .stage-in { --stage-pad: 1.1em; }
+  .mn .stage-field { --at: calc(var(--stage-pad) + 2.3em) 50%; }
+  .mn .stage-head { gap: 1.1em; }
+  .mn .stage-figure { width: 4.6em; height: 4.6em; }
+  .mn .stage-title { font-size: 1.5em; }
+  .mn .stage-line { grid-template-columns: 3em 0.8em minmax(0, 1fr) auto; }
+}
+
+/* ── a terminal that is no session: the head says what it is, in place of a figure ── */
+.mn .stage-figure-term { display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 50%; color: var(--ink-2); font-size: 1em; font-weight: 700; }
+.mn .stage-figure-term { width: 4.4em; height: 4.4em; margin: 0.6em 1.3em; }
+.mn .stage-head[data-stage-terminal] .stage-fact[data-fact='what'] { white-space: normal; color: var(--ink-3); border: 0; padding-left: 0; }
+.mn .stage-hint[aria-pressed='true'] { color: var(--ink); }
+.mn .stage-hint[data-stage-end='asked'] { color: var(--stalled); }

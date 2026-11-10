@@ -1,0 +1,85 @@
+/* The new front's ground: black, three typefaces, the state hues, the motion switch
+   (docs/superpowers/specs/2026-11-10-recreation-design.md, "Identity"). Everything is scoped
+   to `.mn`, the new frame's root, so the ship's own tokens are untouched until it goes. */
+
+.mn {
+  color-scheme: dark;
+
+  /* ground */
+  --void: #000;
+  --ink: #fff;
+  --ink-2: rgb(255 255 255 / 0.7);
+  --ink-3: rgb(255 255 255 / 0.45);
+  --ink-4: rgb(255 255 255 / 0.25);
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-2: rgb(255 255 255 / 0.09);
+  --line: rgb(255 255 255 / 0.12);
+  --line-2: rgb(255 255 255 / 0.22);
+  --glow: 0 0 24px rgb(255 255 255 / 0.55), 0 0 60px rgb(255 255 255 / 0.18);
+  --glow-soft: 0 0 14px rgb(255 255 255 / 0.28);
+
+  /* colour is a signal, never decoration: one hue per session state, one for memory */
+  --need: #ffb020;
+  --working: #7dd3fc;
+  --ready: #34d399;
+  --stalled: #f87171;
+  --idle: rgb(255 255 255 / 0.55);
+  --ended: rgb(255 255 255 / 0.28);
+  --memory: #c4b5fd;
+
+  /* type: display for names and numbers, text for sentences, mono for what a terminal printed */
+  --display: 'Jura Variable', 'Geist Variable', system-ui, sans-serif;
+  --text: 'Geist Variable', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 140ms;
+  --slow: 420ms;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--void);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One root size per window width, so every view scales together (the Console prototype's
+   measure): 16px from 2300 wide, 14px to 1600, 12.5px below. Sizes inside are in rem-like
+   `em` of this. */
+.mn { font-size: 12.5px; }
+@media (min-width: 1600px) { .mn { font-size: 14px; } }
+@media (min-width: 2300px) { .mn { font-size: 16px; } }
+
+.mn *, .mn *::before, .mn *::after { box-sizing: border-box; }
+/* `:where` keeps this reset under any class: a button that is a pill keeps the pill's type. */
+:where(.mn) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: inherit; cursor: pointer; }
+.mn ::selection { background: rgb(255 255 255 / 0.22); }
+
+.mn [data-state='need'] { --state: var(--need); }
+.mn [data-state='working'] { --state: var(--working); }
+.mn [data-state='ready'] { --state: var(--ready); }
+.mn [data-state='stalled'] { --state: var(--stalled); }
+.mn [data-state='idle'] { --state: var(--idle); }
+.mn [data-state='ended'] { --state: var(--ended); }
+
+/* Motion: the switch (`data-motion="reduced"` on the root) and the system preference both
+   land here. A component's own animation must honour the same two. */
+@media (prefers-reduced-motion: reduce) {
+  .mn *, .mn *::before, .mn *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+.mn[data-motion='reduced'] *, .mn[data-motion='reduced'] *::before, .mn[data-motion='reduced'] *::after {
+  animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
+}
+
+/* Still when nobody is looking: the frame marks its root `data-away` once the window has been
+   out of focus for a while (src/frame/away.ts), and every animation under it holds its frame.
+   It is what keeps an app that is open all day from asking the machine for sixty frames a
+   second it shows to no one. */
+.mn[data-away] *, .mn[data-away] *::before, .mn[data-away] *::after { animation-play-state: paused !important; }
+
+/* What takes the keyboard says so, the same way everywhere. */
+.mn :focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
+
+/* The primitives' own styles are in primitives.css, which src/ds/index.tsx brings with it. */

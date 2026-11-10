@@ -54,7 +54,8 @@ export function checksOf(pr: Pr): { tone: 'pass' | 'fail' | 'pending'; label: st
 }
 
 /** The values `mnemo dispatch` accepts for each flag; empty leaves the flag off. Closed sets,
- *  as the board had them: these words become a command's arguments. */
-export const MODELS = ['', 'haiku', 'sonnet', 'opus']
+ *  as the board had them: these words become a command's arguments. The Missions panel and the
+ *  command line both offer these. */
+export const MODELS = ['', 'haiku', 'sonnet', 'opus', 'fable']
 export const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max']
 export const MAY = ['', 'pr', 'push', 'none']

@@ -1,0 +1,102 @@
+/* The ground every concept stands on: black, three typefaces, state marks, motion switch.
+   A concept adds to this in its own folder; it does not edit this file. */
+
+@font-face {
+  font-family: "Jura";
+  src: url("fonts/jura-latin-wght-normal.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/geist-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: block;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* ground */
+  --void: #000;
+  --ink: #fff;
+  --ink-2: rgb(255 255 255 / 0.7);
+  --ink-3: rgb(255 255 255 / 0.45);
+  --ink-4: rgb(255 255 255 / 0.25);
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-2: rgb(255 255 255 / 0.09);
+  --line: rgb(255 255 255 / 0.12);
+  --line-2: rgb(255 255 255 / 0.22);
+  --glow: 0 0 24px rgb(255 255 255 / 0.55), 0 0 60px rgb(255 255 255 / 0.18);
+  --glow-soft: 0 0 14px rgb(255 255 255 / 0.28);
+
+  /* colour is a signal, never decoration: one hue per session state */
+  --need: #ffb020;      /* waits for the maintainer */
+  --working: #7dd3fc;   /* acting on its own */
+  --ready: #34d399;     /* finished, a merge waits */
+  --stalled: #f87171;   /* stopped without finishing, or an error */
+  --idle: rgb(255 255 255 / 0.55);
+  --ended: rgb(255 255 255 / 0.28);
+  --memory: #c4b5fd;    /* mnemo: a rule injected, read or learned */
+
+  /* type: a display face for names and numbers, a reading face for sentences, a mono for
+     anything a terminal printed. Display is never used for a paragraph. */
+  --display: "Jura", "Geist", system-ui, sans-serif;
+  --text: "Geist", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 140ms;
+  --slow: 420ms;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--void);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+::selection { background: rgb(255 255 255 / 0.22); }
+
+.label {
+  font: 600 11px/1 var(--display);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+
+/* A state is a shape first and a colour second, so it survives a grey screen:
+   need ◆  working ● (pulsing)  ready ▲  stalled ✕  idle ○  ended · */
+[data-state="need"]    { --state: var(--need); }
+[data-state="working"] { --state: var(--working); }
+[data-state="ready"]   { --state: var(--ready); }
+[data-state="stalled"] { --state: var(--stalled); }
+[data-state="idle"]    { --state: var(--idle); }
+[data-state="ended"]   { --state: var(--ended); }
+
+/* Motion: `data-motion="reduced"` on <html> (the switch every concept offers) and the
+   system preference both land here. A concept's own animations must honour the same two. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+html[data-motion="reduced"] *, html[data-motion="reduced"] *::before, html[data-motion="reduced"] *::after {
+  animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
+}

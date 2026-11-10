@@ -8,6 +8,10 @@ import type { VoicePhase } from '../client'
  *  follow-up window) is a slow breath. */
 export type OrbLook = 'listening' | 'thinking' | 'speaking' | 'waiting'
 
+/** A look's word, under the orb and beside James's name in his presence: a state is a word
+ *  before it is a way of moving. `waiting` is James still listening for more. */
+export const LOOK_WORD: Record<OrbLook, string> = { listening: 'listening', thinking: 'thinking', speaking: 'speaking', waiting: 'go on' }
+
 /** The orb fades out over this long once the conversation is over, then hides. */
 export const LINGER_MS = 1500
 
@@ -47,8 +51,10 @@ export function stepShow(s: Shown, look: OrbLook | null, now: number): Shown {
 /** A caption under the orb: what was heard, then what James is saying. */
 export type Caption = { who: 'you' | 'james'; text: string; at: number }
 
-/** `jarvis://orb`: what the main window tells the orb (`./control`). `look` null: fading out. */
-export type OrbState = { look: OrbLook | null; captions: Caption[] }
+/** `jarvis://orb`: what the main window tells the orb (`./control`). `look` null: fading out.
+ *  `still`: the frame's motion switch is on, so the orb holds its place (the system's own
+ *  preference the orb's page reads itself). */
+export type OrbState = { look: OrbLook | null; captions: Caption[]; still?: true }
 export const ORB_EVENT = 'jarvis://orb'
 /** `jarvis://orb-ready`: the orb's page listens now, and wants the state it may have missed. */
 export const ORB_READY = 'jarvis://orb-ready'

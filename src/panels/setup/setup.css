@@ -1,0 +1,31 @@
+/* The Setup panel: `setup-`. A tool's state is a shape and a word before it is a colour:
+   a tick for found, a cross for missing and needed, a ring for missing and optional. */
+
+.mn .setup { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.3em; align-content: start; }
+.mn .setup-top { align-items: flex-start; }
+.mn .setup-summary { margin: 0; display: flex; gap: 0.7em; font-size: 1.05em; line-height: 1.5; color: var(--ink); }
+.mn .setup-summary-mark { flex: none; color: var(--ready); }
+.mn .setup-summary[data-missing] .setup-summary-mark { color: var(--stalled); }
+
+.mn .setup-tools { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); }
+.mn .setup-tool { display: grid; grid-template-columns: 2em minmax(0, 1fr); gap: 0.4em; padding: 1em 0.2em; border-top: 1px solid var(--line); }
+.mn .setup-tool:last-child { border-bottom: 1px solid var(--line); }
+.mn .setup-mark { font-size: 1.15em; line-height: 1.35; color: var(--ink-3); }
+.mn .setup-tool[data-state='found'] .setup-mark { color: var(--ready); }
+.mn .setup-tool[data-state='needed'] .setup-mark { color: var(--stalled); }
+.mn .setup-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45em; font-size: 0.95em; }
+.mn .setup-head { gap: 0.3em 0.9em; }
+.mn .setup-name { font: 700 1.25em/1.2 var(--display); letter-spacing: 0.1em; }
+.mn .setup-state { font: 600 0.72em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+.mn .setup-tool[data-state='found'] .setup-state { color: var(--ink-2); }
+.mn .setup-tool[data-state='needed'] .setup-state { color: var(--stalled); }
+.mn .setup-path { overflow-wrap: anywhere; }
+.mn .setup-action { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em 1em; padding-top: 0.4em; }
+.mn .setup-hint { flex: 1; min-width: 14em; font-size: 0.9em; line-height: 1.45; }
+.mn .setup-hint code { font: 400 0.92em var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.mn .setup-line { margin: 0; font-size: 0.93em; line-height: 1.5; }
+.mn .setup-run { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5em; padding-top: 0.5em; }
+.mn .setup-run[data-tone='ok'] > .mn-label { color: var(--ready); }
+.mn .setup-run[data-tone='bad'] > .mn-label { color: var(--stalled); }
+.mn .setup-ok { color: var(--ready); font-size: 0.93em; }
+.mn .setup-err { color: var(--stalled); font-size: 0.93em; }

@@ -22,6 +22,8 @@ export type OrbDeps = {
   api: OrbApi
   /** What James says aloud of a reply (`forSpeech`). */
   spoken: (text: string) => string
+  /** Whether the frame's motion switch stills everything (`frameStilled`); never, when not given. */
+  still?: () => boolean
   now?: () => number
   setTimer?: (f: () => void, ms: number) => unknown
   clearTimer?: (t: unknown) => void
@@ -37,6 +39,7 @@ export function createOrbControl({
   store,
   api,
   spoken,
+  still = () => false,
   now = Date.now,
   setTimer = (f, ms) => setTimeout(f, ms),
   clearTimer = (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
@@ -73,7 +76,7 @@ export function createOrbControl({
       }, shown.overAt + LINGER_MS - now())
     }
     if (!shown.shown) return
-    const state: OrbState = { look, captions: captionsOf(s.lines, shown.since, spoken) }
+    const state: OrbState = { look, captions: captionsOf(s.lines, shown.since, spoken), ...(still() ? { still: true as const } : {}) }
     const json = JSON.stringify(state)
     if (json === sent) return
     sent = json

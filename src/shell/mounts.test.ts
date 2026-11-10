@@ -15,6 +15,6 @@ test('every folder that mounts a screen in a shell slot has a view.tsx for App t
   }
   // James's panel, the Nexus (and, from its start, its toaster), the notification stack, the
   // dictation indicator.
-  expect([...mounting].sort()).toEqual(['jarvis', 'nexus', 'notify', 'voice'])
+  expect([...mounting].sort()).toEqual(['frame', 'jarvis', 'nexus', 'notify', 'voice'])
   expect([...mounting].filter((d) => !views.has(d)).sort()).toEqual([])
 })

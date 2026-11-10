@@ -133,3 +133,31 @@ test('disposing hides a shown orb and stops following the store', async () => {
   store.setState({ voice: 'listening' })
   expect(calls).toEqual([])
 })
+
+test("the motion switch of the frame goes to the orb with its state, and only while it is on", async () => {
+  const store = createJarvisStore()
+  const sent: OrbState[] = []
+  let stilled = true
+  const api: OrbApi = { enabled: async () => true, show: async () => {}, send: async (s) => void sent.push(s), onReady: async () => () => {} }
+  const control = createOrbControl({ store, api, spoken: (s) => s, still: () => stilled, now: () => 0, setTimer: () => 0, clearTimer: () => {} })
+  await settle()
+  store.setState({ voice: "listening" })
+  expect(sent).toEqual([{ look: "listening", captions: [], still: true }])
+
+  stilled = false
+  store.setState({ voice: "speaking" })
+  expect(sent[1]).toEqual({ look: "speaking", captions: [] })
+
+  // Turned on again mid-conversation: the next thing the store says carries it.
+  stilled = true
+  store.setState({ busy: true })
+  expect(sent[2]).toEqual({ look: "speaking", captions: [], still: true })
+  control.dispose()
+})
+
+test("with no switch given, the orb is never told to hold still", async () => {
+  const { store, calls } = setup(true)
+  await settle()
+  store.setState({ voice: "listening" })
+  expect(calls).toEqual([true, { look: "listening", captions: [] }])
+})

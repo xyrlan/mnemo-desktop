@@ -1421,14 +1421,17 @@ mod tests {
 
     #[test]
     fn a_slow_download_that_keeps_moving_finishes() {
-        // 96 KiB at 4 KiB every 40 ms takes about a second; nothing may stall for 400 ms.
+        // 96 KiB at 2 KiB every 50 ms takes about 2.4 s; nothing may stall for 1.5 s. The window
+        // is that wide because a loaded CI runner has slept through a 400 ms one between two
+        // chunks (macOS, 2026-11-10, with a dozen jobs queued), which failed a download that
+        // never stalled.
         let data = body(96 * 1024);
-        let (url, asked) = serve(data.clone(), |_| Serve::Slow { chunk: 4096, every: Duration::from_millis(40) });
+        let (url, asked) = serve(data.clone(), |_| Serve::Slow { chunk: 2048, every: Duration::from_millis(50) });
         let dir = crate::testutil::temp_dir("voice-dl");
         let path = dir.join("model.bin");
         let started = std::time::Instant::now();
-        download(&url, &path, data.len() as u64, Duration::from_millis(400), |_, _| {}).unwrap();
-        assert!(started.elapsed() > Duration::from_millis(400), "the body outlasted one window");
+        download(&url, &path, data.len() as u64, Duration::from_millis(1500), |_, _| {}).unwrap();
+        assert!(started.elapsed() > Duration::from_millis(1500), "the body outlasted one window");
         assert_eq!(std::fs::read(&path).unwrap(), data);
         assert!(!dir.join("model.bin.part").exists());
         // Every request after the first asked for the rest, not for byte 0.

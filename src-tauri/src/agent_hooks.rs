@@ -1,7 +1,7 @@
 //! Agent status from Claude Code's own hooks (spec, *Agent status: the app's own hooks*).
 //!
 //! ```text
-//! claude ──hook, JSON on stdin──▶ mnemo-desktop-hook <Event> ──unix socket, one JSON line──▶ app
+//! claude ──hook, JSON on stdin──▶ mnemo-desktop-hook <Event> ──`ipc`, one JSON line──▶ app
 //!                                                               app ──`agent://event`──▶ webview (src/agents/)
 //! ```
 //!
@@ -9,7 +9,8 @@
 //! say where a session is: `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` (waiting
 //! on you) and `SessionEnd`. mnemo's CLI keeps its own hooks in the same file, so an entry is
 //! the app's only when its command runs this build's hook binary; nothing else is ever
-//! rewritten, moved or removed.
+//! rewritten, moved or removed. An entry is a line of POSIX shell on macOS and Linux and, on
+//! Windows, the binary and its argument with no shell at all (`hook_entry_on`).
 //!
 //! The binary (`src/bin/mnemo-desktop-hook.rs`) never slows Claude down: it prints nothing,
 //! always exits 0, gives up after a second and a half, and says nothing when the app is
@@ -61,10 +62,10 @@ pub fn socket_path() -> PathBuf {
     app_dir().join("agent-hooks.sock")
 }
 
-/// Where the settings point: a symlink to the binary of whichever build of this app dir
-/// started last, so the entries survive rebuilds, worktrees and moving the app.
+/// Where the settings point: the binary of whichever build of this app dir started last
+/// (`mcp::relink`), so the entries survive rebuilds, worktrees and moving the app.
 pub fn stable_binary() -> PathBuf {
-    app_dir().join("bin").join(BIN_NAME)
+    app_dir().join("bin").join(format!("{BIN_NAME}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`.
@@ -86,14 +87,28 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-/// The command for one event. The redirect and `|| true` keep the "always exits 0, silent"
-/// promise even when the app was deleted and the link dangles.
+/// The command for one event where Claude Code hands it to `sh -c`. The redirect and `|| true`
+/// keep the "always exits 0, silent" promise even when the app was deleted and the link dangles.
 pub fn hook_command(binary: &Path, event: &str) -> String {
     format!("{} {event} 2>/dev/null || true", sh_quote(&binary.display().to_string()))
 }
 
-fn hook_entry(binary: &Path, event: &str) -> Value {
-    json!({ "type": "command", "command": hook_command(binary, event), "timeout": TIMEOUT_SECS })
+/// One event's entry in the settings of a system that is Windows, or is not.
+///
+/// On Windows Claude Code hands a hook's `command` to Git Bash, or to PowerShell where Git Bash
+/// is not installed, and no one line reads the same in both. So the entry there is Claude
+/// Code's exec form: with `args` beside it, `command` is a program started with those
+/// arguments and no shell in between, whatever the path holds. Nothing has to make it "always
+/// exit 0" either: the stable binary is a copy (`mcp::relink`), still there when the app is
+/// not. The path is written with `/`, which Windows takes as it takes `\`: a Claude Code too
+/// old to know `args` runs `command` as a line of shell, where `\` would be eaten, and the
+/// binary, started with no argument, leaves the event's name to the payload (`parse_line`).
+pub fn hook_entry_on(binary: &Path, event: &str, windows: bool) -> Value {
+    if windows {
+        json!({ "type": "command", "command": binary.display().to_string().replace('\\', "/"), "args": [event], "timeout": TIMEOUT_SECS })
+    } else {
+        json!({ "type": "command", "command": hook_command(binary, event), "timeout": TIMEOUT_SECS })
+    }
 }
 
 fn owned(hook: &Value, mark: &str) -> bool {
@@ -171,6 +186,12 @@ struct Event {
 /// text when anything changed, `None` when nothing had to. Every entry the app did not write
 /// is written back as it was read; settings it does not understand are refused, not rewritten.
 pub fn apply(text: &str, binary: &Path, mark: &str, install: bool) -> Result<Option<String>, String> {
+    apply_on(text, binary, mark, install, cfg!(windows))
+}
+
+/// `apply`, writing the entries of a system that is Windows, or is not (`hook_entry_on`).
+pub fn apply_on(text: &str, binary: &Path, mark: &str, install: bool, windows: bool) -> Result<Option<String>, String> {
+    let hook_entry = |binary: &Path, event: &str| hook_entry_on(binary, event, windows);
     let top = match text.trim() {
         "" => Vec::new(),
         t => serde_json::from_str::<Members>(t).map_err(|e| format!("settings.json is not a JSON object: {e}"))?.0,
@@ -363,28 +384,21 @@ pub fn now_ms() -> u64 {
 pub type Sink = std::sync::Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
 /// Binds `path`, replacing a socket left by an earlier (or still running) app: the app
-/// started last hears the hooks, as `mcp::bind` does for its own socket.
-#[cfg(unix)]
-pub fn bind(path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
-    use std::os::unix::fs::PermissionsExt;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    if std::fs::symlink_metadata(path).is_ok() {
-        std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    let listener = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Other local users must not feed this user's agent state.
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    Ok(listener)
+/// started last hears the hooks, as `mcp::bind` does for its own socket. Other local users
+/// must not feed this user's agent state: `ipc` lets in the user who bound it and nobody else.
+pub fn bind(path: &Path) -> Result<crate::ipc::Listener, String> {
+    crate::ipc::Listener::bind(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// One line per connection; the hook never waits for an answer.
-#[cfg(unix)]
-pub fn serve(listener: std::os::unix::net::UnixListener, sink: Sink) {
+pub fn serve(listener: crate::ipc::Listener, sink: Sink) {
     use std::io::{BufRead, BufReader, Read};
     for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+        let Ok(stream) = stream else {
+            // As `mcp::serve`: a listener that keeps failing must not take a core.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            continue;
+        };
         let sink = sink.clone();
         std::thread::spawn(move || {
             let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
@@ -408,11 +422,6 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     if std::env::var_os("MNEMO_DESKTOP_SMOKE").is_some() {
         return Ok(());
     }
-    // Absent by design is not a failure: a warning here would open every log on Windows (#364).
-    if let Some(why) = ABSENT {
-        log::info!("agent hooks: off on this system: {why}");
-        return Ok(());
-    }
     listen(app.clone());
     if guard().is_ok() && !app_dir().join(OFF_MARKER).exists() {
         std::thread::spawn(|| {
@@ -424,7 +433,6 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn listen<R: Runtime>(app: AppHandle<R>) {
     let listener = match bind(&socket_path()) {
         Ok(l) => l,
@@ -438,34 +446,14 @@ fn listen<R: Runtime>(app: AppHandle<R>) {
     }
 }
 
-/// Why this system has no hook socket, None where it has one.
-#[cfg(unix)]
-const ABSENT: Option<&str> = None;
-#[cfg(not(unix))]
-const ABSENT: Option<&str> = Some("the hook socket needs unix sockets");
-
-/// Never reached: `start` returns first where `ABSENT` says why.
-#[cfg(not(unix))]
-fn listen<R: Runtime>(_app: AppHandle<R>) {}
-
-#[cfg(unix)]
 fn install() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let built = exe.with_file_name(BIN_NAME);
-    if !built.is_file() {
-        return Err(format!("{} is missing (cargo build --bin {BIN_NAME})", built.display()));
-    }
+    let built = crate::mcp::built_beside_the_app(BIN_NAME)?;
     let stable = stable_binary();
     crate::mcp::relink(&built, &stable)?;
     if apply_at(&claude_settings(), &stable, &owner_mark(NAME), true)? {
         log::info!("agent hooks: installed into {}", claude_settings().display());
     }
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn install() -> Result<(), String> {
-    Err("agent hooks need unix sockets".into())
 }
 
 /// Writes (or refreshes) the app's hooks in the user's Claude settings, and lets the app
@@ -503,24 +491,26 @@ mod tests {
 
     const BIN: &str = "/Users/me/.mnemo-desktop/bin/mnemo-desktop-hook";
 
-    /// Windows has no hook socket by design: `start` says so at info, below what the log file
-    /// keeps (`crash::tests::a_panic_on_any_thread_lands_in_the_log_with_where`), and neither
-    /// listens nor installs, which wrote two warnings at every start before #364.
-    #[test]
-    fn a_system_without_the_hook_socket_knows_it_before_trying() {
-        assert_eq!(ABSENT.is_some(), cfg!(windows));
-    }
+    /// The stable binary as Windows names it, and as the settings there spell it.
+    const WIN_BIN: &str = r"C:\Users\First Last\.mnemo-desktop\bin\mnemo-desktop-hook.exe";
+    const WIN_COMMAND: &str = "C:/Users/First Last/.mnemo-desktop/bin/mnemo-desktop-hook.exe";
 
     fn mark() -> String {
         owner_mark(crate::app_dir::RELEASE)
     }
 
+    /// The entries of macOS and Linux, on whichever system the tests run.
     fn install(text: &str) -> Option<String> {
-        apply(text, Path::new(BIN), &mark(), true).unwrap()
+        apply_on(text, Path::new(BIN), &mark(), true, false).unwrap()
     }
 
     fn uninstall(text: &str) -> Option<String> {
-        apply(text, Path::new(BIN), &mark(), false).unwrap()
+        apply_on(text, Path::new(BIN), &mark(), false, false).unwrap()
+    }
+
+    /// The entries of Windows, likewise.
+    fn install_windows(text: &str) -> Option<String> {
+        apply_on(text, Path::new(WIN_BIN), &mark(), true, true).unwrap()
     }
 
     fn parse(text: &str) -> Value {
@@ -620,9 +610,59 @@ mod tests {
 
     #[test]
     fn a_changed_binary_path_is_rewritten() {
-        let old = apply(THEIRS, Path::new("/elsewhere/.mnemo-desktop/bin/mnemo-desktop-hook"), &mark(), true).unwrap().unwrap();
+        let old = apply_on(THEIRS, Path::new("/elsewhere/.mnemo-desktop/bin/mnemo-desktop-hook"), &mark(), true, false).unwrap().unwrap();
         let out = install(&old).unwrap();
         assert!(out.contains(BIN) && !out.contains("/elsewhere/"));
+    }
+
+    /// Claude Code on Windows runs a `command` through Git Bash, or PowerShell without it; an
+    /// entry with `args` goes through neither.
+    #[test]
+    fn on_windows_an_entry_names_the_binary_and_its_argument_and_no_shell() {
+        let v = parse(&install_windows(THEIRS).unwrap());
+        let theirs = parse(THEIRS);
+        for (event, _) in EVENTS {
+            let groups = v["hooks"][event].as_array().unwrap();
+            let ours = &groups.last().unwrap()["hooks"][0];
+            assert_eq!(*ours, json!({ "type": "command", "command": WIN_COMMAND, "args": [event], "timeout": TIMEOUT_SECS }));
+            // Nothing a shell would have to read: no quote, no redirect, no backslash.
+            let command = ours["command"].as_str().unwrap();
+            assert!(!command.contains(['\'', '"', '\\', '>', '|']), "{command}");
+        }
+        assert_eq!(v["hooks"]["SessionStart"][0], theirs["hooks"]["SessionStart"][0]);
+        assert_eq!(v["hooks"]["PreToolUse"], theirs["hooks"]["PreToolUse"]);
+    }
+
+    #[test]
+    fn on_windows_too_install_is_idempotent_and_uninstall_gives_back_their_file() {
+        let once = install_windows(THEIRS).unwrap();
+        assert_eq!(install_windows(&once), None);
+        assert_eq!(apply_on(&once, Path::new(WIN_BIN), &mark(), false, true).unwrap().unwrap(), THEIRS);
+        // The mark finds the entry however its path is slashed, and never the dev build's.
+        assert!(owned(&json!({ "command": WIN_COMMAND }), &mark()));
+        assert!(owned(&json!({ "command": WIN_BIN }), &mark()));
+        assert!(!owned(&json!({ "command": WIN_COMMAND }), &owner_mark(crate::app_dir::DEBUG)));
+    }
+
+    /// Settings carried from one system to the other (a dotfiles repo): the entry is this
+    /// build's by its path, and is written again as this system runs it.
+    #[test]
+    fn an_entry_in_the_other_systems_form_is_rewritten_in_this_ones() {
+        let posix = install(THEIRS).unwrap();
+        let out = install_windows(&posix).unwrap();
+        assert!(!out.contains("2>/dev/null"), "{out}");
+        assert_eq!(parse(&out), parse(&install_windows(THEIRS).unwrap()));
+        let back = install(&out).unwrap();
+        assert_eq!(parse(&back), parse(&posix));
+        assert!(!back.contains("\"args\""), "{back}");
+    }
+
+    /// This system's own: `apply` writes what `apply_on` writes for it.
+    #[test]
+    fn apply_writes_this_systems_form() {
+        let out = apply(THEIRS, Path::new(BIN), &mark(), true).unwrap().unwrap();
+        assert_eq!(parse(&out)["hooks"]["Stop"][1]["hooks"][0].get("args").is_some(), cfg!(windows));
+        assert_eq!(apply(&out, Path::new(BIN), &mark(), true).unwrap(), None);
     }
 
     #[test]
@@ -653,6 +693,7 @@ mod tests {
         let b = Path::new(BIN);
         for text in ["[]", "3", "{ // comment\n}", r#"{"hooks": []}"#, r#"{"hooks": {"Stop": {}}}"#] {
             assert!(apply(text, b, &mark(), true).is_err(), "{text}");
+            assert!(apply_on(text, b, &mark(), true, !cfg!(windows)).is_err(), "{text}");
         }
     }
 
@@ -690,6 +731,35 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "{ // not json");
 
         let missing = dir.join("none/settings.json");
+        assert!(!apply_at(&missing, b, &mark(), false).unwrap());
+        assert!(!missing.exists());
+        assert!(apply_at(&missing, b, &mark(), true).unwrap());
+        let leftovers: Vec<_> = std::fs::read_dir(dir.join("none")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(leftovers, ["settings.json"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The same on Windows, where nothing above runs (it needs a symlink): the file is the
+    /// user's real `settings.json`, written only on change, never when it is not understood.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_file_is_rewritten_only_on_change_and_never_when_unparseable() {
+        let dir = crate::testutil::temp_dir("hooks-file");
+        let file = dir.join("settings.json");
+        std::fs::write(&file, THEIRS).unwrap();
+        let b = Path::new(WIN_BIN);
+        assert!(apply_at(&file, b, &mark(), true).unwrap());
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("mnemo.hooks.session_start") && after.contains(WIN_COMMAND), "{after}");
+        assert!(!apply_at(&file, b, &mark(), true).unwrap());
+        assert!(apply_at(&file, b, &mark(), false).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEIRS);
+
+        std::fs::write(&file, "{ // not json").unwrap();
+        assert!(apply_at(&file, b, &mark(), true).unwrap_err().contains("left untouched"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ // not json");
+
+        let missing = dir.join("none").join("settings.json");
         assert!(!apply_at(&missing, b, &mark(), false).unwrap());
         assert!(!missing.exists());
         assert!(apply_at(&missing, b, &mark(), true).unwrap());
@@ -746,25 +816,29 @@ mod tests {
             assert!(bin.contains(&format!("\"{s}\"")), "the hook binary lost {s}");
         }
         assert!(socket_path().ends_with("agent-hooks.sock"));
-        assert!(stable_binary().ends_with(format!("{NAME}/bin/{BIN_NAME}")));
+        assert!(stable_binary().ends_with(format!("{NAME}/bin/{BIN_NAME}{}", std::env::consts::EXE_SUFFIX)));
+        // What marks an entry as this build's is in the path of the binary it names.
+        assert!(stable_binary().display().to_string().replace('\\', "/").contains(&owner_mark(NAME)));
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_socket_hands_each_line_to_the_sink() {
         use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
         // Short names: a socket path must fit in sun_path, and macOS's temp dir is long.
         let dir = crate::testutil::temp_dir("hs");
         let path = dir.join("h.sock");
         std::fs::write(&path, "stale").unwrap();
         let listener = bind(&path).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = std::sync::Mutex::new(tx);
         std::thread::spawn(move || serve(listener, std::sync::Arc::new(move |e| tx.lock().unwrap().send(e).unwrap())));
         for l in ["garbage", &line("Stop", json!({ "session_id": "s2", "cwd": "/w" }))] {
-            let mut s = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            let mut s = crate::ipc::Stream::connect(&path).unwrap();
             writeln!(s, "{l}").unwrap();
         }
         let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();

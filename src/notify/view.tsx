@@ -1,13 +1,17 @@
 import { subscribeAgentEvents } from '../agents/events'
 import { notifyAgent } from '../agents/notify'
 import { fleetStore, subscribePolledMoves } from '../fleet/store'
+import { nextFront } from '../frame/flag'
 import { missionStore } from '../mission/app-store'
 import { openFigure } from '../nexus/outside'
 import { nexusStore } from '../nexus/store'
 import { mountInSlot } from '../shell/slots'
+import { openOnStage } from '../world/route'
+import { sessionOf, worldStore } from '../world/store'
 import { figureOf, shownSession } from './decide'
 import { NotificationStack } from './NotificationStack'
 import { createNotifier } from './notifier'
+import { openSession } from './open'
 import { chime } from './sound'
 
 // Imported by `App.tsx`'s view glob: the one notifier of the app run, and its stack in the shell.
@@ -37,10 +41,16 @@ export const notifier = createNotifier({
   },
   native: notifyAgent,
   sound: () => chime(),
-  // Its figure in the Nexus (Q14): a dispatched child's robot, else its captain. What it said is
-  // seen once it is on screen.
+  // Its figure in the Nexus (Q14): a dispatched child's robot, else its captain. In the new front,
+  // the session on Console's stage (`./open`). What it said is seen once it is on screen.
   open(sessionId, worktree) {
-    if (!openFigure(figureOf(missionStore.getState().snapshot, sessionId))) return false
+    const opened = openSession({
+      figure: () => openFigure(figureOf(missionStore.getState().snapshot, sessionId)),
+      next: nextFront(),
+      known: () => sessionOf(worldStore.getState().world, sessionId)?.id ?? null,
+      stage: openOnStage,
+    })
+    if (!opened) return false
     if (worktree !== null) fleetStore.getState().markRead(worktree)
     return true
   },

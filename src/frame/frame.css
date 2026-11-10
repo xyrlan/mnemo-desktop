@@ -1,0 +1,164 @@
+/* The frame: the top bar and the line of panels under it, each view's room, the foot with the command line and the keys
+   (src/frame/Frame.tsx). Scoped under `.mn`; sizes in `em` of its three root sizes, so one
+   breakpoint table (src/ds/tokens.css: 12.5px, 14px from 1600, 16px from 2300) scales it all. */
+
+.mn {
+  --frame-top: 3.5em;
+  --frame-sub: 2em;
+  --frame-foot: 2.75em;
+  --frame-pad: 0.9em;
+  --frame-roster: 26em;
+  --frame-insts: 26.5em;
+  --frame-move: 320ms;
+}
+@media (min-width: 1600px) { .mn { --frame-pad: 1.25em; --frame-roster: 33em; --frame-insts: 34em; } }
+@media (min-width: 2300px) { .mn { --frame-roster: 39em; --frame-insts: 61em; } }
+
+.mn .frame { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.mn .frame-main { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+/* ── the top bar ── */
+.mn .frame-top {
+  flex: none; display: flex; align-items: center; gap: 1.1em; height: var(--frame-top); padding: 0 var(--frame-pad);
+  border-bottom: 1px solid var(--line); min-width: 0; white-space: nowrap;
+}
+@media (min-width: 2300px) { .mn .frame-top { gap: 1.45em; } }
+
+.mn .frame-brand { display: flex; align-items: center; gap: 0.75em; flex: none; }
+.mn .frame-mark { width: 1.9em; height: 1.9em; flex: none; filter: drop-shadow(0 0 6px rgb(255 255 255 / 0.45)); }
+.mn .frame-wordmark { font: 600 1.25em/1 var(--display); letter-spacing: 0.42em; text-transform: uppercase; text-shadow: var(--glow-soft); }
+
+/* The three views: one lit plate slides under the names, so the change is seen where it was asked. */
+.mn .frame-views { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: none; height: 2em; border: 1px solid var(--line-2); border-radius: 999px; }
+.mn .frame-views-lit {
+  position: absolute; inset: -1px auto -1px -1px; width: calc((100% + 2px) / 3); border-radius: 999px; background: var(--ink); box-shadow: var(--glow-soft);
+  transform: translateX(calc(var(--frame-at, 0) * 100%)); transition: transform var(--frame-move) var(--ease);
+}
+.mn .frame-view-tab {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.6em; padding: 0 1em;
+  font: 600 max(10px, 0.72em)/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-2); transition: color var(--fast);
+}
+.mn .frame-view-tab:hover { color: var(--ink); }
+.mn .frame-view-tab[aria-current] { color: var(--void); }
+.mn .frame-view-tab .mn-kbd { font-size: 0.9em; border-color: currentColor; color: inherit; opacity: 0.55; }
+.mn .frame-view-tab[aria-current] .mn-kbd { opacity: 0.7; }
+
+/* The fleet by state: shape, number, and the word when the bar has room for it
+   (`data-tight`, measured in TopBar.tsx: the room depends on what else the bar holds). */
+.mn .frame-fleet { display: flex; align-items: center; gap: 1.2em; min-width: 0; overflow: hidden; }
+.mn .frame-fleet[data-tight] { gap: 0.9em; }
+.mn .frame-fl { flex: none; }
+.mn .frame-fl { display: inline-flex; align-items: center; gap: 0.5em; color: var(--ink-3); }
+.mn .frame-fl .mn-state { font-size: 0.9em; }
+.mn .frame-fl b { color: var(--ink); font-size: 1em; font-weight: 600; }
+.mn .frame-fl-word { font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .frame-fleet[data-tight] .frame-fl-word { display: none; }
+.mn .frame-fl[data-zero] { opacity: 0.4; }
+.mn .frame-fl[data-zero] .mn-state-glyph { animation: none; }
+
+/* Each account's plan windows. The account of the session in hand is the bright one, with bars. */
+.mn .frame-plans { margin-left: auto; display: flex; align-items: center; gap: 1.3em; flex: none; }
+.mn .frame-acct { display: inline-flex; align-items: center; gap: 0.65em; color: var(--ink-3); font-size: max(10px, 0.6875em); opacity: 0.55; }
+.mn .frame-acct[data-on] { opacity: 1; }
+.mn .frame-acct-name { font: 600 1.09em/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
+.mn .frame-acct-plan { text-transform: uppercase; letter-spacing: 0.1em; }
+.mn .frame-acct:not([data-on]) .frame-acct-plan { display: none; }
+.mn .frame-acct-old { text-transform: uppercase; letter-spacing: 0.1em; color: var(--need); }
+.mn .frame-lim { display: inline-flex; align-items: center; gap: 0.45em; }
+.mn .frame-lim b { color: var(--ink-2); font-size: 1.09em; font-weight: 600; min-width: 2.2em; }
+.mn .frame-lim[data-off] { opacity: 0.5; }
+.mn .frame-lim[data-hot] b, .mn .frame-lim[data-hot] .frame-lim-kind { color: var(--need); }
+.mn .frame-lim[data-hot] .mn-meter > i { background: var(--need); }
+.mn .frame-lim-kind { text-transform: uppercase; letter-spacing: 0.12em; }
+.mn .frame-lim-left { display: none; color: var(--ink-4); }
+@media (min-width: 2300px) { .mn .frame-lim-left { display: inline; } }
+/* Below 1600 only the account in hand has room. */
+@media (max-width: 1599px) { .mn .frame-acct:not([data-on]), .mn .frame-acct-plan { display: none; } }
+
+/* James, at the end of the first line: his presence is the overlays piece's own. */
+.mn .frame-james { flex: none; display: flex; align-items: center; }
+
+/* ── the second line: the panels that exist, the motion switch, which world this is ── */
+.mn .frame-sub {
+  flex: none; display: flex; align-items: center; gap: 1.1em; height: var(--frame-sub); padding: 0 var(--frame-pad);
+  border-bottom: 1px solid var(--line); min-width: 0; white-space: nowrap;
+}
+.mn .frame-panels { display: flex; align-items: stretch; gap: 0.2em; height: 100%; min-width: 0; margin-right: auto; margin-left: -0.75em; }
+.mn .frame-panel-tab {
+  position: relative; display: inline-flex; align-items: center; padding: 0 0.75em; flex: none;
+  font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); transition: color var(--fast);
+}
+.mn .frame-panel-tab:hover { color: var(--ink); }
+.mn .frame-panel-tab[aria-pressed='true'] { color: var(--ink); text-shadow: var(--glow-soft); }
+.mn .frame-panel-tab[aria-pressed='true']::after { content: ''; position: absolute; left: 0.75em; right: 0.75em; bottom: -1px; height: 1px; background: var(--ink); box-shadow: var(--glow-soft); }
+@media (max-width: 1599px) { .mn .frame-panel-tab { padding: 0 0.6em; letter-spacing: 0.12em; } .mn .frame-panels { margin-left: -0.6em; } }
+
+.mn .frame-motion { display: inline-flex; align-items: center; gap: 0.5em; height: 1.45em; padding: 0 0.7em; border: 1px solid var(--line); border-radius: 999px; flex: none; transition: border-color var(--fast); }
+.mn .frame-motion:hover { border-color: var(--line-2); }
+.mn .frame-motion b { font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.mn .frame-source { flex: none; white-space: pre; }
+/* The pending piece's own count is wider than a number: below 1600 the bar gives it the room. */
+@media (max-width: 1599px) { .mn .frame-source-more { display: none; } .mn .frame-view-tab { padding: 0 0.75em; } .mn .frame-top { gap: 0.95em; } }
+
+/* What the world could not read: said in a line of its own, for as long as it is true. */
+.mn .frame-unread { flex: none; display: flex; align-items: baseline; gap: 1em; padding: 0.5em var(--frame-pad); border-bottom: 1px solid var(--line); background: rgb(248 113 113 / 0.06); }
+.mn .frame-unread .mn-label { color: var(--stalled); flex: none; }
+.mn .frame-unread ul { display: flex; flex-wrap: wrap; gap: 0.2em 1.6em; margin: 0; padding: 0; list-style: none; color: var(--ink-2); font-size: 0.8125em; }
+
+/* ── the views ── */
+.mn .frame-view { position: absolute; inset: 0; transform-origin: 0 0; }
+.mn .frame-view[data-phase='out'] { z-index: 1; pointer-events: none; animation: frame-out var(--frame-move) var(--ease) both; }
+.mn .frame-view[data-phase='in'] { animation: frame-in var(--frame-move) var(--ease) both; }
+@keyframes frame-out { 60% { opacity: 0.5; } to { opacity: 0; transform: var(--frame-to, none); } }
+@keyframes frame-in { from { opacity: 0; transform: var(--frame-from, none); } }
+
+/* Console: roster, stage, instruments. Each column is its piece's to fill. */
+.mn .frame-console { position: absolute; inset: 0; display: grid; grid-template-columns: var(--frame-roster) minmax(0, 1fr); }
+.mn .frame-console[data-instruments] { grid-template-columns: var(--frame-roster) minmax(0, 1fr) var(--frame-insts); }
+.mn .frame-col { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* ── the foot: the command line, and the keys in short ── */
+.mn .frame-foot { flex: none; position: relative; z-index: 6; display: flex; align-items: center; gap: 1.2em; height: var(--frame-foot); padding: 0 var(--frame-pad); border-top: 1px solid var(--line); min-width: 0; white-space: nowrap; background: var(--void); }
+/* Where the top bar has no James (the overlays piece is not in the build), his panel docks its
+   own way in at the window's corner, 30px square and 16px in: the foot's last key stops short
+   of it. With him in the top bar the corner is the foot's. */
+.mn:not([data-james]) .frame-foot { padding-right: calc(16px + 30px + 12px); }
+.mn .frame-keys { margin-left: auto; display: flex; align-items: center; gap: 1.2em; flex: none; color: var(--ink-3); font-size: max(10px, 0.6875em); }
+.mn .frame-keys > span { display: inline-flex; align-items: center; gap: 0.35em; flex: none; }
+.mn .frame-keys .mn-kbd { font-size: 1em; }
+.mn .frame-keys-alt { color: var(--ink-2); }
+.mn .frame-foot:has(.frame-cmd-line[data-open]) .frame-keys { display: none; }
+/* Below 1600 the family's keys give their place: the stage shows them where they act. */
+@media (max-width: 1599px) { .mn .frame-keys > span:nth-last-child(6) { display: none; } }
+
+/* ── the key sheet ── */
+.mn .frame-veil { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgb(0 0 0 / 0.82); animation: frame-veil var(--fast) var(--ease); }
+@keyframes frame-veil { from { opacity: 0; } }
+.mn .frame-sheet { width: min(46em, 92vw); padding: 1.6em 2em 1.4em; background: #050505; border: 1px solid var(--line-2); border-radius: 0.8em; box-shadow: 0 0 80px -20px rgb(255 255 255 / 0.35); }
+.mn .frame-sheet h2 { display: block; margin: 0 0 1.2em; }
+.mn .frame-sheet-keys > div { display: grid; grid-template-columns: 11em minmax(0, 1fr); align-items: center; gap: 1em; padding: 0.42em 0; border-top: 1px solid rgb(255 255 255 / 0.09); color: var(--ink-2); font-size: 0.8125em; }
+.mn .frame-sheet-keys .mn-kbd { margin-right: 0.3em; font-size: 0.85em; }
+.mn .frame-sheet-keys i { font-style: normal; color: var(--ink-4); margin: 0 0.5em 0 0.2em; font-size: 0.85em; }
+.mn .frame-sheet-note { margin: 1.1em 0 0; color: var(--ink-3); font-size: 0.75em; line-height: 1.6; }
+
+/* ── the boot sequence: the clip of the lattice assembling, over Orbit's own lattice ──
+   (Boot.tsx). While it plays alone Orbit is not drawn; Orbit then opens out from the lattice
+   under the clip's last moments, and the clip's last frame fades from over the live one. */
+.mn .frame-boot { position: absolute; inset: 0; z-index: 30; pointer-events: none; background: var(--void); transition: background-color 700ms var(--ease); }
+.mn .frame-boot[data-frame-boot='opening'], .mn .frame-boot[data-frame-boot='leaving'] { background: transparent; }
+.mn .frame-boot-clip { position: absolute; transform: translate(-50%, -50%) scale(2.1); transition: transform 700ms var(--ease), opacity 320ms linear; }
+/* The clip's ground is nearly black, not black: its contrast is raised and its corners masked,
+   so no square shows around the lattice. */
+.mn .frame-boot-clip > video {
+  display: block; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: screen; filter: contrast(1.25);
+  -webkit-mask-image: radial-gradient(closest-side, #000 90%, transparent 100%); mask-image: radial-gradient(closest-side, #000 90%, transparent 100%);
+}
+.mn .frame-boot[data-frame-boot='opening'] .frame-boot-clip { transform: translate(-50%, -50%) scale(1); }
+.mn .frame-boot[data-frame-boot='leaving'] .frame-boot-clip { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+/* Orbit under the clip: absent, then opening out from where the lattice stands. Its own lattice
+   stays out until the clip has left, so there is one lattice on screen, never two. */
+.mn[data-boot='playing'] .frame-view[data-layer='orbit'] { opacity: 0; }
+.mn[data-boot='opening'] .frame-view[data-layer='orbit'] { transform-origin: 50% 50%; animation: frame-open 700ms var(--ease) both; }
+.mn[data-boot='playing'] .orbit-core-in, .mn[data-boot='opening'] .orbit-core-in { opacity: 0; }
+.mn[data-boot='leaving'] .orbit-core-in { transition: opacity 320ms linear; }
+@keyframes frame-open { from { opacity: 0; transform: scale(0.94); } }
