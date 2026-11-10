@@ -780,6 +780,10 @@ export function createJarvis({
     }
 
     if (brain.kind === 'claude') {
+      // A local model that failed to start is not this turn's: Claude answers it. The card that
+      // said so, with its "try again", would otherwise stay and offer to download a model the
+      // config no longer asks for.
+      if (store.getState().setup.kind === 'error') set({ setup: { kind: 'idle' } })
       // The request is the message itself; what came before it, the panel showed and Claude did not.
       if (unseen.at(-1) === said) unseen = unseen.slice(0, -1)
       const told = unseen

@@ -838,6 +838,15 @@ function withClaude(replies: string[], { local = [] as Chunk[][], client = {} as
 }
 
 describe('with Claude', () => {
+  test('a local model that failed to start is forgotten once Claude answers: its card would offer a download nobody asked for', async () => {
+    const s = withClaude(['Tudo certo por aqui.'])
+    s.store.setState({ setup: { kind: 'error', message: 'jarvis.json: model.llamaServer is …, and there is no file there' } })
+    await s.jarvis.ask('tudo bem?')
+    expect(s.store.getState().setup).toEqual({ kind: 'idle' })
+    expect(s.ensureModel).not.toHaveBeenCalled()
+    expect(s.last()).toBe('Tudo certo por aqui.')
+  })
+
   test('Claude naming a project that is none of the known ones is told so, and reads nothing (#542)', async () => {
     const s = withClaude(['{"tool": "read_briefings", "args": {"project": "system32"}}', 'O system32 não é um projeto que eu acompanhe.'], {
       client: { focusedWindow: async () => 'loop.ts - tasklist - Visual Studio Code' },
