@@ -680,6 +680,22 @@ mod imp {
             (name, (waiting, guard))
         }
 
+        /// `sddl` as the system itself spells that descriptor: it writes an account it has a
+        /// short name for by that name (`LA`, the built-in administrator a CI runner works as).
+        pub fn spelled(sddl: &str) -> String {
+            let guard = Guard::from_sddl(sddl).unwrap();
+            // SAFETY: test code; a descriptor the system just made, and its own string.
+            unsafe {
+                let what = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+                let mut text: *mut u16 = null_mut();
+                assert_ne!(ConvertSecurityDescriptorToStringSecurityDescriptorW(guard.0, SDDL_REVISION_1, what, &mut text, null_mut()), 0);
+                let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+                let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+                LocalFree(text.cast());
+                s
+            }
+        }
+
         /// Who owns the pipe called `name` and who it lets in, as a security descriptor spells it.
         pub fn guard_of(name: &str) -> String {
             let name = wide(name);
@@ -1044,7 +1060,11 @@ mod tests {
         assert!(name.starts_with(imp::NAMESPACE), "{name}");
         // Owned by this user, one entry, this user's, and none inherited (`P`).
         let me = probe::me();
-        assert_eq!(probe::guard_of(&name), format!("O:{me}D:P(A;;FA;;;{me})"));
+        let alone = probe::spelled(&format!("O:{me}D:P(A;;FA;;;{me})"));
+        assert_eq!(probe::guard_of(&name), alone);
+        // What that comparison can tell apart: a second entry, and entries taken from elsewhere.
+        assert_ne!(alone, probe::spelled(&format!("O:{me}D:P(A;;FA;;;{me})(A;;FR;;;AN)")));
+        assert_ne!(alone, probe::spelled(&format!("O:{me}D:(A;;FA;;;{me})")));
         drop(listener.accept());
 
         // Another account is refused: the anonymous logon, the one this process can become.
