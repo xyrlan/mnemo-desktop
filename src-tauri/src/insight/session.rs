@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::line::{self, clip, is, kind_of, memory_file, number, page_of, parsed, short, text, truthy, Attachment, Block, Input, Line, Usage};
 use super::tail::Sink;
 use super::{
-    shot, Artifact, AskOption, Bucket, ClaudeMemory, Compaction, Context, Cost, EditedFile, Fetch, Files, Insight, Instruction, MemoryTouch, Page, PendingAsk, PrLink, ReadFile, Search, SearchHit, Shot,
+    shot, Artifact, AskOption, AskQuestion, Bucket, ClaudeMemory, Compaction, Context, Cost, EditedFile, Fetch, Files, Insight, Instruction, MemoryTouch, Page, PendingAsk, PrLink, ReadFile, Search, SearchHit, Shot,
     SkillUse, SubagentTokens, TokenRow, Tokens, ToolCall, Web, Words,
 };
 use crate::mission::stamp_ms;
@@ -381,9 +381,18 @@ impl Session {
             push_capped(&mut self.skills, SkillUse { at, name: skill.to_string() }, LIST_CAP);
         }
         if name == "AskUserQuestion" {
-            if let (Some(id), Some((question, options))) = (id.clone(), input.question()) {
-                let options = options.into_iter().map(|(label, description)| AskOption { label: short(&label, 80), description: short(&description, 240) }).collect();
-                self.pending_ask = Some(PendingAsk { id, at, question: short(&question, 400), options });
+            let questions: Vec<AskQuestion> = input
+                .asked()
+                .into_iter()
+                .map(|q| AskQuestion {
+                    header: short(&q.header, 40),
+                    question: short(&q.question, 400),
+                    options: q.options.into_iter().map(|(label, description)| AskOption { label: short(&label, 80), description: short(&description, 240) }).collect(),
+                    multi: q.multi,
+                })
+                .collect();
+            if let (Some(id), Some(first)) = (id.clone(), questions.first().cloned()) {
+                self.pending_ask = Some(PendingAsk { id, at, question: first.question, options: first.options, questions });
             }
         }
 

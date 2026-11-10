@@ -217,7 +217,12 @@ fn a_typed_prompt_is_a_turn_and_ends_what_was_waiting() {
     let i = insight(&lines);
     assert_eq!((i.turns, i.turn_ms, i.last_prompt.as_deref()), (1, 1_500, Some("build the reader")));
     let options = vec![AskOption { label: "attention".into(), description: "what waits first".into() }, AskOption { label: "station".into(), description: String::new() }];
-    assert_eq!(i.pending_ask, Some(PendingAsk { id: "q1".into(), at: ms(3), question: "Which layout?".into(), options }));
+    // every question of the call, the first included: the dialog asks them in this order
+    let questions = vec![
+        AskQuestion { header: "x".into(), question: "Which layout?".into(), options: options.clone(), multi: false },
+        AskQuestion { header: String::new(), question: "Second?".into(), options: vec![], multi: false },
+    ];
+    assert_eq!(i.pending_ask, Some(PendingAsk { id: "q1".into(), at: ms(3), question: "Which layout?".into(), options, questions }));
     assert_eq!(i.activity[1].target, "Which layout?");
     assert!(i.activity.iter().all(|c| c.running));
 
@@ -503,4 +508,17 @@ fn starting_over_forgets_what_was_read() {
     let (mut session, _) = read_at(&browsing());
     session.restart();
     assert_eq!(session.insight(vec![]), insight(&[]));
+}
+
+#[test]
+fn a_question_that_takes_several_answers_says_so() {
+    let question = json!({ "questions": [
+        { "question": "Which checks?", "header": "Checks", "multiSelect": true, "options": [{ "label": "lint" }, { "label": "types" }] },
+        { "header": "no question text" },
+        { "question": "Ship it?", "header": "Ship", "options": ["yes", "no"] },
+    ] });
+    let i = insight(&[prompt(1, "go"), tool(2, "m1", "q9", "AskUserQuestion", question)]);
+    let ask = i.pending_ask.expect("the call is unanswered");
+    assert_eq!(ask.questions.iter().map(|q| (q.header.as_str(), q.question.as_str(), q.multi, q.options.len())).collect::<Vec<_>>(), vec![("Checks", "Which checks?", true, 2), ("Ship", "Ship it?", false, 2)]);
+    assert_eq!((ask.question.as_str(), ask.options.len()), ("Which checks?", 2));
 }

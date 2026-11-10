@@ -33,6 +33,8 @@ export interface LiveInput {
   pulses: PulseEvent[]
   /** The session ids whose terminal the app runs itself. */
   hosted: string[]
+  /** Where each dialog of several questions is, by its call's id (`./asked.ts`). */
+  asked: Record<string, number>
   /** What the reader itself could not read, in words. */
   notes: string[]
   now: number
@@ -49,5 +51,6 @@ export const NO_INPUT: Omit<LiveInput, 'now'> = {
   accounts: { state: null, usage: {}, error: null },
   pulses: [],
   hosted: [],
+  asked: {},
   notes: [],
 }

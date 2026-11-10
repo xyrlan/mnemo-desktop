@@ -37,6 +37,8 @@ export interface LiveSources {
   pulses: Watch<PulseEvent[]>
   /** The session ids (a child's short id counts) whose terminal the app runs itself. */
   hosted: Watch<string[]>
+  /** Where each dialog of several questions is (`./asked.ts`). A source without it has none. */
+  asked?: Watch<Record<string, number>>
   feed(asks: FeedAsk[]): Promise<Feed>
   insight(asks: InsightAsk[]): Promise<Insights>
   trails(sessionIds: string[]): Promise<Trails>
@@ -158,6 +160,7 @@ export function createLive(src: LiveSources, set: (world: World) => void): () =>
     follow(src.accounts, (accounts) => hold('accounts', accounts)),
     follow(src.pulses, (pulses) => hold('pulses', pulses)),
     follow(src.hosted, (hosted) => hold('hosted', [...hosted].sort())),
+    ...(src.asked ? [follow(src.asked, (asked) => hold('asked', asked))] : []),
   ]
 
   async function read() {

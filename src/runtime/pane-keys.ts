@@ -79,6 +79,27 @@ export async function pickOption(d: PaneDeps, pane: number, index: number, label
   await d.write(pane, String(o.n))
 }
 
+/** Which question of a dialog of several pane `pane` shows: its index among `firsts` (each
+ *  question's first option), `firsts.length` on the review that submits them, null when the
+ *  screen shows none of them. Types nothing. */
+export async function dialogAt(d: PaneDeps, pane: number, firsts: readonly string[]): Promise<number | null> {
+  const q = questionOnScreen(await screenOf(d, pane))
+  if (!q) return null
+  if (q.kind === 'review') return firsts.length
+  const first = q.options[0]?.text ?? ''
+  const hit = firsts.findIndex((f) => f !== '' && sameOption(first, f))
+  return hit < 0 ? null : hit
+}
+
+/** Submits the answers on the review a dialog of several questions ends on. */
+export async function submitReview(d: PaneDeps, pane: number): Promise<void> {
+  const lines = await screenOf(d, pane)
+  if (promptOnScreen(lines)) throw new Error('It is showing a permission prompt, not its review: nothing was pressed.')
+  const q = questionOnScreen(lines)
+  if (!q || q.kind !== 'review') throw new Error('Its review is not on its screen now: nothing was pressed.')
+  await d.write(pane, String(q.submit))
+}
+
 /** Answers the question pane `pane` asks in words, through its "Type something." row. */
 export async function answerInWords(d: PaneDeps, pane: number, text: string): Promise<void> {
   const words = answerText(text)

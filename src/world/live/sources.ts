@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { accountsStore } from '../../accounts/store'
 import { fleetStore } from '../../fleet/store'
 import type { Insights, Trails, VaultPulse } from '../../insight/types'
+import { askedStore } from './asked'
 import { store as layout } from '../../layout/app-store'
 import { missionStore } from '../../mission/app-store'
 import type { Feed } from '../../nexus/ship-types'
@@ -63,6 +64,7 @@ export function appSources(): LiveSources {
         return () => offs.forEach((off) => off())
       },
     },
+    asked: { get: () => askedStore.getState().at, subscribe: (cb) => askedStore.subscribe(cb) },
     feed: (asks) => invoke<Feed>('nexus_feed', { asks }),
     insight: (asks) => invoke<Insights>('session_insight', { asks }),
     trails: (sessionIds) => invoke<Trails>('memory_trail', { sessionIds }),

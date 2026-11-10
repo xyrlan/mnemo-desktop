@@ -1,4 +1,5 @@
 import type { Snapshot } from '../mission/types'
+import { askedStore, setAsked } from '../world/live/asked'
 import type { Session, World } from '../world/types'
 import { createActions, GONE, NOT_WAITING, NOTHING, type ActionPaths, type Did } from './actions'
 import { liveWorld, snapshotOf, titled } from './testing'
@@ -405,4 +406,74 @@ test('open and close are the hosting\'s', async () => {
   await b.actions.open('a')
   await b.actions.close('b')
   expect(b.did).toEqual(['open a', 'close b'])
+})
+
+describe('a dialog of several questions, answered from its card', () => {
+  const REVIEW = ['Review your answers', '', ' ● Where is it changed?', '   → Subscription', '', 'Ready to submit your answers?', '', '❯ 1. Submit answers', '  2. Cancel']
+  const QUESTIONS = [
+    { text: 'Where is it changed?', options: ['Subscription', 'Kit'] },
+    { text: 'Which codes?', options: ['Ask the agency', 'Standard ones'] },
+  ]
+  const screenOf = (k: number) => [RULE, ` ${QUESTIONS[k].text}`, '', ...QUESTIONS[k].options.map((o, i) => `   ${i + 1}. ${o}`), `   ${QUESTIONS[k].options.length + 1}. Type something.`]
+
+  /** The bench with the session's waiting item made question `at` of the dialog (2 is its review). */
+  function dialog(at: number) {
+    const b = bench()
+    const s = b.session('Order status history')
+    const was = b.waiting(s)
+    const step = { ask: 'toolu_d', at, of: 2, firsts: QUESTIONS.map((q) => q.options[0]) }
+    const choices = at === 2 ? [{ key: 1, label: 'Submit answers', hint: null, tone: 'good' as const }] : QUESTIONS[at].options.map((label, i) => ({ key: i + 1, label, hint: null, tone: 'neutral' as const }))
+    const item = { ...was, text: at === 2 ? 'Submit the answers?' : QUESTIONS[at].text, choices, step }
+    b.state.world = { ...b.state.world, pending: b.state.world.pending.map((p) => (p.id === was.id ? item : p)) }
+    setAsked('toolu_d', at)
+    return { b, s, item }
+  }
+  const place = () => askedStore.getState().at.toolu_d
+
+  test('an answer typed moves the dialog to its next question, and past the last to its review', async () => {
+    const first = dialog(0)
+    first.b.inPane(first.s, 12, screenOf(0))
+    expect(await first.b.actions.answer(first.item.id, 1)).toEqual({ ok: true, note: 'Subscription' })
+    expect([first.b.did, place()]).toEqual([['write 12 "1"'], 1])
+
+    const last = dialog(1)
+    last.b.inPane(last.s, 12, screenOf(1))
+    expect(await last.b.actions.answer(last.item.id, 2)).toEqual({ ok: true, note: 'Standard ones' })
+    expect([last.b.did, place()]).toEqual([['write 12 "2"'], 2])
+  })
+
+  test('an answer that was not typed leaves it where it was', async () => {
+    const { b, s, item } = dialog(0)
+    b.inPane(s, 12, EMPTY_BOX)
+    expect((await b.actions.answer(item.id, 1)).ok).toBe(false)
+    expect([b.did, place()]).toEqual([[], 0])
+  })
+
+  test('the review is submitted by its own row, only while it is on screen', async () => {
+    const { b, s, item } = dialog(2)
+    b.inPane(s, 12, REVIEW)
+    expect(await b.actions.answer(item.id, 1)).toEqual({ ok: true, note: 'Submit answers' })
+    expect([b.did, place()]).toEqual([['write 12 "1"'], 2])
+  })
+
+  test('a terminal already on another question moves the card there and types nothing', async () => {
+    // he answered the first in the terminal: the card still shows it
+    const { b, s, item } = dialog(0)
+    b.inPane(s, 12, screenOf(1))
+    expect(await b.actions.answer(item.id, 1)).toEqual({ ok: false, why: 'Its terminal is on another question of this dialog: the card shows it now. Nothing was typed.' })
+    expect([b.did, place()]).toEqual([[], 1])
+    // and one already on its review
+    const late = dialog(1)
+    late.b.inPane(late.s, 12, REVIEW)
+    expect(await late.b.actions.answer(late.item.id, 1)).toEqual({ ok: false, why: 'Its terminal is already on the review of this dialog: the card shows it now. Nothing was typed.' })
+    expect([late.b.did, place()]).toEqual([[], 2])
+  })
+
+  test('his own words answer the question on screen and move the dialog on', async () => {
+    const { b, s } = dialog(0)
+    b.inPane(s, 12, screenOf(0))
+    expect((await b.actions.reply(s.id, 'neither, ask the agency')).ok).toBe(true)
+    expect(b.did[0]).toBe('write 12 "3"')
+    expect(place()).toBe(1)
+  })
 })

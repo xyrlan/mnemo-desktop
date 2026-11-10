@@ -15,7 +15,7 @@ fn serialises_as_types_ts_reads_it() {
         last_at: Some(2),
         last_prompt: Some("go".into()),
         recap: Some(Words { at: 3, text: "halfway".into() }),
-        pending_ask: Some(PendingAsk { id: "q1".into(), at: 4, question: "Which?".into(), options: vec![AskOption { label: "a".into(), description: "d".into() }] }),
+        pending_ask: Some(PendingAsk { id: "q1".into(), at: 4, question: "Which?".into(), options: vec![AskOption { label: "a".into(), description: "d".into() }], questions: vec![AskQuestion { header: "H".into(), question: "Which?".into(), options: vec![AskOption { label: "a".into(), description: "d".into() }], multi: true }] }),
         turn_ms: 9,
         tokens: Tokens {
             main: tokens,
@@ -37,7 +37,10 @@ fn serialises_as_types_ts_reads_it() {
     let v = serde_json::to_value(&i).unwrap();
     assert_eq!(v["permissionMode"], json!("plan"));
     assert_eq!((&v["accountUuid"], &v["startedAt"], &v["lastAt"], &v["lastPrompt"], &v["turnMs"]), (&json!("acc"), &json!(1), &json!(2), &json!("go"), &json!(9)));
-    assert_eq!(v["pendingAsk"], json!({ "id": "q1", "at": 4, "question": "Which?", "options": [{ "label": "a", "description": "d" }] }));
+    assert_eq!(
+        v["pendingAsk"],
+        json!({ "id": "q1", "at": 4, "question": "Which?", "options": [{ "label": "a", "description": "d" }], "questions": [{ "header": "H", "question": "Which?", "options": [{ "label": "a", "description": "d" }], "multi": true }] })
+    );
     assert_eq!(v["tokens"]["main"], json!({ "input": 1, "output": 2, "cacheRead": 3, "cacheCreation": 4, "thinking": 5 }));
     assert_eq!(v["tokens"]["subagents"][0]["agentType"], json!("Explore"));
     assert_eq!(v["tokens"]["byModel"]["claude-opus-5"]["cacheRead"], json!(3));

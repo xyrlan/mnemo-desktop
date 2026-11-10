@@ -128,6 +128,7 @@ export function buildWorld(input: LiveInput, prev: World | null): World {
     trails: input.trails,
     pulses: input.pulses,
     hosted: new Set(input.hosted),
+    asked: input.asked,
     kinds: new Map((input.accounts.state?.accounts ?? []).map((a) => [a.id, a.kind])),
     now,
   }
