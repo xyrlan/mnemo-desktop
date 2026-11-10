@@ -3,12 +3,12 @@
 
 import { useLayoutEffect, useRef } from 'react'
 import { Kbd, Mark, Meter, StateMark } from '../ds'
+import { WaitingCount } from '../pending'
 import { WORD } from '../world/format'
 import { go, useRoute, type View } from '../world/route'
 import { sessionOf, useWorld, worldSource } from '../world/store'
 import { STATE_ORDER, type Account, type PlanLimit, type SessionState, type World } from '../world/types'
 import { setReduced, useReduced } from './motion'
-import { WaitingCount } from './pieces'
 
 export const VIEWS: readonly { view: View; name: string; key: string }[] = [
   { view: 'orbit', name: 'Orbit', key: 'H' },

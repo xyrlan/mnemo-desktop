@@ -13,7 +13,7 @@ import { accountInFront, countsByState, fitFleet, until } from './TopBar'
 
 // Every view is another piece's. Here each is the least that shows where the frame put it and
 // what it was given, so these tests hold before and after the real ones land.
-const seen = vi.hoisted(() => ({ orbitTook: [] as string[], runtime: 0 }))
+const seen = vi.hoisted(() => ({ orbitTook: [] as string[], runtime: 0, answered: [] as number[], replied: 0, takesReply: true }))
 vi.mock('../orbit', () => ({
   OrbitView: () => (
     <section
@@ -52,10 +52,17 @@ vi.mock('../stage', () => ({
 vi.mock('../instruments', () => ({ Instruments: ({ sessionId, at }: { sessionId: string; at?: number | null }) => <aside data-testid="instruments" data-session={sessionId} data-at={at ?? ''} /> }))
 vi.mock('../score', () => ({ ScoreView: () => <section data-testid="score" /> }))
 vi.mock('../runtime', () => ({ startRuntime: () => (seen.runtime++, () => {}) }))
-// The pending piece as the seam has it: the frame's own stand-ins are what is drawn and pressed.
+// What waits is the pending piece's: its count, and what a digit and `R` do. The order `N`
+// walks is the real one.
 vi.mock('../pending', async (original) => {
   const real = await original<typeof import('../pending')>()
-  return { armedPending: real.armedPending, nextPending: real.nextPending, WaitingCount: undefined, answerArmed: undefined, replyArmed: undefined }
+  return {
+    armedPending: real.armedPending,
+    nextPending: real.nextPending,
+    WaitingCount: () => <span data-testid="waiting" />,
+    answerArmed: async (key: number) => (seen.answered.push(key), null),
+    replyArmed: () => (seen.replied++, seen.takesReply),
+  }
 })
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -95,6 +102,9 @@ beforeEach(() => {
   sheetStore.setState({ open: false })
   resetLine()
   seen.orbitTook.length = 0
+  seen.answered.length = 0
+  seen.replied = 0
+  seen.takesReply = true
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -304,15 +314,19 @@ describe('the fleet-wide keys, on the page', () => {
     expect(at('instruments')).toBeNull()
   })
 
-  test('a digit answers the item whose card is open, through the actions', async () => {
-    const item = pendingInOrder(sample)[0]
-    await draw({ session: item.session, pending: item.id })
-    expect(world().pending.some((p) => p.id === item.id)).toBe(true)
-    // not one of its choices: nothing is answered
-    await key(document.body, '9')
-    expect(world().pending.some((p) => p.id === item.id)).toBe(true)
-    await key(document.body, '1')
-    expect(world().pending.some((p) => p.id === item.id)).toBe(false)
+  test('a digit goes to the pending piece, which answers the armed item with it', async () => {
+    await draw()
+    expect(await key(document.body, '3')).toBe(false)
+    await key(host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!, '7', { altKey: true })
+    expect(seen.answered).toEqual([3, 7])
+  })
+
+  test('R goes to the pending piece; when nothing armed takes a reply the key is not spent', async () => {
+    await draw()
+    expect(await key(document.body, 'r')).toBe(false)
+    seen.takesReply = false
+    expect(await key(document.body, 'r')).toBe(true)
+    expect(seen.replied).toBe(2)
   })
 
   test('`;` opens the command line with the caret in it, and Esc there closes it', async () => {
@@ -397,17 +411,13 @@ describe('the top bar', () => {
     expect(fleet.hasAttribute('data-tight')).toBe(true)
   })
 
-  test('says how many wait, and its key walks them', async () => {
+  test('carries the pending piece’s count of what waits, between the views and the fleet', async () => {
     await draw()
-    const waiting = () => host.querySelector<HTMLButtonElement>('.frame-waiting')!
-    expect(waiting().textContent).toContain(`${sample.pending.length}wait for you`)
-    await act(async () => waiting().click())
-    expect(route()).toMatchObject({ session: pendingInOrder(sample)[0].session, pending: pendingInOrder(sample)[0].id })
-
-    await act(async () => worldStore.getState().set({ ...world(), pending: world().pending.slice(0, 1) }))
-    expect(waiting().textContent).toContain('1waits for you')
-    await act(async () => worldStore.getState().set({ ...world(), pending: [] }))
-    expect(waiting().textContent).toBe('nothing waits for you')
+    const bar = [...host.querySelector('[data-top-bar]')!.children]
+    const at = (pick: (el: Element) => boolean) => bar.findIndex(pick)
+    const count = at((el) => (el as HTMLElement).dataset.testid === 'waiting')
+    expect(count).toBeGreaterThan(at((el) => el.classList.contains('frame-views')))
+    expect(count).toBeLessThan(at((el) => el.classList.contains('frame-fleet')))
   })
 
   test('draws in full the account of the session in hand', async () => {

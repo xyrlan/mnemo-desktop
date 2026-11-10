@@ -11,7 +11,7 @@ import { Starfield } from '../ds'
 import { Instruments } from '../instruments'
 import { OrbitView } from '../orbit'
 import { Panels } from '../panels'
-import { nextPending } from '../pending'
+import { answerArmed, nextPending, replyArmed } from '../pending'
 import { Roster } from '../roster'
 import { startRuntime } from '../runtime'
 import { ScoreView } from '../score'
@@ -22,7 +22,6 @@ import { rosterOrder, sessionOf, useWorld, worldSource, worldStore } from '../wo
 import { KeyHints, KeySheet, sheetStore } from './KeySheet'
 import { createBack, focusTerminal, press, whereOf, type Fleet } from './keys'
 import { still, useReduced } from './motion'
-import { answerArmed, replyArmed } from './pieces'
 import { TopBar, Unread } from './TopBar'
 
 /** Left to right, as the top bar has them: a change of view moves that way. */
