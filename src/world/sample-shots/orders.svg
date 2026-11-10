@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" font-family="system-ui, sans-serif">
+  <rect width="1280" height="800" fill="#f6f7f9"/>
+  <rect width="1280" height="56" fill="#fff"/><rect y="56" width="1280" height="1" fill="#e3e5ea"/>
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#111">Lumen</text>
+  <text x="120" y="36" font-size="14" fill="#555">Orders</text><text x="190" y="36" font-size="14" fill="#999">Customers</text>
+  <text x="32" y="108" font-size="26" font-weight="700" fill="#111">Orders</text>
+  <rect x="32" y="136" width="1216" height="44" rx="8" fill="#fff" stroke="#e3e5ea"/>
+  <text x="52" y="164" font-size="13" fill="#888">ORDER</text><text x="300" y="164" font-size="13" fill="#888">CUSTOMER</text>
+  <text x="720" y="164" font-size="13" fill="#888">STATUS</text><text x="1040" y="164" font-size="13" fill="#888">TOTAL</text>
+  <g font-size="14" fill="#222">
+    <g><rect x="32" y="188" width="1216" height="52" fill="#fff" stroke="#e3e5ea"/><text x="52" y="220">#8841</text><text x="300" y="220">Ana Ribeiro</text><rect x="716" y="202" width="86" height="24" rx="12" fill="#e7f6ee"/><text x="732" y="219" fill="#17804a">Paid</text><text x="1040" y="220">R$ 184,00</text></g>
+    <g><rect x="32" y="240" width="1216" height="52" fill="#fff" stroke="#e3e5ea"/><text x="52" y="272">#8840</text><text x="300" y="272">Marcos Teles</text><rect x="716" y="254" width="104" height="24" rx="12" fill="#fff4dd"/><text x="732" y="271" fill="#9a6400">Pending</text><text x="1040" y="272">R$ 59,90</text></g>
+    <g><rect x="32" y="292" width="1216" height="52" fill="#fff" stroke="#e3e5ea"/><text x="52" y="324">#8839</text><text x="300" y="324">Livia Prado</text><rect x="716" y="306" width="86" height="24" rx="12" fill="#e7f6ee"/><text x="732" y="323" fill="#17804a">Paid</text><text x="1040" y="324">R$ 312,40</text></g>
+    <g><rect x="32" y="344" width="1216" height="52" fill="#fff" stroke="#e3e5ea"/><text x="52" y="376">#8838</text><text x="300" y="376">Caio Brandt</text><rect x="716" y="358" width="112" height="24" rx="12" fill="#fde8e8"/><text x="732" y="375" fill="#b42318">Cancelled</text><text x="1040" y="376">R$ 96,00</text></g>
+  </g>
+</svg>

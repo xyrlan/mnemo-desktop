@@ -1,0 +1,111 @@
+/* The new front's ground: black, three typefaces, the state hues, the motion switch
+   (docs/superpowers/specs/2026-11-10-recreation-design.md, "Identity"). Everything is scoped
+   to `.mn`, the new frame's root, so the ship's own tokens are untouched until it goes. */
+
+.mn {
+  color-scheme: dark;
+
+  /* ground */
+  --void: #000;
+  --ink: #fff;
+  --ink-2: rgb(255 255 255 / 0.7);
+  --ink-3: rgb(255 255 255 / 0.45);
+  --ink-4: rgb(255 255 255 / 0.25);
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-2: rgb(255 255 255 / 0.09);
+  --line: rgb(255 255 255 / 0.12);
+  --line-2: rgb(255 255 255 / 0.22);
+  --glow: 0 0 24px rgb(255 255 255 / 0.55), 0 0 60px rgb(255 255 255 / 0.18);
+  --glow-soft: 0 0 14px rgb(255 255 255 / 0.28);
+
+  /* colour is a signal, never decoration: one hue per session state, one for memory */
+  --need: #ffb020;
+  --working: #7dd3fc;
+  --ready: #34d399;
+  --stalled: #f87171;
+  --idle: rgb(255 255 255 / 0.55);
+  --ended: rgb(255 255 255 / 0.28);
+  --memory: #c4b5fd;
+
+  /* type: display for names and numbers, text for sentences, mono for what a terminal printed */
+  --display: 'Jura Variable', 'Geist Variable', system-ui, sans-serif;
+  --text: 'Geist Variable', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 140ms;
+  --slow: 420ms;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--void);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One root size per window width, so every view scales together (the Console prototype's
+   measure): 16px from 2300 wide, 14px to 1600, 12.5px below. Sizes inside are in rem-like
+   `em` of this. */
+.mn { font-size: 12.5px; }
+@media (min-width: 1600px) { .mn { font-size: 14px; } }
+@media (min-width: 2300px) { .mn { font-size: 16px; } }
+
+.mn *, .mn *::before, .mn *::after { box-sizing: border-box; }
+.mn button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.mn ::selection { background: rgb(255 255 255 / 0.22); }
+
+.mn [data-state='need'] { --state: var(--need); }
+.mn [data-state='working'] { --state: var(--working); }
+.mn [data-state='ready'] { --state: var(--ready); }
+.mn [data-state='stalled'] { --state: var(--stalled); }
+.mn [data-state='idle'] { --state: var(--idle); }
+.mn [data-state='ended'] { --state: var(--ended); }
+
+/* Motion: the switch (`data-motion="reduced"` on the root) and the system preference both
+   land here. A component's own animation must honour the same two. */
+@media (prefers-reduced-motion: reduce) {
+  .mn *, .mn *::before, .mn *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+.mn[data-motion='reduced'] *, .mn[data-motion='reduced'] *::before, .mn[data-motion='reduced'] *::after {
+  animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
+}
+
+/* The primitives of src/ds/index.tsx */
+.mn-label { font: 600 0.72em/1 var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
+.mn-num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+.mn-mono { font-family: var(--mono); }
+
+.mn-state { display: inline-flex; align-items: baseline; gap: 0.45em; color: var(--state); white-space: nowrap; }
+.mn-state-glyph { display: inline-block; font-style: normal; line-height: 1; }
+.mn-state[data-state='working'] .mn-state-glyph { animation: mn-breathe 1.6s ease-in-out infinite; }
+.mn-state[data-state='need'] .mn-state-glyph { animation: mn-blink 1.2s steps(2, end) infinite; }
+.mn-state-word { font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+@keyframes mn-breathe { 50% { opacity: 0.45; transform: scale(0.82); } }
+@keyframes mn-blink { 50% { opacity: 0.4; } }
+
+.mn-kbd { display: inline-grid; place-items: center; min-width: 1.6em; height: 1.6em; padding: 0 0.4em; border: 1px solid var(--line-2); border-radius: 0.3em; font: 600 0.72em/1 var(--display); letter-spacing: 0.06em; color: var(--ink-2); }
+
+.mn-pill { display: inline-flex; align-items: center; gap: 0.5em; height: 2em; padding: 0 0.9em; border: 1px solid var(--line-2); border-radius: 999px; font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; transition: background var(--fast), color var(--fast), border-color var(--fast); }
+.mn-pill[data-active='true'] { background: var(--ink); color: var(--void); border-color: var(--ink); box-shadow: var(--glow-soft); }
+button.mn-pill:hover { border-color: var(--ink); color: var(--ink); }
+.mn-pill[data-tone='need'] { border-color: var(--need); color: var(--need); }
+.mn-pill[data-tone='memory'] { border-color: var(--memory); color: var(--memory); }
+
+.mn-meter { display: inline-block; position: relative; height: 2px; background: var(--line); vertical-align: middle; }
+.mn-meter > i { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width var(--slow) var(--ease); }
+.mn-meter[data-tone='hot'] > i { box-shadow: var(--glow-soft); }
+
+.mn-ring { display: inline-grid; place-items: center; position: relative; }
+.mn-ring > svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.mn-ring circle { fill: none; }
+.mn-ring .track { stroke: var(--line); }
+.mn-ring .fill { stroke: var(--ink); stroke-linecap: round; transition: stroke-dashoffset var(--slow) var(--ease); }
+
+.mn-figure { display: inline-block; color: var(--ink); }
+.mn-figure line { stroke: currentColor; stroke-width: 1; opacity: 0.55; }
+.mn-figure circle { fill: currentColor; }
+
+.mn-stars { position: absolute; inset: 0; pointer-events: none; }
+.mn-lattice { display: block; width: 100%; height: 100%; }

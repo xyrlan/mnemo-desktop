@@ -12,3 +12,6 @@ app-icon.png
 docs/superpowers/prototypes/redesign/data.js
 docs/superpowers/prototypes/redesign/shots/
 __pycache__/
+
+# The real capture a dev build may draw (scripts/world-sample.mjs --real)
+public/world.capture.json

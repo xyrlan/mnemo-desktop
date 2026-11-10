@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { nextFront } from '../frame/flag'
 import { mountInSlot } from '../shell/slots'
 import { startNexusApp } from './boot'
 import { tauriNexus } from './client'
@@ -19,4 +20,5 @@ function Nexus() {
   return <NexusView client={tauriShip} usage={tauriNexus} />
 }
 
-mountInSlot('overlay', Nexus)
+// The new front (src/frame/) takes the slot instead when its flag is set.
+if (!nextFront()) mountInSlot('overlay', Nexus)
