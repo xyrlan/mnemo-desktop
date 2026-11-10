@@ -223,7 +223,8 @@ function SessionRow({ sc, row, t, selected, waits }: { sc: Score; row: Extract<R
   const share = ctx == null ? null : (ctx / d.window) * 100
   const spent = kids.length ? treeAt(sc, s, t) : ownAt(sc, s, t)
   const about = live ? '' : '≈ '
-  const main = { 'data-score-main': true, 'data-score-card': s.id, role: 'button', tabIndex: 0, onClick: () => select(s.id), onDoubleClick: () => openOnStage(s.id), 'aria-pressed': selected, title: 'Select; double-click or Enter opens it on stage' }
+  // `data-session`: the frame slides the roster's entry onto this one when the view changes.
+  const main = { 'data-score-main': true, 'data-score-card': s.id, 'data-session': s.id, role: 'button', tabIndex: 0, onClick: () => select(s.id), onDoubleClick: () => openOnStage(s.id), 'aria-pressed': selected, title: 'Select; double-click or Enter opens it on stage' }
   return (
     <div className="score-row" data-score-row={s.id} data-state={state ?? 'future'} data-selected={selected || undefined} data-compact={compact || undefined} style={{ '--depth': row.depth } as React.CSSProperties}>
       {compact ? (

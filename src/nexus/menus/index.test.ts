@@ -1,6 +1,7 @@
 import { settingsStore } from '../../settings/app-store'
 import { MNEMO, ROOT, ship } from '../command/fixtures'
 import { menuFor } from '../ui/menus'
+import { windowsIn } from '../ui/windows'
 import { shipMenu } from './index'
 
 const ctx = { open: () => {} }
@@ -18,4 +19,8 @@ test('a repo’s saved commands are found by path, however the key is spelt', ()
   expect(shipMenu({ kind: 'deck', id: ROOT }, ship(), ctx).map((i) => i.label)).toEqual(['New session', 'Terminal here', 'dev'])
   expect(shipMenu({ kind: 'deck', id: 'c:/Users/you/mnemo' }, ship(), ctx).map((i) => i.label)).toEqual(['New session', 'Terminal here', 'test'])
   expect(shipMenu({ kind: 'deck', id: MNEMO }, ship(), ctx).map((i) => i.label)).toEqual(['New session', 'Terminal here'])
+})
+
+test('importing the piece puts New interface in the SYSTEMS menu: the way back from the ship', () => {
+  expect(windowsIn('systems').map((w) => w.title)).toContain('New interface')
 })

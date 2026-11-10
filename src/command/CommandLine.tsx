@@ -8,7 +8,7 @@ import { useWorld } from '../world/store'
 import './command.css'
 import { closeCommand, complete, enter, escape, lineStore, move, openCommand, rows, type, type Row } from './line'
 
-const HINT = "new · shell · dispatch · message · merge green · land · stop · or a session's name"
+const HINT = 'new · shell · dispatch · message · merge green · land · stop · panel · or a name'
 
 function RowView({ row, selected, onTake }: { row: Row; selected: boolean; onTake: () => void }) {
   if (row.kind === 'hint') {

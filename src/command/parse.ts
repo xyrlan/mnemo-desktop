@@ -3,7 +3,9 @@
 // `src/nexus/command/parse.ts` on `World` instead of the ship: the same verbs, the same three
 // batch verbs that are confirmed before they run, and a refusal is always a sentence.
 
+import { panels } from '../panels/registry'
 import type { DispatchOptions } from '../world/actions'
+import type { PanelId } from '../world/route'
 import { rosterOrder, sessionOf } from '../world/store'
 import type { Project, PullRequest, Session, World } from '../world/types'
 
@@ -18,6 +20,8 @@ export type Command =
   | { kind: 'merge-green' }
   | { kind: 'land'; root: string; feature: string }
   | { kind: 'stop'; sessions: string[] }
+  | { kind: 'panel'; panel: PanelId }
+  | { kind: 'classic' }
 
 /** `says` is what Enter will do, in words. `batch`: it reaches more than one session, so it is
  *  asked about before it runs. */
@@ -39,7 +43,12 @@ export const VERBS: readonly Verb[] = [
   { verb: 'land', form: 'land <feature>', does: "land a contract's feature" },
   { verb: 'stop', form: 'stop <session | all>', does: 'stop a session, or every running child' },
   { verb: 'go', form: 'go <session>', does: 'put a session on stage' },
+  { verb: 'panel', form: 'panel <name>', does: 'open a panel: projects, missions, changes, memory, learned, accounts, setup, settings' },
+  { verb: 'classic', form: 'classic', does: 'show the classic interface: the app loads again, your terminals stay' },
 ]
+
+/** The verbs that take nothing after them: taking one from the list runs it. */
+export const WHOLE: readonly string[] = ['classic']
 
 const ALIAS: Record<string, string> = { msg: 'message', open: 'go' }
 
@@ -240,8 +249,36 @@ function stop(rest: string, world: World): Parsed {
   return { command: { kind: 'stop', sessions: [s.id] }, says: `Stop ${nameOf(s)}`, batch: false }
 }
 
+/** The panel a word names, among those that exist: its id or its title, or the one panel either
+ *  starts with the word. Null when it names none, or more than one. */
+export function panelCalled(word: string): { id: PanelId; title: string } | null {
+  const w = word.trim().toLowerCase()
+  if (!w) return null
+  const all = panels()
+  const exact = all.find((p) => p.id === w || p.title.toLowerCase() === w)
+  const starts = all.filter((p) => p.id.startsWith(w) || p.title.toLowerCase().startsWith(w))
+  const hit = exact ?? (starts.length === 1 ? starts[0] : null)
+  return hit ? { id: hit.id, title: hit.title } : null
+}
+
+function panel(rest: string): Parsed {
+  const all = panels()
+  const list = all.length ? `There ${all.length === 1 ? 'is' : 'are'}: ${all.map((p) => p.id).join(', ')}.` : 'This build has no panel.'
+  if (!rest) return { error: `panel <name>: which one? ${list}` }
+  const hit = panelCalled(rest)
+  if (!hit) return { error: `No panel called ${rest}. ${list}` }
+  return { command: { kind: 'panel', panel: hit.id }, says: `Open ${hit.title}`, batch: false }
+}
+
+function classic(rest: string): Parsed {
+  if (rest) return { error: 'classic takes nothing after it: it shows the classic interface.' }
+  return { command: { kind: 'classic' }, says: 'Show the classic interface (the app loads again; your terminals stay)', batch: false }
+}
+
 function show(rest: string, world: World): Parsed {
   const s = rest ? sessionCalled(rest, world) : null
+  // `open missions`: a word that names no session may name a panel.
+  if (!s && rest && panelCalled(rest)) return panel(rest)
   if (!s) return { error: rest ? `No session called ${rest}. Type part of its name and take it from the list.` : 'go <session>: which one?' }
   return { command: { kind: 'go', session: s.id }, says: `On stage: ${nameOf(s)}`, batch: false }
 }
@@ -250,13 +287,15 @@ function show(rest: string, world: World): Parsed {
  *  run says why, and nothing is guessed. */
 export function parse(line: string, world: World): Parsed {
   const m = /^(\S+)\s*([\s\S]*)$/.exec(bare(line).trim())
-  if (!m) return { error: 'Type a verb (new, shell, dispatch, message, merge green, land, stop) or part of a session’s name.' }
+  if (!m) return { error: 'Type a verb (new, shell, dispatch, message, merge green, land, stop, panel, classic), part of a session’s name, or a panel’s.' }
   const verb = verbOf(m[1])
   const rest = m[2].trim()
   if (!verb) {
     // A session named outright is put on stage: the short way to say `go`.
     const s = rest ? null : sessionCalled(m[1], world)
     if (s) return show(m[1], world)
+    // A panel named outright is opened: the short way to say `panel`.
+    if (!rest && panelCalled(m[1])) return panel(m[1])
     return { error: `No verb called ${m[1]}. There are: ${VERBS.map((v) => v.verb).join(', ')}.` }
   }
   switch (verb.verb) {
@@ -274,6 +313,10 @@ export function parse(line: string, world: World): Parsed {
       return land(rest, world)
     case 'stop':
       return stop(rest, world)
+    case 'panel':
+      return panel(rest)
+    case 'classic':
+      return classic(rest)
     default:
       return show(rest, world)
   }

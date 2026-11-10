@@ -14,7 +14,9 @@ import { saidStore } from './said'
 const { hosted } = vi.hoisted(() => ({ hosted: new Set<string>() }))
 
 vi.mock('../runtime', () => ({
-  canHost: (s: Session) => hosted.has(s.id),
+  useCanHost: (s: Session | null | undefined) => !!s && hosted.has(s.id),
+  // no terminal that is not a session: `terminal.test.tsx` has those, on the real runtime module
+  useHosted: () => [],
   LiveTerminal: ({ sessionId, active }: { sessionId: string; active: boolean }) => <textarea data-fake-terminal={sessionId} data-active={String(active)} />,
 }))
 vi.mock('../pending', async (original) => ({

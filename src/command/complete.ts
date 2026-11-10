@@ -1,13 +1,15 @@
 // What the command line offers for the text typed so far: verbs, then whatever the verb takes
 // next, completed against the world's own sessions, projects and contracts.
 
+import { panels } from '../panels/registry'
+import { MODELS } from '../tasks/model'
 import { WORD } from '../world/format'
 import { rosterOrder } from '../world/store'
 import type { Session, SessionState, World } from '../world/types'
-import { EFFORTS, MAY, OPTION_KEYS, VERBS, bare, features, greenPulls, nameOf, runningChildren, sessionCalled, verbOf } from './parse'
+import { EFFORTS, MAY, OPTION_KEYS, VERBS, WHOLE, bare, features, greenPulls, nameOf, runningChildren, sessionCalled, verbOf } from './parse'
 
 export interface Offer {
-  kind: 'verb' | 'session' | 'project' | 'feature' | 'option' | 'word'
+  kind: 'verb' | 'session' | 'project' | 'feature' | 'option' | 'word' | 'panel'
   /** The short mark before the row: a verb, a project, an option. A session shows its state. */
   tag: string
   label: string
@@ -38,11 +40,22 @@ const sessionRow = (s: Session, fill: string, runs: boolean): Offer => ({
   state: s.state,
 })
 
-/** The models the fleet is running now, most used first: what `model=` completes to. */
-function models(world: World): string[] {
+/** What `model=` completes to: the models `mnemo dispatch` names (`src/tasks/model.ts`, the
+ *  Missions panel's own list), newest first, then the ones the fleet is running now, most used
+ *  first. */
+export function models(world: World): string[] {
   const count = new Map<string, number>()
   for (const s of world.sessions) if (s.model) count.set(s.model, (count.get(s.model) ?? 0) + 1)
-  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m)
+  const running = [...count.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m)
+  return [...new Set([...MODELS.filter(Boolean).reverse(), ...running])]
+}
+
+/** The panels a word finds: the ones whose name starts with it. Enter opens one. */
+function panelOffers(word: string): Offer[] {
+  const w = word.toLowerCase()
+  return panels()
+    .filter((p) => p.id.startsWith(w) || p.title.toLowerCase().startsWith(w))
+    .map((p) => ({ kind: 'panel', tag: 'panel', label: p.title, detail: p.hint ?? 'a panel', fill: `panel ${p.id}`, runs: true }))
 }
 
 function optionOffers(head: string, word: string, world: World): Offer[] {
@@ -57,7 +70,7 @@ function optionOffers(head: string, word: string, world: World): Offer[] {
   return values
     .filter((v) => v.toLowerCase().startsWith(typed) && v.toLowerCase() !== typed)
     .slice(0, MOST)
-    .map((v) => ({ kind: 'option', tag: key, label: v, detail: key === 'may' ? MAY_DOES[v] : key === 'effort' ? 'effort' : 'a model the fleet runs now', fill: `${head}${key}=${v} `, runs: false }))
+    .map((v) => ({ kind: 'option', tag: key, label: v, detail: key === 'may' ? MAY_DOES[v] : key === 'effort' ? 'effort' : MODELS.includes(v) ? 'a model' : 'a model the fleet runs now', fill: `${head}${key}=${v} `, runs: false }))
 }
 
 const OPTION_DOES: Record<string, string> = {
@@ -77,9 +90,15 @@ export function offers(line: string, world: World): Offer[] {
   const verb = verbOf(first)
 
   if (typingVerb || !verb) {
-    const out: Offer[] = typingVerb ? VERBS.filter((v) => v.verb.startsWith(first.toLowerCase())).map((v) => ({ kind: 'verb', tag: v.verb, label: v.form, detail: v.does, fill: `${v.verb} `, runs: false })) : []
-    // Part of a session's name, typed with no verb, finds the session: Enter stages it.
+    const out: Offer[] = typingVerb
+      ? VERBS.filter((v) => v.verb.startsWith(first.toLowerCase())).map((v) => {
+          const whole = WHOLE.includes(v.verb)
+          return { kind: 'verb', tag: v.verb, label: v.form, detail: v.does, fill: whole ? v.verb : `${v.verb} `, runs: whole }
+        })
+      : []
+    // Part of a panel's name, or of a session's, typed with no verb, finds it: Enter opens it.
     const words = text.trim()
+    if (words && typingVerb) out.push(...panelOffers(words))
     if (words) for (const s of matchSessions(words, world).slice(0, MOST)) out.push(sessionRow(s, `go ${s.short}`, true))
     return out
   }
@@ -117,6 +136,8 @@ export function offers(line: string, world: World): Offer[] {
       for (const s of matchSessions(word, world, keep).slice(0, MOST)) out.push(sessionRow(s, `${verb.verb} ${s.short}${verb.verb === 'message' ? ' ' : ''}`, verb.verb !== 'message'))
       return out
     }
+    case 'panel':
+      return onFirst ? panelOffers(word) : []
     case 'merge': {
       if (!onFirst || !'green'.startsWith(word.toLowerCase())) return []
       const green = greenPulls(world)

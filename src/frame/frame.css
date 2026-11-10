@@ -1,9 +1,10 @@
-/* The frame: the top bar, each view's room, the foot with the command line and the keys
+/* The frame: the top bar and the line of panels under it, each view's room, the foot with the command line and the keys
    (src/frame/Frame.tsx). Scoped under `.mn`; sizes in `em` of its three root sizes, so one
    breakpoint table (src/ds/tokens.css: 12.5px, 14px from 1600, 16px from 2300) scales it all. */
 
 .mn {
   --frame-top: 3.5em;
+  --frame-sub: 2em;
   --frame-foot: 2.75em;
   --frame-pad: 0.9em;
   --frame-roster: 26em;
@@ -74,7 +75,25 @@
 /* Below 1600 only the account in hand has room. */
 @media (max-width: 1599px) { .mn .frame-acct:not([data-on]), .mn .frame-acct-plan { display: none; } }
 
-.mn .frame-motion { display: inline-flex; align-items: center; gap: 0.5em; height: 1.7em; padding: 0 0.7em; border: 1px solid var(--line); border-radius: 999px; flex: none; transition: border-color var(--fast); }
+/* James, at the end of the first line: his presence is the overlays piece's own. */
+.mn .frame-james { flex: none; display: flex; align-items: center; }
+
+/* ── the second line: the panels that exist, the motion switch, which world this is ── */
+.mn .frame-sub {
+  flex: none; display: flex; align-items: center; gap: 1.1em; height: var(--frame-sub); padding: 0 var(--frame-pad);
+  border-bottom: 1px solid var(--line); min-width: 0; white-space: nowrap;
+}
+.mn .frame-panels { display: flex; align-items: stretch; gap: 0.2em; height: 100%; min-width: 0; margin-right: auto; margin-left: -0.75em; }
+.mn .frame-panel-tab {
+  position: relative; display: inline-flex; align-items: center; padding: 0 0.75em; flex: none;
+  font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); transition: color var(--fast);
+}
+.mn .frame-panel-tab:hover { color: var(--ink); }
+.mn .frame-panel-tab[aria-pressed='true'] { color: var(--ink); text-shadow: var(--glow-soft); }
+.mn .frame-panel-tab[aria-pressed='true']::after { content: ''; position: absolute; left: 0.75em; right: 0.75em; bottom: -1px; height: 1px; background: var(--ink); box-shadow: var(--glow-soft); }
+@media (max-width: 1599px) { .mn .frame-panel-tab { padding: 0 0.6em; letter-spacing: 0.12em; } .mn .frame-panels { margin-left: -0.6em; } }
+
+.mn .frame-motion { display: inline-flex; align-items: center; gap: 0.5em; height: 1.45em; padding: 0 0.7em; border: 1px solid var(--line); border-radius: 999px; flex: none; transition: border-color var(--fast); }
 .mn .frame-motion:hover { border-color: var(--line-2); }
 .mn .frame-motion b { font: 600 max(10px, 0.6875em)/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
 .mn .frame-source { flex: none; white-space: pre; }
@@ -100,9 +119,10 @@
 
 /* ── the foot: the command line, and the keys in short ── */
 .mn .frame-foot { flex: none; position: relative; z-index: 6; display: flex; align-items: center; gap: 1.2em; height: var(--frame-foot); padding: 0 var(--frame-pad); border-top: 1px solid var(--line); min-width: 0; white-space: nowrap; background: var(--void); }
-/* James's button (src/jarvis/panel/panel.css) is 30px square, 16px from the window's corner,
-   until the second wave redraws it: the foot's last key stops short of it. */
-.mn .frame-foot { padding-right: calc(16px + 30px + 12px); }
+/* Where the top bar has no James (the overlays piece is not in the build), his panel docks its
+   own way in at the window's corner, 30px square and 16px in: the foot's last key stops short
+   of it. With him in the top bar the corner is the foot's. */
+.mn:not([data-james]) .frame-foot { padding-right: calc(16px + 30px + 12px); }
 .mn .frame-keys { margin-left: auto; display: flex; align-items: center; gap: 1.2em; flex: none; color: var(--ink-3); font-size: max(10px, 0.6875em); }
 .mn .frame-keys > span { display: inline-flex; align-items: center; gap: 0.35em; flex: none; }
 .mn .frame-keys .mn-kbd { font-size: 1em; }
@@ -120,3 +140,25 @@
 .mn .frame-sheet-keys .mn-kbd { margin-right: 0.3em; font-size: 0.85em; }
 .mn .frame-sheet-keys i { font-style: normal; color: var(--ink-4); margin: 0 0.5em 0 0.2em; font-size: 0.85em; }
 .mn .frame-sheet-note { margin: 1.1em 0 0; color: var(--ink-3); font-size: 0.75em; line-height: 1.6; }
+
+/* ── the boot sequence: the clip of the lattice assembling, over Orbit's own lattice ──
+   (Boot.tsx). While it plays alone Orbit is not drawn; Orbit then opens out from the lattice
+   under the clip's last moments, and the clip's last frame fades from over the live one. */
+.mn .frame-boot { position: absolute; inset: 0; z-index: 30; pointer-events: none; background: var(--void); transition: background-color 700ms var(--ease); }
+.mn .frame-boot[data-frame-boot='opening'], .mn .frame-boot[data-frame-boot='leaving'] { background: transparent; }
+.mn .frame-boot-clip { position: absolute; transform: translate(-50%, -50%) scale(2.1); transition: transform 700ms var(--ease), opacity 320ms linear; }
+/* The clip's ground is nearly black, not black: its contrast is raised and its corners masked,
+   so no square shows around the lattice. */
+.mn .frame-boot-clip > video {
+  display: block; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: screen; filter: contrast(1.25);
+  -webkit-mask-image: radial-gradient(closest-side, #000 90%, transparent 100%); mask-image: radial-gradient(closest-side, #000 90%, transparent 100%);
+}
+.mn .frame-boot[data-frame-boot='opening'] .frame-boot-clip { transform: translate(-50%, -50%) scale(1); }
+.mn .frame-boot[data-frame-boot='leaving'] .frame-boot-clip { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+/* Orbit under the clip: absent, then opening out from where the lattice stands. Its own lattice
+   stays out until the clip has left, so there is one lattice on screen, never two. */
+.mn[data-boot='playing'] .frame-view[data-layer='orbit'] { opacity: 0; }
+.mn[data-boot='opening'] .frame-view[data-layer='orbit'] { transform-origin: 50% 50%; animation: frame-open 700ms var(--ease) both; }
+.mn[data-boot='playing'] .orbit-core-in, .mn[data-boot='opening'] .orbit-core-in { opacity: 0; }
+.mn[data-boot='leaving'] .orbit-core-in { transition: opacity 320ms linear; }
+@keyframes frame-open { from { opacity: 0; transform: scale(0.94); } }

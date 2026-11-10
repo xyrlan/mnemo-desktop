@@ -69,6 +69,12 @@ describe('the now column', () => {
     expect($$('[data-score-card]').map((el) => el.dataset.scoreCard)).toEqual(rosterOrder(world).map((s) => s.id))
   })
 
+  test('each card carries its session’s id as `data-session`, inside its row: what the frame slides a roster entry onto', () => {
+    const entries = $$('[data-score-row] [data-session]')
+    expect(entries.map((el) => el.dataset.session)).toEqual(rosterOrder(world).map((s) => s.id))
+    expect(entries.every((el) => el.dataset.session === el.dataset.scoreCard)).toBe(true)
+  })
+
   test('says each session’s state in a word, and how full its context is', () => {
     expect(rowOf('Order status').dataset.state).toBe('need')
     expect(card('Order status').textContent).toContain('needs you')

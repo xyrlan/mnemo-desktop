@@ -201,3 +201,10 @@
   .mn .stage-title { font-size: 1.5em; }
   .mn .stage-line { grid-template-columns: 3em 0.8em minmax(0, 1fr) auto; }
 }
+
+/* ── a terminal that is no session: the head says what it is, in place of a figure ── */
+.mn .stage-figure-term { display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 50%; color: var(--ink-2); font-size: 1em; font-weight: 700; }
+.mn .stage-figure-term { width: 4.4em; height: 4.4em; margin: 0.6em 1.3em; }
+.mn .stage-head[data-stage-terminal] .stage-fact[data-fact='what'] { white-space: normal; color: var(--ink-3); border: 0; padding-left: 0; }
+.mn .stage-hint[aria-pressed='true'] { color: var(--ink); }
+.mn .stage-hint[data-stage-end='asked'] { color: var(--stalled); }

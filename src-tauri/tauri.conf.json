@@ -27,8 +27,8 @@
     "targets": "all",
     "category": "DeveloperTool",
     "copyright": "Copyright © 2026 xyrlan",
-    "shortDescription": "The Nexus: every Claude Code session and dispatched child, on one ship",
-    "longDescription": "Desktop app for the mnemo agentic development environment: the Nexus, a ship that shows every Claude Code session you run and every child you dispatch, with each session's live terminal in a drawer beside it.",
+    "shortDescription": "Every Claude Code session and dispatched child, as one fleet seen three ways",
+    "longDescription": "Desktop app for the mnemo agentic development environment: every Claude Code session you run and every child you dispatch as one fleet, seen three ways. Orbit shows who needs you at a glance, Console is where you work in a session with its live terminal, and Score is the day over time. Each session shows what it spent, what it read from memory and what it looked at.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

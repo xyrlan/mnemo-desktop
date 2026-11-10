@@ -39,11 +39,12 @@ describe('what the line offers', () => {
     expect(fills('dispatch atlas-api #12 may=p')).toEqual(['dispatch atlas-api #12 may=pr ', 'dispatch atlas-api #12 may=push '])
     const models = [...new Set(world.sessions.map((s) => s.model).filter(Boolean))]
     expect(models.length).toBeGreaterThan(0)
+    // the models `mnemo dispatch` names, then the ones the fleet runs (`swap.test.ts` has the order)
     expect(
       offers('dispatch atlas-api #12 model=', world)
         .map((o) => o.label)
         .sort(),
-    ).toEqual([...models].sort())
+    ).toEqual([...models, 'fable', 'haiku', 'opus', 'sonnet'].sort())
   })
 
   test('stop offers every running child first, then only sessions that are running', () => {

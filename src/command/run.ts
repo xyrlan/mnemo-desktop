@@ -1,22 +1,31 @@
 // Does what a parsed line asks, through `actions()` and nothing else. In the sample world the
 // actions change the sample; in a live one `src/runtime/` carries the guards.
 
+import { showClassic } from '../frame/flag'
 import { actions, type Outcome } from '../world/actions'
-import { openOnStage } from '../world/route'
+import { go, openOnStage } from '../world/route'
 import { sessionOf } from '../world/store'
 import type { World } from '../world/types'
 import { nameOf, type Command } from './parse'
 
 const failed = (e: unknown): Outcome => ({ ok: false, why: e instanceof Error ? e.message : String(e) })
 
-/** Runs one command. A refusal comes back as words, never as an exception. */
-export async function run(command: Command, world: World): Promise<Outcome> {
+/** Runs one command. A refusal comes back as words, never as an exception. `classic` is how the
+ *  ship is shown (the app's own, unless a test hands one in). */
+export async function run(command: Command, world: World, classic: () => string | null = showClassic): Promise<Outcome> {
   const act = actions()
   try {
     switch (command.kind) {
       case 'go':
         openOnStage(command.session)
         return { ok: true }
+      case 'panel':
+        go({ panel: command.panel, command: false })
+        return { ok: true }
+      case 'classic': {
+        const why = classic()
+        return why ? { ok: false, why } : { ok: true }
+      }
       case 'new':
         return await act.newSession(command.root, { prompt: command.prompt ?? undefined, agent: command.agent ?? undefined })
       case 'shell':
