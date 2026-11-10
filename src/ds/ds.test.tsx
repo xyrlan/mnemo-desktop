@@ -178,13 +178,14 @@ describe('spent by kind', () => {
     const parts = spentKinds(row)
     expect(parts.map((p) => p.label)).toEqual(['input', 'output', 'cache read', 'cache written'])
     expect(parts.reduce((n, p) => n + p.value, 0)).toBe(sum(row))
-    expect(parts.reduce((n, p) => n + p.share, 0)).toBeCloseTo(1)
-    expect(parts[2].share).toBeCloseTo(5000 / 6000)
+    expect(parts.reduce((n, p) => n + p.share, 0)).toBeCloseTo(1, 12)
+    expect(parts.map((p) => p.share)).toEqual([100 / 6000, 300 / 6000, 5000 / 6000, 600 / 6000])
   })
 
   test('thinking is said under the output and never counted again', () => {
     const parts = spentKinds(row)
     expect(parts[1].note).toBe('120 of it thinking')
+    expect(parts[1].value).toBe(300)
     expect(parts.filter((p) => p.note).length).toBe(1)
     expect(spentKinds({ ...row, thinking: 0 })[1].note).toBeNull()
   })
@@ -235,8 +236,9 @@ describe('a full value', () => {
     cut = true
     // jsdom lays nothing out: a head is as wide as its box unless the test says it is cut
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 100)
+    // ... and, as in a browser, an opened one wraps and overflows nothing
     vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('mn-full-head') && cut ? 240 : 100
+      return this.classList.contains('mn-full-head') && cut && !this.closest('[data-open]') ? 240 : 100
     })
   })
   const VALUE = 'Idempotent retries for the billing webhooks'
@@ -270,12 +272,14 @@ describe('a full value', () => {
   test('stays something to close while it is open, though opened it no longer overflows', () => {
     draw(<Full value={VALUE} />)
     press(full(), 'Enter')
-    cut = false
-    draw(<Full value={VALUE} />)
+    expect(full().dataset.open).toBe('true')
+    expect(full().dataset.cut).toBeUndefined()
     expect(full().getAttribute('role')).toBe('button')
     press(full(), 'Enter')
     expect(full().dataset.open).toBeUndefined()
-    expect(full().getAttribute('role')).toBeNull()
+    // closed, it is cut again, and can be opened again
+    expect(full().dataset.cut).toBe('true')
+    expect(full().getAttribute('role')).toBe('button')
   })
 
   test('closes when focus leaves it', () => {

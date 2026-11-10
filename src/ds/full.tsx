@@ -24,8 +24,8 @@ export function Full({ value, keep = 'start', className }: { value: string; keep
   useLayoutEffect(() => {
     const el = head.current
     if (!el) return
-    // Opened, it wraps and nothing overflows: what it was before stands until it is closed.
-    const measure = () => setCut((was) => (el.closest('[data-open]') ? was : el.scrollWidth > el.clientWidth + 1))
+    // Opened, it wraps and nothing overflows: it is measured again when it closes (`open` below).
+    const measure = () => setCut(el.scrollWidth > el.clientWidth + 1)
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const watching = new ResizeObserver(measure)
@@ -33,6 +33,7 @@ export function Full({ value, keep = 'start', className }: { value: string; keep
     return () => watching.disconnect()
   }, [value, keep, open])
 
+  // open, it no longer overflows, and must still be something to close
   const can = cut || open
   const toggle = () => setOpen((o) => !o)
   const onKeyDown = (e: KeyboardEvent) => {
