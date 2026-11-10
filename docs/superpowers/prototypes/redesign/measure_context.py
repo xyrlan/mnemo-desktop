@@ -8,9 +8,9 @@ moment only: a `compact_boundary` record carries `preTokens`, the context it was
 compact. This compares the two at every compaction it finds, with and without the output
 tokens, and prints the error.
 
-Run on the maintainer's machine on 2026-11-09 over 400 transcripts: 108 compactions, from
+Run on the maintainer's machine on 2026-11-09 over 400 transcripts: 170 compactions, from
 200,512 to 967,338 tokens; with output, median error 0.00% and largest 0.4%; without it,
-median -0.17% and largest 4.2%.
+median -0.19% and largest 4.2%.
 """
 import glob
 import json

@@ -81,7 +81,7 @@ Context:
 
 | field | notes |
 | --- | --- |
-| `context.tokens` | the size of the context now: input + both caches + output of the last main-chain call. Measured against Claude Code's own `preTokens` at 108 compactions: median error 0.00%, largest 0.4% (`measure_context.py`) |
+| `context.tokens` | the size of the context now: input + both caches + output of the last main-chain call. Measured against Claude Code's own `preTokens` at 170 compactions: median error 0.00%, largest 0.4% (`measure_context.py`) |
 | `context.window` | 1,000,000 when the session asked for the 1M beta or has ever passed 200k, else 200,000 |
 | `context.percent` | |
 | `context.series[[at, tokens]]` | the curve, call by call, thinned to about 240 points |
