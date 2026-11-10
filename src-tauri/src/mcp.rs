@@ -3,7 +3,7 @@
 //! (spec `2026-10-15-nexus-app-design.md`, Q16).
 //!
 //! ```text
-//! claude ──stdio JSON-RPC──▶ mnemo-desktop-mcp ──unix socket, one JSON line each way──▶ app
+//! claude ──stdio JSON-RPC──▶ mnemo-desktop-mcp ──`ipc`, one JSON line each way──▶ app
 //!                                                   app ──`mcp://ask`──▶ webview (src/mcp/)
 //!                                                   app ◀──`mcp_answer`── webview
 //! ```
@@ -11,7 +11,9 @@
 //! The binary (`src/bin/mnemo-desktop-mcp.rs`) owns the MCP protocol; this side only
 //! relays a tool name and its arguments to the webview, which knows the sessions, and hands
 //! back MCP `content`. The socket is bound when the webview first asks for its path, so
-//! nothing is served before something can answer.
+//! nothing is served before something can answer. "Socket" on every system: `ipc.rs` makes it
+//! a Unix socket on macOS and Linux and a named pipe on Windows, where `mcp.sock` is the file
+//! that names the pipe.
 //!
 //! Eyes (spec 2026-09-24, *Eyes first*): `desktop_app_snapshot` is a picture of the app's own
 //! main webview, taken here rather than by the webview, so a page that hangs can still be
@@ -42,23 +44,24 @@ pub const DEV_TOOLS: &[&str] = &[APP_DRIVE];
 pub const APP_SNAPSHOT: &str = "desktop_app_snapshot";
 pub const APP_DRIVE: &str = "desktop_app_drive";
 
-/// Why no tool works on Windows. Keep in step with `UNAVAILABLE` in `src/bin/mnemo-desktop-mcp.rs`,
-/// which lists the tools.
-pub const UNAVAILABLE: &str =
-    "The desktop MCP is not available on Windows: the app serves it over a Unix socket, and Windows has no server for it yet.";
-
-/// Whether the desktop MCP can be served on `os` (`std::env::consts::OS`) at all.
-pub fn available_on(os: &str) -> bool {
-    os != "windows"
+/// Tools no app serves on `os` (`std::env::consts::OS`). The snapshot through a Windows app's
+/// socket is out of the transport's first scope (spec 2026-11-10, "A transport Windows has").
+/// Keep in step with `not_on` in `src/bin/mnemo-desktop-mcp.rs`, which lists the tools.
+pub fn not_on(os: &str) -> &'static [&'static str] {
+    match os {
+        "windows" => &[APP_SNAPSHOT],
+        _ => &[],
+    }
 }
 
 /// Whether this build serves `method`.
 pub fn serves(method: &str) -> bool {
-    serves_in(method, cfg!(debug_assertions))
+    serves_on(method, cfg!(debug_assertions), std::env::consts::OS)
 }
 
-pub fn serves_in(method: &str, debug: bool) -> bool {
-    TOOLS.contains(&method) || (debug && DEV_TOOLS.contains(&method))
+/// Whether a `debug` or release build serves `method` on `os`.
+pub fn serves_on(method: &str, debug: bool, os: &str) -> bool {
+    (TOOLS.contains(&method) || (debug && DEV_TOOLS.contains(&method))) && !not_on(os).contains(&method)
 }
 /// The socket the binary connects to; the app exports it into every pane (`pane_env`).
 pub const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
@@ -66,6 +69,7 @@ pub const SOCKET_ENV: &str = "MNEMO_DESKTOP_MCP_SOCKET";
 const MAIN: &str = "main";
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(10);
+const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 use crate::app_dir::{app_dir, home};
 
@@ -78,16 +82,15 @@ pub fn socket_path() -> PathBuf {
 
 /// What a pane's environment carries so a session in it reaches this app, not another
 /// instance: the binary Claude Code starts is found through the user's registration, which
-/// may be another build's, and falls back to the release socket without it. Nothing where
-/// no socket is ever served: the pane gets no `SOCKET_ENV` at all (`pty::command`).
-pub fn pane_env() -> Option<(&'static str, PathBuf)> {
-    available_on(std::env::consts::OS).then(|| (SOCKET_ENV, socket_path()))
+/// may be another build's, and falls back to the release socket without it.
+pub fn pane_env() -> (&'static str, PathBuf) {
+    (SOCKET_ENV, socket_path())
 }
 
-/// Where sessions are pointed at: a symlink to the binary of whichever app build started
-/// last, so a registration survives rebuilds, worktrees and moving the app.
+/// Where sessions are pointed at: the binary of whichever app build started last (`relink`), so
+/// a registration survives rebuilds, worktrees and moving the app.
 pub fn stable_binary() -> PathBuf {
-    app_dir().join("bin").join(BIN_NAME)
+    app_dir().join("bin").join(format!("{BIN_NAME}{}", std::env::consts::EXE_SUFFIX))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -123,11 +126,15 @@ pub fn answer_line(line: &str, ask: &dyn Fn(&str, Value) -> Result<Value, String
 /// Answers a tool call: the webview in the app, a fake in tests.
 pub type Asker = std::sync::Arc<dyn Fn(&str, Value) -> Result<Value, String> + Send + Sync>;
 
-#[cfg(unix)]
-pub fn serve(listener: std::os::unix::net::UnixListener, ask: Asker) {
+pub fn serve(listener: crate::ipc::Listener, ask: Asker) {
     use std::io::{BufRead, BufReader, Write};
     for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+        let Ok(stream) = stream else {
+            // Nothing a retry at once would fix; without the pause a listener that keeps
+            // failing takes a core.
+            std::thread::sleep(ACCEPT_RETRY);
+            continue;
+        };
         let ask = ask.clone();
         std::thread::spawn(move || {
             let Ok(mut out) = stream.try_clone() else { return };
@@ -146,20 +153,10 @@ pub fn serve(listener: std::os::unix::net::UnixListener, ask: Asker) {
 }
 
 /// Binds `path`, replacing a socket left by an earlier (or still running) app: the app
-/// started last serves, as it is the one the user is looking at.
-#[cfg(unix)]
-pub fn bind(path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
-    use std::os::unix::fs::PermissionsExt;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    if std::fs::symlink_metadata(path).is_ok() {
-        std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    let listener = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Other local users must not read this user's terminals.
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    Ok(listener)
+/// started last serves, as it is the one the user is looking at. Other local users must not
+/// read this user's terminals: `ipc` lets in the user who bound it and nobody else.
+pub fn bind(path: &Path) -> Result<crate::ipc::Listener, String> {
+    crate::ipc::Listener::bind(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -195,45 +192,24 @@ pub fn mcp_answer(ask: u64, content: Option<Value>, error: Option<String>) {
 
 static STARTED: OnceLock<Result<(), String>> = OnceLock::new();
 
-/// What `mcp_socket_path` tells the webview: where the app serves, or, on a system where it
-/// cannot (`available_on`), why, which the webview shows. `unavailable` is set at the first
-/// start only (`unavailable_said`): the person is told once, not at every launch.
+/// What `mcp_socket_path` tells the webview: where the app serves.
 #[derive(serde::Serialize, Debug, PartialEq)]
 pub struct Serving {
-    pub socket: Option<String>,
-    pub unavailable: Option<String>,
+    pub socket: String,
 }
 
 /// Where the app serves the MCP binary. The first call binds the socket and refreshes the
 /// session registration (`~/.mnemo-desktop/mcp.json`, the user-scope `claude mcp` entry).
 #[tauri::command]
 pub fn mcp_socket_path<R: Runtime>(app: AppHandle<R>) -> Serving {
-    if !available_on(std::env::consts::OS) {
-        log::info!("mcp: not serving: {UNAVAILABLE}");
-        return Serving { socket: None, unavailable: unavailable_said(&app_dir().join("mcp-unavailable-said")) };
-    }
     let path = socket_path();
     let started = STARTED.get_or_init(|| start(app, &path));
     if let Err(e) = started {
         log::warn!("mcp: not serving: {e}");
     }
-    Serving { socket: Some(path.display().to_string()), unavailable: None }
+    Serving { socket: path.display().to_string() }
 }
 
-/// `UNAVAILABLE` the first time it is asked for, then `None`: `marker` remembers it was said.
-/// A marker that cannot be written says it again next time rather than never.
-pub fn unavailable_said(marker: &Path) -> Option<String> {
-    if marker.exists() {
-        return None;
-    }
-    if let Some(dir) = marker.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(marker, "");
-    Some(UNAVAILABLE.into())
-}
-
-#[cfg(unix)]
 fn start<R: Runtime>(app: AppHandle<R>, path: &Path) -> Result<(), String> {
     let listener = bind(path)?;
     let asker = app.clone();
@@ -250,11 +226,6 @@ fn start<R: Runtime>(app: AppHandle<R>, path: &Path) -> Result<(), String> {
         });
     }
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn start<R: Runtime>(_app: AppHandle<R>, _path: &Path) -> Result<(), String> {
-    Err(UNAVAILABLE.into())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -279,13 +250,18 @@ pub fn add_command(binary: &Path) -> String {
     format!("claude mcp add --scope user {SERVER_NAME} -- {}", sh_quote(&binary.display().to_string()))
 }
 
-#[cfg(unix)]
-fn install() -> Result<(), String> {
+/// The helper called `name` that was built with this app, beside the app's own executable.
+pub fn built_beside_the_app(name: &str) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let built = exe.with_file_name(BIN_NAME);
+    let built = exe.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if !built.is_file() {
-        return Err(format!("{} is missing (cargo build --bin {BIN_NAME})", built.display()));
+        return Err(format!("{} is missing (cargo build --bin {name})", built.display()));
     }
+    Ok(built)
+}
+
+fn install() -> Result<(), String> {
+    let built = built_beside_the_app(BIN_NAME)?;
     let stable = stable_binary();
     relink(&built, &stable)?;
 
@@ -296,8 +272,7 @@ fn install() -> Result<(), String> {
     }
 
     // `claude mcp add` is non-interactive, so the user scope gets the server, once: the marker
-    // keeps a `claude mcp remove` from being undone at the next start. Through a login shell:
-    // an app launched from Finder has a bare PATH.
+    // keeps a `claude mcp remove` from being undone at the next start.
     let marker = app_dir().join("mcp-registered");
     if marker.exists() {
         return Ok(());
@@ -307,11 +282,7 @@ fn install() -> Result<(), String> {
         let _ = std::fs::write(&marker, "");
         return Ok(());
     }
-    let out = crate::proc::command(crate::pty::default_shell())
-        .args(["-l", "-c", &add_command(&stable)])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = register(&stable).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!("claude mcp add failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
@@ -320,6 +291,26 @@ fn install() -> Result<(), String> {
     Ok(())
 }
 
+/// `claude mcp add …` for `binary`, ready to run. Through a login shell on macOS and Linux: an
+/// app launched from Finder has a bare PATH.
+#[cfg(unix)]
+fn register(binary: &Path) -> std::process::Command {
+    let mut cmd = crate::proc::command(crate::pty::default_shell());
+    cmd.args(["-l", "-c", &add_command(binary)]);
+    cmd
+}
+
+/// On Windows no shell: `claude` is found as the app finds it everywhere else (`claude.cmd`
+/// included), and the path travels as one argument, whatever is in it.
+#[cfg(windows)]
+fn register(binary: &Path) -> std::process::Command {
+    let mut cmd = crate::proc::tool("claude", &crate::mission::login_path());
+    cmd.args(["mcp", "add", "--scope", "user", SERVER_NAME, "--"]).arg(binary);
+    cmd
+}
+
+/// Makes `link`, the stable path, run `target`, the helper this build of the app came with.
+/// On macOS and Linux a symlink.
 #[cfg(unix)]
 pub fn relink(target: &Path, link: &Path) -> Result<(), String> {
     if std::fs::read_link(link).is_ok_and(|t| t == target) {
@@ -332,6 +323,38 @@ pub fn relink(target: &Path, link: &Path) -> Result<(), String> {
         std::fs::remove_file(link).map_err(|e| format!("{}: {e}", link.display()))?;
     }
     std::os::unix::fs::symlink(target, link).map_err(|e| format!("{}: {e}", link.display()))
+}
+
+/// On Windows a copy, written again only when it differs: a link to a file takes a privilege
+/// most accounts lack. A copy that a session is running cannot be written over, but it can be
+/// renamed: it is moved aside (`<name>.old-…`), runs on, and is removed at a later start.
+#[cfg(windows)]
+pub fn relink(target: &Path, link: &Path) -> Result<(), String> {
+    let at = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    let new = std::fs::read(target).map_err(|e| at(target, e))?;
+    if std::fs::read(link).is_ok_and(|old| old == new) {
+        return Ok(());
+    }
+    let dir = link.parent().ok_or_else(|| format!("{} has no parent", link.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| at(dir, e))?;
+    let name = link.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    // Copies moved aside by earlier starts; one still running refuses, and waits for the next.
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&format!("{name}.old-")) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let stamp = format!("{}-{:x}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    let fresh = dir.join(format!("{name}.new-{stamp}"));
+    std::fs::write(&fresh, &new).map_err(|e| at(&fresh, e))?;
+    let placed = std::fs::rename(&fresh, link).or_else(|_| {
+        std::fs::rename(link, dir.join(format!("{name}.old-{stamp}")))?;
+        std::fs::rename(&fresh, link)
+    });
+    placed.map_err(|e| {
+        let _ = std::fs::remove_file(&fresh);
+        at(link, e)
+    })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -685,7 +708,7 @@ mod tests {
         assert_eq!(r["error"], "unknown tool pty_write");
         // Gone with the workbench's browser panes: refused before the webview hears of them.
         for gone in ["desktop_browser_read", "desktop_pane_snapshot"] {
-            assert!(!serves_in(gone, true), "{gone}");
+            assert!(!serves_on(gone, true, "macos"), "{gone}");
             let r = parse(answer_line(&json!({ "id": 5, "method": gone, "params": { "pane": -1 } }).to_string(), &echo));
             assert_eq!(r["error"], format!("unknown tool {gone}"));
         }
@@ -696,23 +719,28 @@ mod tests {
 
     #[test]
     fn the_app_tools_are_served_and_driving_only_by_a_debug_build() {
-        assert!(serves_in(APP_SNAPSHOT, false) && serves_in(APP_SNAPSHOT, true));
-        assert!(serves_in(APP_DRIVE, true));
-        assert!(!serves_in(APP_DRIVE, false), "a release build must never be driven");
-        assert!(!serves_in("pty_write", true));
+        for os in ["macos", "linux", "windows"] {
+            // The snapshot on Windows is not served yet: out of the transport's first scope.
+            assert_eq!(serves_on(APP_SNAPSHOT, false, os) && serves_on(APP_SNAPSHOT, true, os), os != "windows", "{os}");
+            assert!(serves_on(APP_DRIVE, true, os), "{os}");
+            assert!(!serves_on(APP_DRIVE, false, os), "a release build must never be driven");
+            assert!(!serves_on("pty_write", true, os));
+            // The sessions and their terminals are read on every system.
+            assert!(serves_on("desktop_list_panes", false, os) && serves_on("desktop_terminal_read", false, os), "{os}");
+        }
+        assert_eq!(serves(APP_SNAPSHOT), !cfg!(windows), "this system");
         // `cargo test` is a debug build, like `tauri dev`.
         let r = parse(answer_line(r#"{"id":1,"method":"desktop_app_drive","params":{"action":"eval","js":"1"}}"#, &echo));
         assert_eq!(r["content"][0]["text"], r#"desktop_app_drive {"action":"eval","js":"1"}"#);
     }
 
     #[test]
-    fn a_system_that_cannot_serve_says_so_once_and_exports_no_socket() {
-        assert_eq!(pane_env().is_some(), !cfg!(windows));
-        assert!(available_on("macos") && available_on("linux") && !available_on("windows"));
-        let marker = crate::testutil::temp_dir("mcp-unavailable").join("mcp-unavailable-said");
-        assert_eq!(unavailable_said(&marker).as_deref(), Some(UNAVAILABLE));
-        assert_eq!(unavailable_said(&marker), None, "said once");
-        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
+    fn every_system_exports_its_own_socket_and_a_binary_it_can_run() {
+        assert_eq!(pane_env(), (SOCKET_ENV, socket_path()));
+        assert!(socket_path().ends_with("mcp.sock") && socket_path().starts_with(app_dir()));
+        let want = if cfg!(windows) { "mnemo-desktop-mcp.exe" } else { "mnemo-desktop-mcp" };
+        assert_eq!(stable_binary().file_name().unwrap(), want);
+        assert_eq!(stable_binary().parent().unwrap(), app_dir().join("bin"));
     }
 
     #[test]
@@ -768,27 +796,26 @@ mod tests {
         assert_eq!(add_command(Path::new("/a b/it's")), r"claude mcp add --scope user desktop -- '/a b/it'\''s'");
     }
 
-    #[cfg(unix)]
     fn scratch(tag: &str) -> PathBuf {
-        let d = crate::testutil::temp_dir(&format!("mcp-{tag}"));
-        d
+        crate::testutil::temp_dir(&format!("mcp-{tag}"))
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_socket_answers_line_by_line_and_replaces_a_stale_one() {
         use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::net::UnixStream;
 
         let dir = scratch("sock");
         let path = dir.join("mcp.sock");
         std::fs::write(&path, "stale").unwrap();
         let listener = bind(&path).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         std::thread::spawn(move || serve(listener, std::sync::Arc::new(echo)));
 
-        let stream = UnixStream::connect(&path).unwrap();
+        let stream = crate::ipc::Stream::connect(&path).unwrap();
         let mut out = stream.try_clone().unwrap();
         let mut lines = BufReader::new(stream).lines();
         writeln!(out, r#"{{"id":1,"method":"desktop_list_panes"}}"#).unwrap();
@@ -811,6 +838,29 @@ mod tests {
         relink(&a, &link).unwrap();
         relink(&b, &link).unwrap();
         assert_eq!(std::fs::read_link(&link).unwrap(), b);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Windows: the stable path holds the latest build's bytes, and is left alone when it does.
+    #[cfg(windows)]
+    #[test]
+    fn relink_copies_the_latest_build_to_the_stable_path() {
+        let dir = scratch("copy");
+        let (a, b, link) = (dir.join("a.exe"), dir.join("b.exe"), dir.join("bin").join("mnemo-desktop-mcp.exe"));
+        std::fs::write(&a, "build a").unwrap();
+        std::fs::write(&b, "build b, longer").unwrap();
+        relink(&a, &link).unwrap();
+        assert_eq!(std::fs::read(&link).unwrap(), b"build a");
+        let written = std::fs::metadata(&link).unwrap().modified().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        relink(&a, &link).unwrap();
+        assert_eq!(std::fs::metadata(&link).unwrap().modified().unwrap(), written, "the same build is not written again");
+        relink(&b, &link).unwrap();
+        assert_eq!(std::fs::read(&link).unwrap(), b"build b, longer");
+        let left: Vec<_> = std::fs::read_dir(dir.join("bin")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["mnemo-desktop-mcp.exe"], "nothing beside the binary");
+        assert!(relink(&dir.join("missing.exe"), &link).is_err());
+        assert_eq!(std::fs::read(&link).unwrap(), b"build b, longer", "a build that is not there replaces nothing");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
