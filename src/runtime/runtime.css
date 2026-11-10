@@ -1,0 +1,52 @@
+/* A session's real terminal on the stage (src/runtime/Terminals.tsx). The terminal keeps the
+   readable palette it has (src/terminal/terminal.css); this is only the box it is drawn in, and
+   what is said in that box while there is no terminal to draw. */
+
+.mn .runtime-terminal {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* The terminal's own ground, so no seam shows between its rows and its box. The frame around
+     it is the stage's. */
+  background: var(--bg, #0f1116);
+}
+
+.mn .runtime-slot {
+  position: absolute;
+  inset: 0.35em 0 0 0.6em;
+}
+.runtime-held {
+  height: 100%;
+}
+
+.mn .runtime-note {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9em;
+  padding: 1.4em;
+  text-align: center;
+  color: var(--ink-3);
+  font: 400 1em/1.5 var(--text);
+  background: var(--bg, #0f1116);
+}
+.mn .runtime-note button {
+  padding: 0.3em 0.9em;
+  border: 1px solid var(--line-2);
+  border-radius: 0.3em;
+  color: var(--ink);
+  font: 600 0.85em/1.4 var(--display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.mn .runtime-note button:hover,
+.mn .runtime-note button:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}

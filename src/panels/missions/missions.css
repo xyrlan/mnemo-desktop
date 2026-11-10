@@ -1,0 +1,118 @@
+/* The Missions panel. Every size is in em of the frame's root size. */
+
+.mn .mn-missions { display: flex; flex-direction: column; gap: 0.9em; min-height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-missions:focus, .mn .mn-missions:focus-visible { outline: none; }
+
+.mn .mn-missions-bar { display: flex; align-items: center; gap: 0.7em; }
+.mn .mn-missions-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.7em; height: 2.6em; padding: 0 0.8em; border: 1px solid var(--line); background: var(--surface); transition: border-color var(--fast); }
+.mn .mn-missions-field:focus-within { border-color: var(--ink); }
+.mn .mn-missions input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: 400 1em/1 var(--text); }
+.mn .mn-missions input.mn-mono { font-family: var(--mono); font-size: 0.9em; }
+.mn .mn-missions input::placeholder { color: var(--ink-4); }
+
+.mn .mn-missions-btn { display: inline-flex; align-items: center; gap: 0.55em; height: 2.3em; padding: 0 0.9em; border: 1px solid var(--line-2); color: var(--ink-2); font: 600 0.78em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; transition: border-color var(--fast), color var(--fast), background var(--fast); }
+.mn .mn-missions-bar .mn-missions-btn { height: 2.6em; }
+.mn .mn-missions-btn:hover:not(:disabled), .mn .mn-missions-btn:focus-visible { border-color: var(--ink); color: var(--ink); outline: 0; }
+.mn .mn-missions-btn:disabled { opacity: 0.35; cursor: default; }
+.mn .mn-missions-btn[data-tone='go'] { background: var(--ink); border-color: var(--ink); color: var(--void); box-shadow: var(--glow-soft); }
+.mn .mn-missions-btn[data-tone='go'] .mn-kbd { border-color: rgb(0 0 0 / 0.4); color: var(--void); }
+.mn .mn-missions-btn[data-tone='go']:disabled { box-shadow: none; }
+
+/* Which repo: one chip each. */
+.mn .mn-missions-repos { display: flex; flex-wrap: wrap; gap: 0.45em; }
+.mn .mn-missions-chip { display: inline-flex; align-items: baseline; gap: 0.5em; height: 2em; padding: 0 0.85em; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-3); font: 600 0.72em/2 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
+.mn .mn-missions-chip:hover { color: var(--ink); border-color: var(--line-2); }
+.mn .mn-missions-chip[aria-checked='true'] { background: var(--ink); border-color: var(--ink); color: var(--void); }
+
+/* The flags the next dispatch carries: four rows, one choice in each. */
+.mn .mn-missions-flags { display: grid; gap: 0.15em; padding: 0.7em 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.mn .mn-missions-flag { display: flex; align-items: center; gap: 0.15em; min-width: 0; }
+.mn .mn-missions-flagname { display: inline-flex; align-items: center; gap: 0.6em; width: 8.5em; flex: none; }
+.mn .mn-missions-opt { height: 1.9em; padding: 0 0.7em; border-bottom: 1px solid transparent; color: var(--ink-3); font: 500 0.85em/1.9 var(--display); letter-spacing: 0.04em; }
+.mn .mn-missions-opt:hover { color: var(--ink); }
+.mn .mn-missions-opt[aria-checked='true'] { color: var(--ink); border-bottom-color: var(--ink); text-shadow: var(--glow-soft); }
+
+.mn .mn-missions-why { margin: 0; padding: 0.6em 0.9em; border-left: 2px solid var(--stalled); background: var(--surface); color: var(--ink); }
+.mn .mn-missions-quiet { margin: 0; color: var(--ink-3); font-size: 0.9em; }
+.mn .mn-missions-notice { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; margin: 0; padding: 0.6em 0.9em; border-left: 2px solid var(--ink-2); background: var(--surface); color: var(--ink-2); }
+.mn .mn-missions-notice button { color: var(--ink-3); }
+.mn .mn-missions-empty { margin: 3em 0; text-align: center; color: var(--ink-3); }
+
+.mn .mn-missions-sub { display: block; margin: 1em 0 0.35em; }
+.mn .mn-missions-sub .mn-num { color: var(--ink); margin-left: 0.4em; }
+.mn .mn-missions-word { color: var(--ink-2); font-size: 0.88em; }
+.mn .mn-missions-with { margin-left: 0.8em; color: var(--ink-3); font-size: 0.88em; }
+
+/* What was launched from here. */
+.mn .mn-missions-launched { display: flex; flex-direction: column; }
+.mn .mn-missions-launched .mn-missions-sub { margin-top: 0; }
+.mn .mn-missions-launch { display: grid; grid-template-columns: 1.2em minmax(0, 1fr) auto 1.6em; align-items: baseline; column-gap: 0.7em; row-gap: 0.15em; padding: 0.55em 0; border-top: 1px solid var(--line); }
+.mn .mn-missions-ltitle { min-width: 0; overflow-wrap: anywhere; }
+.mn .mn-missions-ltitle strong { font: 600 1em/1.3 var(--display); letter-spacing: 0.04em; }
+.mn .mn-missions-lrepo { margin-left: 0.5em; color: var(--ink-3); font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .mn-missions-age { color: var(--ink-3); font-size: 0.85em; }
+.mn .mn-missions-lword { grid-column: 2 / 4; grid-row: 2; min-width: 0; text-align: left; color: var(--state, var(--ink-2)); font-size: 0.9em; overflow-wrap: anywhere; }
+.mn .mn-missions-launch[data-state='idle'] .mn-missions-lword, .mn .mn-missions-launch[data-state='ended'] .mn-missions-lword { color: var(--ink-2); }
+.mn button.mn-missions-lword:hover { text-decoration: underline; text-underline-offset: 0.25em; }
+.mn .mn-missions-x { grid-column: 4; grid-row: 1; color: var(--ink-4); }
+.mn .mn-missions-x:hover, .mn .mn-missions-x:focus-visible { color: var(--ink); outline: 0; }
+
+/* A repo and its rows. A row the cursor lands on is scrolled clear of the bar at the foot. */
+.mn .mn-missions-list { display: flex; flex-direction: column; gap: 1.6em; }
+.mn .mn-missions-head { display: flex; align-items: baseline; gap: 0.9em; padding-bottom: 0.5em; border-bottom: 1px solid var(--line-2); }
+.mn .mn-missions-name { font: 600 1.25em/1.15 var(--display); letter-spacing: 0.06em; text-shadow: var(--glow-soft); }
+.mn .mn-missions-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.82em; }
+.mn .mn-missions-head .mn-missions-btn { align-self: center; }
+
+.mn .mn-missions-row { scroll-margin: 2.5em 0 5.5em; position: relative; display: flex; align-items: baseline; gap: 0.7em; margin: 0 -1.6em; padding: 0.5em 1.6em; }
+.mn .mn-missions-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--ink); box-shadow: var(--glow-soft); opacity: 0; transition: opacity var(--fast); }
+.mn .mn-missions-row[data-on] { background: var(--surface); }
+.mn .mn-missions-row[data-on]::before { opacity: 1; }
+.mn .mn-missions-row[data-picked] .mn-missions-text { color: var(--ink); }
+
+.mn .mn-missions-box { flex: none; display: inline-grid; place-items: center; width: 1.15em; height: 1.15em; align-self: center; border: 1px solid var(--line-2); font-size: 0.8em; line-height: 1; color: var(--ink); }
+.mn span.mn-missions-box { border-color: transparent; }
+.mn button.mn-missions-box:hover, .mn button.mn-missions-box:focus-visible { border-color: var(--ink); outline: 0; }
+.mn .mn-missions-box[aria-checked='true'] { border-color: var(--ink); box-shadow: var(--glow-soft); }
+
+.mn .mn-missions-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.7em; text-align: left; }
+.mn .mn-missions-num { flex: none; min-width: 2.6em; color: var(--ink-3); }
+.mn .mn-missions-text { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.mn .mn-missions-title:hover .mn-missions-text, .mn .mn-missions-title:focus-visible .mn-missions-text { color: var(--ink); text-decoration: underline; text-underline-offset: 0.25em; }
+.mn .mn-missions-title:focus-visible { outline: 0; }
+.mn .mn-missions-tag { flex: none; padding: 0 0.55em; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-3); font: 600 0.68em/1.7 var(--display); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.mn .mn-missions-flight, .mn .mn-missions-checks { flex: none; display: inline-flex; align-items: baseline; gap: 0.45em; white-space: nowrap; color: var(--ink-3); font-size: 0.95em; }
+.mn .mn-missions-flight .mn-missions-word, .mn .mn-missions-checks .mn-missions-word { color: var(--state, var(--ink-2)); }
+.mn button.mn-missions-flight:hover .mn-missions-word { text-decoration: underline; text-underline-offset: 0.25em; }
+.mn .mn-missions-link { flex: none; color: var(--ink-3); font: 500 0.85em/1 var(--mono); }
+.mn .mn-missions-link:hover { color: var(--ink); }
+
+/* A mission from a contract: its standing, then a mark per piece. */
+.mn .mn-missions-mission { flex-direction: column; align-items: stretch; gap: 0.45em; padding-top: 0.7em; padding-bottom: 0.75em; }
+.mn .mn-missions-mhead { display: flex; align-items: center; gap: 0.7em; }
+.mn .mn-missions-feature { font: 600 1.05em/1.2 var(--display); letter-spacing: 0.05em; }
+.mn .mn-missions-mhead .mn-missions-word { flex: 1; min-width: 0; }
+.mn .mn-missions-pieces { display: flex; flex-wrap: wrap; gap: 0.35em 1.4em; padding-left: 1.5em; }
+.mn .mn-missions-piece { display: inline-flex; align-items: baseline; gap: 0.45em; white-space: nowrap; }
+.mn .mn-missions-piece-name { font: 600 0.9em/1.3 var(--display); letter-spacing: 0.04em; color: var(--ink); }
+.mn button.mn-missions-piece:hover .mn-missions-piece-name { text-decoration: underline; text-underline-offset: 0.25em; }
+
+/* The contract picker under a repo's header. */
+.mn .mn-missions-contract { display: flex; flex-direction: column; gap: 0.6em; margin: 0.7em 0 0.4em; padding: 0.9em 1em; border: 1px solid var(--line-2); background: var(--surface); }
+.mn .mn-missions-files { display: flex; flex-direction: column; }
+.mn .mn-missions-file { display: flex; align-items: baseline; gap: 0.7em; padding: 0.3em 0; text-align: left; }
+.mn .mn-missions-file .mn-missions-text { flex: 1; font-size: 0.88em; }
+.mn .mn-missions-file[aria-checked='true'] .mn-missions-text { color: var(--ink); }
+.mn .mn-missions-file[aria-checked='true'] .mn-missions-box { border-color: var(--ink); }
+.mn .mn-missions-go { display: flex; align-items: center; gap: 0.6em; }
+.mn .mn-missions-go input { height: 2.3em; padding: 0 0.7em; border: 1px solid var(--line-2); background: var(--void); }
+.mn .mn-missions-go input:focus { border-color: var(--ink); }
+
+/* What Enter does now, pinned at the panel's foot. */
+.mn .mn-missions-foot { position: sticky; bottom: -2em; z-index: 1; display: flex; align-items: center; gap: 0.7em; margin: auto -1.6em -2em; padding: 0.9em 4.6em 0.9em 1.6em; border-top: 1px solid var(--ink); background: #000; box-shadow: 0 -24px 40px rgb(0 0 0 / 0.85); animation: mn-missions-foot var(--slow) var(--ease); }
+.mn .mn-missions-what { flex: 1; min-width: 0; color: var(--ink-2); }
+.mn .mn-missions-what strong { font: 600 1.05em/1.3 var(--display); letter-spacing: 0.04em; color: var(--ink); }
+.mn .mn-missions-what .mn-missions-with { display: block; margin: 0.15em 0 0; }
+@keyframes mn-missions-foot { from { transform: translateY(0.8em); opacity: 0; } }

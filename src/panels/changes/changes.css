@@ -1,0 +1,104 @@
+/* The Changes panel: a wide one. Every size is in em of the frame's root size. */
+
+/* The panel fills the sheet: the file list and the diff each scroll by themselves. */
+.mn .mn-panel[data-panel='changes'] .mn-panel-body { overflow: hidden; padding: 0; display: grid; }
+
+.mn .mn-changes { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-changes:focus, .mn .mn-changes:focus-visible { outline: none; }
+
+.mn .mn-changes-bar { display: flex; align-items: center; gap: 1em; padding: 1em 1.6em; border-bottom: 1px solid var(--line); }
+.mn .mn-changes-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2em; }
+.mn .mn-changes-session { font: 600 1.2em/1.2 var(--display); letter-spacing: 0.05em; text-shadow: var(--glow-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .mn-changes-where { color: var(--ink-3); font-size: 0.82em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .mn-changes-totals { flex: none; color: var(--ink-2); white-space: nowrap; }
+.mn .mn-changes [data-sign='+'] { color: var(--ready); }
+.mn .mn-changes [data-sign='-'] { color: var(--stalled); }
+.mn .mn-changes-tools { flex: none; display: flex; gap: 0.6em; }
+
+.mn .mn-changes-btn { display: inline-flex; align-items: center; gap: 0.55em; height: 2.3em; padding: 0 0.9em; border: 1px solid var(--line-2); color: var(--ink-2); font: 600 0.78em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; transition: border-color var(--fast), color var(--fast); }
+.mn .mn-changes-btn:hover:not(:disabled), .mn .mn-changes-btn:focus-visible { border-color: var(--ink); color: var(--ink); outline: 0; }
+.mn .mn-changes-btn:disabled { opacity: 0.35; cursor: default; }
+.mn .mn-changes-btn[data-tone='go']:not(:disabled) { background: var(--ink); border-color: var(--ink); color: var(--void); box-shadow: var(--glow-soft); }
+.mn .mn-changes-btn[data-tone='go']:not(:disabled) .mn-kbd { border-color: rgb(0 0 0 / 0.4); color: var(--void); }
+
+.mn .mn-changes-said { margin: 0; padding: 0.6em 1.6em; border-bottom: 1px solid var(--line); border-left: 2px solid var(--ink-2); background: var(--surface); color: var(--ink-2); }
+.mn .mn-changes-said[data-tone='bad'] { border-left-color: var(--stalled); color: var(--ink); }
+
+.mn .mn-changes-main { grid-row: -2 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 0; }
+
+/* The files. */
+.mn .mn-changes-files { width: 22em; overflow: auto; border-right: 1px solid var(--line); padding: 0.4em 0; }
+.mn .mn-changes-file { position: relative; display: grid; grid-template-columns: 1.2em minmax(0, 1fr) auto auto; align-items: baseline; gap: 0.7em; width: 100%; padding: 0.5em 1em 0.5em 1.6em; text-align: left; }
+.mn .mn-changes-file::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--ink); box-shadow: var(--glow-soft); opacity: 0; transition: opacity var(--fast); }
+.mn .mn-changes-file[aria-current] { background: var(--surface); }
+.mn .mn-changes-file[aria-current]::before { opacity: 1; }
+.mn .mn-changes-file:hover .mn-changes-base { color: var(--ink); }
+.mn .mn-changes-file:focus-visible { outline: 0; background: var(--surface); }
+.mn .mn-changes-letter { font: 700 0.85em/1 var(--display); color: var(--ink-3); }
+.mn .mn-changes-file[data-status='added'] .mn-changes-letter, .mn .mn-changes-file[data-status='untracked'] .mn-changes-letter, .mn .mn-changes-letter[data-status='added'], .mn .mn-changes-letter[data-status='untracked'] { color: var(--ready); }
+.mn .mn-changes-file[data-status='deleted'] .mn-changes-letter, .mn .mn-changes-file[data-status='conflicted'] .mn-changes-letter, .mn .mn-changes-letter[data-status='deleted'], .mn .mn-changes-letter[data-status='conflicted'] { color: var(--stalled); }
+.mn .mn-changes-path { min-width: 0; display: flex; flex-direction: column; gap: 0.1em; }
+.mn .mn-changes-base { color: var(--ink-2); font: 500 0.9em/1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .mn-changes-file[aria-current] .mn-changes-base { color: var(--ink); }
+.mn .mn-changes-dir { color: var(--ink-4); font: 400 0.76em/1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .mn-changes-notes { padding: 0 0.55em; border: 1px solid var(--ink-2); border-radius: 999px; color: var(--ink); font: 600 0.66em/1.7 var(--display); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.mn .mn-changes-count { display: inline-flex; gap: 0.5em; color: var(--ink-3); font-size: 0.82em; white-space: nowrap; }
+
+/* The diff. */
+.mn .mn-changes-diff { min-width: 0; min-height: 0; overflow: auto; }
+.mn .mn-changes-notice { display: grid; place-items: center; min-height: 12em; height: 100%; margin: 0; padding: 2em; text-align: center; color: var(--ink-3); }
+.mn .mn-changes-notice[data-tone='bad'] { color: var(--ink); }
+.mn .mn-changes-quiet { margin: 0; padding: 0.8em 1.6em; color: var(--ink-3); font-family: var(--text); }
+
+.mn .mn-changes-filediff { min-width: min-content; }
+.mn .mn-changes-filehead { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 0.9em; padding: 0.7em 1.6em; border-bottom: 1px solid var(--line); background: #000; }
+.mn .mn-changes-filepath { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95em; }
+.mn .mn-changes-old { color: var(--ink-3); }
+
+.mn .mn-changes-lines { padding: 0.4em 0 2em; font-size: 0.86em; line-height: 1.55; }
+.mn .mn-changes-fold { display: block; width: 100%; padding: 0.35em 1.6em; text-align: left; color: var(--ink-4); font: 500 0.92em/1.4 var(--display); letter-spacing: 0.1em; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); margin: 0.3em 0; }
+.mn .mn-changes-fold:hover, .mn .mn-changes-fold:focus-visible { color: var(--ink); outline: 0; }
+
+.mn .mn-changes-line { display: grid; grid-template-columns: 4em 4em 1.6em minmax(0, 1fr); align-items: start; min-height: 1.55em; padding-right: 1.6em; }
+.mn .mn-changes-n { display: block; padding-right: 0.9em; text-align: right; color: var(--ink-4); font: inherit; line-height: inherit; font-variant-numeric: tabular-nums; user-select: none; }
+.mn button.mn-changes-n { cursor: pointer; }
+.mn button.mn-changes-n:hover, .mn button.mn-changes-n:focus-visible { color: var(--ink); outline: 0; text-shadow: var(--glow-soft); }
+.mn .mn-changes-sign { font-style: normal; text-align: center; user-select: none; }
+.mn .mn-changes-code { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+/* Added is lit, removed is dimmed: the sign says which before the colour does. */
+.mn .mn-changes-line[data-sign='+'] { background: rgb(255 255 255 / 0.075); }
+.mn .mn-changes-line[data-sign='+'] .mn-changes-code { color: var(--ink); }
+.mn .mn-changes-line[data-sign='+'] .mn-changes-sign { color: var(--ready); }
+.mn .mn-changes-line[data-sign='-'] { background: rgb(248 113 113 / 0.05); }
+.mn .mn-changes-line[data-sign='-'] .mn-changes-code { color: var(--ink-3); }
+.mn .mn-changes-line[data-sign='-'] .mn-changes-sign { color: var(--stalled); }
+.mn .mn-changes-line[data-noted], .mn .mn-changes-pair[data-noted] { box-shadow: inset 2px 0 0 var(--ink); }
+
+.mn .mn-changes-pair { display: grid; grid-template-columns: 4em minmax(0, 1fr) 4em minmax(0, 1fr); align-items: start; min-height: 1.55em; padding-right: 1.6em; }
+.mn .mn-changes-pair .mn-changes-code { padding: 0 0.8em; color: var(--ink-2); min-height: 1.55em; }
+.mn .mn-changes-pair .mn-changes-code[data-sign='+'] { background: rgb(255 255 255 / 0.075); color: var(--ink); box-shadow: inset 2px 0 0 var(--ready); }
+.mn .mn-changes-pair .mn-changes-code[data-sign='-'] { color: var(--ink-3); box-shadow: inset 2px 0 0 var(--stalled); }
+.mn .mn-changes-pair .mn-changes-code[data-void] { background: repeating-linear-gradient(135deg, transparent 0 0.5em, rgb(255 255 255 / 0.03) 0.5em 1em); align-self: stretch; }
+
+/* Notes. */
+.mn .mn-changes-under { display: flex; flex-direction: column; gap: 0.4em; margin: 0.4em 1.6em 0.6em 9.6em; font-family: var(--text); font-size: 1.12em; }
+.mn .mn-changes-filediff[data-layout='split'] .mn-changes-under { margin-left: calc(50% + 2em); }
+.mn .mn-changes-note { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: baseline; gap: 0.9em; padding: 0.6em 0.9em; border: 1px solid var(--line-2); border-left: 2px solid var(--ink); background: #000; }
+.mn .mn-changes-notebody { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.mn .mn-changes-note textarea { grid-column: 2; width: 100%; resize: none; border: 0; outline: 0; background: none; color: var(--ink); font: 400 1em/1.5 var(--text); }
+.mn .mn-changes-note textarea::placeholder { color: var(--ink-4); }
+.mn .mn-changes-hint { grid-column: 3 / 5; display: inline-flex; align-items: center; gap: 0.5em; color: var(--ink-3); font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .mn-changes-link { color: var(--ink-3); font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.mn .mn-changes-link:hover, .mn .mn-changes-link:focus-visible { color: var(--ink); outline: 0; }
+.mn .mn-changes-adrift { display: flex; flex-direction: column; gap: 0.5em; padding: 1em 1.6em 2em; border-top: 1px solid var(--line); }
+
+/* No session selected: whose changes. */
+.mn .mn-changes-chooser { display: flex; flex-direction: column; gap: 0.2em; padding: 1.4em 1.6em 2em; overflow: auto; }
+.mn .mn-changes-chooser > .mn-label { margin-bottom: 0.8em; }
+.mn .mn-changes-pick { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 0.8em; padding: 0.55em 0.6em; text-align: left; border-bottom: 1px solid var(--line); }
+.mn .mn-changes-pick[data-role='child'] { padding-left: 2.4em; }
+.mn .mn-changes-pick:hover, .mn .mn-changes-pick:focus-visible { background: var(--surface); outline: 0; }
+.mn .mn-changes-pick-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 1.05em/1.3 var(--display); letter-spacing: 0.04em; }
+.mn .mn-changes-pick-where { color: var(--ink-3); font-size: 0.82em; white-space: nowrap; }
