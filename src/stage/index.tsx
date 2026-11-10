@@ -2,12 +2,14 @@
 // (docs/superpowers/specs/2026-11-10-recreation-front.md, "stage"): the session's figure, name
 // and facts, its family across the top, what it is doing now, the rhythm of its tool calls,
 // and its terminal: the live one when the runtime can host it, else the transcript drawn
-// from the world, with a reply box under it.
+// from the world, with a reply box under it. A terminal the app holds that is no session (a
+// shell, a command) stands here too, under a head that says what it is.
 
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { Figure, Kbd, Label, StateMark } from '../ds'
 import { PendingCard, armedPending } from '../pending'
-import { LiveTerminal, canHost } from '../runtime'
+import { plainTerminals, terminalName, terminalWord } from '../roster/terminals'
+import { LiveTerminal, useCanHost, useHosted, type Hosted } from '../runtime'
 import { actions } from '../world/actions'
 import { age, tilde } from '../world/format'
 import { go, routeStore, select, useRoute } from '../world/route'
@@ -45,6 +47,9 @@ export function Stage() {
   const id = useRoute((r) => r.session)
   const world = useWorld((w) => w)
   const session = sessionOf(world, id)
+  const hosted = useHosted()
+  // No session of that name: a terminal the app holds that is none, when it is one of those.
+  const terminal = session ? undefined : plainTerminals(world, hosted).find((h) => h.id === id)
   const root = useRef<HTMLElement>(null)
   // The focus follows a walk made from inside the stage, so the next key lands here too.
   const follow = useRef(false)
@@ -90,8 +95,14 @@ export function Stage() {
   }
 
   return (
-    <section ref={root} className="stage" data-stage data-state={session?.state} tabIndex={-1} onKeyDown={onKeyDown}>
-      {session ? <Body key={session.id} world={world} session={session} entered={shown.entered} stageOn={stageOn} /> : <Empty waiting={world.pending.length} sessions={world.sessions.length} />}
+    <section ref={root} className="stage" data-stage data-state={session?.state} data-terminal={terminal?.id} tabIndex={-1} onKeyDown={onKeyDown}>
+      {session ? (
+        <Body key={session.id} world={world} session={session} entered={shown.entered} stageOn={stageOn} />
+      ) : terminal ? (
+        <TerminalBody key={terminal.id} terminal={terminal} />
+      ) : (
+        <Empty waiting={world.pending.length} sessions={world.sessions.length} />
+      )}
     </section>
   )
 }
@@ -126,7 +137,9 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
   const view = useRoute((r) => r.view)
   const family = familyOf(world, s)
   const parent = parentOf(world, s)
-  const live = canHost(s)
+  // Heard, not read: a terminal that becomes available (an attach that took, a resume) is on
+  // stage at once, with no change of the world to wait for.
+  const live = useCanHost(s)
   return (
     <div className={entered ? 'stage-in stage-enter' : 'stage-in'} data-wide={wide || undefined}>
       <header className="stage-head">
@@ -188,6 +201,7 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
       {live ? (
         <section className="stage-term" data-live aria-label="Terminal">
           <TermBar session={s}>
+            <ChangesButton session={s} />
             <RoomButton wide={wide} />
           </TermBar>
           <div className="stage-live">
@@ -301,6 +315,93 @@ function TermBar({ session: s, note, children }: { session: Session; note?: stri
   )
 }
 
+/** What the session on stage changed: opens the Changes panel for it, and closes it again. A
+ *  session with no folder has nothing to read. */
+function ChangesButton({ session: s }: { session: Session }) {
+  const open = useRoute((r) => r.panel === 'changes')
+  if (!s.cwd) return null
+  return (
+    <button type="button" className="stage-hint" data-stage-changes aria-pressed={open} onClick={() => go({ panel: open ? null : 'changes', command: false })}>
+      changes
+    </button>
+  )
+}
+
+/** A terminal that is no session: a head that says what it is, and the terminal. It has no
+ *  family, no transcript and no instruments: there is nothing to read of it but what it prints. */
+function TerminalBody({ terminal: t }: { terminal: Hosted }) {
+  const wide = useRoute((r) => r.wide)
+  const view = useRoute((r) => r.view)
+  const [end, setEnd] = useState<'idle' | 'asked' | 'busy'>('idle')
+  const [refused, setRefused] = useState<string | null>(null)
+  const started = t.kind !== 'session' || !!t.sessionId
+
+  const close = async () => {
+    if (end === 'busy') return
+    // Asked first: ending it stops whatever runs in it.
+    if (end === 'idle') return setEnd('asked')
+    setEnd('busy')
+    let why: string | null = null
+    try {
+      const outcome = await actions().close(t.id)
+      if (!outcome.ok) why = outcome.why
+    } catch (err) {
+      why = err instanceof Error ? err.message : String(err)
+    }
+    setRefused(why)
+    setEnd('idle')
+  }
+
+  return (
+    <div className="stage-in" data-wide={wide || undefined}>
+      <header className="stage-head" data-stage-terminal>
+        <span className="stage-field" aria-hidden="true" />
+        <div className="stage-figure stage-figure-term mn-mono" aria-hidden="true">
+          &gt;_
+        </div>
+        <div className="stage-id">
+          <div className="stage-kick">
+            <span className="stage-project">terminal</span>
+            <span className="stage-of">{terminalWord(t)}</span>
+          </div>
+          <h1 className="stage-title">{terminalName(t)}</h1>
+          <div className="stage-facts">
+            {t.cwd && (
+              <span className="stage-fact mn-mono" data-fact="cwd">
+                {tilde(t.cwd)}
+              </span>
+            )}
+            <span className="stage-fact" data-fact="what">
+              {started ? 'A session the app started. The fleet does not list it yet: it takes its place in the roster when it does.' : 'A terminal the app holds, not a session: the fleet reads nothing of it but what it prints.'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <section className="stage-term" data-live aria-label="Terminal">
+        <div className="stage-term-bar">
+          <Label>terminal</Label>
+          <span className="stage-term-cwd mn-mono">{tilde(t.cwd)}</span>
+          {refused && (
+            <span className="stage-term-note" role="status">
+              not ended: {refused}
+            </span>
+          )}
+          <span className="stage-term-hints">
+            <button type="button" className="stage-hint" data-stage-end={end} disabled={end === 'busy'} onClick={() => void close()} onBlur={() => end === 'asked' && setEnd('idle')}>
+              {end === 'idle' ? 'end it' : end === 'asked' ? 'end it, and what runs in it?' : 'ending…'}
+            </button>
+            <RoomButton wide={wide} />
+          </span>
+        </div>
+        <div className="stage-live">
+          <LiveTerminal key={t.id} sessionId={t.id} active={view === 'console'} />
+        </div>
+      </section>
+    </div>
+  )
+}
+
 /** The terminal takes the instruments' room, and gives it back (`route.wide`). */
 function RoomButton({ wide, hint }: { wide: boolean; hint?: boolean }) {
   return (
@@ -367,6 +468,7 @@ function Transcript({ world, session: s, wide }: { world: World; session: Sessio
             <button type="button" className="stage-hint" onClick={() => input.current?.focus()}>
               <Kbd>Enter</Kbd>type here
             </button>
+            <ChangesButton session={s} />
             <RoomButton wide={wide} />
           </>
         )}

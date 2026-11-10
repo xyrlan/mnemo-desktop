@@ -53,6 +53,14 @@ scenario('job-running', {
 - Events the page itself emits reach its own listeners and never reach `ipc`.
 - **`storage`** (optional) is what the app kept in `localStorage` from a last run, set before its
   code runs: `{ 'mnemo.nexus-drawer.v1': JSON.stringify(…) }`. Values are strings.
+- Unless a scenario's `storage` says otherwise it holds `'mnemo.next': '0'` and
+  `'mnemo.boot': '0'`: the ship, and no boot clip. A build shows the new front by default
+  (`src/frame/flag.ts`), and the ship's scenarios were written when it was the other way round;
+  a scenario of the new front says `'mnemo.next': '1'` (`fixtures/next.mjs` does), and the one
+  of the launch itself says `'mnemo.boot': '1'`.
+- **`before`** (optional) runs with the page before it navigates: `async (page) => {…}`, for
+  what has to stand between the page and the app as it loads (`page.route` aborting a module,
+  which is how `next-swap-broken` shows what replaces a frame that cannot be drawn).
 - **`drive`** (optional) is what a user did before the shot: `async (page) => {…}`, given the
   Playwright page once the app is up and settled (`page.keyboard.press('/')`). The shot waits
   `--settle` again after it.

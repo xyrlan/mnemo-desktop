@@ -18,6 +18,9 @@ export const BASE = {
   // The desktop MCP served, as on macOS (`Serving`, src/mcp/serving.ts).
   mcp_socket_path: () => ({ socket: `${HOME}/.mnemo-desktop/mcp.sock`, unavailable: null }),
   pulse_start: () => null,
+  // Asked at launch on Windows only (src/pty/shells.ts): the one shell every Windows has, so
+  // no setting to choose between shells is drawn. Other systems never ask.
+  pty_shells: () => ({ shells: [{ id: 'cmd', label: 'Command Prompt', kind: 'cmd', path: 'C:/Windows/System32/cmd.exe' }], current: 'cmd', kind: 'cmd' }),
   vault_level_best: ({ xp }) => xp,
   // Each project's level (#478): none on record, every deck LV0; the best offered is the best.
   vault_project_levels: () => ({ root: `${HOME}/mnemo`, projects: {}, error: null }),

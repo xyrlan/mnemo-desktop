@@ -12,8 +12,27 @@ test('scenario() keeps ipc and events, defaulting events to none', () => {
   scenario('reg-a', { ipc })
   assert.equal(getScenario('reg-a').ipc, ipc)
   assert.deepEqual(getScenario('reg-a').events, [])
-  assert.deepEqual(getScenario('reg-a').storage, {})
+  // Unless it says otherwise a scenario shows the ship, and no boot clip.
+  assert.deepEqual(getScenario('reg-a').storage, { 'mnemo.next': '0', 'mnemo.boot': '0' })
   assert.equal(getScenario('reg-a').drive, undefined)
+  assert.equal(getScenario('reg-a').before, undefined)
+})
+
+test('a scenario that says which front it shows, or that it plays the boot clip, is taken at its word', () => {
+  const before = async () => {}
+  scenario('reg-next', { ipc: () => 1, storage: { 'mnemo.next': '1', 'mnemo.boot': '1', 'mnemo.world': 'sample' }, before })
+  assert.deepEqual(getScenario('reg-next').storage, { 'mnemo.next': '1', 'mnemo.boot': '1', 'mnemo.world': 'sample' })
+  assert.equal(getScenario('reg-next').before, before)
+})
+
+test('the scenarios of the ship say nothing and show the ship; the ones of the new front say so', async () => {
+  await loadScenarios()
+  assert.equal(getScenario('empty-workspace').storage['mnemo.next'], '0')
+  assert.equal(getScenario('nexus').storage['mnemo.next'], '0')
+  assert.equal(getScenario('next-console').storage['mnemo.next'], '1')
+  // no picture of a URL is a picture of the launch, but the one that is meant to be
+  assert.equal(getScenario('next-orbit').storage['mnemo.boot'], '0')
+  assert.equal(getScenario('next-swap-boot').storage['mnemo.boot'], '1')
 })
 
 test('scenario() refuses a bad name, a missing ipc, a bad event and a second registration', () => {
@@ -23,6 +42,7 @@ test('scenario() refuses a bad name, a missing ipc, a bad event and a second reg
   assert.throws(() => scenario('reg-d', { ipc: () => {}, events: [{ event: 'e', payload: 1, afterMs: -1 }] }), /afterMs/)
   assert.throws(() => scenario('reg-f', { ipc: () => {}, storage: { k: 1 } }), /storage values are strings/)
   assert.throws(() => scenario('reg-g', { ipc: () => {}, drive: 'press /' }), /drive must be a function/)
+  assert.throws(() => scenario('reg-h', { ipc: () => {}, before: 'abort the frame' }), /before must be a function/)
   scenario('reg-e', { ipc: () => {} })
   assert.throws(() => scenario('reg-e', { ipc: () => {} }), /twice/)
 })

@@ -150,6 +150,8 @@ export async function shoot({ scenario: name, out, size = DEFAULT_SIZE, settleMs
       if (m.type() === 'error') pageErrors.push(m.text())
     })
     unanswered = await preparePage(page, setup, { trace, log })
+    // What stands between the page and the app before it loads (a module that never arrives).
+    if (setup.before) await setup.before(page)
 
     await page.goto(url, { waitUntil: 'networkidle' })
     await page.waitForFunction(() => window.__previewEventsDone === true)

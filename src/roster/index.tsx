@@ -7,13 +7,15 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEv
 import { Figure, Kbd, Label, StateMark } from '../ds'
 import { OrbitMap } from '../orbit'
 import { PendingCard, armedPending } from '../pending'
-import { age, sum, tokens, WORD } from '../world/format'
+import { useHosted } from '../runtime'
+import { age, sum, tilde, tokens, WORD } from '../world/format'
 import { go, openOnStage, select, useRoute } from '../world/route'
 import { pendingOf, sessionOf, useWorld, worldStore } from '../world/store'
 import type { Pending, Session, World } from '../world/types'
 import { fitStep, reveal, startFit, type Fit, type Measured } from './fit'
 import { groupStore, toggleGroup, useGroup } from './group'
 import { nowOf, plan, projectMarks, shownOrder, wordOf, type Block, type Now } from './model'
+import { plainTerminals, terminalName, terminalWord } from './terminals'
 import './roster.css'
 
 export { setGroup, toggleGroup, useGroup } from './group'
@@ -30,6 +32,9 @@ export function Roster() {
   const group = useGroup()
   const here = sessionOf(world, route.session) ?? null
   const armed = armedPending(world, route)
+  const hosted = useHosted()
+  // What is on stage: a session, or a terminal the app holds that is none.
+  const onStage = here?.id ?? route.session
 
   const scroll = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -37,7 +42,7 @@ export function Roster() {
 
   // The fitting starts again whenever what is drawn, or the room it has, changed.
   const [epoch, setEpoch] = useState(0)
-  const key: unknown[] = [world, here?.id ?? null, armed?.id ?? null, group, epoch]
+  const key: unknown[] = [world, onStage, armed?.id ?? null, group, epoch, hosted]
   const [was, setWas] = useState(key)
   const [fit, setFit] = useState<Fit>(startFit)
   if (key.some((v, i) => v !== was[i])) {
@@ -73,7 +78,7 @@ export function Roster() {
     // The list follows the selection: when it changes or the list is regrouped, and after
     // that for as long as the list is where the roster left it. Once he scrolls it himself it
     // stays where he put it.
-    const what = `${here?.id}|${armed?.id}|${group}`
+    const what = `${onStage}|${armed?.id}|${group}`
     const untouched = Math.abs(sc.scrollTop - left.current) < 1 || left.current > sc.scrollHeight - sc.clientHeight
     if (sight.current !== what || untouched) {
       sight.current = what
@@ -85,10 +90,10 @@ export function Roster() {
     if (bm) {
       // it slides only from one session to another: the first draw, a resize and a world
       // that moved the rows all put it where it belongs at once
-      bm.style.transition = lit.current && lit.current !== here?.id ? '' : 'none'
+      bm.style.transition = lit.current && lit.current !== onStage ? '' : 'none'
       bm.style.opacity = '1'
       bm.style.transform = `translateY(${top}px) scaleY(${sel.offsetHeight})`
-      lit.current = here?.id ?? null
+      lit.current = onStage
     }
     // `fit` changes whenever the world, the selection, the grouping or the room does
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -136,6 +141,7 @@ export function Roster() {
     e.preventDefault()
   }
 
+  const terminals = plainTerminals(world, hosted)
   const blocks = plan(world, { here, group, density: fit.density, roomy: fit.roomy })
   const marks = projectMarks(world)
   const count = blocks.reduce((n, b) => n + (b.kind === 'band' ? b.count : 0), 0)
@@ -262,8 +268,8 @@ export function Roster() {
 
   return (
     <nav className="roster" data-roster data-group={group} aria-label="Sessions" onKeyDown={onKeyDown}>
+      {/* The map says what it is ("where it stands") itself. */}
       <div className="roster-map">
-        <Label className="roster-map-label">Where it stands</Label>
         <OrbitMap focus={route.session} />
       </div>
       <header className="roster-head">
@@ -280,6 +286,28 @@ export function Roster() {
           <i ref={beam} className="roster-beam" aria-hidden="true" />
           {blocks.map(draw)}
           {world.sessions.length === 0 && <p className="roster-empty">No sessions yet.</p>}
+          {/* The terminals the app holds that are no session, after the sessions. */}
+          {terminals.length > 0 && (
+            <>
+              <h2 className="roster-band" data-band="terminals">
+                <span>Terminals</span>
+                <b className="mn-num">{terminals.length}</b>
+                <small className="roster-wide">held here, no session</small>
+              </h2>
+              {terminals.map((t) => (
+                <article key={t.id} className="roster-ent roster-term" data-terminal={t.id}>
+                  <button type="button" className="roster-main" data-session={t.id} data-sel={onStage === t.id || undefined} aria-current={onStage === t.id || undefined} onClick={() => openOnStage(t.id)}>
+                    <span className="roster-term-sign mn-mono" aria-hidden="true">
+                      &gt;_
+                    </span>
+                    <span className="roster-title">{terminalName(t)}</span>
+                    <span className="roster-term-word">{terminalWord(t)}</span>
+                    {t.cwd && <span className="roster-term-cwd mn-mono">{tilde(t.cwd)}</span>}
+                  </button>
+                </article>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </nav>

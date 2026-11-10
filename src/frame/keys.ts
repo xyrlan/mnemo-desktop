@@ -88,7 +88,7 @@ export function familyOf(world: World, id: string | null): Session[] {
 
 /** The session `by` steps from `id` in `list`. From nowhere, down is the first and up the
  *  last. `wrap`: past an end is the other end; otherwise the end holds. */
-export function step(list: Session[], id: string | null, by: 1 | -1, wrap: boolean): Session | null {
+export function step<T extends { id: string }>(list: readonly T[], id: string | null, by: 1 | -1, wrap: boolean): T | null {
   if (!list.length) return null
   const at = list.findIndex((s) => s.id === id)
   if (at < 0) return by > 0 ? list[0] : list[list.length - 1]
@@ -123,6 +123,12 @@ export interface Fleet {
   route(): Route
   /** The sessions that were selected, most recent first. */
   recent(): string[]
+  /** What up and down walk: the roster as it is shown now (regrouped by project after `G`),
+   *  then the terminals the app holds that are no session. Without it, `rosterOrder`. */
+  order?(): readonly { id: string }[]
+  /** Whether `id` can still be put on stage: a session of the world, or a terminal held.
+   *  Without it, a session of the world. */
+  has?(id: string): boolean
   go(patch: Partial<Route>): void
   now(): number
   nextPending(world: World, route: Route): Pending | null
@@ -155,19 +161,20 @@ export function press(e: Press, where: Where, fleet: Fleet): boolean {
   if (!hit) return false
   const world = fleet.world()
   const route = fleet.route()
-  const select = (s: Session | null) => s && s.id !== route.session && fleet.go({ session: s.id, pending: null })
+  const select = (s: { id: string } | null) => s && s.id !== route.session && fleet.go({ session: s.id, pending: null })
+  const has = (id: string) => fleet.has?.(id) ?? !!sessionOf(world, id)
 
   switch (hit.key) {
     case 'up':
     case 'down':
-      select(step(rosterOrder(world), route.session, hit.key === 'down' ? 1 : -1, false))
+      select(step(fleet.order?.() ?? rosterOrder(world), route.session, hit.key === 'down' ? 1 : -1, false))
       return true
     case 'left':
     case 'right':
       select(step(familyOf(world, route.session), route.session, hit.key === 'right' ? 1 : -1, true))
       return true
     case 'back': {
-      const id = fleet.back(fleet.recent(), route.session, fleet.now(), (x) => !!sessionOf(world, x))
+      const id = fleet.back(fleet.recent(), route.session, fleet.now(), has)
       if (id && id !== route.session) fleet.go({ session: id, pending: null })
       return true
     }

@@ -1,13 +1,16 @@
 // The top bar: the mark, the three views, how many wait, the fleet by state, each account's
-// plan windows, the motion switch, and which world this is.
+// plan windows and James; and under it, on a line of its own, the panels that exist, the motion
+// switch and which world this is. The first line is the fleet; the second is the app.
 
 import { useLayoutEffect, useRef } from 'react'
 import { Kbd, Mark, Meter, StateMark } from '../ds'
+import { panels } from '../panels'
 import { WaitingCount } from '../pending'
 import { WORD } from '../world/format'
 import { go, useRoute, type View } from '../world/route'
 import { sessionOf, useWorld, worldSource } from '../world/store'
 import { STATE_ORDER, type Account, type PlanLimit, type SessionState, type World } from '../world/types'
+import { useJames } from './james'
 import { setReduced, useReduced } from './motion'
 
 export const VIEWS: readonly { view: View; name: string; key: string }[] = [
@@ -87,10 +90,42 @@ export function fitFleet(fleet: HTMLElement): void {
   if (fleet.scrollWidth > fleet.clientWidth + 1) fleet.setAttribute('data-tight', '')
 }
 
+/** The panels that exist, each one click away; the open one is lit, and a click on it closes
+ *  it. With them, what is the app's and not the fleet's: the motion switch, and which world
+ *  this is when it is not this machine's. */
+export function PanelBar() {
+  const open = useRoute((r) => r.panel)
+  const reduced = useReduced()
+  const [source, more] = SOURCE[worldSource()]
+  return (
+    <div className="frame-sub">
+      <nav className="frame-panels" aria-label="Panels">
+        {panels().map((p) => (
+          <button key={p.id} type="button" className="frame-panel-tab" data-panel-tab={p.id} aria-pressed={p.id === open} title={p.hint} onClick={() => go({ panel: p.id === open ? null : p.id, command: false })}>
+            {p.title}
+          </button>
+        ))}
+      </nav>
+
+      <button type="button" className="frame-motion" aria-pressed={reduced} onClick={() => setReduced(!reduced)}>
+        <span className="mn-label">motion</span>
+        <b>{reduced ? 'reduced' : 'full'}</b>
+      </button>
+
+      {source && (
+        <span className="frame-source mn-label">
+          {source}
+          <span className="frame-source-more">{more}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function TopBar() {
   const world = useWorld((w) => w)
   const view = useRoute((r) => r.view)
-  const reduced = useReduced()
+  const James = useJames()
   const bar = useRef<HTMLElement>(null)
   const fleet = useRef<HTMLDivElement>(null)
 
@@ -107,7 +142,6 @@ export function TopBar() {
     return () => watch.disconnect()
   })
   const at = VIEWS.findIndex((v) => v.view === view)
-  const [source, more] = SOURCE[worldSource()]
   return (
     <header ref={bar} className="frame-top" data-top-bar>
       <div className="frame-brand">
@@ -138,16 +172,11 @@ export function TopBar() {
 
       <Plans />
 
-      <button type="button" className="frame-motion" aria-pressed={reduced} onClick={() => setReduced(!reduced)}>
-        <span className="mn-label">motion</span>
-        <b>{reduced ? 'reduced' : 'full'}</b>
-      </button>
-
-      {source && (
-        <span className="frame-source mn-label">
-          {source}
-          <span className="frame-source-more">{more}</span>
-        </span>
+      {/* James: his state, and the way into his panel (the overlays piece's own). */}
+      {James && (
+        <div className="frame-james" data-frame-james>
+          <James />
+        </div>
       )}
     </header>
   )

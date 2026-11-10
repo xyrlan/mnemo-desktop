@@ -9,10 +9,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
 /** @typedef {{ event: string; payload: unknown; afterMs?: number }} ScenarioEvent */
-/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[]; storage?: Record<string, string>; drive?: (page: import('playwright').Page) => Promise<void> }} ScenarioSetup */
+/** @typedef {{ ipc: (cmd: string, args: Record<string, unknown>) => unknown; events?: ScenarioEvent[]; storage?: Record<string, string>; before?: (page: import('playwright').Page) => Promise<void>; drive?: (page: import('playwright').Page) => Promise<void> }} ScenarioSetup */
 
 /** @type {Map<string, ScenarioSetup>} */
 const registry = new Map()
+
+/**
+ * What every scenario's `localStorage` holds unless the scenario says otherwise.
+ *
+ * - `mnemo.next: '0'`: the ship. A build shows the new front by default (`src/frame/flag.ts`),
+ *   and the ship's scenarios were written when it was the other way round: they keep showing
+ *   the ship without each one saying so. A scenario of the new front says `'1'`
+ *   (`fixtures/next.mjs`).
+ * - `mnemo.boot: '0'`: no boot clip (`src/frame/Boot.tsx`), so a picture of a URL is never a
+ *   picture of the launch. The scenario of the clip itself says `'1'`.
+ */
+export const DEFAULT_STORAGE = Object.freeze({ 'mnemo.next': '0', 'mnemo.boot': '0' })
 
 /**
  * Registers a scenario. `ipc` may return a value or a promise; throwing (or rejecting) makes the
@@ -38,8 +50,9 @@ export function scenario(name, setup) {
     if (typeof v !== 'string') throw new Error(`scenario ${name}: storage values are strings, as localStorage keeps them (${k})`)
   }
   if (setup.drive !== undefined && typeof setup.drive !== 'function') throw new Error(`scenario ${name}: drive must be a function of the page`)
+  if (setup.before !== undefined && typeof setup.before !== 'function') throw new Error(`scenario ${name}: before must be a function of the page`)
   if (registry.has(name)) throw new Error(`scenario ${name} is registered twice`)
-  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [], storage: setup.storage ?? {}, drive: setup.drive })
+  registry.set(name, { ipc: setup.ipc, events: setup.events ?? [], storage: { ...DEFAULT_STORAGE, ...(setup.storage ?? {}) }, before: setup.before, drive: setup.drive })
 }
 
 /** @returns {ScenarioSetup | undefined} */

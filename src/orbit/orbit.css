@@ -290,7 +290,8 @@
 /* ------------------------------------------------------------------ the map */
 .mn .orbit-map { position: relative; height: 10em; border-bottom: 1px solid var(--line); cursor: pointer; }
 .mn .orbit-map > svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.mn .orbit-map-name { position: absolute; left: 0.9em; top: 0.75em; font-size: 0.6em; }
+/* The map's own name: the roster, whose head it stands in, says nothing more. */
+.mn .orbit-map-name { position: absolute; left: 1.74em; top: 1.2em; z-index: 1; pointer-events: none; }
 .mn .orbit-map-ring { fill: none; stroke: rgb(255 255 255 / 0.2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .mn .orbit-map-ring[data-band='need'] { stroke: color-mix(in srgb, var(--need) 55%, transparent); }
 .mn .orbit-map-ring[data-rim] { stroke: var(--line-2); }

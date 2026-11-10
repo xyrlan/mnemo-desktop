@@ -25,8 +25,7 @@
 
 /* ── the map at its head: the scene, small ── */
 .mn .roster-map { position: relative; flex: none; display: flex; flex-direction: column; height: clamp(6.5em, 15vh, 12em); overflow: hidden; border-bottom: 1px solid var(--roster-hair); }
-.mn .roster-map > :not(.roster-map-label) { flex: 1 1 auto; min-width: 0; min-height: 0; }
-.mn .roster-map-label { position: absolute; left: 1.74em; top: 1.2em; z-index: 1; pointer-events: none; }
+.mn .roster-map > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
 
 /* ── the head: how many, and how they are grouped ── */
 .mn .roster-head { display: flex; align-items: center; gap: 0.6em; height: 2.5em; padding: 0 var(--roster-pad); flex: none; border-bottom: 1px solid var(--roster-hair); }
@@ -202,3 +201,12 @@
 @media (max-height: 820px) {
   .mn .roster-band { padding-top: 0.8em; }
 }
+
+/* ── the terminals the app holds that are no session: one line each, after the sessions ── */
+.mn .roster-band[data-band='terminals'] > small { font-size: var(--roster-xs); }
+.mn .roster-term .roster-main { display: flex; align-items: baseline; gap: 0.7em; padding: 0.55em var(--roster-pad); }
+.mn .roster-term-sign { flex: none; width: var(--roster-fw); text-align: center; color: var(--ink-3); font-size: var(--roster-xs); font-weight: 700; }
+.mn .roster-term .roster-main[data-sel] .roster-term-sign { color: #fff; text-shadow: var(--glow-soft); }
+.mn .roster-term .roster-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--roster-m); }
+.mn .roster-term-word { flex: none; font: 600 var(--roster-xs) / 1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.mn .roster-term-cwd { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--ink-3); font-size: var(--roster-xs); }
