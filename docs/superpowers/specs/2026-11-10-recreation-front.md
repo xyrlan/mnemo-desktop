@@ -226,3 +226,34 @@ Acting on sessions from a panel goes through `actions()` (a new session, a shell
 dispatch): `actions().newSession(root)`, `newShell(root)`, `dispatch(root, issues, options)`,
 `dispatchContract(root, path, options)`, `land(root, feature)`. In a preview scenario those
 are the sample world's and only record what was asked.
+
+## The overlays (dispatched as the first wave lands)
+
+James's panel and launcher, James's orb, the notification stack and the dictation indicator
+are drawn over whatever front is mounted, and today they wear the ship's look through
+`src/nexus/ui/ui.css`. In the new front they are the last things on screen from the old
+identity (the launcher's square sits at the bottom right of every picture of this wave).
+
+They take the new identity: `src/ds/tokens.css` and the primitives, black, hairlines, the
+state hues, the three typefaces, the motion rules of "What every piece holds to". None of
+them imports `src/nexus/ui/ui.css` any more. Under the ship (the flag off) they may keep the
+look they have or wear the new one; whichever costs less, said in the pull request, as long
+as the ship stays whole and usable.
+
+- **James's presence is the thread orb.** In the panel it is the generated loop
+  `src/ds/art/james-orb.webm` (with `.mp4` second and `james-orb-first.jpg` as poster and as
+  what reduced motion shows), alive while James listens, thinks or speaks and still at rest.
+  In the orb's own window (`orb.html`, `src/jarvis/orb/`), which is transparent and
+  click-through, a clip with a black ground cannot stand, so the orb is drawn: the same
+  thread sphere in hairlines, answering to the voice's state and level as today's does.
+- **The launcher** stops being a square in the corner: James is reached from the frame's
+  top bar and his chord, and what the launcher showed (listening, speaking, an error) is
+  shown there. The panel itself opens as today.
+- **Notifications** stack as today and read as the waiting cards do: the session's figure,
+  its title in full, what happened, and the keys that act on it. A click opens the session
+  on stage.
+- **Dictation's indicator and the file-transcription overlay** keep what they do.
+
+Everything they do today keeps working (the James contracts under
+`docs/superpowers/contracts/2026-10-2*-jarvis-*.md` say what that is), and their tests keep
+passing or change only where they asserted the old markup or stylesheet.
