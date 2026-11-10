@@ -7,9 +7,9 @@
 //   node tools/perf/bundle.mjs --dir path/to/dist
 //   node tools/perf/bundle.mjs --behind Frame-       # what only the chunks so named lead to
 //
-// It also says what stands behind one door: the files the pages reach only through the chunks
-// named `--behind` (by default the code editor the classic interface's diff opens, which the
-// new front never loads). That is how a number over the budget is traced to what costs.
+// With `--behind` it also says what stands behind one door: the files the pages reach only
+// through the chunks so named. That is how a number over the budget is traced to what costs
+// (the code editor of the interface the app had before, 13.39 MB, was found this way).
 //
 // A file a dev build alone reads (`world.capture.json`, the machine's own capture, copied from
 // `public/` when it is there) is not part of what ships and is left out, and said.
@@ -56,10 +56,6 @@ export function measure(files, { localOnly = LOCAL_ONLY, top = 12 } = {}) {
   const largest = [...shipped].sort((a, b) => b.bytes - a.bytes).slice(0, top)
   return { total, budget: BUDGET_BYTES, within: total <= BUDGET_BYTES, files: shipped.length, byKind, largest, leftOut: left }
 }
-
-/** The chunks that are the way into the code editor (monaco): the classic interface's diff and
- *  the editor's own API. Whatever the pages reach only through them is the editor's. */
-export const EDITOR_DOORS = ['DiffEditor-', 'editor.api-']
 
 /** Which files each file names: a chunk names the chunks it imports, the workers it starts and
  *  the assets it shows by their file names, which the build made unique. `text(file)` reads one. */
@@ -113,20 +109,20 @@ function main() {
   }
   const m = measure(files)
   const doorAt = args.indexOf('--behind')
-  const doors = doorAt >= 0 ? args[doorAt + 1].split(',') : EDITOR_DOORS
+  const doors = doorAt >= 0 ? args[doorAt + 1].split(',') : null
   const shipped = files.filter((f) => !LOCAL_ONLY.includes(path.posix.basename(f.file)))
-  const b = behind(
+  const b = doors && behind(
     shipped,
     references(shipped, (file) => readFileSync(path.join(dir, file), 'utf8')),
     doors,
   )
-  m.behind = { doors, ...b, rest: m.total - b.bytes }
+  if (doors && b) m.behind = { doors, ...b, rest: m.total - b.bytes }
   if (args.includes('--json')) return void process.stdout.write(JSON.stringify(m, null, 2) + '\n')
   const lines = [`${mb(m.total)} in ${m.files} files (budget ${mb(m.budget)}: ${m.within ? 'within' : 'over'})`, '']
   for (const [kind, bytes] of Object.entries(m.byKind).sort((a, b) => b[1] - a[1])) lines.push(`  ${mb(bytes).padStart(9)}  ${kind}`)
   lines.push('', 'largest:')
   for (const f of m.largest) lines.push(`  ${mb(f.bytes).padStart(9)}  ${f.file}`)
-  lines.push('', `reached only through ${doors.join(', ')}: ${mb(b.bytes)} in ${b.files} files; everything else: ${mb(m.behind.rest)}`)
+  if (doors && b) lines.push('', `reached only through ${doors.join(', ')}: ${mb(b.bytes)} in ${b.files} files; everything else: ${mb(m.behind.rest)}`)
   for (const f of m.leftOut) lines.push('', `left out, a dev build's own: ${f.file} (${mb(f.bytes)})`)
   process.stdout.write(lines.join('\n') + '\n')
 }

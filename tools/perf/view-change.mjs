@@ -85,7 +85,7 @@ async function main() {
   const browser = await chromium.launch()
   try {
     const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage()
-    const storage = { 'mnemo.next': '1', 'mnemo.boot': '0', 'mnemo.world': world, 'mnemo.motion': motion, 'mnemo.route': '#v=orbit' }
+    const storage = { 'mnemo.boot': '0', 'mnemo.world': world, 'mnemo.motion': motion, 'mnemo.route': '#v=orbit' }
     await preparePage(page, { ipc: appIpc({}), events: [], storage })
     await page.goto(url, { waitUntil: 'networkidle' })
     await page.waitForSelector('.mn .frame-view')

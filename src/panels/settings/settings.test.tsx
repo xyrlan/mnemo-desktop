@@ -195,26 +195,3 @@ test('the about line names the build that is running, with a newer release besid
   expect(about.querySelector('span')!.textContent).toBe('mnemo 0.8.0 · 9f3ab21 · built 2026-11-09 13:49 UTC')
   expect(button('0.9.0 is out', about)).toBeDefined()
 })
-
-describe('Classic interface', () => {
-  test('is one button, and it shows the ship: nothing is written to the settings file', async () => {
-    let shown = 0
-    t.file = {}
-    undraw = await draw(<SettingsPanel classic={() => (shown++, null)} />)
-    await flush()
-    expect(setting('classic').querySelector('.settings-name')!.textContent).toBe('Classic interface')
-    expect(setting('classic').querySelector('.settings-what')!.textContent).toContain('your sessions and their terminals stay as they are')
-    await click(button('Show the classic interface', setting('classic')))
-    expect(shown).toBe(1)
-    expect(t.written).toEqual([])
-    expect(setting('classic').querySelector('[role=alert]')).toBeNull()
-  })
-
-  test('a switch that could not be kept says why under itself', async () => {
-    t.file = {}
-    undraw = await draw(<SettingsPanel classic={() => 'The choice could not be kept: storage is full'} />)
-    await flush()
-    await click(button('Show the classic interface', setting('classic')))
-    expect(setting('classic').querySelector('[role=alert]')!.textContent).toBe('▲ Not saved: The choice could not be kept: storage is full')
-  })
-})

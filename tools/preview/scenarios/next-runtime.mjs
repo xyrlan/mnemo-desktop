@@ -75,7 +75,7 @@ const WORKING = [
   `  ${c('2', '⏵⏵ accept edits on · ctrl+z to detach')}`,
 ].join('\r\n')
 
-const route = (r) => ({ 'mnemo.next': '1', 'mnemo.route': '#' + new URLSearchParams(r).toString() })
+const route = (r) => ({ 'mnemo.route': '#' + new URLSearchParams(r).toString() })
 const bytes = (text) => [...new TextEncoder().encode(text)]
 
 /** What the core says of the fleet: one session the maintainer talks to, which asks a question,

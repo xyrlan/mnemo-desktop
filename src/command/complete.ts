@@ -6,7 +6,7 @@ import { MODELS } from '../tasks/model'
 import { WORD } from '../world/format'
 import { rosterOrder } from '../world/store'
 import type { Session, SessionState, World } from '../world/types'
-import { EFFORTS, MAY, OPTION_KEYS, VERBS, WHOLE, bare, features, greenPulls, nameOf, runningChildren, sessionCalled, verbOf } from './parse'
+import { EFFORTS, MAY, OPTION_KEYS, VERBS, bare, features, greenPulls, nameOf, runningChildren, sessionCalled, verbOf } from './parse'
 
 export interface Offer {
   kind: 'verb' | 'session' | 'project' | 'feature' | 'option' | 'word' | 'panel'
@@ -91,10 +91,7 @@ export function offers(line: string, world: World): Offer[] {
 
   if (typingVerb || !verb) {
     const out: Offer[] = typingVerb
-      ? VERBS.filter((v) => v.verb.startsWith(first.toLowerCase())).map((v) => {
-          const whole = WHOLE.includes(v.verb)
-          return { kind: 'verb', tag: v.verb, label: v.form, detail: v.does, fill: whole ? v.verb : `${v.verb} `, runs: whole }
-        })
+      ? VERBS.filter((v) => v.verb.startsWith(first.toLowerCase())).map((v) => ({ kind: 'verb', tag: v.verb, label: v.form, detail: v.does, fill: `${v.verb} `, runs: false }))
       : []
     // Part of a panel's name, or of a session's, typed with no verb, finds it: Enter opens it.
     const words = text.trim()

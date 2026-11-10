@@ -17,14 +17,10 @@ const registry = new Map()
 /**
  * What every scenario's `localStorage` holds unless the scenario says otherwise.
  *
- * - `mnemo.next: '0'`: the ship. A build shows the new front by default (`src/frame/flag.ts`),
- *   and the ship's scenarios were written when it was the other way round: they keep showing
- *   the ship without each one saying so. A scenario of the new front says `'1'`
- *   (`fixtures/next.mjs`).
  * - `mnemo.boot: '0'`: no boot clip (`src/frame/Boot.tsx`), so a picture of a URL is never a
  *   picture of the launch. The scenario of the clip itself says `'1'`.
  */
-export const DEFAULT_STORAGE = Object.freeze({ 'mnemo.next': '0', 'mnemo.boot': '0' })
+export const DEFAULT_STORAGE = Object.freeze({ 'mnemo.boot': '0' })
 
 /**
  * Registers a scenario. `ipc` may return a value or a promise; throwing (or rejecting) makes the

@@ -18,12 +18,11 @@ export function sessionTitled(text) {
   return hit.id
 }
 
-/** A scenario setup: the new front, the sample world, at `route` (the keys of the hash:
+/** A scenario setup: the sample world, at `route` (the keys of the hash:
  *  `v` view, `s` session, `r` reading, `at`, `p` pending, `panel`, `wide`, `cmd`). */
 export function next(route = {}, ipc = {}) {
   return {
     storage: {
-      'mnemo.next': '1',
       'mnemo.world': 'sample',
       'mnemo.route': '#' + new URLSearchParams(route).toString(),
     },

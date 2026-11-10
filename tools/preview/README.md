@@ -9,8 +9,8 @@ pnpm install                                   # the repo's own deps: the harnes
 pnpm --dir tools/preview install               # playwright, on its own lockfile
 pnpm --dir tools/preview exec playwright install chromium   # once per machine
 
-node tools/preview/shot.mjs --scenario terminal-pane --out /tmp/terminal.png
-node tools/preview/shot.mjs --scenario empty-workspace --out /tmp/nexus.png --size 1280x800
+node tools/preview/shot.mjs --scenario next-console --out /tmp/console.png
+node tools/preview/shot.mjs --scenario empty-workspace --out /tmp/empty.png --size 1280x800
 node tools/preview/shot.mjs --list
 ```
 
@@ -52,12 +52,10 @@ scenario('job-running', {
   give it an `afterMs`. The shot waits for the last one.
 - Events the page itself emits reach its own listeners and never reach `ipc`.
 - **`storage`** (optional) is what the app kept in `localStorage` from a last run, set before its
-  code runs: `{ 'mnemo.nexus-drawer.v1': JSON.stringify(…) }`. Values are strings.
-- Unless a scenario's `storage` says otherwise it holds `'mnemo.next': '0'` and
-  `'mnemo.boot': '0'`: the ship, and no boot clip. A build shows the new front by default
-  (`src/frame/flag.ts`), and the ship's scenarios were written when it was the other way round;
-  a scenario of the new front says `'mnemo.next': '1'` (`fixtures/next.mjs` does), and the one
-  of the launch itself says `'mnemo.boot': '1'`.
+  code runs: `{ 'mnemo.world': 'sample' }`. Values are strings.
+- Unless a scenario's `storage` says otherwise it holds `'mnemo.boot': '0'`: no boot clip, so a
+  picture of a URL is never a picture of the launch. The scenario of the launch itself says
+  `'mnemo.boot': '1'`.
 - **`before`** (optional) runs with the page before it navigates: `async (page) => {…}`, for
   what has to stand between the page and the app as it loads (`page.route` aborting a module,
   which is how `next-swap-broken` shows what replaces a frame that cannot be drawn).
@@ -65,22 +63,11 @@ scenario('job-running', {
   Playwright page once the app is up and settled (`page.keyboard.press('/')`). The shot waits
   `--settle` again after it.
 
-`fixtures/app.mjs` is the launch state with nothing going on. `empty-workspace` is the app as a
-fresh boot opens it: the Nexus, empty. `terminal-pane` restores a saved tab through
-`workspace_read` and shows it as a drawer session, so a change to the saved workspace format means
-updating that fixture. `nexus-quiet` is a crowded COMMAND column with the drawer open: two
-captains with two-line names over eight quiet captains' chips (#465). `nexus-drawer` is the
-drawer open on seven sessions kept from a last run (three children, two captains with long titles,
-two shells): one header of session pills (#467); shoot it at `--size 940x760` for the narrowest
-drawer, where the pills wrap to two rows and the rest are behind `+N`. `nexus-command` is the
-`nexus` ship with `/` pressed: the fleet's command line over the bridge, every verb suggested
-(#469). `nexus-states` is one robot in each state a snapshot can make, across the four classes:
-each holds its state's prop (or none), with no badge (#473); `stopped`, which no snapshot makes, is
-in the unit tests. `nexus-memory` is the `nexus` ship with mnemo's memory at work (#472): the
-archive tower and its project's `LV` beside the deck's name and in the dock pod (#478), and one
-`mnemo://pulse` of each kind fired once the ship is drawn, so packets are in the air at the shot (a
-reflex twice to one child, joined as `×2`). `nexus-levels` is two decks at different levels, each
-its own project's (`LV2`, `LV7`), and a docked repo with nothing on record at `LV0` (#478).
+`fixtures/app.mjs` is the launch state with nothing going on, and `empty-workspace` is the app as
+a fresh boot opens it. `fixtures/next.mjs` is the sample world at a route: `next({ v: 'console' })`.
+The `next-*` scenarios are the frame's views and states over it, each file saying at its top what
+its scenarios show; `real-orbit`, `real-console` and `real-score` draw this machine's own sessions
+from a capture that never leaves it.
 
 ## Tests
 
@@ -88,10 +75,6 @@ its own project's (`LV2`, `LV7`), and a docked repo with nothing on record at `L
 pnpm --dir tools/preview test
 ```
 
-The last of them shoot `nexus`, `nexus-quiet`, `nexus-drawer`, `nexus-command`, `nexus-states`, `nexus-memory`, `nexus-levels`, `empty-workspace` and `terminal-pane` through the
-real vite and look at the page they drew (no workbench element, the drawer's tabs, no quiet
-captain's chip over a captain, the drawer's one header with every pill readable and apart, no
-input on the bridge, the command line open with its verbs, every robot's prop and no badge, every
-kind's packet flown and the deck's label row no taller than before the archive, each deck's own
-level), so they need the
-repo's deps too.
+The last of them shoot `next-console`, `next-orbit`, `empty-workspace` and `next-swap-broken`
+through the real vite and look at the page they drew (the frame, its sessions and bodies, no page
+error, what stands in a broken frame's place), so they need the repo's deps too.

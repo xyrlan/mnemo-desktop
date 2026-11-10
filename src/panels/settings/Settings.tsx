@@ -8,7 +8,6 @@ import { open as pickFolder } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState, type ReactNode } from 'react'
 import { aboutLine, buildInfo, type BuildInfo } from '../../about/info'
 import { newerLine, newerRelease, openRelease, type NewerRelease } from '../../about/release'
-import { showClassic } from '../../frame/flag'
 import { useKnownRepos } from '../../nexus/repos'
 import { basename } from '../../path/path'
 import { loadShells, shells, type Shells } from '../../pty/shells'
@@ -217,25 +216,6 @@ function RepoSetup({ save, failed }: { save: Save; failed?: string }) {
   )
 }
 
-/** The way back to the interface the app had before this one. It is a choice of screen, not a
- *  setting of the settings file: it is kept where the app decides which front to mount, and
- *  takes effect by loading the app again (`src/frame/flag.ts`). */
-function ClassicInterface({ classic }: { classic: () => string | null }) {
-  const [failed, setFailed] = useState<string | null>(null)
-  return (
-    <Setting
-      id="classic"
-      name="Classic interface"
-      what="The interface the app had before this one. Choosing it loads the app again: your sessions and their terminals stay as they are. Its SYSTEMS menu has New interface, the way back here."
-      failed={failed ?? undefined}
-    >
-      <Btn small onClick={() => setFailed(classic())}>
-        Show the classic interface
-      </Btn>
-    </Setting>
-  )
-}
-
 /** The build that is running, so a stale bundle reads as stale, with a newer release beside it
  *  when GitHub has one. */
 function About() {
@@ -263,7 +243,7 @@ function About() {
   )
 }
 
-export function SettingsPanel({ classic = showClassic }: { classic?: () => string | null }) {
+export function SettingsPanel() {
   const loaded = useSettings((s) => s.loaded)
   const unreadable = useSettings((s) => s.unreadable)
   const outgoing = useSettings((s) => s.outgoing)
@@ -330,9 +310,6 @@ export function SettingsPanel({ classic = showClassic }: { classic?: () => strin
       <Section title="Repos">
         <CloneBase save={save} failed={why('cloneBase')} />
         <RepoSetup save={save} failed={why('repoSetup')} />
-      </Section>
-      <Section title="Interface">
-        <ClassicInterface classic={classic} />
       </Section>
       <About />
     </div>

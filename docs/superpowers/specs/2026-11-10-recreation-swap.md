@@ -23,6 +23,15 @@ follow his say-so, as their own change.
   the same switch; a broken new front never strands him without the old one.
 - The ship gets the way back: its SYSTEMS menu has "New interface".
 
+**Since then (2026-11-10, the same day):** the maintainer used the new front on his fleet and
+said it had replaced the ship, so the ship is out of the build: nothing mounts it, the flag,
+the `classic` command, the Settings switch and the guard's offer are gone, and so are the
+components, styles and tests only it reached (its scene, drawer, windows, menus, the
+conversation view, the code editor and the diff around it). The bundle went from 16.85 MB to
+3.38 MB. What the new front still takes from `src/nexus/` (the drawer's sessions, the store,
+the first run, the types) stays there until it is moved to homes of its own, and the old
+shell is still what the frame is mounted in.
+
 ## What this wave closes
 
 **Reaching the panels.** The top bar lists the panels that exist (`panels()`), and the

@@ -124,7 +124,7 @@ test('serving the bundle: the page is told where to open before the app runs', (
   const line = opening({ world: 'capture', view: 'score', motion: 'full' })
   assert.match(line, /localStorage\.setItem\("mnemo\.world", "capture"\)/)
   assert.match(line, /localStorage\.setItem\("mnemo\.route", "#v=score"\)/)
-  assert.match(line, /localStorage\.setItem\("mnemo\.next", "1"\)/)
+  assert.match(line, /localStorage\.setItem\("mnemo\.boot", "0"\)/)
   // a live world is the core's: the kept choice of another world goes
   const live = opening({ world: 'live', view: 'orbit', motion: 'reduced' })
   assert.doesNotMatch(live, /setItem\("mnemo\.world"/)

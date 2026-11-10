@@ -21,7 +21,6 @@ export type Command =
   | { kind: 'land'; root: string; feature: string }
   | { kind: 'stop'; sessions: string[] }
   | { kind: 'panel'; panel: PanelId }
-  | { kind: 'classic' }
 
 /** `says` is what Enter will do, in words. `batch`: it reaches more than one session, so it is
  *  asked about before it runs. */
@@ -44,11 +43,7 @@ export const VERBS: readonly Verb[] = [
   { verb: 'stop', form: 'stop <session | all>', does: 'stop a session, or every running child' },
   { verb: 'go', form: 'go <session>', does: 'put a session on stage' },
   { verb: 'panel', form: 'panel <name>', does: 'open a panel: projects, missions, changes, memory, learned, accounts, setup, settings' },
-  { verb: 'classic', form: 'classic', does: 'show the classic interface: the app loads again, your terminals stay' },
 ]
-
-/** The verbs that take nothing after them: taking one from the list runs it. */
-export const WHOLE: readonly string[] = ['classic']
 
 const ALIAS: Record<string, string> = { msg: 'message', open: 'go' }
 
@@ -270,11 +265,6 @@ function panel(rest: string): Parsed {
   return { command: { kind: 'panel', panel: hit.id }, says: `Open ${hit.title}`, batch: false }
 }
 
-function classic(rest: string): Parsed {
-  if (rest) return { error: 'classic takes nothing after it: it shows the classic interface.' }
-  return { command: { kind: 'classic' }, says: 'Show the classic interface (the app loads again; your terminals stay)', batch: false }
-}
-
 function show(rest: string, world: World): Parsed {
   const s = rest ? sessionCalled(rest, world) : null
   // `open missions`: a word that names no session may name a panel.
@@ -287,7 +277,7 @@ function show(rest: string, world: World): Parsed {
  *  run says why, and nothing is guessed. */
 export function parse(line: string, world: World): Parsed {
   const m = /^(\S+)\s*([\s\S]*)$/.exec(bare(line).trim())
-  if (!m) return { error: 'Type a verb (new, shell, dispatch, message, merge green, land, stop, panel, classic), part of a session’s name, or a panel’s.' }
+  if (!m) return { error: 'Type a verb (new, shell, dispatch, message, merge green, land, stop, panel), part of a session’s name, or a panel’s.' }
   const verb = verbOf(m[1])
   const rest = m[2].trim()
   if (!verb) {
@@ -315,8 +305,6 @@ export function parse(line: string, world: World): Parsed {
       return stop(rest, world)
     case 'panel':
       return panel(rest)
-    case 'classic':
-      return classic(rest)
     default:
       return show(rest, world)
   }

@@ -1,7 +1,6 @@
 import { subscribeAgentEvents } from '../agents/events'
 import { notifyAgent } from '../agents/notify'
 import { fleetStore, subscribePolledMoves } from '../fleet/store'
-import { nextFront } from '../frame/flag'
 import { missionStore } from '../mission/app-store'
 import { openFigure } from '../nexus/outside'
 import { nexusStore } from '../nexus/store'
@@ -41,12 +40,10 @@ export const notifier = createNotifier({
   },
   native: notifyAgent,
   sound: () => chime(),
-  // Its figure in the Nexus (Q14): a dispatched child's robot, else its captain. In the new front,
-  // the session on Console's stage (`./open`). What it said is seen once it is on screen.
+  // The session on Console's stage (`./open`). What it said is seen once it is on screen.
   open(sessionId, worktree) {
     const opened = openSession({
       figure: () => openFigure(figureOf(missionStore.getState().snapshot, sessionId)),
-      next: nextFront(),
       known: () => sessionOf(worldStore.getState().world, sessionId)?.id ?? null,
       stage: openOnStage,
     })
