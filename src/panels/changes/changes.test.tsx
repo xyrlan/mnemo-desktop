@@ -221,6 +221,11 @@ test('S sends every note of the worktree to the session as one reply, and the no
   await note(10, 'say why this changed')
   await press('ArrowDown')
   await note(2, 'second thought')
+  // Each file counts its own notes; the button counts the worktree's.
+  expect(document.querySelector('[data-file="src/a.ts"] .mn-changes-notes')!.textContent).toBe('1 note')
+  expect(document.querySelector('[data-file="docs/b.md"] .mn-changes-notes')!.textContent).toBe('1 note')
+  expect(document.querySelector('[data-file="src/gone.ts"] .mn-changes-notes')).toBeNull()
+  expect(document.querySelector('[data-action="send-notes"]')!.textContent).toContain('Send 2 notes')
   await press('s')
   expect(r.replies.length).toBe(1)
   expect(r.replies[0][0]).toBe(child.id)

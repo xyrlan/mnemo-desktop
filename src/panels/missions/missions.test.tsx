@@ -271,18 +271,19 @@ test('L on a mission whose pieces are not all in says so and lands nothing; so d
 })
 
 test('P lists the repo\'s contracts, newest first, on the first not dispatched yet; Enter dispatches it with the flags', async () => {
-  ipc.dirs[`${ROOT}/docs/contracts`] = ['round4.md', 'round5.md', 'notes.txt']
+  // round4 is the newest and was dispatched already: the picker starts on the one after it.
+  ipc.dirs[`${ROOT}/docs/contracts`] = ['round2.md', 'round4.md', 'round3.md', 'notes.txt']
   await mount()
   await press('v')
   await press('p')
   const files = [...document.querySelectorAll('[data-contract-picker] [role="radio"]')]
-  expect(files.map((f) => f.textContent)).toEqual([expect.stringContaining('docs/contracts/round5.md'), expect.stringContaining('docs/contracts/round4.md')])
-  expect(files[1].textContent).toContain('dispatched · 3 pieces')
-  expect(files[0].getAttribute('aria-checked')).toBe('true')
+  expect(files.map((f) => f.querySelector('.mn-missions-text')!.textContent)).toEqual(['docs/contracts/round4.md', 'docs/contracts/round3.md', 'docs/contracts/round2.md'])
+  expect(files[0].textContent).toContain('dispatched · 3 pieces')
+  expect(files.map((f) => f.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
   await press('Enter')
-  expect(asked.contract).toEqual([[ROOT, 'docs/contracts/round5.md', { advisor: 'haiku' }]])
+  expect(asked.contract).toEqual([[ROOT, 'docs/contracts/round3.md', { advisor: 'haiku' }]])
   expect(document.querySelector('[data-contract-picker]')).toBeNull()
-  expect(launches()[0].textContent).toContain('contract docs/contracts/round5.md')
+  expect(launches()[0].textContent).toContain('contract docs/contracts/round3.md')
 })
 
 test('a contract dispatched before asks again before it starts every piece over', async () => {

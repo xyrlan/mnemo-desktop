@@ -36,6 +36,11 @@ describe('what the panel lists', () => {
     expect(s.map((x) => x.repo.name)).toEqual(['mnemo', 'mnemo-desktop', 'notes'])
     expect(s[1].missions.map((m) => m.feature)).toEqual(['round3'])
     expect(s[1].issues).toEqual([])
+    // Hidden or unresolved, a repo is not listed for its mission either.
+    const hidden = { ...home, repos: home.repos.map((r) => (r.name === 'mnemo-desktop' ? { ...r, hidden: true } : r)) }
+    expect(sectionsOf(hidden, snapWithIssues, '', null).map((x) => x.repo.name)).toEqual(['mnemo', 'notes'])
+    const unresolved = { ...home, repos: home.repos.map((r) => (r.name === 'mnemo-desktop' ? { ...r, unresolved: true } : r)) }
+    expect(sectionsOf(unresolved, snapWithIssues, '', null).map((x) => x.repo.name)).toEqual(['mnemo', 'notes'])
   })
 
   test('the rows the cursor walks: a repo\'s missions, then its issues, then its pull requests', () => {

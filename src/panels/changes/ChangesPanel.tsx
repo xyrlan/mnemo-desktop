@@ -197,7 +197,7 @@ function Changes({ store, session, worktree }: { store: StoreApi<DiffState>; ses
       ))}
       <div className="mn-changes-main">
         {files && files.length > 0 && (
-          <div className="mn-changes-files" role="list" aria-label="Changed files">
+          <div className="mn-changes-files" role="group" aria-label="Changed files">
             {files.map((f) => (
               <FileRow key={f.path} file={f} notes={notesByFile.get(f.path) ?? 0} on={f.path === file?.path} onPick={() => pick(f.path)} />
             ))}
@@ -213,7 +213,7 @@ function FileRow({ file, notes, on, onPick }: { file: ChangedFile; notes: number
   const s = STATUS[file.status]
   const dir = dirOf(file.path)
   return (
-    <button type="button" role="listitem" className="mn-changes-file" data-file={file.path} data-status={file.status} aria-current={on || undefined} title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path} onClick={onPick}>
+    <button type="button" className="mn-changes-file" data-file={file.path} data-status={file.status} aria-current={on || undefined} title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path} onClick={onPick}>
       <span className="mn-changes-letter" aria-label={s.word} title={s.word}>
         {s.letter}
       </span>
@@ -277,10 +277,9 @@ function FileDiff({ file, sides, sideBySide, comments, onOpen, onRest, onAdd, on
 
   /** A click on a line's number starts a note there; with shift, one over the range from the
    *  line last clicked. */
-  function note(l: Line, e: MouseEvent) {
-    if (l.now === null) return
-    setDraft(rangeOf(anchor, l.now, e.shiftKey))
-    if (!e.shiftKey) setAnchor(l.now)
+  function note(line: number, e: MouseEvent) {
+    setDraft(rangeOf(anchor, line, e.shiftKey))
+    if (!e.shiftKey) setAnchor(line)
   }
 
   const under = (l: Line | null): ReactNode => {
@@ -313,13 +312,14 @@ function FileDiff({ file, sides, sideBySide, comments, onOpen, onRest, onAdd, on
 
   const inRange = (l: Line | null) => !!draft && !!l && l.now !== null && l.now >= (draft.startLine ?? draft.lineNumber) && l.now <= draft.lineNumber
 
-  const number = (l: Line) =>
-    l.now !== null ? (
-      <button type="button" className="mn-changes-n" aria-label={`Note on line ${l.now}`} title="Write a note for the session on this line (shift: through this line)" onClick={(e) => note(l, e)}>
-        {l.now}
+  /** A line's number on the working side is where a note starts; a removed line has none. */
+  const number = ({ now }: Line) =>
+    now !== null ? (
+      <button type="button" className="mn-changes-n" aria-label={`Note on line ${now}`} title="Write a note for the session on this line (shift: through this line)" onClick={(e) => note(now, e)}>
+        {now}
       </button>
     ) : (
-      <span className="mn-changes-n">{l.now ?? ''}</span>
+      <span className="mn-changes-n" />
     )
 
   const fold = (n: number, at: number) =>
