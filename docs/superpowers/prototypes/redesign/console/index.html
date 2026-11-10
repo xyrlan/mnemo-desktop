@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mnemo · console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../base/base.css">
+<link rel="stylesheet" href="console.css">
+</head>
+<body>
+<!-- Console: one roster, one stage. BRIEF.md is the direction, NOTES.md what was decided.
+     Everything below is drawn by console.js from the capture ../base/load.js hands over. -->
+<div class="app" id="app" hidden>
+  <header class="top" id="top"></header>
+
+  <nav class="roster" aria-label="Sessions">
+    <div class="roster-head" id="rosterHead"></div>
+    <div class="roster-scroll" id="rosterScroll">
+      <div id="rosterList"></div>
+      <i class="beam" id="beam" aria-hidden="true"></i>
+    </div>
+  </nav>
+
+  <main class="stage" id="stage"></main>
+
+  <aside class="insts" id="insts" aria-label="Instruments"></aside>
+
+  <footer class="cmd" id="cmd">
+    <div class="cmd-pop" id="cmdPop" hidden></div>
+    <label class="cmd-line">
+      <span class="cmd-sign">:</span>
+      <input id="cmdIn" type="text" autocomplete="off" spellcheck="false"
+             placeholder="new · dispatch · message · merge green · stop · or a session's name">
+    </label>
+    <div class="cmd-said" id="cmdSaid"></div>
+    <div class="keys" id="keys"></div>
+  </footer>
+</div>
+<div id="overlay"></div>
+<div class="boot" id="boot">reading the capture</div>
+
+<script src="../base/load.js"></script>
+<script src="console.js"></script>
+</body>
+</html>
