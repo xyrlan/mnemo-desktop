@@ -1,0 +1,40 @@
+/* The Accounts panel: `accounts-`. One card per account; the active one is lit. */
+
+.mn .accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.2em; align-content: start; }
+.mn .accounts-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1em; }
+.mn .accounts-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9em; padding: 1.1em 1.2em 1.2em; border: 1px solid var(--line); border-radius: 0.3em; transition: border-color var(--slow), background var(--slow); }
+.mn .accounts-card[data-active] { border-color: var(--line-2); background: linear-gradient(180deg, var(--surface), transparent 70%); box-shadow: inset 2px 0 0 var(--ink); }
+
+.mn .accounts-pick { display: flex; align-items: center; gap: 0.9em; width: 100%; text-align: left; }
+.mn .accounts-pick:disabled { cursor: default; }
+.mn .accounts-mark { flex: none; font-size: 1.3em; line-height: 1; color: var(--ink-3); transition: color var(--fast), text-shadow var(--fast); }
+.mn .accounts-card[data-active] .accounts-mark { color: var(--ink); text-shadow: var(--glow); }
+.mn .accounts-pick:hover:not(:disabled) .accounts-mark { color: var(--ink); }
+.mn .accounts-name { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; font: 700 1.3em/1.2 var(--display); letter-spacing: 0.08em; }
+.mn .accounts-name .sp-tag { font-size: 0.5em; }
+.mn .accounts-sub { display: block; margin-top: 0.3em; font-size: 0.88em; overflow-wrap: anywhere; }
+.mn .accounts-state { flex: none; font: 600 0.68em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); padding: 0.65em 0.9em; border: 1px solid transparent; border-radius: 0.3em; transition: color var(--fast), border-color var(--fast), background var(--fast); }
+.mn .accounts-pick:not(:disabled) .accounts-state { border-color: var(--line-2); color: var(--ink-2); }
+.mn .accounts-pick:hover:not(:disabled) .accounts-state { background: var(--ink); border-color: var(--ink); color: var(--void); }
+.mn .accounts-card[data-active] .accounts-state { color: var(--ink); }
+
+.mn .accounts-limits { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75em; }
+.mn .accounts-limit { display: grid; grid-template-columns: 8.5em 3.4em minmax(0, 1fr) 13em; align-items: center; gap: 1em; }
+.mn .accounts-limit-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn .accounts-limit-pct { font-size: 1.35em; line-height: 1; text-align: right; }
+.mn .accounts-limit-pct > i { font-style: normal; font-size: 0.55em; color: var(--ink-3); margin-left: 0.15em; }
+.mn .accounts-limit[data-tone='warn'] .accounts-limit-pct { color: var(--need); }
+.mn .accounts-limit[data-tone='bad'] .accounts-limit-pct { color: var(--stalled); }
+.mn .accounts-limit .sp-bar { height: 3px; }
+.mn .accounts-limit-reset { font-size: 0.84em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mn .accounts-severity { font-weight: 600; color: var(--ink-2); }
+.mn .accounts-limit[data-tone='warn'] .accounts-severity { color: var(--need); }
+.mn .accounts-limit[data-tone='bad'] .accounts-severity { color: var(--stalled); }
+
+.mn .accounts-line { margin: 0; font-size: 0.9em; line-height: 1.45; }
+.mn .accounts-problem { color: var(--need); }
+.mn .accounts-acts { padding-top: 0.2em; }
+.mn .accounts-form { gap: 0.5em; }
+.mn .accounts-add { justify-self: start; }
+.mn .accounts-adding { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.8em; justify-items: start; padding: 1.1em 1.2em; border: 1px dashed var(--line-2); border-radius: 0.3em; }
+.mn .accounts-adding .accounts-form { width: 100%; }
