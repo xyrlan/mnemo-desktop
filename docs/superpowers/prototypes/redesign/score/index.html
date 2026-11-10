@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mnemo · score</title>
+<link rel="stylesheet" href="../base/base.css">
+<link rel="stylesheet" href="score.css">
+</head>
+<body>
+
+<div id="stars" data-asset="starfield" aria-hidden="true"></div>
+
+<div id="app" data-inspector="closed">
+  <div id="halo" data-asset="memory-rings" aria-hidden="true"></div>
+
+  <header id="bar">
+    <div class="brand"><b>mnemo</b><span>score</span></div>
+    <div id="range" class="range"></div>
+    <nav id="zoom" class="zoom" aria-label="Zoom"></nav>
+    <span class="flex"></span>
+    <button id="pending" class="pill" type="button"></button>
+    <button id="motion" class="pill" type="button"></button>
+    <button id="help" class="pill" type="button">Keys <kbd>?</kbd></button>
+  </header>
+
+  <!-- the fleet over the same axis, and the ruler -->
+  <section id="head" aria-label="The fleet over time">
+    <div class="striplabel"><span class="label">Fleet tokens</span><span id="stripnote" class="note"></span></div>
+    <canvas id="strip"></canvas>
+    <canvas id="ruler"></canvas>
+  </section>
+
+  <section id="nowhead" aria-label="Now"></section>
+
+  <!-- the score: a sticky canvas on the left, one card per line on the right -->
+  <section id="rows" aria-label="Sessions">
+    <div id="inner">
+      <div id="track">
+        <div id="under"></div>
+        <canvas id="score"></canvas>
+        <div id="over"></div>
+      </div>
+      <div id="cards"></div>
+    </div>
+  </section>
+
+  <aside id="inspector" aria-label="Selected session"></aside>
+
+  <footer id="keys">
+    <span><kbd>J</kbd><kbd>K</kbd> lines</span>
+    <span><kbd>Space</kbd> next waiting</span>
+    <span><kbd>1</kbd>–<kbd>9</kbd> answer</span>
+    <span><kbd>A</kbd> approve</span>
+    <span><kbd>←</kbd><kbd>→</kbd> replay</span>
+    <span><kbd>Esc</kbd> back to now</span>
+    <span><kbd>T</kbd> terminal</span>
+    <span><kbd>C</kbd><kbd>M</kbd><kbd>S</kbd> readings</span>
+    <span><kbd>+</kbd><kbd>−</kbd> zoom</span>
+    <span class="flex"></span>
+    <span class="legend" id="legend"></span>
+  </footer>
+
+  <div id="seam" data-asset="now-seam" aria-hidden="true"></div>
+  <div id="dim" aria-hidden="true" hidden></div>
+  <div id="hair" aria-hidden="true" hidden><span></span></div>
+  <div id="playhead" aria-hidden="true" hidden><span id="flag"></span></div>
+  <div id="tip" role="tooltip" hidden></div>
+  <div id="toast" role="status" hidden></div>
+  <div id="sheet" hidden></div>
+</div>
+
+<script src="../base/load.js"></script>
+<script src="model.js"></script>
+<script src="draw.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
