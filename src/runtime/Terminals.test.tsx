@@ -148,6 +148,21 @@ test('a tab renamed when its session is learnt keeps the view it had', () => {
   expect(b.life).toEqual(['mount 1'])
 })
 
+test('the terminal on stage says which PTY a dropped file goes to, and nothing when it has none', () => {
+  // src/terminal/file-drop.ts types a dropped image's path, or a voice note's transcript, into
+  // the presentation under the pointer, found by `data-session-pty`. Without the mark the stage's
+  // terminal took no drop at all (the maintainer's first day with the new front).
+  const b = bench()
+  render(<b.LiveTerminal sessionId="alpha" active />)
+  const box = () => document.querySelector<HTMLElement>('[data-live-terminal="alpha"]')
+  b.hold('alpha', 7)
+  expect(box()?.dataset.sessionPty).toBe('7')
+  b.say('alpha', { state: 'held', tab: 'alpha', key: 'child:alpha', pty: null, error: null })
+  expect(box()?.dataset.sessionPty).toBe('')
+  b.say('alpha', { state: 'detached' })
+  expect(box()?.dataset.sessionPty).toBe('')
+})
+
 test('a terminal let go of is unmounted, and the stage says what there is instead', () => {
   const b = bench()
   render(<b.LiveTerminal sessionId="alpha" active />)

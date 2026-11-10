@@ -154,7 +154,12 @@ export function createTerminals(d: TerminalsDeps) {
     }, [active, at])
 
     return (
-      <div className="runtime-terminal" data-live-terminal={sessionId} data-active={active || undefined} data-terminal-state={view.state} data-pty={view.state === 'held' ? (view.pty ?? '') : ''}>
+      <div className="runtime-terminal" data-live-terminal={sessionId} data-active={active || undefined} data-terminal-state={view.state} data-pty={view.state === 'held' ? (view.pty ?? '') : ''}
+        // What a file dropped here is typed into (src/terminal/file-drop.ts finds the presentation
+        // under the pointer by this mark, as it found the ship's drawer): without it an image or
+        // a voice note dragged onto the stage's terminal went nowhere.
+        data-session-pty={view.state === 'held' ? (view.pty ?? '') : ''}
+      >
         <div ref={slot} className="runtime-slot" />
         {view.state === 'held' && view.error !== null && <p className="runtime-note">{view.error}</p>}
         {(view.state === 'waiting' || (view.state === 'held' && view.pty === null && view.error === null)) && <p className="runtime-note">Attaching…</p>}
