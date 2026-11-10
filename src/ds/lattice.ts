@@ -328,6 +328,8 @@ export function createLattice(canvas: HTMLCanvasElement, options: LatticeOptions
   const root = canvas.closest('.mn')
   const prefers = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null
   const reduced = () => !!canvas.closest('[data-motion="reduced"]') || !!prefers?.matches
+  // the frame marks its root while the maintainer is away (src/frame/away.ts): nothing turns then
+  const away = () => !!canvas.closest('[data-away]')
   function stop() {
     running = false
     if (raf) cancelAnimationFrame(raf)
@@ -336,7 +338,7 @@ export function createLattice(canvas: HTMLCanvasElement, options: LatticeOptions
   function start() {
     if (gone || running) return
     measure()
-    if (reduced() || document.hidden || !visible) {
+    if (reduced() || away() || document.hidden || !visible) {
       draw(performance.now())
       return
     }
@@ -353,6 +355,7 @@ export function createLattice(canvas: HTMLCanvasElement, options: LatticeOptions
   }
 
   document.addEventListener('visibilitychange', restart)
+  window.addEventListener('mnemo:away', restart)
   prefers?.addEventListener?.('change', restart)
   // the frame's motion switch flips an attribute on the root
   const switched = root && typeof MutationObserver !== 'undefined' ? new MutationObserver(restart) : null
@@ -396,6 +399,7 @@ export function createLattice(canvas: HTMLCanvasElement, options: LatticeOptions
       if (still) clearTimeout(still)
       still = 0
       document.removeEventListener('visibilitychange', restart)
+      window.removeEventListener('mnemo:away', restart)
       prefers?.removeEventListener?.('change', restart)
       switched?.disconnect()
       seen?.disconnect()

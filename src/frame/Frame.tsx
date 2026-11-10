@@ -2,6 +2,7 @@
 // command line (docs/superpowers/specs/2026-11-10-recreation-design.md, "The frame"). Every
 // view is another piece's; the frame gives each its room and keeps the selection between them.
 
+import { watchAway } from './away'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import '@fontsource-variable/jura'
 import '../ds/tokens.css'
@@ -239,6 +240,7 @@ export function Frame() {
   const [typing, setTyping] = useState(false)
 
   useEffect(() => startWorld(), [])
+  useEffect(() => (root.current ? watchAway(root.current) : undefined), [])
   useEffect(() => (worldSource() === 'live' ? startRuntime() : undefined), [])
 
   useEffect(() => {

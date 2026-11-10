@@ -73,6 +73,12 @@
   animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
 }
 
+/* Still when nobody is looking: the frame marks its root `data-away` once the window has been
+   out of focus for a while (src/frame/away.ts), and every animation under it holds its frame.
+   It is what keeps an app that is open all day from asking the machine for sixty frames a
+   second it shows to no one. */
+.mn[data-away] *, .mn[data-away] *::before, .mn[data-away] *::after { animation-play-state: paused !important; }
+
 /* What takes the keyboard says so, the same way everywhere. */
 .mn :focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
 
