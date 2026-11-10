@@ -203,7 +203,7 @@
 .mn .instruments-lacks + .instruments-vault { margin-top: 1.2em; }
 
 /* ── sight ── */
-.mn .instruments-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(11em, 1fr)); gap: 0.8em; margin-bottom: 0.8em; }
+.mn .instruments-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 0.8em; margin-bottom: 0.8em; }
 .mn .instruments-shot { display: flex; flex-direction: column; gap: 0.2em; min-width: 0; }
 .mn .instruments-shot-f { display: grid; place-items: center; aspect-ratio: 16 / 10; border: 1px solid var(--line-2); overflow: hidden; background: var(--surface); transition: border-color var(--fast), box-shadow var(--fast); }
 .mn .instruments-shot:hover .instruments-shot-f, .mn .instruments-shot:focus-visible .instruments-shot-f { border-color: #fff; box-shadow: 0 0 20px -6px #fff; }
