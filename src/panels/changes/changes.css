@@ -4,6 +4,9 @@
 .mn .mn-panel[data-panel='changes'] .mn-panel-body { overflow: hidden; padding: 0; display: grid; }
 
 .mn .mn-changes { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-changes:focus, .mn .mn-changes:focus-visible { outline: none; }
 .mn .mn-changes:has(.mn-changes-said) { grid-template-rows: auto auto 1fr; }
 
 .mn .mn-changes-bar { display: flex; align-items: center; gap: 1em; padding: 1em 1.6em; border-bottom: 1px solid var(--line); }

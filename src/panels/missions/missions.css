@@ -1,6 +1,9 @@
 /* The Missions panel. Every size is in em of the frame's root size. */
 
 .mn .mn-missions { display: flex; flex-direction: column; gap: 0.9em; min-height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-missions:focus, .mn .mn-missions:focus-visible { outline: none; }
 
 .mn .mn-missions-bar { display: flex; align-items: center; gap: 0.7em; }
 .mn .mn-missions-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.7em; height: 2.6em; padding: 0 0.8em; border: 1px solid var(--line); background: var(--surface); transition: border-color var(--fast); }

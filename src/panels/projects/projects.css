@@ -1,6 +1,9 @@
 /* The Projects panel. Every size is in em of the frame's root size. */
 
 .mn .mn-projects { display: flex; flex-direction: column; gap: 0.9em; min-height: 100%; outline: none; }
+/* The panel itself takes the focus so its keys work at once; it is the whole sheet, so it
+   draws no ring of its own. What can be pressed inside it keeps the design system's. */
+.mn .mn-projects:focus, .mn .mn-projects:focus-visible { outline: none; }
 
 .mn .mn-projects-bar { display: flex; align-items: center; gap: 0.7em; }
 .mn .mn-projects-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.7em; height: 2.6em; padding: 0 0.8em; border: 1px solid var(--line); background: var(--surface); transition: border-color var(--fast); }
