@@ -7,32 +7,13 @@
 //   // src/panels/missions/index.tsx
 //   registerPanel({ id: 'missions', title: 'Missions', Component: MissionsPanel })
 
-import { useEffect, type ComponentType } from 'react'
+import { useEffect } from 'react'
 import { Kbd, Label } from '../ds'
 import { go, useRoute, type PanelId } from '../world/route'
+import { panelOf } from './registry'
 import './panels.css'
 
-export interface PanelSpec {
-  id: PanelId
-  title: string
-  /** A line under the title: what the panel is for. */
-  hint?: string
-  /** `wide`: a panel that needs the room (a diff, the vault's pages). */
-  size?: 'side' | 'wide'
-  Component: ComponentType
-}
-
-const registry = new Map<PanelId, PanelSpec>()
-
-export function registerPanel(spec: PanelSpec): void {
-  registry.set(spec.id, spec)
-}
-
-/** The panels that exist, in the order the command line and the top bar list them. */
-export function panels(): PanelSpec[] {
-  const order: PanelId[] = ['projects', 'missions', 'changes', 'memory', 'learned', 'accounts', 'setup', 'settings']
-  return order.map((id) => registry.get(id)).filter((p): p is PanelSpec => !!p)
-}
+export { panels, registerPanel, type PanelSpec } from './registry'
 
 export const openPanel = (id: PanelId): void => go({ panel: id, command: false })
 export const closePanel = (): void => go({ panel: null })
@@ -43,7 +24,7 @@ import.meta.glob('./*/index.tsx', { eager: true })
 /** The open panel, or nothing. The frame renders this once, over its views. */
 export function Panels() {
   const id = useRoute((r) => r.panel)
-  const spec = id ? registry.get(id) : undefined
+  const spec = panelOf(id)
   useEffect(() => {
     if (!spec) return
     const onKey = (e: KeyboardEvent) => {
