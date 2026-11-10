@@ -78,3 +78,13 @@ export async function pasteBytes(clip: ClipboardLike): Promise<string | null> {
     return null
   }
 }
+
+/** Puts what `pasteBytes` gave into the terminal. The image's Ctrl+V is a key and goes to the
+ *  PTY as it is. Text goes through xterm's own paste, which turns its line ends into returns
+ *  and, when the program asked for bracketed paste (Claude Code does), wraps it in the marks
+ *  that make it one paste: written raw, every line end of a long text was a return typed at
+ *  the prompt, and only what followed the last one was left in it. */
+export function putPaste(bytes: string, term: { paste(text: string): void }, write: (bytes: string) => void): void {
+  if (bytes === '\x16') write(bytes)
+  else term.paste(bytes)
+}

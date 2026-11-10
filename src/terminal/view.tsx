@@ -9,7 +9,7 @@ import { tauriPty } from '../pty/client'
 import { store, useApp } from '../layout/app-store'
 import { xtermTheme, cssVar } from '../theme'
 import { parseOsc7, parseOsc9 } from './osc7'
-import { pasteBytes, terminalKey } from './keymap'
+import { pasteBytes, putPaste, terminalKey } from './keymap'
 import { detectPlatform } from '../actions/chords'
 import { holdFileDrop } from './file-drop'
 import { bufferLines, registerBuffer } from './buffer'
@@ -148,7 +148,8 @@ export default function TerminalPane({ id, props }: PaneViewProps) {
         if (platform !== 'mac') term.clearSelection()
       } else if ('paste' in v) {
         void pasteBytes(navigator.clipboard).then((b) => {
-          if (b && mine()) void tauriPty.write(id, b)
+          // Text comes back through `onData`, which writes it for the owner.
+          if (b && mine()) putPaste(b, term, (key) => void tauriPty.write(id, key))
         })
       }
       return false
