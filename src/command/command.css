@@ -1,0 +1,59 @@
+/* The command line, at the foot of the frame (src/command/CommandLine.tsx). Scoped under the
+   frame's `.mn` root; sizes in `em` of its three root sizes. */
+
+.mn .frame-cmd-line { position: relative; display: flex; align-items: center; gap: 1.2em; flex: 0 1 44em; min-width: 12em; }
+.mn .frame-cmd-line:has(.frame-cmd-said) { flex: 1 1 44em; }
+.mn .frame-cmd-line[data-open] { flex-basis: 52em; }
+
+.mn .frame-cmd-field {
+  display: flex; align-items: center; gap: 0.6em; flex: 1; min-width: 0; height: 1.9em; padding: 0 0.8em;
+  border: 1px solid var(--line); border-radius: 0.45em; font-family: var(--mono); font-size: max(11px, 0.8125em); cursor: text;
+  transition: border-color var(--fast), box-shadow var(--fast);
+}
+.mn .frame-cmd-line[data-open] .frame-cmd-field { border-color: var(--ink); box-shadow: 0 0 20px -6px var(--ink); }
+.mn .frame-cmd-sign { color: var(--ink-2); font-weight: 700; }
+.mn .frame-cmd-field input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; padding: 0; color: var(--ink); font: inherit; caret-color: var(--ink); }
+.mn .frame-cmd-field input::placeholder { color: var(--ink-4); }
+.mn .frame-cmd-line[data-busy] .frame-cmd-field { opacity: 0.6; }
+
+/* What the last command came to, beside the closed line. */
+.mn .frame-cmd-said { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: max(11px, 0.8125em); animation: frame-cmd-said 500ms var(--ease); }
+.mn .frame-cmd-said[data-ok='false'] { color: var(--stalled); }
+.mn .frame-cmd-line:has(.frame-cmd-said) .frame-cmd-field { flex: 0 1 22em; }
+@keyframes frame-cmd-said { from { opacity: 0; transform: translateX(-0.6em); } }
+
+/* The rows open upward, over whatever the view shows at its foot. */
+.mn .frame-cmd-pop {
+  position: absolute; left: 0; bottom: calc(100% + 0.6em); width: min(60em, calc(100vw - 2 * var(--frame-pad, 1.25em))); z-index: 5; padding: 0.35em;
+  background: #050505; border: 1px solid var(--line-2); border-radius: 0.6em;
+  box-shadow: 0 -20px 80px 20px #000, 0 0 40px -12px rgb(255 255 255 / 0.4);
+  animation: frame-cmd-rise var(--fast) var(--ease);
+}
+@keyframes frame-cmd-rise { from { opacity: 0; transform: translateY(0.4em); } }
+
+.mn .frame-cmd-row {
+  display: grid; grid-template-columns: 5.2em minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 0 0.9em;
+  width: 100%; min-height: 2.3em; padding: 0.4em 0.7em; border-radius: 0.4em; text-align: left; font-size: max(11px, 0.8125em); color: var(--ink-2);
+}
+.mn .frame-cmd-row[data-selected] { background: var(--surface-2); color: var(--ink); }
+.mn .frame-cmd-mark { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.mn .frame-cmd-mark b { font: 700 0.92em/1 var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mn .frame-cmd-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--display); font-weight: 600; letter-spacing: 0.02em; color: var(--ink); }
+.mn .frame-cmd-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.92em; }
+.mn .frame-cmd-key { display: inline-flex; min-width: 3.2em; justify-content: flex-end; }
+
+/* A line that cannot run yet says why across the row; so does a refusal. */
+.mn .frame-cmd-row[data-kind='hint'], .mn .frame-cmd-row[data-kind='refused'] { grid-template-columns: 5.2em minmax(0, 1fr); }
+.mn .frame-cmd-row[data-kind='hint'] .frame-cmd-sub, .mn .frame-cmd-row[data-kind='refused'] .frame-cmd-sub { white-space: normal; }
+.mn .frame-cmd-row[data-kind='refused'] .frame-cmd-sub, .mn .frame-cmd-row[data-kind='refused'] b { color: var(--stalled); }
+.mn .frame-cmd-row[data-kind='run'] .frame-cmd-mark b { color: var(--ink-3); }
+
+/* A batch asked about: the one row, in the colour of what waits for him. */
+.mn .frame-cmd-row[data-kind='confirm'] { background: rgb(255 176 32 / 0.08); box-shadow: inset 0 0 0 1px var(--need); }
+.mn .frame-cmd-row[data-kind='confirm'] .frame-cmd-main, .mn .frame-cmd-row[data-kind='confirm'] b { color: var(--need); }
+/* What would be done is read whole, on as many lines as it takes; the keys go under it. */
+.mn .frame-cmd-row[data-kind='confirm'] { grid-template: 'mark main key' auto 'mark sub key' auto / 5.2em minmax(0, 1fr) auto; padding-block: 0.6em; row-gap: 0.3em; }
+.mn .frame-cmd-row[data-kind='confirm'] .frame-cmd-mark { grid-area: mark; }
+.mn .frame-cmd-row[data-kind='confirm'] .frame-cmd-main { grid-area: main; white-space: normal; }
+.mn .frame-cmd-row[data-kind='confirm'] .frame-cmd-sub { grid-area: sub; }
+.mn .frame-cmd-row[data-kind='confirm'] .frame-cmd-key { grid-area: key; }
