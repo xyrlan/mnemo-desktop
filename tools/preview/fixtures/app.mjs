@@ -58,8 +58,10 @@ export const BASE = {
   plan_usage: () => ({ limits: [], plan: null, fetchedAt: Date.now(), stale: null }),
   // No project to offer "what mnemo learned" for, so that screen never opens by itself.
   install_review_project: () => null,
-  // Nexus v2: its feed (empty fleet) and the usage rows it writes while shown.
+  // The fleet's feed (empty) and the usage rows the app writes while shown.
   nexus_feed: () => ({ sessions: {}, prs: {}, rate: null, at: Date.now() }),
+  // The vault's pulse, for the live world: no vault yet.
+  vault_pulse: () => ({ rules: null, prompts: 0, outcomes: {}, learned: [], recent: [] }),
   usage_log: () => null,
   // James's brain (#503): the local model, as with no `brain` in jarvis.json.
   jarvis_brain: () => ({ kind: 'local' }),

@@ -1,4 +1,4 @@
-// What the swap added to the command line: `classic`, a panel opened by name, and the models
+// What the swap added to the command line: a panel opened by name, and the models
 // `mnemo dispatch` names (docs/superpowers/specs/2026-11-10-recreation-swap.md).
 
 import { registerPanel } from '../panels/registry'
@@ -8,7 +8,7 @@ import { HOME, routeStore } from '../world/route'
 import { sampleActions, sampleWorld } from '../world/sample'
 import { models, offers } from './complete'
 import { enter, lineStore, openCommand, resetLine, rows, type } from './line'
-import { VERBS, panelCalled, parse, type Command } from './parse'
+import { panelCalled, parse, type Command } from './parse'
 import { run } from './run'
 
 const world = sampleWorld()
@@ -35,38 +35,6 @@ beforeAll(() => {
 afterAll(() => {
   const g = globalThis as { __mnemoPanels?: Map<string, unknown> }
   g.__mnemoPanels?.clear()
-})
-
-describe('classic', () => {
-  test('is a verb of its own, and takes nothing after it', () => {
-    expect(VERBS.map((v) => v.verb)).toContain('classic')
-    expect(command('classic')).toEqual({ kind: 'classic' })
-    expect(command('/classic')).toEqual({ kind: 'classic' })
-    expect(error('classic now')).toBe('classic takes nothing after it: it shows the classic interface.')
-  })
-
-  test('says what Enter will do, and is not asked about twice', () => {
-    const parsed = parse('classic', world)
-    expect(parsed).toMatchObject({ says: 'Show the classic interface (the app loads again; your terminals stay)', batch: false })
-  })
-
-  test('taken from the list it is whole: Enter runs it', () => {
-    const offer = offers('cla', world).find((o) => o.tag === 'classic')!
-    expect(offer).toMatchObject({ fill: 'classic', runs: true })
-    // every other verb still wants what comes after it
-    expect(
-      offers('', world)
-        .filter((o) => o.runs)
-        .map((o) => o.tag),
-    ).toEqual(['classic'])
-  })
-
-  test('running it shows the ship; a switch that could not be kept is a refusal, in its words', async () => {
-    let shown = 0
-    expect(await run({ kind: 'classic' }, world, () => (shown++, null))).toEqual({ ok: true })
-    expect(shown).toBe(1)
-    expect(await run({ kind: 'classic' }, world, () => 'The choice could not be kept: no storage')).toEqual({ ok: false, why: 'The choice could not be kept: no storage' })
-  })
 })
 
 describe('a panel, by name', () => {

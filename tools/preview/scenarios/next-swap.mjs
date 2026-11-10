@@ -4,15 +4,12 @@
 //   next-swap-console      the frame as a build shows it: the panels on their own line under the top bar
 //   next-swap-orbit, -score   the same line over the two views that have the whole room
 //   next-swap-panel        a panel opened from that line, its name lit
-//   next-swap-settings     Settings, down at "Classic interface"
 //   next-swap-command-panel   the command line finding a panel by the start of its name
-//   next-swap-command-classic the command line about to show the ship
 //   next-swap-changes      the Changes panel opened from the stage, for the session on stage
 //   next-swap-shell        a plain shell on stage, and in the roster after the sessions (a live world)
 //   next-swap-boot         the launch: the clip of the lattice assembling, mid-way
 //   next-swap-boot-opening Orbit opening out of the clip's last moments
 //   next-swap-broken       what stands in the frame's place when it cannot be drawn
-//   next-swap-ship         the ship, one switch away: its SYSTEMS menu, with "New interface"
 //
 //   for s in 2560x1440 1920x1080 1366x768; do
 //     node tools/preview/shot.mjs --scenario next-swap-console --size $s --out /tmp/swap-console-$s.png
@@ -43,15 +40,7 @@ scenario('next-swap-panel', {
   },
 })
 
-scenario('next-swap-settings', {
-  ...next({ ...console_, panel: 'settings' }),
-  drive: async (page) => {
-    await page.locator('[data-setting="classic"]').scrollIntoViewIfNeeded()
-  },
-})
-
 scenario('next-swap-command-panel', { ...next(console_), drive: typed('me') })
-scenario('next-swap-command-classic', { ...next(console_), drive: typed('cla') })
 
 scenario('next-swap-changes', {
   ...next(console_),
@@ -120,7 +109,7 @@ const live = {
 }
 
 scenario('next-swap-shell', {
-  storage: { 'mnemo.next': '1', 'mnemo.route': '#' + new URLSearchParams({ v: 'console', s: PARENT }).toString() },
+  storage: { 'mnemo.route': '#' + new URLSearchParams({ v: 'console', s: PARENT }).toString() },
   ipc: appIpc(live),
   drive: async (page) => {
     // As the maintainer opens one: the command line, `shell`, the project.
@@ -157,15 +146,5 @@ scenario('next-swap-broken', {
   // The frame's own module does not arrive: what `view.tsx` mounts stands in its place.
   before: async (page) => {
     await page.route('**/src/frame/Frame.tsx*', (route) => route.abort())
-  },
-})
-
-// ── the ship, one switch away ──
-
-scenario('next-swap-ship', {
-  storage: { 'mnemo.next': '0' },
-  ipc: appIpc({}),
-  drive: async (page) => {
-    await page.getByText('SYSTEMS').click()
   },
 })

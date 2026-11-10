@@ -3,21 +3,14 @@
  *  session each terminal runs, learnt here, and the tabs kept across a restart. Every terminal the
  *  app keeps is reachable: in a drawer tab, or through its live Claude's captain (`./persist`). A
  *  repo opens as a shell in a tab. */
-import { toast } from '@/ui'
 import { learnSession, SESSION_HIDDEN_MS, SESSION_POLL_MS, tauriSession } from '../../chrome/session'
 import { paneRuns } from '../../chrome/running'
-import { ConversationView } from '../../conversation/ConversationView'
-import { tauriDiff } from '../../diff/client'
-import { fleetStore } from '../../fleet/store'
 import { store as layout } from '../../layout/app-store'
 import { sessionHost } from '../../session/app-host'
 import { settingsStore } from '../../settings/app-store'
 import { pollWhileShown } from '../../shell/while-shown'
-import TerminalPane from '../../terminal/view'
 import { nexusStore } from '../store'
-import type { DrawerDeps } from './Drawer'
 import { claimClose } from './keys'
-import { deepestWorktree } from './model'
 import { launchDrawer, type Launch } from './launch'
 import { createDrawer } from './sessions'
 import { createSessions, type Sessions } from './start'
@@ -70,17 +63,7 @@ const stopLearning = pollWhileShown(
   { hiddenMs: SESSION_HIDDEN_MS, wait: true },
 )
 
-export const liveDrawer: DrawerDeps = {
-  drawer,
-  host: sessionHost,
-  owners: layout,
-  terminal: TerminalPane,
-  conversation: ConversationView,
-  diff: tauriDiff,
-  worktreeOf: (cwd) => deepestWorktree(cwd, [...fleetStore.getState().repos.flatMap((r) => r.worktrees.map((w) => w.path)), ...layout.getState().worktrees]),
-  paneOfSession: (sessionId) => liveSessions.paneOf(sessionId),
-  goToRepo: (root) => void liveSessions.openSession({ kind: 'shell', root }).catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))),
-}
+export const liveDrawer = { drawer }
 
 import.meta.hot?.dispose(() => {
   launch.stop()

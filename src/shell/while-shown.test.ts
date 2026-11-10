@@ -165,10 +165,7 @@ function sources(dir = `${cwd}/src`): [string, string][] {
 }
 
 /** What may still `setInterval`, and why it starts no process or read. */
-const UNPOLLED: Record<string, string> = {
-  // Clocks: they move "3 min ago" on screen, nothing more.
-  'src/conversation/ConversationView.tsx': 'clock',
-}
+const UNPOLLED: Record<string, string> = {}
 
 test('every setInterval left in the app is a clock or named with why it runs while hidden', () => {
   const found = sources()

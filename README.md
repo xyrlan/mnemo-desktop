@@ -89,7 +89,7 @@ The top bar has the three views, how many things wait for you, the fleet by stat
 - **Learned**: what mnemo learned lately, kept or dropped.
 - **Accounts**: each account, its plan windows and resets, switch, add, rename, remove, sign in.
 - **Setup**: the tools the app needs, found or missing, and installing them.
-- **Settings**: every setting, the way back to the classic interface, and the build that is running.
+- **Settings**: every setting, and the build that is running.
 
 **The command line** (`;`, at the foot, in every view) takes orders for the fleet and completes them against the real sessions, projects and contracts:
 
@@ -102,7 +102,6 @@ The top bar has the three views, how many things wait for you, the fleet by stat
     stop <session | all>                  stop a session, or every running child
     go <session>                          put a session on stage (or just type part of its name)
     panel <name>                          open a panel (or just type the start of its name)
-    classic                               show the classic interface
 
 A verb that reaches more than one session (`message all`, `merge green`, `stop all`) is asked about before it runs. A refusal is a sentence, said where the order was typed.
 
@@ -111,15 +110,6 @@ The terminals the app runs survive a restart: the core keeps their shells and th
 ### The two worlds
 
 What the views draw is one model of the fleet. A build draws **this machine's**: the sessions, the children, the accounts and the vault as the core reads them. `?world=sample` on the URL, or `localStorage['mnemo.world'] = 'sample'`, draws a **synthetic** fleet instead, with no core at all; there an action changes the sample and nothing else. It is how every view is developed, photographed (`tools/preview`) and tested, and a safe place to try a key. The line under the top bar says `sample world` while it is on.
-
-### The classic interface
-
-The interface the app had before this one (the ship) stays in the build for one release, one action away:
-
-- from the new interface: *Settings › Classic interface*, or `classic` at the command line;
-- from the classic one: *SYSTEMS › New interface*.
-
-Either loads the app again; the sessions and their terminals stay as they are. If the new interface ever fails to draw, what stands in its place says so and offers the classic one. The choice is kept in `localStorage['mnemo.next']` (`'0'` is classic).
 
 ## Keys
 

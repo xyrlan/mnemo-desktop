@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 /** Draws what `view.tsx` mounts, over a frame that `load` fetches. */
-async function draw(load: () => Promise<{ Frame: () => React.JSX.Element }>, props: { classic?: () => string | null; again?: () => void } = {}) {
+async function draw(load: () => Promise<{ Frame: () => React.JSX.Element }>, props: { again?: () => void } = {}) {
   const Front = guarded(load, props)
   await act(async () => root.render(<Front />))
   // the frame is fetched apart from the app's start: let that settle
@@ -46,7 +46,7 @@ describe('the new front, behind its guard', () => {
     expect(host.querySelector('[data-testid="frame"]')).toBeNull()
     const broken = host.querySelector('[data-frame-broken]')!
     expect(broken.getAttribute('role')).toBe('alert')
-    expect(broken.querySelector('h1')!.textContent).toBe('The new interface could not be drawn.')
+    expect(broken.querySelector('h1')!.textContent).toBe('The interface could not be drawn.')
     expect(broken.querySelector('[data-frame-broken-why]')!.textContent).toBe('the roster has no session to draw')
   })
 
@@ -55,8 +55,7 @@ describe('the new front, behind its guard', () => {
     expect(host.querySelector('[data-frame-broken-why]')!.textContent).toBe('Failed to fetch dynamically imported module')
   })
 
-  test('it offers the same switch: Classic interface shows the ship', async () => {
-    let classic = 0
+  test('it offers one way on: Try again loads the app again', async () => {
     let again = 0
     await draw(
       async () => ({
@@ -64,16 +63,15 @@ describe('the new front, behind its guard', () => {
           throw new Error('broken')
         },
       }),
-      { classic: () => (classic++, null), again: () => again++ },
+      { again: () => again++ },
     )
-    await act(async () => button('Classic interface').click())
-    expect([classic, again]).toEqual([1, 0])
+    expect([...host.querySelectorAll('[data-frame-broken] button')].map((b) => b.textContent?.trim())).toEqual(['Try again'])
     await act(async () => button('Try again').click())
-    expect([classic, again]).toEqual([1, 1])
+    expect(again).toBe(1)
   })
 
   test('what broke is said as it is, whatever was thrown', () => {
-    act(() => root.render(<Broken error="a string, not an Error" classic={() => null} again={() => {}} />))
+    act(() => root.render(<Broken error="a string, not an Error" again={() => {}} />))
     expect(host.querySelector('[data-frame-broken-why]')!.textContent).toBe('a string, not an Error')
   })
 })

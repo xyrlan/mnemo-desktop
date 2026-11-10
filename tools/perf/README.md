@@ -70,6 +70,7 @@ A change of view, production bundle, 2560×1440, the sample fleet, in the harnes
 view being left stays for the 320 ms of the movement. What costs is drawing the arriving view
 from nothing: the layout of its new elements and each view's own measuring passes.
 
-The bundle: 16.85 MB in all, of which 13.39 MB is reached only through the code editor the
-classic interface's diff opens (`bundle.mjs` says what stands behind a door); everything
-else, the new front with its art among it, is 3.46 MB.
+The bundle: 3.38 MB in all, in 64 files, its art among it. While the interface the app had
+before was still in the build it was 16.85 MB, of which 13.39 MB was reached only through the
+code editor that interface's diff opened (`bundle.mjs --behind` says what stands behind a
+door).

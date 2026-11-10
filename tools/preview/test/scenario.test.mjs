@@ -4,7 +4,7 @@ import { getScenario, loadScenarios, PreviewChannel, reviveChannels, scenario, s
 
 test('the shipped scenarios load', async () => {
   await loadScenarios()
-  for (const name of ['empty-workspace', 'terminal-pane']) assert.ok(scenarioNames().includes(name), name)
+  for (const name of ['empty-workspace', 'next-console']) assert.ok(scenarioNames().includes(name), name)
 })
 
 test('scenario() keeps ipc and events, defaulting events to none', () => {
@@ -12,25 +12,21 @@ test('scenario() keeps ipc and events, defaulting events to none', () => {
   scenario('reg-a', { ipc })
   assert.equal(getScenario('reg-a').ipc, ipc)
   assert.deepEqual(getScenario('reg-a').events, [])
-  // Unless it says otherwise a scenario shows the ship, and no boot clip.
-  assert.deepEqual(getScenario('reg-a').storage, { 'mnemo.next': '0', 'mnemo.boot': '0' })
+  // Unless it says otherwise a scenario plays no boot clip.
+  assert.deepEqual(getScenario('reg-a').storage, { 'mnemo.boot': '0' })
   assert.equal(getScenario('reg-a').drive, undefined)
   assert.equal(getScenario('reg-a').before, undefined)
 })
 
-test('a scenario that says which front it shows, or that it plays the boot clip, is taken at its word', () => {
+test('a scenario that says which world it shows, or that it plays the boot clip, is taken at its word', () => {
   const before = async () => {}
-  scenario('reg-next', { ipc: () => 1, storage: { 'mnemo.next': '1', 'mnemo.boot': '1', 'mnemo.world': 'sample' }, before })
-  assert.deepEqual(getScenario('reg-next').storage, { 'mnemo.next': '1', 'mnemo.boot': '1', 'mnemo.world': 'sample' })
+  scenario('reg-next', { ipc: () => 1, storage: { 'mnemo.boot': '1', 'mnemo.world': 'sample' }, before })
+  assert.deepEqual(getScenario('reg-next').storage, { 'mnemo.boot': '1', 'mnemo.world': 'sample' })
   assert.equal(getScenario('reg-next').before, before)
 })
 
-test('the scenarios of the ship say nothing and show the ship; the ones of the new front say so', async () => {
+test('no picture of a URL is a picture of the launch, but the one that is meant to be', async () => {
   await loadScenarios()
-  assert.equal(getScenario('empty-workspace').storage['mnemo.next'], '0')
-  assert.equal(getScenario('nexus').storage['mnemo.next'], '0')
-  assert.equal(getScenario('next-console').storage['mnemo.next'], '1')
-  // no picture of a URL is a picture of the launch, but the one that is meant to be
   assert.equal(getScenario('next-orbit').storage['mnemo.boot'], '0')
   assert.equal(getScenario('next-swap-boot').storage['mnemo.boot'], '1')
 })

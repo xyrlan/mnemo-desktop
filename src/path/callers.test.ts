@@ -5,9 +5,7 @@ import type { HomeSnapshot } from '../home/types'
 import type { RepoNode } from '../fleet/types'
 import { buildRepos, knownRepos, worktreeName, type Tracked } from '../fleet/model'
 import { alertFor, cardKey, onScreen } from '../notify/decide'
-import { prefill, resolvePath } from '../editor/paths'
 import { agentForCwd } from '../vault/search'
-import { relativeTo } from '../conversation/run'
 
 /** One repo as it reaches the front end on Windows: git prints `C:/…`; the OS, a folder picker and
  *  Claude Code `C:\…`; `canonicalize` `\\?\C:\…`. Each caller is given one and asked about another. */
@@ -67,36 +65,10 @@ describe('notify', () => {
   })
 })
 
-describe('Open file… (#321 finding 4)', () => {
-  const root = OS
-  const me = 'C:\\Users\\you'
-  test('opens what is typed or picked, as an absolute Windows path', () => {
-    expect(prefill(root)).toBe(`${OS}\\`)
-    expect(prefill(GIT)).toBe(`${GIT}/`)
-    expect(resolvePath(`${prefill(root)}src\\a.ts`, root, me)).toBe(`${GIT}/src/a.ts`)
-    expect(resolvePath('C:/Users/you/repo/src/a.ts', root, me)).toBe(`${GIT}/src/a.ts`)
-    expect(resolvePath('src/a.ts', root, me)).toBe(`${GIT}/src/a.ts`)
-    expect(resolvePath('src\\..\\b.ts', root, me)).toBe(`${GIT}/b.ts`)
-    expect(resolvePath('~/notes.md', root, me)).toBe('C:/Users/you/notes.md')
-    expect(resolvePath('~\\notes.md', root, me)).toBe('C:/Users/you/notes.md')
-    expect(resolvePath('d:\\x\\..\\..\\y.txt', root, me)).toBe('D:/y.txt')
-    expect(resolvePath('\\\\server\\share\\..\\a.txt', root, me)).toBe('//server/share/a.txt')
-  })
-})
-
 describe('vault (#323 finding 4)', () => {
   test("the vault knows the repo of a folder", () => {
     const agents = [{ name: 'repo', kind: 'repo' as const }]
     expect(agentForCwd(OS, agents)).toBe('repo')
     expect(agentForCwd(`${OS_WT}\\src`, agents)).toBe('repo')
-  })
-})
-
-describe('conversation (#322 finding 6)', () => {
-  test('a path inside the worktree is shortened in its own spelling', () => {
-    expect(relativeTo(`${OS}\\src\\app.ts`, OS)).toBe('src\\app.ts')
-    expect(relativeTo(`${OS}\\src\\app.ts`, GIT)).toBe('src\\app.ts')
-    expect(relativeTo(`${GIT}/src/app.ts`, VERBATIM)).toBe('src/app.ts')
-    expect(relativeTo('D:\\other\\app.ts', OS)).toBe('D:\\other\\app.ts')
   })
 })

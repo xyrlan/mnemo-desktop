@@ -2,14 +2,10 @@
  *  contract (`docs/superpowers/contracts/2026-10-15-nexus-v2.md`). No piece edits this file; a type
  *  that does not fit is a question for the parent session. */
 
-import type { ReactNode } from 'react'
 import type { AgentState, WaitingFor } from '../fleet/types'
 import type { ErrorSource } from '../mission/errors'
 import type { ChildSession, Mission, ParentSession, Pr, Snapshot } from '../mission/types'
 import type { PulseEvent } from '../pulse/types'
-import type { Pulse } from '../pulse/store'
-import type { Levels } from './ship-scene/Memory'
-import type { MenuTarget } from './ui/menus'
 
 // ------------------------------------------------------------------ the feed --
 // What `nexus_feed` adds to the snapshot, read from each session's transcript and job.
@@ -233,64 +229,3 @@ export type ActionResult = { ok: boolean; say: string; log: LogEvent[] }
 
 /** A line typed at the fleet's command line. `confirm`: a batch verb waiting for `/yes`. */
 export type Parsed = { action: ShipAction } | { confirm: ShipAction; prompt: string } | { yes: true } | { error: string }
-
-// ------------------------------------------------------------- component props --
-
-export type ShipSceneProps = {
-  ship: Ship
-  log: LogEvent[]
-  /** The session open in the drawer's active tab: its figure is highlighted and scrolled to. */
-  focusId: string | null
-  selection: ReadonlySet<string>
-  /** A click on a captain or a robot. */
-  onOpen(id: string): void
-  /** Shift+click on a robot. */
-  onSelect(id: string): void
-  /** An exception's button, an inline answer. */
-  onAction(action: ShipAction): void
-  /** The `! N need you` chip. */
-  onTriage(): void
-  /** A right-click on a captain, a robot, a deck or a dock, or the bar's SYSTEMS button: the view
-   *  opens the menu at (x, y), in viewport px. */
-  onMenu(target: MenuTarget, x: number, y: number): void
-  /** The fleet's command line while it is open (`/`, the bridge's `/ commands`): it floats over
-   *  the bridge's top edge. Null while closed: the bridge holds no input. */
-  command: ReactNode
-  /** The bridge's `/ commands` hint: opens the command line. */
-  onCommand(): void
-  reducedMotion: boolean
-  visible: boolean
-  /** mnemo's events as the app received them (`pulseStore`): each new one flies as a packet
-   *  between its deck's archive and its session's figure. */
-  pulses?: readonly Pulse[]
-  /** Each project's level by name, beside its deck's archive (#478): null until read, `'none'`
-   *  with no vault. */
-  levels?: Levels
-}
-
-export type FleetPromptProps = {
-  ship: Ship
-  /** Every repo `/new` takes besides the ship's (`useKnownRepos`). */
-  repos?: readonly { root: string; name: string }[]
-  /** Runs an action and returns what to print under the line. */
-  run(action: ShipAction): Promise<ActionResult>
-  /** Whether the line is shown. Closed, it keeps what it holds: a batch waiting for `/yes`. */
-  open: boolean
-  /** Esc, a click outside it. */
-  onClose(): void
-}
-
-export type TriageProps = {
-  ship: Ship
-  open: boolean
-  onClose(): void
-  onOpen(id: string): void
-  run(action: ShipAction): Promise<ActionResult>
-}
-
-export type SelectionBarProps = {
-  ship: Ship
-  selection: ReadonlySet<string>
-  onClear(): void
-  run(action: ShipAction): Promise<ActionResult>
-}

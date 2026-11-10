@@ -7,8 +7,8 @@
 //   node tools/perf/serve.mjs --port 1420 --world sample --view console --motion full
 //
 // A production front refuses `desktop_app_drive`, so where the app opens is said here: the
-// page is served with a line that sets `mnemo.world`, `mnemo.route`, `mnemo.motion`,
-// `mnemo.next` and `mnemo.boot` before the app's own code runs. `--world live` leaves the
+// page is served with a line that sets `mnemo.world`, `mnemo.route`, `mnemo.motion` and
+// `mnemo.boot` before the app's own code runs. `--world live` leaves the
 // world to the core. Start the debug build after this (under a home of its own), give it a
 // moment, and measure it with `rest.mjs`.
 import { createServer } from 'node:http'
@@ -20,7 +20,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 /** The line that says where the app opens, as a script the page runs first. */
 export function opening({ world, view, motion }) {
-  const set = { 'mnemo.next': '1', 'mnemo.boot': '0', 'mnemo.route': `#v=${view}`, 'mnemo.motion': motion }
+  const set = { 'mnemo.boot': '0', 'mnemo.route': `#v=${view}`, 'mnemo.motion': motion }
   if (world !== 'live') set['mnemo.world'] = world
   const lines = Object.entries(set).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)})`)
   if (world === 'live') lines.push(`localStorage.removeItem('mnemo.world')`)

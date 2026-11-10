@@ -143,16 +143,9 @@ test('the stack follows its store', async () => {
 test('a card whose click opened nothing says so', async () => {
   await mount([card(1, 'done'), card(2, 'question', { unopened: true })])
   const [unopened, plain] = cardEls()
-  expect(unopened.querySelector('[data-unopened]')?.textContent).toBe('It is not on the ship yet: nothing to open.')
+  expect(unopened.querySelector('[data-unopened]')?.textContent).toBe('It is not in the fleet yet: nothing to open.')
   expect(plain.querySelector('[data-unopened]')).toBeNull()
-  expect(stackEl()!.querySelector('button')!.title).toBe('Open it in the Nexus')
-})
-
-test('in the new front a card speaks of the stage and the fleet, not of the ship', async () => {
-  localStorage.setItem('mnemo.next', '1')
-  await mount([card(2, 'question', { unopened: true })])
   expect(stackEl()!.querySelector('button')!.title).toBe('Open it on stage')
-  expect(stackEl()!.querySelector('[data-unopened]')!.textContent).toBe('It is not in the fleet yet: nothing to open.')
 })
 
 test("the frame's motion switch stills the stack", async () => {

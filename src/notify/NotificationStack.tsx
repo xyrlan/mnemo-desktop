@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom'
 import { useStore } from 'zustand'
 import { Figure, Kbd, StateMark } from '../ds'
-import { nextFront } from '../frame/flag'
 import { sessionOf, useWorld } from '../world/store'
 import type { SessionState } from '../world/types'
 import type { AlertKind } from './decide'
@@ -35,14 +34,13 @@ export function NotificationStack({ notifier }: { notifier: Pick<Notifier, 'card
 /** One card, read as a waiting card is: the session's figure, its title in full, where it runs,
  *  what happened, and the keys that act on the card while it has the keyboard. */
 export function NotificationCard({ card, onOpen, onDismiss }: { card: Card; onOpen(): void; onDismiss(): void }) {
-  // The world knows the session's own title; under the ship, or before the world has it, the
-  // card is named by where the agent runs.
+  // The world knows the session's own title; before it has it, the card is named by where the
+  // agent runs.
   const title = useWorld((w) => sessionOf(w, card.sessionId)?.title) || card.name
   const where = [card.repo, card.name].filter((part, i, all): part is string => !!part && part !== title && all.indexOf(part) === i).join(' · ')
-  const front = nextFront()
   return (
     <div role="complementary" aria-label={`${title}: ${LABEL[card.kind]}`} aria-live="polite" data-kind={card.kind} data-state={SIGN[card.kind]} className="note">
-      <button type="button" className="note-open" title={front ? 'Open it on stage' : 'Open it in the Nexus'} onClick={onOpen} onKeyDown={(e) => e.key === 'Escape' && onDismiss()}>
+      <button type="button" className="note-open" title="Open it on stage" onClick={onOpen} onKeyDown={(e) => e.key === 'Escape' && onDismiss()}>
         <Figure id={card.sessionId} size="2.5em" className="note-figure" />
         <span className="note-text">
           <span className="note-title">{title}</span>
@@ -56,7 +54,7 @@ export function NotificationCard({ card, onOpen, onDismiss }: { card: Card; onOp
           <span className="note-message">{card.message}</span>
           {card.unopened && (
             <span className="note-unopened" data-unopened="">
-              {front ? 'It is not in the fleet yet: nothing to open.' : 'It is not on the ship yet: nothing to open.'}
+              It is not in the fleet yet: nothing to open.
             </span>
           )}
           <span className="note-keys" aria-hidden="true">
