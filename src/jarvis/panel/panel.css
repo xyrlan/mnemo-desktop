@@ -1,117 +1,183 @@
-/* James's panel in the ship's look (`src/nexus/ui/ui.css`, whose `.nx` tokens and kit it uses):
-   docked on the right under the ship's bar (44px and its 2px edge), over the ship and the drawer
-   and under a Nexus window (60), the notification cards (75) and the dictation indicator (85).
-   Colour means state only. Every rule is under `.nx.jv-…` or `.nx .jv-…`, so it beats the kit's
-   `.nx button`. */
+/* James in the new identity (`src/ds/tokens.css`): his presence (the top bar's, or docked in the
+   corner where no top bar has him) and his panel. Black, hairlines, the three typefaces; colour
+   is a state's hue and nothing else. Sizes are in `em` of the `.mn` root, which the panel and
+   the dock each are (`src/notify/overlay.ts`), so the frame's three root sizes scale them.
 
-.nx.jv-panel {
-  position: fixed;
-  top: 54px;
-  right: 16px;
-  bottom: 16px;
-  z-index: 58;
-  display: flex;
-  flex-direction: column;
-  width: 380px;
-  max-width: calc(100vw - 32px);
-  border: 2px solid var(--nx-edge-hi);
-  border-radius: 4px;
-  background: var(--nx-hull);
-  box-shadow: 0 0 0 3px #000, 8px 8px 0 #000, 0 0 40px #6366f133;
-}
-.nx.jv-panel[data-voice='listening'] { border-color: var(--state-working, #60a5fa); }
+   Layers, among what is drawn over a front: the ship's bar and drawer under everything here,
+   James 58, a Nexus window 60, the notification cards 75, toasts 80, the dictation indicator 85.
 
-.nx.jv-launcher {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 58;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 2px solid var(--nx-edge);
-  border-radius: 3px;
-  background: var(--nx-hull-2);
-  box-shadow: 3px 3px 0 #000;
-  color: var(--nx-pale);
-  font-weight: 700;
+   Motion is `transform` and `opacity`, and nothing runs at rest: the thread turns only while
+   James is alive, the sweep only while something loads, the three dots only while he thinks. */
+
+/* ── his presence ── */
+.mn .jv-presence {
+  display: inline-flex; flex: none; align-items: center; gap: 0.75em;
+  height: 2.8em; padding: 0 1em 0 0.55em;
+  border: 1px solid var(--line-2); border-radius: 99em;
+  font: 600 0.72em/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap;
+  color: var(--ink-2);
+  transition: border-color var(--fast), color var(--fast), box-shadow var(--fast);
 }
-.nx.jv-launcher:hover { border-color: var(--nx-edge-hi); color: #fff; }
-.nx.jv-launcher[data-waiting] { border-color: var(--nx-danger); }
-.nx .jv-badge {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  min-width: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--nx-danger);
-  color: #000;
-  font-size: 10px;
-  line-height: 14px;
+.mn .jv-presence:hover, .mn .jv-presence:focus-visible, .mn .jv-presence[data-open] { border-color: var(--ink); color: var(--ink); outline: none; }
+.mn .jv-presence[data-alive] { border-color: var(--ink); color: var(--ink); box-shadow: var(--glow-soft); }
+.mn .jv-presence[data-james='error'] { border-color: var(--stalled); }
+.mn .jv-presence-name { color: var(--ink); }
+.mn .jv-presence-word { color: var(--ink-2); }
+.mn .jv-presence[data-alive] .jv-presence-word { color: var(--ink); }
+.mn .jv-presence[data-james='error'] .jv-presence-word { color: var(--stalled); }
+.mn .jv-presence-need { display: inline-flex; align-items: center; gap: 0.4em; color: var(--need); }
+.mn .jv-presence-need > svg { width: 0.9em; height: 0.9em; fill: currentColor; }
+.mn .jv-presence-need > b { font-size: 1.25em; letter-spacing: 0; }
+.mn .jv-presence .mn-kbd { font-size: 1em; letter-spacing: 0; text-transform: none; }
+
+/* The thread orb, small. Six turns of one thread round a sphere. */
+.mn .jv-thread { flex: none; width: 2em; height: 2em; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1px; }
+.mn .jv-thread > circle { opacity: 0.55; vector-effect: non-scaling-stroke; }
+.mn .jv-thread > g { opacity: 0.8; transform-box: fill-box; transform-origin: center; }
+.mn .jv-presence[data-alive] .jv-thread > g { opacity: 1; animation: jv-turn 9s linear infinite; }
+.mn .jv-presence[data-james='thinking'] .jv-thread > g { animation-duration: 3.6s; }
+.mn .jv-presence[data-james='speaking'] .jv-thread > g { animation-duration: 6s; }
+.mn .jv-presence[data-james='error'] .jv-thread { color: var(--stalled); }
+@keyframes jv-turn { to { transform: rotate(360deg); } }
+
+/* Docked: where no top bar has him, the corner the launcher had. */
+.mn.jv-dock {
+  position: fixed; inset: auto 1em 1em auto; z-index: 58;
+  overflow: visible; background: none;
 }
+.mn.jv-dock .jv-presence { background: var(--void); box-shadow: 0 0 0 1px #000, 0 0.6em 2em #000; }
+.mn.jv-dock .jv-presence[data-alive] { box-shadow: 0 0 0 1px #000, var(--glow-soft); }
+
+/* ── the panel ── */
+.mn.jv-panel {
+  position: fixed; inset: 4.3em 0.9em 0.9em auto; z-index: 58;
+  display: flex; flex-direction: column;
+  width: 27em; max-width: calc(100vw - 1.8em);
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--void);
+  box-shadow: 0 0 0 1px #000, 0 1.4em 5em #000;
+  transition: border-color var(--slow) var(--ease), box-shadow var(--slow) var(--ease);
+  animation: jv-open var(--fast) var(--ease);
+}
+.mn.jv-panel[data-voice='listening'], .mn.jv-panel[data-voice='speaking'] { border-color: var(--ink-2); box-shadow: 0 0 0 1px #000, 0 1.4em 5em #000, var(--glow-soft); }
+@keyframes jv-open { from { transform: translateX(0.8em); opacity: 0; } }
+
+/* The head: the orb, his name, who answers and what the voice is doing. */
+.mn .jv-head { display: flex; flex: none; align-items: center; gap: 0.9em; padding: 0.7em 1em 0.7em 0.7em; border-bottom: 1px solid var(--line); }
+.mn .jv-orb {
+  flex: none; display: block; width: 5.4em; height: 5.4em; object-fit: cover;
+  /* The clip's ground is black and its thread trails off to one side: only the sphere is kept. */
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 60%, transparent 63.5%);
+  mask-image: radial-gradient(circle closest-side, #000 60%, transparent 63.5%);
+  transform: scale(1.5);
+  opacity: 0.7;
+  transition: opacity var(--slow) var(--ease);
+}
+.mn .jv-orb[data-alive] { opacity: 1; }
+.mn .jv-id { display: flex; flex: 1; flex-direction: column; gap: 0.5em; min-width: 0; }
+.mn .jv-name { margin: 0; font: 600 1.25em/1 var(--display); letter-spacing: 0.34em; text-transform: uppercase; color: var(--ink); }
+.mn .jv-word { overflow: hidden; font: 600 0.72em/1.2 var(--display); letter-spacing: 0.14em; text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
+.mn.jv-panel:not([data-voice='idle']) .jv-word { color: var(--ink); }
+.mn .jv-close { flex: none; align-self: flex-start; opacity: 0.7; transition: opacity var(--fast); }
+.mn .jv-close:hover, .mn .jv-close:focus-visible { opacity: 1; }
+
+.mn .jv-section { margin: 0 0 0.5em; font-size: 1em; font-weight: 400; line-height: 1; }
+
+/* A button of the panel: a hairline; the one that goes on is filled, the one that turns back hollow. */
+.mn .jv-btn, .mn .jv-send {
+  flex: none; height: 2.3em; padding: 0 1em;
+  border: 1px solid var(--line-2); border-radius: 0.3em;
+  font: 600 0.72em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2);
+  transition: border-color var(--fast), color var(--fast), background var(--fast), opacity var(--fast);
+}
+.mn .jv-btn:hover, .mn .jv-btn:focus-visible, .mn .jv-send:hover:not(:disabled), .mn .jv-send:focus-visible { border-color: var(--ink); color: var(--ink); }
+.mn .jv-btn[data-tone='good'] { border-color: var(--need); background: var(--need); color: #000; }
+.mn .jv-btn[data-tone='good']:hover, .mn .jv-btn[data-tone='good']:focus-visible { color: #000; box-shadow: 0 0 1.2em -0.2em var(--need); }
+.mn .jv-send:disabled { cursor: default; opacity: 0.35; }
 
 /* The model's setup. */
-.nx .jv-setup { flex: none; padding: 8px 12px; border-bottom: 2px solid var(--nx-edge); }
-.nx .jv-setup p { margin: 0 0 6px; }
-.nx .jv-setup[data-kind='error'] { color: var(--nx-danger); }
-.nx .jv-bar { height: 4px; overflow: hidden; border-radius: 2px; background: #000; }
-.nx .jv-bar > div { height: 100%; background: var(--nx-edge-hi); }
-.nx .jv-bar[data-indeterminate] > div { width: 30%; animation: jv-sweep 1.2s ease-in-out infinite alternate; }
-@keyframes jv-sweep { from { margin-left: 0; } to { margin-left: 70%; } }
-@media (prefers-reduced-motion: reduce) { .nx .jv-bar[data-indeterminate] > div { width: 100%; animation: none; opacity: 0.5; } }
+.mn .jv-setup { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: 0.6em; padding: 0.8em 1em; border-bottom: 1px solid var(--line); font-size: 0.92em; color: var(--ink-2); }
+.mn .jv-setup p { margin: 0; overflow-wrap: anywhere; }
+.mn .jv-setup[data-kind='error'] p { padding-left: 1.3em; color: var(--stalled); text-indent: -1.3em; }
+.mn .jv-setup[data-kind='error'] p::before { content: '✕'; display: inline-block; width: 1.3em; text-indent: 0; }
+.mn .jv-bar { align-self: stretch; height: 3px; overflow: hidden; background: var(--line); }
+.mn .jv-bar > div { height: 100%; background: var(--ink); box-shadow: 0 0 8px rgb(255 255 255 / 0.9); }
+.mn .jv-bar[data-indeterminate] > div { width: 30%; animation: jv-sweep 1.2s ease-in-out infinite alternate; }
+@keyframes jv-sweep { from { transform: translateX(0); } to { transform: translateX(233.4%); } }
 
-/* A parent's waiting approval. */
-.nx .jv-approval { flex: none; margin: 8px 12px 0; padding: 6px 8px; border: 2px solid var(--nx-danger); border-radius: 3px; background: #1a0f1f; }
-.nx .jv-approval-q { margin: 4px 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.nx .jv-approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* A parent's waiting approval: what waits wears the need's hue, as a waiting card does. */
+.mn .jv-approval { flex: none; margin: 0.8em 1em 0; padding: 0.7em 0.9em 0.8em; border: 1px solid var(--need); border-left-width: 2px; background: rgb(0 0 0 / 0.86); box-shadow: 0 0 1.6em -0.45em var(--need), inset 0 0 2.2em -1.3em var(--need); }
+.mn .jv-approval-head { display: flex; align-items: baseline; gap: 0.6em; font-size: 0.92em; color: var(--ink-2); }
+.mn .jv-approval-head b { color: var(--ink); font-weight: 600; }
+.mn .jv-approval-q { margin: 0.5em 0 0.7em; font: 0.92em/1.5 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mn .jv-approval-actions { display: flex; justify-content: flex-end; gap: 0.6em; }
+
+/* A shape before a word. */
+.mn .jv-sign { display: inline-flex; flex: none; align-self: center; font-size: 0.95em; }
 
 /* The parents Jarvis opened. */
-.nx .jv-parents { flex: none; padding: 8px 12px 0; }
-.nx .jv-parent { min-width: 0; }
-.nx .jv-parent[data-state='working'],
-.nx .jv-parent[data-state='starting'] { border-left-color: var(--state-working, #60a5fa); }
-.nx .jv-parent[data-state='asking'],
-.nx .jv-parent[data-state='approval'] { border-left-color: var(--nx-danger); }
-.nx .jv-parent[data-state='idle'] { border-left-color: var(--nx-ok); }
-.nx .jv-parent-state { flex: none; color: var(--nx-dim); }
-.nx .jv-parent-req { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-faint); text-overflow: ellipsis; white-space: nowrap; }
+.mn .jv-parents { flex: none; padding: 0.9em 1em 0; }
+.mn .jv-parent { display: flex; align-items: baseline; gap: 0.6em; min-width: 0; padding: 0.3em 0; font-size: 0.92em; }
+.mn .jv-parent > b { flex: none; color: var(--ink); font-weight: 600; }
+.mn .jv-parent-state { flex: none; font: 600 0.78em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.mn .jv-parent[data-state='asking'] .jv-parent-state, .mn .jv-parent[data-state='approval'] .jv-parent-state { color: var(--need); }
+.mn .jv-parent-req { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-3); text-overflow: ellipsis; white-space: nowrap; }
 
-/* The researches James runs in the background (jarvis-research): a running one in working's colour,
-   a failed one in danger's, a done one in ok's. The section scrolls on its own, so the
-   conversation keeps its room. */
-.nx .jv-researches { flex: none; max-height: 45%; padding: 8px 12px 0; overflow-y: auto; }
-.nx .jv-research { margin-bottom: 6px; padding: 4px 8px; border-left: 3px solid var(--nx-edge); background: var(--nx-hull-2); }
-.nx .jv-research[data-state='running'] { border-left-color: var(--state-working, #60a5fa); }
-.nx .jv-research[data-state='done'] { border-left-color: var(--nx-ok); }
-.nx .jv-research[data-state='failed'] { border-left-color: var(--nx-danger); }
-.nx .jv-research-head { display: flex; gap: 8px; min-width: 0; }
-.nx .jv-research-state { flex: none; color: var(--nx-dim); }
-.nx .jv-research-q { flex: 1; min-width: 0; overflow: hidden; color: var(--nx-pale); text-overflow: ellipsis; white-space: nowrap; }
-.nx .jv-research .jv-bar { margin: 4px 0 2px; }
-.nx .jv-research-summary { margin: 4px 0; overflow-wrap: anywhere; }
-.nx .jv-research-more > summary { color: var(--nx-faint); cursor: pointer; }
-.nx .jv-research-details { margin: 4px 0; color: var(--nx-dim); overflow-wrap: anywhere; white-space: pre-wrap; }
-.nx .jv-research-error { margin: 4px 0; color: var(--nx-danger); overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The researches James runs in the background (jarvis-research). The section scrolls on its own,
+   so the conversation keeps its room. */
+.mn .jv-researches { flex: none; max-height: 45%; padding: 0.9em 1em 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.mn .jv-research { margin-bottom: 0.5em; padding: 0.55em 0.8em 0.6em; border: 1px solid var(--line); font-size: 0.92em; }
+.mn .jv-research[data-state='failed'] { border-color: color-mix(in srgb, var(--stalled) 45%, transparent); }
+.mn .jv-research-head { display: flex; align-items: baseline; gap: 0.6em; min-width: 0; }
+.mn .jv-research-state { flex: none; font: 600 0.78em/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.mn .jv-research-q { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.mn .jv-research .jv-bar { margin: 0.55em 0 0.1em; }
+.mn .jv-research-summary { margin: 0.5em 0 0.4em; color: var(--ink); overflow-wrap: anywhere; }
+.mn .jv-research-more > summary { width: fit-content; font: 600 0.78em/1.6 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); cursor: pointer; }
+.mn .jv-research-more > summary:hover, .mn .jv-research-more[open] > summary { color: var(--ink-2); }
+.mn .jv-research-details { margin: 0.4em 0; color: var(--ink-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.mn .jv-research-error { margin: 0.4em 0 0; color: var(--stalled); overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* A search's sources: each opens in the browser. */
-.nx .jv-sources { margin: 2px 0 0; padding: 0; list-style: none; }
-.nx .jv-sources > li { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.nx .jv-source { min-width: 0; padding: 0; overflow: hidden; border: 0; background: none; color: var(--nx-pale); text-align: left; text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.nx .jv-source:hover { color: #fff; }
-.nx .jv-source-host { flex: none; color: var(--nx-faint); font-size: 10px; }
+.mn .jv-sources { margin: 0.3em 0 0; padding: 0; list-style: none; }
+.mn .jv-sources > li { display: flex; align-items: baseline; gap: 0.6em; min-width: 0; padding: 0.1em 0; }
+.mn .jv-source { min-width: 0; overflow: hidden; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 0.25em; text-overflow: ellipsis; white-space: nowrap; }
+.mn .jv-source:hover, .mn .jv-source:focus-visible { color: var(--ink); text-decoration-color: var(--ink); outline: none; }
+.mn .jv-source-host { flex: none; font: 0.82em/1 var(--mono); color: var(--ink-3); }
 
 /* The conversation. */
-.nx .jv-lines { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow-y: auto; list-style: none; }
-.nx .jv-line { display: flex; flex-direction: column; gap: 1px; padding: 3px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.nx .jv-line + .jv-line { margin-top: 4px; }
-.nx .jv-who { color: var(--nx-faint); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
-.nx .jv-line[data-who='you'] .jv-text { color: var(--nx-pale); }
-.nx .jv-line[data-who='parent'] { padding-left: 6px; border-left: 3px solid var(--nx-edge); }
-.nx .jv-line[data-who='note'] .jv-text { color: var(--nx-dim); font-style: italic; }
-.nx .jv-line[data-error] .jv-text { color: var(--nx-danger); font-style: normal; }
-.nx .jv-empty { padding: 12px 0; }
+.mn .jv-lines { flex: 1; min-height: 0; margin: 0; padding: 0.9em 1em; overflow-y: auto; list-style: none; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.mn .jv-line { display: flex; flex-direction: column; gap: 0.3em; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mn .jv-line + .jv-line, .mn .jv-line + .jv-thinking { margin-top: 0.9em; }
+.mn .jv-who { font: 600 0.68em/1 var(--display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
+.mn .jv-text { color: var(--ink); }
+.mn .jv-line[data-who='you'] .jv-text { color: var(--ink-2); }
+.mn .jv-line[data-who='parent'] { padding-left: 0.8em; border-left: 1px solid var(--line-2); }
+.mn .jv-line[data-who='parent'] .jv-text { color: var(--ink-2); }
+.mn .jv-line[data-who='note'] .jv-text { font-size: 0.92em; color: var(--ink-3); }
+.mn .jv-line[data-error] .jv-text { color: var(--stalled); }
+.mn .jv-line[data-error] .jv-text::before { content: '✕  '; }
+.mn .jv-empty { color: var(--ink-3); font-size: 0.92em; }
+.mn .jv-thinking { display: flex; gap: 0.35em; padding: 0.3em 0; }
+.mn .jv-thinking > i { width: 0.34em; height: 0.34em; border-radius: 50%; background: var(--ink); animation: jv-think 1.2s ease-in-out infinite; }
+.mn .jv-thinking > i:nth-child(2) { animation-delay: 0.16s; }
+.mn .jv-thinking > i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes jv-think { 0%, 70%, 100% { opacity: 0.25; } 35% { opacity: 1; } }
 
 /* The field. */
-.nx .jv-compose { display: flex; flex: none; align-items: flex-end; gap: 8px; padding: 8px 12px; border-top: 2px solid var(--nx-edge); }
-.nx .jv-field { flex: 1; min-width: 0; resize: none; }
+.mn .jv-compose { display: flex; flex: none; align-items: flex-start; gap: 0.6em; padding: 0.7em 1em 0.8em; border-top: 1px solid var(--line); }
+.mn .jv-compose:focus-within { border-top-color: var(--line-2); }
+.mn .jv-prompt { flex: none; font: 700 1em/1.5 var(--mono); color: var(--ink-3); }
+.mn .jv-compose:focus-within .jv-prompt { color: var(--ink); }
+.mn .jv-field { flex: 1; min-width: 0; padding: 0; border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: inherit; line-height: 1.5; }
+.mn .jv-field::placeholder { color: var(--ink-3); }
+
+/* Stilled, by the system or by the frame's switch on this root: the thread and the sweep hold
+   their place instead of ending a turn in 1ms, and the panel is simply there. */
+@media (prefers-reduced-motion: reduce) {
+  .mn .jv-presence .jv-thread > g, .mn .jv-thinking > i, .mn.jv-panel { animation: none; }
+  .mn .jv-bar[data-indeterminate] > div { width: 100%; animation: none; opacity: 0.5; }
+}
+.mn[data-motion='reduced'] .jv-presence .jv-thread > g, .mn[data-motion='reduced'] .jv-thinking > i, .mn[data-motion='reduced'].jv-panel { animation: none; }
+.mn[data-motion='reduced'] .jv-bar[data-indeterminate] > div { width: 100%; animation: none; opacity: 0.5; }
