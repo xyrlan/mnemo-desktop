@@ -153,7 +153,8 @@ export function backToNow(): boolean {
  *    + − 0    zoom in, out, and back to 12 hours ending now
  *    F        fold or unfold the selected line's ended children
  *    Enter    the selected session, on stage
- *    Esc      back to now, then close the selection
+ *    Esc      back to now, then close the selection (never while a panel or the command
+ *             line is open: closing those is the frame's)
  *    1–9, R   with the playhead held in the past: back to now first, where a waiting item is
  *             answered. At now they are the frame's. */
 export function scoreKey(key: string, shift = false): boolean {
@@ -194,6 +195,8 @@ export function scoreKey(key: string, shift = false): boolean {
       openOnStage(r.session!)
       return true
     case 'Escape':
+      // a panel or the command line that is open closes first, and that is the frame's
+      if (r.panel || r.command) return false
       if (backToNow()) return true
       if (!r.session) return false
       select(null)

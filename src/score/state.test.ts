@@ -78,6 +78,14 @@ describe('Esc', () => {
     expect(route().session).toBeNull()
     expect(scoreKey('Escape')).toBe(false)
   })
+
+  test('is left to the frame while a panel or the command line is open', () => {
+    routeStore.getState().go({ session: titled('Order status').id, at: NOW - HOUR, panel: 'memory' })
+    expect(scoreKey('Escape')).toBe(false)
+    routeStore.getState().go({ panel: null, command: true })
+    expect(scoreKey('Escape')).toBe(false)
+    expect(route()).toMatchObject({ at: NOW - HOUR, session: titled('Order status').id })
+  })
 })
 
 describe('the zoom', () => {
