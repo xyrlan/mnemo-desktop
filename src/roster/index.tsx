@@ -11,7 +11,7 @@ import { PendingCard, armedPending } from '../pending'
 import { useHosted } from '../runtime'
 import { age, sum, tilde, tokens, WORD } from '../world/format'
 import { go, openOnStage, select, useRoute } from '../world/route'
-import { pendingOf, sessionOf, useWorld, worldStore } from '../world/store'
+import { pendingOf, presentSessions, sessionOf, useWorld, worldStore } from '../world/store'
 import type { Pending, Session, World } from '../world/types'
 import { fitStep, reveal, startFit, type Fit, type Measured } from './fit'
 import { groupStore, toggleGroup, useGroup } from './group'
@@ -286,7 +286,7 @@ export function Roster() {
         <div ref={list} className="roster-list">
           <i ref={beam} className="roster-beam" aria-hidden="true" />
           {blocks.map(draw)}
-          {world.sessions.length === 0 && <p className="roster-empty">No sessions yet.</p>}
+          {presentSessions(world).length === 0 && <p className="roster-empty">No sessions yet.</p>}
           {/* The terminals the app holds that are no session, after the sessions. */}
           {terminals.length > 0 && (
             <>

@@ -12,7 +12,7 @@ import { Figure, Kbd, Lattice, type LatticeHandle } from '../ds'
 import { contextMenu, drawsSession } from '../menu'
 import { PendingCard, armedPending } from '../pending'
 import { go, openOnStage, routeStore, select, useRoute } from '../world/route'
-import { pendingOf, sessionOf, useWorld } from '../world/store'
+import { pendingOf, presentSessions, sessionOf, useWorld } from '../world/store'
 import type { Pending, Session } from '../world/types'
 import { Finder } from './finder'
 import { useFlight } from './flight'
@@ -336,7 +336,7 @@ export function OrbitView() {
         </div>
       )}
 
-      {world.at > 0 && !world.sessions.length && <p className="orbit-empty">Nothing in orbit: no session is running here.</p>}
+      {world.at > 0 && !presentSessions(world).length && <p className="orbit-empty">Nothing in orbit: no session is running here.</p>}
 
       {card && cardOf && cardAt && (
         <div

@@ -8,7 +8,7 @@ import { panels } from '../panels'
 import { WaitingCount } from '../pending'
 import { WORD } from '../world/format'
 import { go, useRoute, type View } from '../world/route'
-import { sessionOf, useWorld, worldSource } from '../world/store'
+import { presentSessions, sessionOf, useWorld, worldSource } from '../world/store'
 import { STATE_ORDER, type Account, type PlanLimit, type SessionState, type World } from '../world/types'
 import { useJames } from './james'
 import { setReduced, useReduced } from './motion'
@@ -21,7 +21,7 @@ export const VIEWS: readonly { view: View; name: string; key: string }[] = [
 
 /** How many sessions are in each state, in the order of attention. */
 export function countsByState(world: World): { state: SessionState; count: number }[] {
-  return STATE_ORDER.map((state) => ({ state, count: world.sessions.filter((s) => s.state === state).length }))
+  return STATE_ORDER.map((state) => ({ state, count: presentSessions(world).filter((s) => s.state === state).length }))
 }
 
 const WINDOW: Record<string, string> = { session: '5h', weekly_all: 'week' }

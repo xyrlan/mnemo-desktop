@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { setActions } from '../world/actions'
 import { HOME, routeStore } from '../world/route'
 import { sampleActions, sampleWorld } from '../world/sample'
-import { EMPTY, worldStore } from '../world/store'
+import { EMPTY, presentSessions, worldStore } from '../world/store'
 import type { Pending, Session, World } from '../world/types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -96,7 +96,8 @@ describe('the scene', () => {
     const roots = world().sessions.filter((s) => !s.parent)
     expect($$('[data-body]').map((el) => el.dataset.body).sort()).toEqual(roots.map((s) => s.id).sort())
     for (const s of roots) expect($(`[data-label="${s.id}"]`)?.textContent).toContain(s.title)
-    expect($$('[data-moon]').length).toBe(world().sessions.length - roots.length)
+    // the sample's one ended child left the present hours ago: it is no moon
+    expect($$('[data-moon]').length).toBe(presentSessions(world()).length - roots.length)
   })
 
   test('a body shows its own state while its family’s band says who needs him', async () => {
@@ -444,7 +445,7 @@ describe('a world with nothing in it', () => {
 describe('more sessions than the scene can name', () => {
   test('the oldest ended ones are beads on the rim, counted on the outer band, and still open on stage', async () => {
     const model = titled('Notes for the 2.5')
-    const more = Array.from({ length: 14 }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world().at - (i + 1) * 3_600_000 }))
+    const more = Array.from({ length: 14 }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world().at - (i + 1) * 60_000 }))
     worldStore.getState().set({ ...world(), sessions: [...world().sessions, ...more] })
     await show(<OrbitView />)
     expect($$('[data-body]').length).toBe(18)

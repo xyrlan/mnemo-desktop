@@ -14,7 +14,7 @@ import { LiveTerminal, useCanHost, useHosted, type Hosted } from '../runtime'
 import { actions } from '../world/actions'
 import { age, tilde } from '../world/format'
 import { go, routeStore, select, useRoute } from '../world/route'
-import { pendingOf, sessionOf, useWorld, worldStore } from '../world/store'
+import { pendingOf, presentSessions, sessionOf, useWorld, worldStore } from '../world/store'
 import type { Session, World } from '../world/types'
 import { factsOf, familyOf, familyStep, nowOf, parentOf, pulseOf, statusOf, transcriptOf, type Line } from './model'
 import { saidStore, useDraft, useSent } from './said'
@@ -102,7 +102,7 @@ export function Stage() {
       ) : terminal ? (
         <TerminalBody key={terminal.id} terminal={terminal} />
       ) : (
-        <Empty waiting={world.pending.length} sessions={world.sessions.length} />
+        <Empty waiting={world.pending.length} sessions={presentSessions(world).length} />
       )}
     </section>
   )

@@ -38,7 +38,7 @@ const names = (list: Row[]) => list.map((r) => (r.type === 'session' ? r.s.id : 
 describe('the order of the lines', () => {
   test('is the roster’s order when nothing folds', () => {
     const list = rows(scoreOf(sample), new Set())
-    expect(names(list)).toEqual(rosterOrder(sample).map((s) => s.id))
+    expect(names(list)).toEqual(rosterOrder(sample, true).map((s) => s.id))
   })
 
   test('a child hangs one level under its parent', () => {

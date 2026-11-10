@@ -76,7 +76,7 @@ describe('a right-click in the roster', () => {
 
   test('on an ended session folded to one line', async () => {
     const s = titled('Notes for the 2.5')
-    await act(async () => worldStore.getState().set({ ...world(), sessions: world().sessions.map((x) => (x.id === s.id ? { ...x, state: 'ended', live: false, hosted: false } : x)) }))
+    await act(async () => worldStore.getState().set({ ...world(), sessions: world().sessions.map((x) => (x.id === s.id ? { ...x, state: 'ended', live: false, hosted: false, lastAt: world().at } : x)) }))
     await rightClick($(`.roster-fold [data-session="${s.id}"]`))
     expect(opened()).toEqual({ kind: 'session', id: s.id })
   })
