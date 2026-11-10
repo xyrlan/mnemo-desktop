@@ -10,8 +10,9 @@
 //! `MNEMO_INSIGHT_PROBE_N` is how many transcripts, newest first (400). What it writes names
 //! real sessions and paths: it stays on the machine.
 //!
-//! Besides writing what it read, it fails when a transcript read in two goes differs from the
-//! same transcript read in one, or when a screenshot it listed cannot be read back.
+//! Besides writing what it read, it fails when a transcript read in three goes differs from
+//! the same transcript read in one, when a screenshot it listed cannot be read back, or when a
+//! session asked for by its id, as the front asks, has no answer.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -21,7 +22,7 @@ use serde_json::{json, Value};
 use super::session::Session;
 use super::subagents::Subagents;
 use super::tail::{Sink, Tail};
-use super::{shot, Held, Insight};
+use super::{shot, Insight, InsightAsk, State};
 
 /// A session read line by line, noting at each compaction what the context was said to be just
 /// before it: `(preTokens, the last main call's size)`, as `measure_context.py` pairs them.
@@ -151,17 +152,17 @@ fn real_transcripts() {
         }));
     }
 
-    // Asked again with nothing new: what a poll of every one of them costs.
-    let mut held: Vec<(PathBuf, Held)> = paths.iter().take(20).map(|p| (p.clone(), Held::default())).collect();
-    for (path, h) in &mut held {
-        let _ = h.refresh(path, now);
-    }
+    // The command's own way in, asked as the front asks: twenty sessions by their ids, found on
+    // this machine's accounts, every three seconds. The first call reads them; the rest find
+    // only what the live ones among them wrote meanwhile, which is what a poll costs.
+    let asks: Vec<InsightAsk> = paths.iter().take(20).filter_map(|p| Some(InsightAsk { key: p.to_string_lossy().into_owned(), session_id: p.file_stem()?.to_str()?.to_string(), cwd: String::new(), account: "default".into() })).collect();
+    let (mut state, deps) = (State::default(), super::live_deps());
+    let first = state.answer(&asks, now, &deps);
+    let unanswered: Vec<&str> = asks.iter().filter(|a| !first.contains_key(&a.key)).map(|a| a.key.as_str()).collect();
     let started = Instant::now();
-    const POLLS: u32 = 50;
-    for _ in 0..POLLS {
-        for (path, h) in &mut held {
-            let _ = h.refresh(path, now);
-        }
+    const POLLS: u64 = 50;
+    for poll in 1..=POLLS {
+        state.answer(&asks, now + poll * 3_000, &deps);
     }
     let poll_ms = started.elapsed().as_secs_f64() * 1000.0 / POLLS as f64;
 
@@ -170,12 +171,14 @@ fn real_transcripts() {
         "bytes": bytes,
         "readMs": read_ms,
         "debug": cfg!(debug_assertions),
-        "poll": { "sessions": held.len(), "ms": poll_ms },
+        "poll": { "sessions": asks.len(), "ms": poll_ms },
         "splitDiffers": split,
         "shotsUnreadable": unreadable,
+        "unanswered": unanswered,
     });
     std::fs::write(&out, serde_json::to_string(&report).unwrap()).unwrap();
-    eprintln!("{} transcripts, {:.1} MB in {:.1} s; {} sessions asked again with nothing new: {:.3} ms", paths.len(), bytes as f64 / 1e6, read_ms / 1000.0, held.len(), poll_ms);
+    eprintln!("{} transcripts, {:.1} MB in {:.1} s; a poll of the {} newest sessions: {:.3} ms", paths.len(), bytes as f64 / 1e6, read_ms / 1000.0, asks.len(), poll_ms);
     assert!(split.is_empty(), "read in three goes, these differ from one go: {split:?}");
     assert!(unreadable.is_empty(), "listed screenshots that cannot be read back: {unreadable:?}");
+    assert!(unanswered.is_empty(), "asked by session id, these had no answer: {unanswered:?}");
 }

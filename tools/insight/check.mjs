@@ -114,7 +114,7 @@ lines.push(
     : '  context         no compaction among them to hold it against',
 )
 lines.push(
-  `  cost            read at ${(megabytes / (report.readMs / 1000)).toFixed(0)} MB/s${report.debug ? ' (a debug build)' : ''}; ${report.poll.sessions} sessions asked again with nothing new: ${report.poll.ms.toFixed(2)} ms`,
+  `  cost            read at ${(megabytes / (report.readMs / 1000)).toFixed(0)} MB/s${report.debug ? ' (a debug build)' : ''}; a poll of the ${report.poll.sessions} newest sessions: ${report.poll.ms.toFixed(2)} ms`,
 )
 console.log(lines.join('\n'))
 
@@ -123,6 +123,7 @@ for (const { session, diffs } of differing.slice(0, 10)) {
 }
 if (differing.length > 10) console.log(`\n…and ${differing.length - 10} more transcripts`)
 
-const failed = probeFailed || differing.length || report.splitDiffers.length || report.shotsUnreadable.length
+if (report.unanswered.length) console.log(`\n${report.unanswered.length} of ${report.poll.sessions} sessions asked for by id had no answer`)
+const failed = probeFailed || differing.length || report.splitDiffers.length || report.shotsUnreadable.length || report.unanswered.length
 console.log(failed ? '\nFAILED: the insight does not match its source' : '\nok: every counter matches')
 process.exit(failed ? 1 : 0)
