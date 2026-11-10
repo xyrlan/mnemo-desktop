@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { resetLine, type as typeInLine } from '../command/line'
+import { closeMenu, menuStore } from '../menu'
 import { actions } from '../world/actions'
 import { HOME, go, routeStore, type Route } from '../world/route'
 import { sampleWorld } from '../world/sample'
@@ -837,5 +838,96 @@ describe('Alt on its own', () => {
     expect(await key(term, ' ', { altKey: true, code: 'Space' })).toBe(true)
     expect(await key(document.body, ' ', { altKey: true, code: 'Space' })).toBe(true)
     expect(route()).toMatchObject({ view: 'console', session: order[0].id, wide: false, command: false })
+  })
+})
+
+describe('the menu, in the frame', () => {
+  const menu = () => host.querySelector<HTMLElement>('[data-menu-root]')
+  const on = () => menuStore.getState().open?.target ?? null
+  afterEach(() => closeMenu())
+
+  test('`M` opens the selected session’s menu over the view, and changes neither the selection nor the stage', async () => {
+    await draw()
+    const before = route()
+    expect(await key(document.body, 'm')).toBe(false)
+    expect(on()).toEqual({ kind: 'session', id: order[0].id })
+    expect(menu()?.querySelector('.menu-title')?.textContent).toBe(order[0].title)
+    expect(route()).toEqual(before)
+  })
+
+  test('while it is open the fleet’s keys are the menu’s: nothing walks, nothing is answered, no view changes', async () => {
+    await draw()
+    await key(document.body, 'm')
+    const list = menu()!.querySelector<HTMLElement>('[role="menu"]')!
+    expect(document.activeElement).toBe(list)
+    for (const k of ['ArrowDown', '1', 't', 'q', ';']) expect(await key(list, k)).toBe(false)
+    expect(route()).toMatchObject({ view: 'console', session: order[0].id, command: false })
+    expect(seen.answered).toEqual([])
+    expect(menu()).not.toBeNull()
+  })
+
+  test('Esc closes the menu and leaves the panel under it open; the next Esc is the panel’s', async () => {
+    await draw({ panel: panels()[0].id })
+    await key(document.body, 'm')
+    await key(menu()!.querySelector('[role="menu"]')!, 'Escape')
+    expect(menu()).toBeNull()
+    expect(route().panel).toBe(panels()[0].id)
+    await key(document.body, 'Escape')
+    expect(route().panel).toBeNull()
+  })
+
+  test('from inside the terminal it is Alt+M, a bare m is typed, and Esc gives the caret back to the terminal', async () => {
+    await draw()
+    const term = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!
+    await act(async () => term.focus())
+    expect(await key(term, 'm')).toBe(true)
+    expect(menu()).toBeNull()
+    expect(await key(term, 'm', { altKey: true, code: 'KeyM' })).toBe(false)
+    expect(on()).toEqual({ kind: 'session', id: order[0].id })
+    expect(document.activeElement).not.toBe(term)
+    await key(menu()!.querySelector('[role="menu"]')!, 'Escape')
+    expect(menu()).toBeNull()
+    expect(document.activeElement).toBe(term)
+  })
+
+  test('the keyboard’s own menu key and Shift+F10 open it; over the terminal they stay the terminal’s', async () => {
+    await draw()
+    expect(await key(document.body, 'ContextMenu')).toBe(false)
+    expect(on()).toEqual({ kind: 'session', id: order[0].id })
+    await act(async () => closeMenu())
+    expect(await key(document.body, 'F10', { shiftKey: true })).toBe(false)
+    expect(on()).toEqual({ kind: 'session', id: order[0].id })
+    await act(async () => closeMenu())
+    const term = host.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!
+    expect(await key(term, 'ContextMenu')).toBe(true)
+    expect(await key(term, 'F10', { shiftKey: true })).toBe(true)
+    expect(menu()).toBeNull()
+  })
+
+  test('Shift+M opens the menu of the selected session’s project', async () => {
+    await draw()
+    expect(await key(document.body, 'M', { shiftKey: true })).toBe(false)
+    expect(on()).toEqual({ kind: 'project', name: order[0].project })
+    expect(menu()?.querySelector('.menu-title')?.textContent).toBe(order[0].project)
+  })
+
+  test('with no session selected the key is nobody’s, and no menu opens', async () => {
+    await draw({ view: 'orbit', session: null })
+    expect(await key(document.body, 'm')).toBe(true)
+    expect(menu()).toBeNull()
+  })
+
+  test('a terminal on stage that is no session has its own menu', async () => {
+    const shell = { id: 'tab-shell-1', kind: 'session' as const, label: 'shell', cwd: 'C:/Users/you/work/atlas-api', sessionId: null, pty: 7 }
+    seen.hosted = [shell]
+    await draw({ session: shell.id })
+    expect(await key(document.body, 'm')).toBe(false)
+    expect(on()).toEqual({ kind: 'terminal', id: shell.id })
+    expect(menu()?.querySelector('.menu-title')?.textContent).toBe('shell')
+  })
+
+  test('the foot names the key', async () => {
+    await draw()
+    expect(host.querySelector('.frame-keys')?.textContent).toContain('M menu')
   })
 })

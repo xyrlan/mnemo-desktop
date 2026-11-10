@@ -377,3 +377,62 @@ describe('Q, the session he was on before', () => {
     expect(state.route.session).toBe(order[1].id)
   })
 })
+
+describe('the menu’s keys', () => {
+  test('`M` is the menu, bare anywhere but a terminal or a field, and with Alt from inside one', () => {
+    expect(named(key('m'), 'open')).toBe('menu')
+    expect(named(key('m'), 'control')).toBe('menu')
+    expect(named(key('m'), 'terminal')).toBeNull()
+    expect(named(key('m'), 'field')).toBeNull()
+    expect(named(alt('m'), 'terminal')).toBe('menu')
+    expect(named(alt('µ', 'KeyM'), 'terminal')).toBe('menu')
+  })
+
+  test('with Shift it is the project’s menu', () => {
+    expect(named(key('M', { shiftKey: true }), 'open')).toBe('project')
+    expect(named(alt('M', 'KeyM', { shiftKey: true }), 'terminal')).toBe('project')
+    expect(named(alt('Â', 'KeyM', { shiftKey: true }), 'terminal')).toBe('project')
+    // Shift with any other letter is still somebody else's key
+    expect(named(key('N', { shiftKey: true }), 'open')).toBeNull()
+  })
+
+  test('the keyboard’s own menu key and Shift+F10 are the menu too, where a key is not typed', () => {
+    expect(named(key('ContextMenu'), 'open')).toBe('menu')
+    expect(named(key('ContextMenu'), 'control')).toBe('menu')
+    expect(named(key('F10', { shiftKey: true }), 'open')).toBe('menu')
+    expect(named(key('F10'), 'open')).toBeNull()
+    // over a live terminal, or in a field, they stay the terminal's and the field's
+    expect(named(key('ContextMenu'), 'terminal')).toBeNull()
+    expect(named(key('F10', { shiftKey: true }), 'terminal')).toBeNull()
+    expect(named(key('ContextMenu'), 'field')).toBeNull()
+    // the menu key with Shift held is still the session's menu, not the project's
+    expect(named(key('ContextMenu', { shiftKey: true }), 'open')).toBe('menu')
+  })
+
+  test('the key asks the fleet for the menu, of the session or of its project', () => {
+    const { fleet, hit } = fleetOn({ session: order[0].id })
+    const asked: string[] = []
+    fleet.openMenu = (of) => (asked.push(of), true)
+    expect(hit('m')).toBe(true)
+    expect(hit('M', 'open', { shiftKey: true })).toBe(true)
+    expect(hit('ContextMenu')).toBe(true)
+    expect(hit('m', 'terminal', { altKey: true })).toBe(true)
+    expect(asked).toEqual(['session', 'project', 'session', 'session'])
+  })
+
+  test('with nothing to open it on the key is not spent, and nothing else moves', () => {
+    const { state, fleet, hit } = fleetOn({ session: null })
+    fleet.openMenu = () => false
+    const before = { ...state.route }
+    expect(hit('m')).toBe(false)
+    expect(state.route).toEqual(before)
+    // a fleet with no menu at all leaves the key alone too
+    delete fleet.openMenu
+    expect(hit('m')).toBe(false)
+  })
+
+  test('the key sheet lists it', async () => {
+    const { KEYS } = await import('./KeySheet')
+    expect(KEYS.find((k) => k.keys.includes('M'))?.does).toContain('menu')
+  })
+})

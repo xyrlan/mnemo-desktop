@@ -4,6 +4,7 @@
 
 import { memo, type CSSProperties } from 'react'
 import { Figure } from '../ds'
+import { drawsProject, drawsSession } from '../menu'
 import { GLYPH, WORD, age, tokens } from '../world/format'
 import { sessionOf } from '../world/store'
 import type { Pending, Session, SessionState, World } from '../world/types'
@@ -68,7 +69,7 @@ export const ChartArt = memo(function ChartArt({ g, chart }: { g: Geom; chart: C
         </text>
       ))}
       {chart.sectors.map((s, i) => (
-        <g key={s.name} data-sector={s.name}>
+        <g key={s.name} data-sector={s.name} {...drawsProject(s.name)}>
           {s.divider && <path className="orbit-divider" d={s.divider} />}
           <text className="orbit-sector" fontSize={s.size.toFixed(1)}>
             <textPath href={`#orbit-sector-${i}`} startOffset="50%" textAnchor="middle">
@@ -102,6 +103,7 @@ function Moons({ world, p, asked, onMoon }: { world: World; p: Placed; asked: st
                       <span
                         className="orbit-moon"
                         data-moon={s.id}
+                        {...drawsSession(s.id)}
                         data-state={s.state}
                         data-asked={asked === s.id || undefined}
                         title={`${s.title} · ${WORD[s.state]}`}
@@ -151,6 +153,7 @@ export const BodyMark = memo(function BodyMark({ world, g, p, cursor, asked, mat
     <div
       className="orbit-body"
       data-body={s.id}
+      {...drawsSession(s.id)}
       data-state={s.state}
       data-band={p.body.band}
       data-cursor={cursor || undefined}
@@ -217,6 +220,7 @@ export const LabelText = memo(function LabelText({ world, body, roomy, cursor, m
     <div
       className="orbit-lab"
       data-label={s.id}
+      {...drawsSession(s.id)}
       data-state={s.state}
       data-band={body.band}
       data-align={spot?.align ?? 'l'}

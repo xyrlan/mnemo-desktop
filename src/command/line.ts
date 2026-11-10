@@ -119,5 +119,11 @@ export function escape(): void {
   else closeCommand()
 }
 
+/** Says what came of something done outside the line (a menu's item), where the line says what
+ *  its own commands came to: beside it, until the next command is typed. */
+export function sayOutcome(text: string, ok: boolean): void {
+  set({ said: { text, ok } })
+}
+
 /** For a test: the line as it is before anything was typed. */
 export const resetLine = (): void => lineStore.setState(REST)

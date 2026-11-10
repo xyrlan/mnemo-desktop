@@ -76,6 +76,8 @@ The top bar has the three views, how many things wait for you, the fleet by stat
 
 **The stage** (Console's middle) is the session in hand: its figure, name and facts, its family across the top, what it is doing now, and its terminal. The terminal is the live one when the app can host it (a session it runs, or a dispatched child through `claude attach`, on the child's own account); otherwise the transcript drawn from what the session recorded, with a box under it that speaks to the session. `changes` on the terminal's bar opens the Changes panel for that session. A terminal that is not a session (a plain shell, a saved command, a session so new the fleet does not list it yet) is listed in the roster after the sessions, under *Terminals*, and stands on stage under a head that says what it is.
 
+**The menu** is the second way to what is already on screen, from wherever a session is drawn: right-click a roster entry or a child inside it, a body or a moon in Orbit, a line or its card in Score, the stage's head or a family tab, a terminal listed under *Terminals*. It opens without selecting anything or moving the stage. It holds, each only when it applies: Open on stage, Answer…, Close session, Resume here, Stop, Message…, Changes, Open pull request, Merge, New session and New shell in the session's project, Copy (its id, `claude --resume <id>`, its folder) and Open folder. What ends something (Close, Stop, Merge) asks once, on the same item; a refusal is said in the menu, in the action's own words, and the menu stays. A project's name (the roster's group head after `G`, Orbit's rim) opens the project's menu: a new session or a shell there, Dispatch… (the Missions panel) and Projects. A right-click inside a live terminal stays the terminal's.
+
 **The instruments** (Console's right, and beside a line selected in Score) are three readings of the session: context and tokens (how full, the curve with its compactions, spent by kind, by sub-agent, by tree), memory (what mnemo gave, what the session asked for, what was held back and why), and sight (the pages it opened with the screenshots it took, searches, files, pull requests).
 
 **The panels** are what is not a session. Their names are on the line under the top bar; a click opens one beside the view, and Esc closes it.
@@ -131,11 +133,14 @@ Two places take keys. While the terminal on stage (or a text field) has the care
 | `N` | the next thing that waits |
 | `1`–`9` | answer the open waiting item |
 | `R` | answer it in your words |
+| `M` | the selected session's menu, where it is drawn; with Shift, its project's. The keyboard's menu key and Shift+F10 open it too |
 | `H` `C` `T` | Orbit (home), Console, Score (time) |
 | `Enter` | into the terminal on stage; again, give it the room |
 | `;` | the command line |
 | `Esc` | out of a card, a panel, the command line; never taken from a terminal |
 | `?` | the keys |
+
+In the menu: `↑` `↓` move, `Enter` chooses, a first letter goes to the item that starts with it (and chooses it when it is the only one), `←` `→` choose what Copy copies, `Esc` takes back a question and then closes.
 
 In Console, `G` regroups the roster by project and back. The app's own chords are unchanged (`src/actions/chords.ts` is the table): ⌘W / Ctrl+Shift+W closes the terminal on stage, ⌘E / Ctrl+Shift+E dictates, ⌥Space / Alt+Space dictates while held.
 

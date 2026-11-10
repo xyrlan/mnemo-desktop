@@ -10,6 +10,7 @@ import './frame.css'
 import { CommandLine, escapeCommand, openCommand } from '../command'
 import { Starfield } from '../ds'
 import { Instruments } from '../instruments'
+import { Menu, menuByKey } from '../menu'
 import { OrbitView } from '../orbit'
 import { Panels } from '../panels'
 import { answerArmed, nextPending, replyArmed } from '../pending'
@@ -265,6 +266,7 @@ export function Frame() {
       openCommand: () => openCommand(),
       escapeCommand,
       sheet: { isOpen: () => sheetStore.getState().open, set: (open) => sheetStore.setState({ open }) },
+      openMenu: (of) => menuByKey(root.current, of, held.current),
       back: createBack(),
     }
     const on = (down: boolean) => (e: KeyboardEvent) => {
@@ -332,6 +334,8 @@ export function Frame() {
         </footer>
       </div>
       <KeySheet />
+      {/* The one menu, over everything: on a session, a project's name, a held terminal. */}
+      <Menu />
     </div>
   )
 }

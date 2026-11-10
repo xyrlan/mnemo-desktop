@@ -4,6 +4,7 @@
 
 import { useMemo } from 'react'
 import { Label } from '../ds'
+import { drawsSession } from '../menu'
 import { WORD } from '../world/format'
 import { go, openOnStage } from '../world/route'
 import { sessionOf, useWorld } from '../world/store'
@@ -43,7 +44,7 @@ export function OrbitMap({ focus }: { focus: string | null }) {
           <circle r={11} />
         </g>
         {stage.beads.map((b) => (
-          <circle key={b.id} className="orbit-map-bead" cx={b.x} cy={b.y} r={7} data-lit={lit?.id === b.id || undefined} />
+          <circle key={b.id} className="orbit-map-bead" {...drawsSession(b.id)} cx={b.x} cy={b.y} r={7} data-lit={lit?.id === b.id || undefined} />
         ))}
         {stage.placed.map((p) => {
           const s = p.body.root
@@ -55,6 +56,7 @@ export function OrbitMap({ focus }: { focus: string | null }) {
               key={p.id}
               className="orbit-map-body"
               data-map-body={s.id}
+              {...drawsSession(s.id)}
               data-state={s.state}
               data-lit={isLit || undefined}
               transform={`translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`}
@@ -74,7 +76,7 @@ export function OrbitMap({ focus }: { focus: string | null }) {
                   const a = (m.angle * Math.PI) / 180
                   const d = ring.r * GROW * 0.62
                   return (
-                    <g key={m.id} data-map-moon={kid.id} data-state={kid.state} data-lit={on?.id === kid.id || undefined} transform={`translate(${(Math.cos(a) * d).toFixed(1)} ${(Math.sin(a) * d * G.k).toFixed(1)})`}>
+                    <g key={m.id} data-map-moon={kid.id} {...drawsSession(kid.id)} data-state={kid.state} data-lit={on?.id === kid.id || undefined} transform={`translate(${(Math.cos(a) * d).toFixed(1)} ${(Math.sin(a) * d * G.k).toFixed(1)})`}>
                       {on?.id === kid.id && <circle className="orbit-map-halo" r={17} />}
                       <Glyph state={kid.state} r={kid.state === 'ended' ? 5 : 8} />
                     </g>

@@ -7,6 +7,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { Figure, Kbd, Label, StateMark } from '../ds'
+import { contextMenu, drawsSession, drawsTerminal } from '../menu'
 import { PendingCard, armedPending } from '../pending'
 import { plainTerminals, terminalName, terminalWord } from '../roster/terminals'
 import { LiveTerminal, useCanHost, useHosted, type Hosted } from '../runtime'
@@ -95,7 +96,7 @@ export function Stage() {
   }
 
   return (
-    <section ref={root} className="stage" data-stage data-state={session?.state} data-terminal={terminal?.id} tabIndex={-1} onKeyDown={onKeyDown}>
+    <section ref={root} className="stage" data-stage data-state={session?.state} data-terminal={terminal?.id} tabIndex={-1} onKeyDown={onKeyDown} onContextMenu={contextMenu}>
       {session ? (
         <Body key={session.id} world={world} session={session} entered={shown.entered} stageOn={stageOn} />
       ) : terminal ? (
@@ -142,7 +143,7 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
   const live = useCanHost(s)
   return (
     <div className={entered ? 'stage-in stage-enter' : 'stage-in'} data-wide={wide || undefined}>
-      <header className="stage-head">
+      <header className="stage-head" {...drawsSession(s.id)}>
         <span className="stage-field" aria-hidden="true" />
         <ContextFigure session={s} />
         <div className="stage-id">
@@ -151,7 +152,7 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
             {parent ? (
               <span className="stage-of">
                 child of{' '}
-                <button type="button" className="stage-link" onClick={() => stageOn(parent.id)}>
+                <button type="button" className="stage-link" {...drawsSession(parent.id)} onClick={() => stageOn(parent.id)}>
                   {parent.title}
                 </button>
               </span>
@@ -181,7 +182,7 @@ function Body({ world, session: s, entered, stageOn }: { world: World; session: 
         </span>
         {family.length > 1 ? (
           family.map((m, i) => (
-            <button key={m.id} type="button" className="stage-chip" data-state={m.state} aria-current={m.id === s.id ? 'true' : undefined} onClick={() => stageOn(m.id)}>
+            <button key={m.id} type="button" className="stage-chip" {...drawsSession(m.id)} data-state={m.state} aria-current={m.id === s.id ? 'true' : undefined} onClick={() => stageOn(m.id)}>
               {i === 0 && <span className="stage-chip-role">parent</span>}
               <StateMark state={m.state} />
               <span className="stage-chip-title">{m.title}</span>
@@ -390,7 +391,7 @@ function TerminalBody({ terminal: t }: { terminal: Hosted }) {
 
   return (
     <div className="stage-in" data-wide={wide || undefined}>
-      <header className="stage-head" data-stage-terminal>
+      <header className="stage-head" data-stage-terminal {...drawsTerminal(t.id)}>
         <span className="stage-field" aria-hidden="true" />
         <div className="stage-figure stage-figure-term mn-mono" aria-hidden="true">
           &gt;_

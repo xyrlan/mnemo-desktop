@@ -3,7 +3,7 @@ import { HOME, routeStore } from '../world/route'
 import { sampleActions, sampleWorld } from '../world/sample'
 import { rosterOrder } from '../world/store'
 import type { World } from '../world/types'
-import { complete, enter, escape, lineStore, move, openCommand, resetLine, rows, type } from './line'
+import { complete, enter, escape, lineStore, move, openCommand, resetLine, rows, sayOutcome, type } from './line'
 import { runningChildren } from './parse'
 
 let world: World
@@ -199,6 +199,22 @@ describe('what a command comes to', () => {
     type('shell atlas-api')
     await enter(world)
     expect(line().said?.ok).toBe(true)
+    openCommand()
+    type('n')
+    expect(line().said).toBeNull()
+  })
+})
+
+describe('what was done outside the line', () => {
+  test('is said where the line says what its own commands came to, and the next command clears it', () => {
+    escape()
+    sayOutcome('Closed', true)
+    expect(line().said).toEqual({ text: 'Closed', ok: true })
+    sayOutcome('It runs in another terminal.', false)
+    expect(line().said).toEqual({ text: 'It runs in another terminal.', ok: false })
+    // the line itself is left as it was: closed, with nothing typed
+    expect(line().text).toBe('')
+    expect(route().command).toBe(false)
     openCommand()
     type('n')
     expect(line().said).toBeNull()
