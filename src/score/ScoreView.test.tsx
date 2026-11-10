@@ -66,12 +66,12 @@ test('before a world arrives it says so, and the lines appear when one does', as
 
 describe('the now column', () => {
   test('is the roster’s order, one card per line', () => {
-    expect($$('[data-score-card]').map((el) => el.dataset.scoreCard)).toEqual(rosterOrder(world).map((s) => s.id))
+    expect($$('[data-score-card]').map((el) => el.dataset.scoreCard)).toEqual(rosterOrder(world, true).map((s) => s.id))
   })
 
   test('each card carries its session’s id as `data-session`, inside its row: what the frame slides a roster entry onto', () => {
     const entries = $$('[data-score-row] [data-session]')
-    expect(entries.map((el) => el.dataset.session)).toEqual(rosterOrder(world).map((s) => s.id))
+    expect(entries.map((el) => el.dataset.session)).toEqual(rosterOrder(world, true).map((s) => s.id))
     expect(entries.every((el) => el.dataset.session === el.dataset.scoreCard)).toBe(true)
   })
 

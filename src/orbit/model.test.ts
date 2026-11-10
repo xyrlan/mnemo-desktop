@@ -36,7 +36,7 @@ describe('the bands of attention', () => {
     expect(bodyTitled(world, 'Why is the bundle').band).toBe('working')
     expect(bodyTitled(world, 'Dark theme contrast').band).toBe('idle')
     // nothing in the family is alive
-    const over = withSession('Notes for the 2.5', { state: 'ended', live: false })
+    const over = withSession('Notes for the 2.5', { state: 'ended', live: false, lastAt: world.at })
     expect(bodyTitled(over, 'Notes for the 2.5').band).toBe('ended')
   })
 
@@ -94,7 +94,7 @@ describe('the bands of attention', () => {
 describe('what the scene has room to name', () => {
   const crowd = (n: number): World => {
     const model = titled(world, 'Notes for the 2.5')
-    const more = Array.from({ length: n }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world.at - (i + 1) * 3_600_000, startedAt: world.at - (i + 30) * 3_600_000 }))
+    const more = Array.from({ length: n }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world.at - (i + 1) * 60_000, startedAt: world.at - (i + 30) * 3_600_000 }))
     return { ...world, sessions: [...world.sessions, ...more] }
   }
 

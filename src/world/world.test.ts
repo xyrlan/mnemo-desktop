@@ -4,7 +4,7 @@ import { age, sum, tilde, tokens } from './format'
 import { choicesFor } from './pending'
 import { HOME, format, parse } from './route'
 import { sampleActions, sampleWorld } from './sample'
-import { childrenOf, pendingInOrder, rosterOrder, roots, sessionOf, urgency } from './store'
+import { SHOWN_ENDED_MS, childrenOf, isPresent, pendingInOrder, presentSessions, rosterOrder, roots, sessionOf, urgency } from './store'
 import { STATE_ORDER, type World } from './types'
 
 const world = sampleWorld()
@@ -23,7 +23,7 @@ describe('the sample world', () => {
 
   test('a tree total is the session and its children', () => {
     for (const s of world.sessions) {
-      const kids = childrenOf(world, s).reduce((n, c) => n + sum(c.totals.own), 0)
+      const kids = childrenOf(world, s, true).reduce((n, c) => n + sum(c.totals.own), 0)
       expect(sum(s.totals.tree)).toBe(sum(s.totals.own) + kids)
     }
   })
@@ -58,7 +58,8 @@ describe('the order of attention', () => {
 
   test('the roster walks each root, then its children', () => {
     const order = rosterOrder(world)
-    expect(order.length).toBe(world.sessions.length)
+    expect(order).toHaveLength(presentSessions(world).length)
+    expect(rosterOrder(world, true)).toHaveLength(world.sessions.length)
     for (const s of order) if (s.parent) expect(order.indexOf(s)).toBeGreaterThan(order.findIndex((p) => p.id === s.parent))
   })
 
@@ -83,6 +84,59 @@ describe('the order of attention', () => {
     expect(armedPending(world, { ...HOME, pending: b.id, session: a.session })?.id).toBe(b.id)
     expect(armedPending(world, { ...HOME, session: a.session })?.id).toBe(a.id)
     expect(armedPending(world, HOME)).toBeNull()
+  })
+})
+
+describe('the present and the past', () => {
+  const fish = world.sessions.find((s) => s.title.startsWith('Shell completions'))!
+  const release = sessionOf(world, fish.parent)!
+  const change = (patch: Record<string, Partial<World['sessions'][number]>>, more: Partial<World> = {}): World => ({
+    ...world,
+    ...more,
+    sessions: world.sessions.map((s) => (patch[s.id] ? { ...s, ...patch[s.id] } : s)),
+  })
+  const names = (w: World) => rosterOrder(w).map((s) => s.id)
+
+  test('an ended session is part of the present for forty minutes after its last sign of life', () => {
+    // the sample's ended child ended five hours ago
+    expect(isPresent(world, fish)).toBe(false)
+    expect(names(world)).not.toContain(fish.id)
+    expect(roots(world).flatMap((r) => childrenOf(world, r))).not.toContain(fish)
+    const fresh = change({ [fish.id]: { lastAt: world.at - SHOWN_ENDED_MS } })
+    expect(names(fresh)).toContain(fish.id)
+    expect(names(change({ [fish.id]: { lastAt: world.at - SHOWN_ENDED_MS - 1 } }))).not.toContain(fish.id)
+    // one whose age nobody knows has left
+    expect(names(change({ [fish.id]: { lastAt: null } }))).not.toContain(fish.id)
+  })
+
+  test('the past is still in the world: found by its id, and walked when asked for', () => {
+    expect(sessionOf(world, fish.id)).toBe(fish)
+    expect(childrenOf(world, release, true)).toContain(fish)
+    expect(rosterOrder(world, true)).toContain(fish)
+    expect(presentSessions(world)).toHaveLength(world.sessions.length - 1)
+  })
+
+  test('a session that has not ended, or that something still holds, stays however old', () => {
+    const old = world.at - 30 * 24 * 3_600_000
+    // not ended
+    expect(names(change({ [release.id]: { lastAt: old } }))).toContain(release.id)
+    // a process still runs it
+    expect(names(change({ [fish.id]: { live: true } }))).toContain(fish.id)
+    // a pull request of its own is open
+    const pr = { ...fish.prs[0], state: 'open' as const }
+    expect(names(change({ [fish.id]: { prs: [pr] } }))).toContain(fish.id)
+    // something waits on it
+    const waits = change({}, { pending: [{ ...world.pending[0], session: fish.id }] })
+    expect(names(waits)).toContain(fish.id)
+  })
+
+  test('an ended parent stays while a child of it is in the present, and leaves with the last one', () => {
+    const ended = { state: 'ended' as const, live: false, lastAt: world.at - 30 * 24 * 3_600_000 }
+    const both = change({ [release.id]: ended })
+    expect(names(both)).not.toContain(release.id)
+    expect(roots(both, true)).toContain(sessionOf(both, release.id))
+    const kept = change({ [release.id]: ended, [fish.id]: { lastAt: world.at } })
+    expect(names(kept).slice(names(kept).indexOf(release.id)).slice(0, 2)).toEqual([release.id, fish.id])
   })
 })
 

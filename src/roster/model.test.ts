@@ -1,9 +1,12 @@
 import { sampleWorld } from '../world/sample'
-import { childrenOf, rosterOrder, sessionOf } from '../world/store'
+import { SHOWN_ENDED_MS, childrenOf, rosterOrder, sessionOf } from '../world/store'
 import type { Session, SessionState, World } from '../world/types'
 import { nowOf, plan, projectMarks, rootsIn, shownOrder, wordOf, type Block } from './model'
 
-const world = sampleWorld()
+// The sample's one ended child ended five hours ago and has left the present. Here it ended
+// a minute ago, so that what the roster does with an ended child can be told.
+const sample = sampleWorld()
+const world: World = { ...sample, sessions: sample.sessions.map((s) => (s.state === 'ended' ? { ...s, lastAt: sample.at - 60_000 } : s)) }
 const titled = (w: World, text: string): Session => {
   const hit = w.sessions.find((s) => s.title.startsWith(text))
   if (!hit) throw new Error(`no session titled ${text}`)
@@ -130,6 +133,19 @@ describe('a family', () => {
     expect(staged.hidden).toBe(0)
   })
 
+  test('an ended child leaves the roster once its last sign of life is old, and an ended family with it', () => {
+    // as the sample has it: the child ended five hours ago
+    const quiet = entryOf(plan(sample), 'Release 2.4')
+    expect([quiet.kids, quiet.hidden]).toEqual([[], 0])
+    expect(shownOrder(sample).map((s) => s.title)).not.toContainEqual(expect.stringMatching(/^Shell completions/))
+    // its parent ended too, long ago: nothing of the family is left to show
+    const gone: World = { ...sample, sessions: sample.sessions.map((s) => (s.title.startsWith('Release 2.4') ? { ...s, state: 'ended' as SessionState, live: false, lastAt: sample.at - SHOWN_ENDED_MS - 1 } : s)) }
+    expect(shownOrder(gone).map((s) => s.title)).not.toContainEqual(expect.stringMatching(/^Release 2\.4/))
+    // while the child is still fresh, its ended parent stays above it
+    const kept: World = { ...gone, sessions: gone.sessions.map((s) => (s.title.startsWith('Shell completions') ? { ...s, lastAt: gone.at - SHOWN_ENDED_MS } : s)) }
+    expect(shownOrder(kept).map((s) => s.title.split(' ')[0])).toEqual(expect.arrayContaining(['Release', 'Shell']))
+  })
+
   test('an ended child that still has something waiting is drawn', () => {
     const w = withSessions({ 'Cursor pagination': { state: 'ended' } })
     expect(entryOf(plan(w), 'Idempotent').kids.map((c) => c.title)).toContainEqual(expect.stringMatching(/^Cursor pagination/))
@@ -164,7 +180,7 @@ describe('the densities', () => {
   })
 
   test('an ended root is one line, at every density, unless it is on stage', () => {
-    const w = withSessions({ 'Notes for the 2.5': { state: 'ended', live: false } })
+    const w = withSessions({ 'Notes for the 2.5': { state: 'ended', live: false, lastAt: world.at } })
     const notes = titled(w, 'Notes for the 2.5')
     for (const density of [0, 1, 2] as const) {
       const blocks = plan(w, { density })
@@ -176,7 +192,7 @@ describe('the densities', () => {
   })
 
   test('at the tightest, the ended roots share one line and the one on stage stays whole', () => {
-    const ended: Partial<Session> = { state: 'ended' as SessionState, live: false }
+    const ended: Partial<Session> = { state: 'ended' as SessionState, live: false, lastAt: world.at }
     const w = withSessions({ 'Notes for the 2.5': ended, 'Flaky snapshot': ended, 'Dark theme': ended })
     const blocks = plan(w, { density: 3 })
     const heaps = blocks.filter((b): b is Extract<Block, { kind: 'heap' }> => b.kind === 'heap')

@@ -5,7 +5,7 @@
 // pressing member, so a parent that is working comes into "needs you" when a child asks.
 
 import { sum } from '../world/format'
-import { childrenOf, roots, sessionOf } from '../world/store'
+import { childrenOf, presentSessions, roots, sessionOf } from '../world/store'
 import { STATE_ORDER, type Pending, type PendingKind, type Session, type SessionState, type World } from '../world/types'
 
 export type BandId = 'need' | 'working' | 'idle' | 'ended'
@@ -297,7 +297,7 @@ export function readVault(world: World): VaultReading {
 export function findSessions(world: World, query: string): Session[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return []
-  return world.sessions
+  return presentSessions(world)
     .map((s) => {
       const hay = [s.title, s.project, s.short, s.branch].filter(Boolean).join(' ').toLowerCase()
       if (!words.every((w) => hay.includes(w))) return null

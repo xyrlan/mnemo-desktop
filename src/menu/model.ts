@@ -8,7 +8,7 @@ import { answer } from '../pending/state'
 import type { Hosted } from '../runtime'
 import { actions, type Outcome } from '../world/actions'
 import { go, openOnStage, routeStore, type Route } from '../world/route'
-import { pendingOf, sessionOf } from '../world/store'
+import { pendingOf, presentSessions, sessionOf } from '../world/store'
 import type { Pending, Project, PullRequest, Session, World } from '../world/types'
 
 /** What a menu is on: a session, a project's name, or a terminal the app holds that is no
@@ -345,7 +345,7 @@ export function menuOf(world: World, target: Target, hosted: readonly Hosted[], 
   if (target.kind === 'project') {
     const p = projectOf(world, target.name)
     if (!p) return null
-    const n = world.sessions.filter((s) => s.project === p.name).length
+    const n = presentSessions(world).filter((s) => s.project === p.name).length
     return { target, title: p.name, sub: plural(n, 'session', 'sessions'), session: null, items: projectItems(p) }
   }
   const t = hosted.find((h) => h.id === target.id)

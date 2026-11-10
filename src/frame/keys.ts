@@ -4,7 +4,7 @@
 // it does; `Frame.tsx` listens and hands it the world.
 
 import type { Route, View } from '../world/route'
-import { childrenOf, rootOf, rosterOrder, sessionOf } from '../world/store'
+import { childrenOf, isPresent, rootOf, rosterOrder, sessionOf } from '../world/store'
 import type { Pending, Session, World } from '../world/types'
 
 export type FleetKey = 'up' | 'down' | 'left' | 'right' | 'back' | 'next' | 'answer' | 'reply' | 'orbit' | 'console' | 'score' | 'enter' | 'command' | 'escape' | 'sheet' | 'menu' | 'project'
@@ -85,12 +85,13 @@ export function fleetKey(e: Press, where: Where): { key: FleetKey; digit: number
   return { key, digit: 0 }
 }
 
-/** A session's family, as left and right walk it: the root, then its children. */
+/** A session's family, as left and right walk it: the root, then its children. From a session
+ *  that left the present, the whole family as Score draws it. */
 export function familyOf(world: World, id: string | null): Session[] {
   const s = sessionOf(world, id)
   if (!s) return []
   const root = rootOf(world, s)
-  return [root, ...childrenOf(world, root)]
+  return [root, ...childrenOf(world, root, !isPresent(world, s))]
 }
 
 /** The session `by` steps from `id` in `list`. From nowhere, down is the first and up the

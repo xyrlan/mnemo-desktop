@@ -193,7 +193,7 @@ export function scoreOf(world: World): Score {
   }
   const kidsOf = (s: Session): Session[] => {
     let list = kids.get(s.id)
-    if (!list) kids.set(s.id, (list = childrenOf(world, s)))
+    if (!list) kids.set(s.id, (list = childrenOf(world, s, true)))
     return list
   }
   const walk = (s: Session, seen: Set<string>): Session[] => {
@@ -323,7 +323,7 @@ export function rows(sc: Score, flipped: ReadonlySet<string>, keep: string | nul
       out.push({ type: 'ensemble', parent: s, sessions: all, depth: depth + 1 })
     }
   }
-  for (const s of roots(sc.world)) add(s, 0)
+  for (const s of roots(sc.world, true)) add(s, 0)
   return out
 }
 

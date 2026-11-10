@@ -83,7 +83,7 @@ describe('sectors and rays', () => {
 
   test('the beads of a project stand on the rim inside its sector', () => {
     const model = titled(world, 'Notes for the 2.5')
-    const more = Array.from({ length: 16 }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world.at - (i + 1) * 3_600_000 }))
+    const more = Array.from({ length: 16 }, (_, i): Session => ({ ...model, id: `ended-${i}`, short: `ended-${i}`, title: `Ended ${i}`, state: 'ended', live: false, children: [], lastAt: world.at - (i + 1) * 60_000 }))
     const stage = stageOf(buildScene({ ...world, sessions: [...world.sessions, ...more] }), g)
     expect(stage.beads.length).toBe(9 + 16 - 18)
     for (const b of stage.beads) {

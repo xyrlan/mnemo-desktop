@@ -45,7 +45,9 @@ const key = (el: Element, k: string, init: KeyboardEventInit = {}) => act(() => 
 const click = (el: Element) => act(() => void (el as HTMLElement).click())
 
 beforeEach(async () => {
-  world = sampleWorld()
+  // the sample's ended child ended a minute ago here, so it is still part of the present
+  const sample = sampleWorld()
+  world = { ...sample, sessions: sample.sessions.map((s) => (s.state === 'ended' ? { ...s, lastAt: sample.at - 60_000 } : s)) }
   worldStore.setState({ world, ready: true })
   undo = setActions(sampleActions(() => worldStore.getState().world, worldStore.getState().set))
   routeStore.setState({ route: { ...HOME, view: 'console' }, recent: [] })
@@ -117,7 +119,7 @@ describe('the roster lists the fleet', () => {
   test('an ended parent is one line, still chosen with a click', async () => {
     const before = worldStore.getState().world
     const notes = titled('Notes for the 2.5')
-    await act(async () => worldStore.getState().set({ ...before, sessions: before.sessions.map((s) => (s.id === notes.id ? { ...s, state: 'ended' as const, live: false } : s)) }))
+    await act(async () => worldStore.getState().set({ ...before, sessions: before.sessions.map((s) => (s.id === notes.id ? { ...s, state: 'ended' as const, live: false, lastAt: before.at } : s)) }))
     expect(headings().at(-1)).toBe('Ended1')
     expect(rowOf(notes).closest('.roster-fold')).not.toBeNull()
     expect(rowOf(notes).textContent).not.toContain('ctx')

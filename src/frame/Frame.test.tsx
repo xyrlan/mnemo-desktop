@@ -415,14 +415,15 @@ describe('the top bar', () => {
 
   test('counts the fleet by state, and follows the world', async () => {
     await draw()
-    // the sample: 15 sessions, most urgent state first
+    // the sample: 15 sessions, most urgent state first; its one ended child ended five hours
+    // ago and has left the present, so it is not counted
     expect(countsByState(sample)).toEqual([
       { state: 'need', count: 2 },
       { state: 'stalled', count: 1 },
       { state: 'ready', count: 2 },
       { state: 'working', count: 3 },
       { state: 'idle', count: 6 },
-      { state: 'ended', count: 1 },
+      { state: 'ended', count: 0 },
     ])
     for (const { state, count: n } of countsByState(sample)) expect([state, count(state)]).toEqual([state, n])
 

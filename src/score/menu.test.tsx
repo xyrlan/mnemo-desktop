@@ -19,7 +19,7 @@ vi.mock('../pending', async (real) => ({
 
 const world = sampleWorld()
 const titled = (text: string) => world.sessions.find((s) => s.title.startsWith(text))!
-const order = rosterOrder(world)
+const order = rosterOrder(world, true)
 /** Each line is this tall here: jsdom lays nothing out, so the rows are given a height. */
 const LINE = 40
 

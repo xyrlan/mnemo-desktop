@@ -80,18 +80,52 @@ export function urgency(world: World, s: Session): number {
   return best
 }
 
-/** The sessions with no parent in the world, most urgent family first, then newest. */
-export function roots(world: World): Session[] {
+/** An ended session stays in what is shown of the present this long after its last sign of
+ *  life. The world itself keeps it longer, for Score to tell the day. */
+export const SHOWN_ENDED_MS = 40 * 60 * 1000
+
+const present = new WeakMap<World, Set<string>>()
+
+function presentIn(world: World): Set<string> {
+  let set = present.get(world)
+  if (set) return set
+  set = new Set()
+  present.set(world, set)
+  const waited = new Set(world.pending.map((p) => p.session))
+  for (const s of world.sessions) {
+    const past = s.state === 'ended' && !s.live && !waited.has(s.id) && !s.prs.some((p) => p.state === 'open') && !(world.at - (s.lastAt ?? NaN) <= SHOWN_ENDED_MS)
+    if (past) continue
+    // What is still here keeps the family above it: a child is never shown without its parent.
+    let at: Session | undefined = s
+    for (let i = 0; i < 9 && at && !set.has(at.id); i++) {
+      set.add(at.id)
+      at = at.parent ? sessionOf(world, at.parent) : undefined
+    }
+  }
+  return set
+}
+
+/** Whether a session is part of the present: anything that has not ended; an ended one for
+ *  `SHOWN_ENDED_MS` after its last sign of life, or while a pull request of its own is open;
+ *  and whatever stands above one of those. The rest is the past: Score draws it, nothing else. */
+export const isPresent = (world: World, s: Session): boolean => presentIn(world).has(s.id)
+
+/** The sessions of the present, in the world's order. */
+export const presentSessions = (world: World): Session[] => world.sessions.filter((s) => isPresent(world, s))
+
+/** The sessions with no parent in the world, most urgent family first, then newest. With
+ *  `past`, the ones that left the present too. */
+export function roots(world: World, past = false): Session[] {
   return world.sessions
-    .filter((s) => !s.parent || !sessionOf(world, s.parent))
+    .filter((s) => (!s.parent || !sessionOf(world, s.parent)) && (past || isPresent(world, s)))
     .sort((a, b) => urgency(world, a) - urgency(world, b) || (b.lastAt ?? 0) - (a.lastAt ?? 0))
 }
 
-/** A session's children, most urgent first. */
-export function childrenOf(world: World, s: Session): Session[] {
+/** A session's children, most urgent first. With `past`, the ones that left the present too. */
+export function childrenOf(world: World, s: Session, past = false): Session[] {
   return s.children
     .map((id) => sessionOf(world, id))
-    .filter((c): c is Session => !!c)
+    .filter((c): c is Session => !!c && (past || isPresent(world, c)))
     .sort((a, b) => rank(a) - rank(b) || (b.lastAt ?? 0) - (a.lastAt ?? 0))
 }
 
@@ -109,9 +143,10 @@ export function rootOf(world: World, s: Session): Session {
 /** What waits on a session, oldest first. */
 export const pendingOf = (world: World, id: string): Pending[] => world.pending.filter((p) => p.session === id)
 
-/** Every session in roster order: each root, then its children. The order keys walk. */
-export function rosterOrder(world: World): Session[] {
-  return roots(world).flatMap((r) => [r, ...childrenOf(world, r)])
+/** Every session of the present in roster order: each root, then its children. The order keys
+ *  walk. With `past`, the ones that left the present too: Score's lines. */
+export function rosterOrder(world: World, past = false): Session[] {
+  return roots(world, past).flatMap((r) => [r, ...childrenOf(world, r, past)])
 }
 
 /** What waits, in roster order, so walking it moves the eye down the list. */

@@ -21,7 +21,7 @@ import { ScoreView } from '../score'
 import { Stage, focusTerminal as focusStage } from '../stage'
 import { go, routeStore, useRoute, type View } from '../world/route'
 import { startWorld } from '../world/start'
-import { rosterOrder, sessionOf, useWorld, worldSource, worldStore } from '../world/store'
+import { presentSessions, rosterOrder, sessionOf, useWorld, worldSource, worldStore } from '../world/store'
 import { Boot, bootsNow, type BootPhase } from './Boot'
 import { useJames } from './james'
 import { KeyHints, KeySheet, sheetStore } from './KeySheet'
@@ -41,7 +41,7 @@ function ConsoleLayout() {
   const session = useRoute((r) => r.session)
   const wide = useRoute((r) => r.wide)
   const known = useWorld((w) => !!sessionOf(w, session))
-  const sessions = useWorld((w) => w.sessions.length)
+  const sessions = useWorld((w) => presentSessions(w).length)
   const hosted = useHosted()
   // A terminal the app holds that is no session (a shell, a command) stands on stage as one does.
   const terminal = !known && !!session && hosted.some((h) => h.id === session)
@@ -249,7 +249,12 @@ export function Frame() {
       world: () => worldStore.getState().world,
       route: () => routeStore.getState().route,
       recent: () => routeStore.getState().recent,
-      order: () => [...rosterShown(), ...plainTerminals(worldStore.getState().world, held.current)],
+      // Score's lines hold the sessions that left the present too, and the keys walk its lines.
+      order: () => {
+        const world = worldStore.getState().world
+        const sessions = routeStore.getState().route.view === 'score' ? rosterOrder(world, true) : rosterShown()
+        return [...sessions, ...plainTerminals(world, held.current)]
+      },
       has: (id) => !!sessionOf(worldStore.getState().world, id) || held.current.some((h) => h.id === id),
       go,
       now: () => Date.now(),
