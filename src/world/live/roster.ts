@@ -135,7 +135,7 @@ export function rosterOf(snapshot: Pick<Snapshot, 'repos'>, feed: { sessions: Re
   const gone = new Map<string, GoneSeat>()
   const children = kept.map((s): ChildSeat => {
     const up = s.child.parent_session ?? null
-    if (!up || up === s.sid || up === s.child.id) return { ...s, parent: null }
+    if (!up) return { ...s, parent: null }
     if (parentIds.has(up)) return { ...s, parent: up }
     const other = byId.get(up)
     if (other) return { ...s, parent: other }
@@ -143,8 +143,8 @@ export function rosterOf(snapshot: Pick<Snapshot, 'repos'>, feed: { sessions: Re
     return { ...s, parent: up }
   })
 
-  // Two children that name each other would stand under no root and be drawn nowhere: the
-  // one that closes the ring stands alone.
+  // Two children that name each other (or one that names itself) would stand under no root
+  // and be drawn nowhere: the one that closes the ring stands alone.
   const up = new Map(children.map((s) => [s.sid, s]))
   for (const s of children) {
     let at = s.parent ? up.get(s.parent) : undefined

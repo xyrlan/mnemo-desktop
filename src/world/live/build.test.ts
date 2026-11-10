@@ -233,6 +233,14 @@ describe('families', () => {
     expect(roots(world).map((s) => s.id).sort()).toEqual([PARENT, CHILD].sort())
   })
 
+  test('a child that names itself as its parent is its own root', () => {
+    for (const self of [CHILD, CID]) {
+      const world = withChildren([child({ parent_session: self })])
+      expect(one(world, CHILD).parent).toBeNull()
+      expect(roots(world).map((s) => s.id)).toContain(CHILD)
+    }
+  })
+
   test('two children that name each other are both still drawn', () => {
     const a = child({ id: 'ring0001', parent_session: 'ring0002-0000-4000-8000-000000000001' })
     const b = child({ id: 'ring0002', parent_session: 'ring0001-0000-4000-8000-000000000001' })
@@ -392,6 +400,14 @@ describe('what happened', () => {
       [NOW - 30 * MIN, 'rule-injected', CHILD, 'prefer-cursor-pagination'],
       [NOW - 20 * MIN, 'finished', CHILD, 'Fix the order history query'],
       [NOW - 5 * MIN, 'pr-merged', CHILD, '#77'],
+    ])
+  })
+
+  test('a rule the core’s trail says mnemo gave is an event, heard by the app or not', () => {
+    const trail = { prompts: 3, injected: [{ at: NOW - 9 * HOUR, slug: 'name-the-flag', name: 'Name the flag', score: 0.7, judge: 0.9 }], considered: [], read: [{ at: NOW - 8 * HOUR, tool: 'read_mnemo_rule', slug: 'retry-with-backoff', topic: null, query: null, hits: [], ms: 4 }], briefings: [], frictions: [] }
+    expect(build({ trails: { [PARENT]: trail } }).events.map((e) => [e.at, e.kind, e.session, e.text])).toEqual([
+      [NOW - 9 * HOUR, 'rule-injected', PARENT, 'name-the-flag'],
+      [NOW - 8 * HOUR, 'rule-read', PARENT, 'retry-with-backoff'],
     ])
   })
 

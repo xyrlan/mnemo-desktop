@@ -63,6 +63,15 @@ describe('when the live world is handed over', () => {
     expect(worlds[0].errors).toEqual(['The fleet could not be read: claude: program not found'])
   })
 
+  test('stopped while the core is still answering, the answer builds nothing', async () => {
+    const live = await started()
+    live.state.feed.sessions[PARENT] = feedOf({ said: { text: 'Too late.', at: NOW + 1000 } })
+    const reading = live.run(READ_MS)
+    live.stop()
+    await reading
+    expect(live.worlds).toHaveLength(1)
+  })
+
   test('nothing after it was stopped, and nothing is listened to any more', async () => {
     const live = await started()
     expect(live.state.subscribed).toBe(6)
@@ -260,9 +269,11 @@ describe('what could not be read', () => {
       "Memory shows only what the app heard while it ran: this build's core answers no memory trail.",
     ])
     live.state.insights[PARENT] = insight({ turns: 1 })
-    live.state.trails[PARENT] = { prompts: 0, injected: [], considered: [], read: [], briefings: [], frictions: [] }
+    live.state.trails[PARENT] = { prompts: 9, injected: [], considered: [], read: [], briefings: [], frictions: [] }
     await live.run(READ_MS)
     expect(live.last().errors).toEqual([])
+    expect(sessionOf(live.last(), PARENT)!.turns).toBe(1)
+    expect(sessionOf(live.last(), PARENT)!.memory.trail.prompts).toBe(9)
   })
 
   test('a feed that fails is said, the world is still there, and the line goes when it answers again', async () => {

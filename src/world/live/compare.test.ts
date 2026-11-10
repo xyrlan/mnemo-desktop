@@ -65,6 +65,14 @@ describe('the live world against the capture of the same fleet', () => {
     expect(extra.why).toContain('it started between the two readings')
   })
 
+  test('what waits for a different kind of answer on the two sides is said', () => {
+    const world = live()
+    const merge = world.pending.find((p) => p.kind === 'merge')!
+    const c = compareWorlds({ ...world, pending: world.pending.filter((p) => p !== merge) }, sample)
+    expect(c.differences.filter((d) => d.field === 'waiting').map((d) => [d.session, d.capture, d.live])).toEqual([[merge.session.slice(0, 8), 'merge', 'nothing']])
+    expect(c.differences.find((d) => d.field === 'waiting')!.why).toContain('CI is red')
+  })
+
   test('a state the two call differently is said with what each road reads', () => {
     const s = { live: true } as Session
     expect(whyState('working', 'stalled', s)).toContain('an action in the last 150 s or a tool call still awaiting its result')
@@ -106,6 +114,15 @@ describe('the report', () => {
     expect(text).not.toContain('second')
     expect(text).not.toMatch(/main(?!-chain)/)
     expect(text).toContain('title: ')
+  })
+
+  test('says that a project, a branch or an account differs, never what it is', () => {
+    const world = live()
+    const renamed = { ...world, sessions: world.sessions.map((s) => ({ ...s, project: 'a-private-project', account: 'someone@example.com', branch: 'feat/a-private-branch' })) }
+    const text = report(compareWorlds(renamed, sample))
+    expect(text).toContain('project: 15')
+    expect(text).toContain('account: 15')
+    for (const secret of ['a-private-project', 'someone@example.com', 'a-private-branch', ...sample.sessions.map((s) => s.project!)]) expect(text).not.toContain(secret)
   })
 
   test('says when the two were read far apart', () => {

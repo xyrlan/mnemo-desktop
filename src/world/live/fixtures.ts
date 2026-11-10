@@ -168,8 +168,9 @@ export function fakeSources(snapshot: Snapshot = { repos: [], errors: [], at: ''
   const accounts = counted(held<LiveInput['accounts']>({ state: null, usage: {}, error: null }))
   const pulses = counted(held<PulseEvent[]>([]))
   const hosted = counted(held<string[]>([]))
-  // Each answer is a fresh copy, as an answer from the core is.
+  // Each answer is a fresh copy, as an answer from the core is, of what was asked about only.
   const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+  const only = <T,>(all: Record<string, T>, keys: string[]): Record<string, T> => fresh(Object.fromEntries(Object.entries(all).filter(([key]) => keys.includes(key))))
   const sources: LiveSources = {
     mission,
     missionError,
@@ -180,15 +181,15 @@ export function fakeSources(snapshot: Snapshot = { repos: [], errors: [], at: ''
     async feed(asks) {
       state.asked.feed.push(asks)
       if (state.feedFails) throw new Error(state.feedFails)
-      return fresh(state.feed)
+      return { ...fresh(state.feed), sessions: only(state.feed.sessions, asks.map((a) => a.key)) }
     },
     async insight(asks) {
       state.asked.insight.push(asks)
-      return fresh(state.insights)
+      return only(state.insights, asks.map((a) => a.key))
     },
     async trails(ids) {
       state.asked.trails.push(ids)
-      return fresh(state.trails)
+      return only(state.trails, ids)
     },
     vault: async () => fresh(state.vault),
     now: () => state.now,
