@@ -16,6 +16,7 @@ export const KEYS: readonly { keys: string[]; does: string }[] = [
   { keys: ['N'], does: 'the next thing that waits for you' },
   { keys: ['1', '–', '9'], does: 'answer the open waiting item' },
   { keys: ['R'], does: 'answer it in your words' },
+  { keys: ['M'], does: "the selected session's menu (a right-click opens it too); with Shift, its project's" },
   { keys: ['H', 'C', 'T'], does: 'Orbit (home), Console, Score (time)' },
   { keys: ['Enter'], does: 'into the terminal on stage; again, give it the room' },
   { keys: [';'], does: 'the command line' },
@@ -43,6 +44,7 @@ export function KeyHints({ alt }: { alt: boolean }) {
       {hint(['N'], 'next waiting')}
       {hint(['1', '–', '9'], 'answer')}
       {hint(['Q'], 'last')}
+      {hint(['M'], 'menu')}
       {hint([';'], 'command')}
       {hint(['?'], 'keys')}
     </div>

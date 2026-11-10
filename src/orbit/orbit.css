@@ -30,6 +30,9 @@
 .mn .orbit-divider { fill: none; stroke: rgb(255 255 255 / 0.3); stroke-width: 1; stroke-dasharray: 2 8; }
 .mn .orbit-band-name { font-family: var(--display); font-weight: 600; letter-spacing: 0.36em; text-transform: uppercase; fill: var(--ink-3); }
 .mn .orbit-band-name[data-hot] { fill: var(--need); }
+/* The chart is line art and takes no pointer, except a project's name on the rim: a right-click
+   on it is the project's menu. */
+.mn .orbit-chart [data-menu] text { pointer-events: auto; }
 .mn .orbit-sector {
   font-family: var(--display); font-weight: 600; letter-spacing: 0.44em; text-transform: uppercase; fill: var(--ink);
   filter: drop-shadow(0 0 8px rgb(255 255 255 / 0.45));

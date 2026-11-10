@@ -103,9 +103,9 @@ export function nowOf(s: Session): Now | null {
 }
 
 export type Block =
-  /** A heading: a band of attention, or a project. `waiting` is what waits in the whole
-   *  fleet, on the first band only. */
-  | { kind: 'band'; key: string; label: string; mark: string | null; band: Band | null; count: number; waiting: number }
+  /** A heading: a band of attention, or a project (`project` is its name, when it has one).
+   *  `waiting` is what waits in the whole fleet, on the first band only. */
+  | { kind: 'band'; key: string; label: string; mark: string | null; band: Band | null; count: number; waiting: number; project?: string }
   /** A root, whole. `tight`: on two rows. `kids`: the children drawn under it. `hidden`: its
    *  ended children kept behind their count. `on`: its family is on stage. */
   | { kind: 'entry'; root: Session; band: Band; on: boolean; tight: boolean; kids: Session[]; hidden: number }
@@ -138,7 +138,7 @@ export function plan(world: World, { here = null, group = 'attention', density =
     if (key !== last) {
       last = key
       if (group === 'project') {
-        out.push({ kind: 'band', key, label: root.project ?? 'No project', mark: (root.project && marksOf.get(root.project)) || null, band: null, count: list.filter((r) => r.project === root.project).length, waiting: 0 })
+        out.push({ kind: 'band', key, label: root.project ?? 'No project', mark: (root.project && marksOf.get(root.project)) || null, band: null, count: list.filter((r) => r.project === root.project).length, waiting: 0, ...(root.project ? { project: root.project } : null) })
       } else {
         out.push({ kind: 'band', key, label: BANDS[b], mark: null, band: b, count: list.filter((r) => band.get(r.id) === b).length, waiting: b === 0 ? world.pending.length : 0 })
       }

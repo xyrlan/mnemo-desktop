@@ -5,6 +5,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Figure, Kbd, Label, StateMark } from '../ds'
+import { contextMenu, drawsProject, drawsSession, drawsTerminal } from '../menu'
 import { OrbitMap } from '../orbit'
 import { PendingCard, armedPending } from '../pending'
 import { useHosted } from '../runtime'
@@ -161,7 +162,7 @@ export function Roster() {
     switch (b.kind) {
       case 'band':
         return (
-          <h2 key={b.key} className="roster-band" data-band={b.band ?? undefined}>
+          <h2 key={b.key} className="roster-band" data-band={b.band ?? undefined} {...(b.project ? drawsProject(b.project) : null)}>
             {b.mark && <span className="roster-proj">{b.mark}</span>}
             <span>{b.label}</span>
             <b className="mn-num">{b.waiting || b.count}</b>
@@ -176,7 +177,7 @@ export function Roster() {
       case 'fold':
         return (
           <article key={b.root.id} className="roster-ent roster-fold" data-state="ended">
-            <button type="button" className="roster-main" data-session={b.root.id} onClick={() => openOnStage(b.root.id)}>
+            <button type="button" className="roster-main" data-session={b.root.id} {...drawsSession(b.root.id)} onClick={() => openOnStage(b.root.id)}>
               <StateMark state="ended" />
               <span className="roster-title">{b.root.title}</span>
               {b.root.project && <span className="roster-proj">{marks.get(b.root.project)}</span>}
@@ -189,7 +190,7 @@ export function Roster() {
           <article key="heap" className="roster-ent roster-fold roster-heap" data-state="ended">
             <StateMark state="ended" />
             {b.roots.map((r) => (
-              <button key={r.id} type="button" className="roster-title" data-session={r.id} onClick={() => openOnStage(r.id)}>
+              <button key={r.id} type="button" className="roster-title" data-session={r.id} {...drawsSession(r.id)} onClick={() => openOnStage(r.id)}>
                 {r.title}
               </button>
             ))}
@@ -199,7 +200,7 @@ export function Roster() {
         const r = b.root
         return (
           <article key={r.id} className="roster-ent" data-id={r.id} data-state={r.state} data-on={b.on || undefined} data-tight={b.tight || undefined} data-band={b.band}>
-            <button type="button" className="roster-main" data-session={r.id} data-sel={here === r || undefined} aria-current={here === r || undefined} onClick={() => openOnStage(r.id)}>
+            <button type="button" className="roster-main" data-session={r.id} {...drawsSession(r.id)} data-sel={here === r || undefined} aria-current={here === r || undefined} onClick={() => openOnStage(r.id)}>
               <Figure id={r.id} className="roster-fig" />
               <span className="roster-title">{r.title}</span>
               <State session={r} className="roster-st" />
@@ -233,7 +234,7 @@ export function Roster() {
               <div className="roster-kids">
                 {b.kids.map((c) => (
                   <Fragment key={c.id}>
-                    <button type="button" className="roster-kid" data-session={c.id} data-state={c.state} data-sel={here === c || undefined} aria-current={here === c || undefined} onClick={() => openOnStage(c.id)}>
+                    <button type="button" className="roster-kid" data-session={c.id} {...drawsSession(c.id)} data-state={c.state} data-sel={here === c || undefined} aria-current={here === c || undefined} onClick={() => openOnStage(c.id)}>
                       <StateMark state={c.state} className="roster-kid-gl" />
                       <span className="roster-kid-title">{c.title}</span>
                       <span className="roster-kid-st">{wordOf(c)}</span>
@@ -267,7 +268,7 @@ export function Roster() {
   }
 
   return (
-    <nav className="roster" data-roster data-group={group} aria-label="Sessions" onKeyDown={onKeyDown}>
+    <nav className="roster" data-roster data-group={group} aria-label="Sessions" onKeyDown={onKeyDown} onContextMenu={contextMenu}>
       {/* The map says what it is ("where it stands") itself. */}
       <div className="roster-map">
         <OrbitMap focus={route.session} />
@@ -296,7 +297,7 @@ export function Roster() {
               </h2>
               {terminals.map((t) => (
                 <article key={t.id} className="roster-ent roster-term" data-terminal={t.id}>
-                  <button type="button" className="roster-main" data-session={t.id} data-sel={onStage === t.id || undefined} aria-current={onStage === t.id || undefined} onClick={() => openOnStage(t.id)}>
+                  <button type="button" className="roster-main" data-session={t.id} {...drawsTerminal(t.id)} data-sel={onStage === t.id || undefined} aria-current={onStage === t.id || undefined} onClick={() => openOnStage(t.id)}>
                     <span className="roster-term-sign mn-mono" aria-hidden="true">
                       &gt;_
                     </span>
@@ -393,7 +394,7 @@ const CI: Record<string, string> = { green: '✓', red: '✕', running: '◌' }
 function Wait({ pending: p, now }: { pending: Pending; now: World['at'] }) {
   const n = p.choices.length
   return (
-    <button type="button" className="roster-wait" data-kind={p.kind} data-wait={p.id} onClick={() => go({ view: 'console', session: p.session, pending: p.id, panel: null })}>
+    <button type="button" className="roster-wait" data-kind={p.kind} data-wait={p.id} {...drawsSession(p.session)} onClick={() => go({ view: 'console', session: p.session, pending: p.id, panel: null })}>
       <span className="roster-wait-kind">{p.kind}</span>
       {p.pr && (
         <>

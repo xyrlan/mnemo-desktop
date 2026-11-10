@@ -3,10 +3,11 @@
 // is drawn when something changed and never on a timer; the now column, the playhead and
 // everything that moves are DOM over it.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
 import { create } from 'zustand'
 import { Figure, Kbd, Label, Meter, StateMark } from '../ds'
 import { Instruments } from '../instruments'
+import { contextMenu, drawsSession } from '../menu'
 import { PendingCard, armedPending } from '../pending'
 import { WORD, tokens } from '../world/format'
 import { go, openOnStage, select, useRoute } from '../world/route'
@@ -224,7 +225,7 @@ function SessionRow({ sc, row, t, selected, waits }: { sc: Score; row: Extract<R
   const spent = kids.length ? treeAt(sc, s, t) : ownAt(sc, s, t)
   const about = live ? '' : '≈ '
   // `data-session`: the frame slides the roster's entry onto this one when the view changes.
-  const main = { 'data-score-main': true, 'data-score-card': s.id, 'data-session': s.id, role: 'button', tabIndex: 0, onClick: () => select(s.id), onDoubleClick: () => openOnStage(s.id), 'aria-pressed': selected, title: 'Select; double-click or Enter opens it on stage' }
+  const main = { 'data-score-main': true, 'data-score-card': s.id, 'data-session': s.id, ...drawsSession(s.id), role: 'button', tabIndex: 0, onClick: () => select(s.id), onDoubleClick: () => openOnStage(s.id), 'aria-pressed': selected, title: 'Select; double-click or Enter opens it on stage' }
   return (
     <div className="score-row" data-score-row={s.id} data-state={state ?? 'future'} data-selected={selected || undefined} data-compact={compact || undefined} style={{ '--depth': row.depth } as React.CSSProperties}>
       {compact ? (
@@ -345,6 +346,12 @@ const LEGEND: [string, string][] = [
 ]
 
 /* ---- the view ---- */
+
+/** The row drawn at `y` (from the top of the lines, scrolled or not), or undefined between rows. */
+export function rowAt(rows: readonly Row[], boxes: readonly Box[], y: number): Row | undefined {
+  const i = boxes.findIndex((b) => y >= b.y && y < b.y + b.h)
+  return i < 0 ? undefined : rows[i]
+}
 
 const sameBoxes = (a: Box[], b: Box[]) => a.length === b.length && a.every((x, i) => x.y === b[i].y && x.h === b[i].h && x.h0 === b[i].h0)
 
@@ -529,6 +536,16 @@ export function ScoreView() {
     else go({ session: hitRow.row.s.id, pending: null, at: hitRow.t < now - 1000 ? Math.round(hitRow.t) : null })
   }
 
+  /** A right-click: on a line, the menu of the session whose line it is (the canvas carries no
+   *  mark, so the row under the pointer says whose); on a card, the card's. It selects nothing. */
+  const onMenu = (ev: MouseEvent<HTMLElement>) => {
+    if (ev.target !== scoreC.current) return void contextMenu(ev)
+    const e = current.current
+    const box = scoreC.current.getBoundingClientRect()
+    const row = rowAt(e.rows, e.boxes, ev.clientY - box.top + e.top)
+    if (row?.type === 'session') contextMenu(ev, { kind: 'session', id: row.s.id })
+  }
+
   /* ---- the ruler and the strip: drag to replay, let go to return to now ---- */
 
   const scrubbing = useRef(false)
@@ -666,7 +683,7 @@ export function ScoreView() {
   const stripNote = `per ${stepMs < HOUR ? stepMs / MIN + ' min' : stepMs / HOUR + ' h'} · peak ${tokens(strip.peak)}${selected ? ' · white is the selected line and its children' : ''} · estimated from each call’s context`
 
   return (
-    <section ref={root} className="score" data-view="score" data-inspector={selected ? 'open' : 'closed'} data-replay={live ? 'off' : 'on'} data-follow={following ? 'yes' : 'no'} tabIndex={-1} onKeyDown={onKeyDown} aria-label="Score: the fleet over time">
+    <section ref={root} className="score" data-view="score" data-inspector={selected ? 'open' : 'closed'} data-replay={live ? 'off' : 'on'} data-follow={following ? 'yes' : 'no'} tabIndex={-1} onKeyDown={onKeyDown} onContextMenu={onMenu} aria-label="Score: the fleet over time">
       <header className="score-bar">
         <div className="score-range">
           <b>
@@ -816,7 +833,7 @@ export function ScoreView() {
 
         {selected && (
           <aside className="score-side" aria-label="Selected session">
-            <header className="score-sidehead" data-state={stateAt(sc, selected, t) ?? 'future'}>
+            <header className="score-sidehead" {...drawsSession(selected.id)} data-state={stateAt(sc, selected, t) ?? 'future'}>
               <div className="score-sidetop">
                 <Shape state={stateAt(sc, selected, t)} word={stateAt(sc, selected, t) ? WORD[stateAt(sc, selected, t)!] : 'not started'} />
                 {!live && <span className="score-asof">as of {fmt.when(t, now)}</span>}

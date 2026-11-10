@@ -129,7 +129,7 @@
 .mn .frame-keys-alt { color: var(--ink-2); }
 .mn .frame-foot:has(.frame-cmd-line[data-open]) .frame-keys { display: none; }
 /* Below 1600 the family's keys give their place: the stage shows them where they act. */
-@media (max-width: 1599px) { .mn .frame-keys > span:nth-last-child(6) { display: none; } }
+@media (max-width: 1599px) { .mn .frame-keys > span:nth-last-child(7) { display: none; } }
 
 /* ── the key sheet ── */
 .mn .frame-veil { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgb(0 0 0 / 0.82); animation: frame-veil var(--fast) var(--ease); }

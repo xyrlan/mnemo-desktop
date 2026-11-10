@@ -7,7 +7,7 @@ import type { Route, View } from '../world/route'
 import { childrenOf, rootOf, rosterOrder, sessionOf } from '../world/store'
 import type { Pending, Session, World } from '../world/types'
 
-export type FleetKey = 'up' | 'down' | 'left' | 'right' | 'back' | 'next' | 'answer' | 'reply' | 'orbit' | 'console' | 'score' | 'enter' | 'command' | 'escape' | 'sheet'
+export type FleetKey = 'up' | 'down' | 'left' | 'right' | 'back' | 'next' | 'answer' | 'reply' | 'orbit' | 'console' | 'score' | 'enter' | 'command' | 'escape' | 'sheet' | 'menu' | 'project'
 
 /** Where the press landed. terminal: the session's own keys. field: a text field. control: a
  *  button or a link, which keeps its own Enter and Space. open: anywhere else. */
@@ -39,13 +39,16 @@ const BY_KEY: Record<string, FleetKey> = {
   h: 'orbit',
   c: 'console',
   t: 'score',
+  m: 'menu',
+  // The keyboard's own key for a menu, where it has one.
+  ContextMenu: 'menu',
   ';': 'command',
   '?': 'sheet',
 }
 
 // ⌥ on a Mac changes the character a key types (⌥N is a dead tilde), so with Alt held the
 // physical key also names it.
-const BY_CODE: Record<string, FleetKey> = { KeyQ: 'back', KeyN: 'next', KeyR: 'reply', KeyH: 'orbit', KeyC: 'console', KeyT: 'score', Semicolon: 'command' }
+const BY_CODE: Record<string, FleetKey> = { KeyQ: 'back', KeyN: 'next', KeyR: 'reply', KeyH: 'orbit', KeyC: 'console', KeyT: 'score', KeyM: 'menu', Semicolon: 'command' }
 
 /** The fleet key a press is, where it landed, or null when the press is not the frame's.
  *  Ctrl and ⌘ chords are never the frame's (the app's own chords are `src/actions/chords.ts`,
@@ -65,7 +68,11 @@ export function fleetKey(e: Press, where: Where): { key: FleetKey; digit: number
     if (d) digit = Number(d[1])
   }
   if (digit) return { key: 'answer', digit }
+  // Shift+F10 is the other way a keyboard asks for a menu.
+  if (k === 'F10' && e.shiftKey) return { key: 'menu', digit: 0 }
   if (!key) return null
+  // `M` is the selected session's menu; with Shift, its project's.
+  if (key === 'menu' && e.shiftKey && k !== 'ContextMenu') return { key: 'project', digit: 0 }
   // Shift with a letter or an arrow is somebody else's key; a sign may need Shift to be typed.
   if (e.shiftKey && (letter || k.startsWith('Arrow') || k === 'Enter' || BY_CODE[e.code] === key) && key !== 'command') return null
   if (key === 'escape') {
@@ -144,6 +151,9 @@ export interface Fleet {
   /** Esc for the command line: takes back a batch asked about, else closes it. */
   escapeCommand(): void
   sheet: { isOpen(): boolean; set(open: boolean): void }
+  /** Opens the menu of what is in focus or selected (`project`: of its project), where it is
+   *  drawn. False: there was nothing to open it on, so the key was not spent. */
+  openMenu?(of: 'session' | 'project'): boolean
   back(recent: string[], current: string | null, now: number, has: (id: string) => boolean): string | null
 }
 
@@ -199,6 +209,9 @@ export function press(e: Press, where: Where, fleet: Fleet): boolean {
     case 'sheet':
       fleet.sheet.set(true)
       return true
+    case 'menu':
+    case 'project':
+      return fleet.openMenu?.(hit.key === 'project' ? 'project' : 'session') ?? false
     case 'enter': {
       // Outside Console, Enter opens the selection on its stage.
       if (route.view !== 'console') {

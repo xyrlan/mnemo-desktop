@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { Figure, Kbd, Lattice, type LatticeHandle } from '../ds'
+import { contextMenu, drawsSession } from '../menu'
 import { PendingCard, armedPending } from '../pending'
 import { go, openOnStage, routeStore, select, useRoute } from '../world/route'
 import { pendingOf, sessionOf, useWorld } from '../world/store'
@@ -27,7 +28,7 @@ export { OrbitMap }
 
 /** The letters that are the frame's in every view (the design's table of keys): typing any
  *  other finds a session, and `/` opens the finder for a name that starts with one of these. */
-const FLEET_LETTERS = 'qnrhct'
+const FLEET_LETTERS = 'qnrhctm'
 
 /** The card's width in em, as orbit.css has it. */
 const CARD_EM = 28
@@ -264,6 +265,7 @@ export function OrbitView() {
       tabIndex={-1}
       aria-label="Sessions in orbit"
       onKeyDown={onKeyDown}
+      onContextMenu={contextMenu}
       onClick={() => {
         if (local.find != null) closeFinder()
         else if (routeStore.getState().route.pending) go({ pending: null })
@@ -308,6 +310,7 @@ export function OrbitView() {
             key={b.id}
             className="orbit-bead"
             data-bead={b.id}
+            {...drawsSession(b.id)}
             data-match={matched.has(b.id) || undefined}
             data-cursor={cursor?.id === b.id || undefined}
             title={`${b.body.root.title} · ended`}
@@ -339,6 +342,7 @@ export function OrbitView() {
         <div
           className="orbit-card"
           data-orbit-card={card.id}
+          {...drawsSession(cardOf.id)}
           data-state={KIND_STATE[card.kind]}
           style={{ left: cardAt.left, top: cardAt.top ?? undefined, bottom: cardAt.bottom ?? undefined, maxHeight: cardAt.maxHeight }}
           onClick={(e) => e.stopPropagation()}
