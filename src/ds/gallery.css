@@ -1,0 +1,92 @@
+/* The gallery page (Gallery.tsx): the design system, seen. It lies over whatever front the
+   build shows, and one page fills one screen at each of the frame's three root sizes: the
+   specimens stretch, the primitives in them stay the size the product draws them. */
+
+.mn-gallery { position: fixed; z-index: 2147483000; display: grid; grid-template-rows: auto minmax(0, 1fr); outline: none; }
+.mn-gallery-bar { position: relative; display: flex; align-items: center; gap: 1.2em; height: 3.4em; padding: 0 1.6em; border-bottom: 1px solid var(--line); }
+.mn-gallery-bar > strong { font: 700 1.1em/1 var(--display); letter-spacing: 0.5em; text-shadow: var(--glow); margin-left: -0.4em; }
+.mn-gallery-gap { flex: 1; }
+
+.mn-gallery-page { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); gap: 1.2em; min-height: 0; padding: 1.2em 1.6em 1.4em; }
+.mn-gallery-page[data-page='identity'] { grid-template-columns: minmax(0, 0.92fr) minmax(0, 1fr); }
+.mn-gallery-page[data-page='sessions'] { grid-template-columns: minmax(0, 0.86fr) minmax(0, 1fr) minmax(0, 0.94fr); }
+.mn-gallery-page[data-page='readings'] { grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr) minmax(0, 0.9fr); }
+.mn-gallery-stack { display: grid; gap: 1.2em; min-height: 0; }
+.mn-gallery-page[data-page='identity'] .mn-gallery-stack { grid-template-rows: minmax(0, 1fr) auto auto; }
+.mn-gallery-page[data-page='sessions'] .mn-gallery-stack { grid-template-rows: minmax(min-content, 1.5fr) minmax(min-content, 0.6fr) minmax(min-content, 1fr); }
+.mn-gallery-page[data-page='readings'] .mn-gallery-stack { grid-template-rows: auto minmax(0, 1fr); }
+.mn-gallery-page[data-page='readings'] .mn-gallery-stack:last-child { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+
+.mn-gallery-specimen { display: flex; flex-direction: column; gap: 0.9em; min-width: 0; min-height: 0; padding: 1em 1.2em 1.1em; border: 1px solid var(--line); background: rgb(0 0 0 / 0.72); }
+.mn-gallery-specimen > header { display: grid; gap: 0.5em; }
+.mn-gallery-specimen > header > .mn-label { color: var(--ink); }
+.mn-gallery-specimen > header > p { margin: 0; max-width: 62ch; font-size: 0.86em; line-height: 1.45; color: var(--ink-3); }
+.mn-gallery-specimen > footer { display: flex; align-items: center; gap: 0.8em 1.4em; flex-wrap: wrap; }
+/* what a specimen shows takes the room the page gives it, and stands in its middle */
+.mn-gallery-fill { flex: 1; min-height: 0; align-content: center; }
+.mn-gallery-caption { font: 500 0.72em/1.3 var(--display); letter-spacing: 0.06em; color: var(--ink-3); }
+.mn-gallery figure { display: grid; justify-items: center; gap: 0.6em; margin: 0; }
+
+.mn-gallery-row { display: flex; align-items: center; flex-wrap: wrap; gap: 1em 1.3em; }
+.mn-gallery-row[data-align='end'] { align-items: flex-end; }
+.mn-gallery-row[data-spread] { justify-content: space-between; }
+
+/* identity */
+.mn-gallery-lattice { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; }
+.mn-gallery-lattice > canvas { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); }
+.mn-gallery-specimen:has(> .mn-gallery-still) { position: relative; }
+.mn-gallery-still { position: absolute; right: 1.2em; bottom: 1.1em; justify-items: end !important; }
+.mn-gallery-still > img { display: block; width: 9em; height: 9em; border: 1px solid var(--line); }
+.mn-gallery-mark { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 1.4em; }
+.mn-gallery-mark > figure { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.mn-gallery-mark > figure > img, .mn-gallery-mark > figure > .mn-mark { display: block; width: auto !important; height: 100% !important; max-width: 100%; aspect-ratio: 1; object-fit: contain; min-height: 0; }
+.mn-gallery-mark > .mn-gallery-row { align-content: center; justify-content: space-between; }
+.mn-gallery-wordmark { flex-basis: 100%; justify-items: start !important; }
+.mn-gallery-wordmark > span:first-child { display: inline-flex; align-items: center; gap: 0.9em; font-size: 1.2em; }
+.mn-gallery-wordmark strong { font: 700 1em/1 var(--display); letter-spacing: 0.5em; text-shadow: var(--glow); }
+.mn-gallery-type { display: grid; gap: 0.5em; }
+.mn-gallery-type p { margin: 0; }
+.mn-gallery-display { font: 600 1.7em/1.1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
+.mn-gallery-text { max-width: 60ch; color: var(--ink-2); }
+.mn-gallery-type .mn-mono { font-size: 0.9em; color: var(--ink-2); }
+.mn-gallery-swatches { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.9em 1em; }
+.mn-gallery-swatches > span { display: grid; gap: 0.35em; min-width: 0; align-content: start; }
+.mn-gallery-swatches i { height: 0.5em; }
+.mn-gallery-swatches b { font-size: 0.72em; font-weight: 400; color: var(--ink-2); }
+
+/* sessions */
+.mn-gallery-states { flex: 1; min-height: 0; display: grid; grid-auto-rows: minmax(0, 9em); align-content: center; }
+.mn-gallery-states > div { display: grid; grid-template-columns: 4.4em 1.6em 11em minmax(0, 1fr); align-items: center; gap: 0 1em; border-bottom: 1px solid var(--line); }
+.mn-gallery-big { font-size: 3.4em; display: grid; place-items: center; }
+.mn-gallery-grey { filter: grayscale(1); padding-top: 0.2em; }
+.mn-gallery-grey > .mn-gallery-caption { flex-basis: 100%; }
+.mn-gallery-figures { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 8em); align-content: center; gap: 0 1.4em; }
+.mn-gallery-figures > div { display: flex; align-items: center; gap: 1em; min-width: 0; }
+.mn-gallery-figures > div > span { display: grid; gap: 0.45em; min-width: 0; }
+.mn-gallery-figures b { font: 600 0.95em/1.2 var(--display); letter-spacing: 0.03em; }
+.mn-gallery-chord { display: inline-flex; align-items: center; gap: 0.35em; margin-left: 0.8em; }
+.mn-gallery-figure-number { display: inline-grid; gap: 0.4em; }
+.mn-gallery-figure-number b { font-size: 1.8em; line-height: 1; font-weight: 500; }
+.mn-gallery-sizes { display: grid; gap: 1.4em; }
+
+/* readings */
+.mn-gallery-curves { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 1.3em 1.6em; }
+.mn-gallery-curves > figure { justify-items: stretch; gap: 0.6em; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.mn-gallery-curves > figure:first-child { grid-column: 1 / -1; }
+.mn-gallery-curves .mn-curve { --mn-curve-height: 4.5em; }
+.mn-gallery-curves .mn-empty { min-height: 3em; }
+.mn-gallery-curves > figure:nth-child(n + 4) { grid-template-rows: auto minmax(0, 1fr); }
+.mn-gallery-spent { max-width: 36em; }
+.mn-gallery-bars { display: grid; gap: 0.5em; }
+.mn-gallery-bars > span { display: grid; grid-template-columns: minmax(0, 15em) minmax(0, 1fr) 3.6em; align-items: center; gap: 0.8em; font-size: 0.86em; color: var(--ink-2); }
+.mn-gallery-bars b { text-align: right; color: var(--ink); }
+.mn-gallery-rows { display: grid; }
+.mn-gallery-rows > .mn-label { padding: 0.9em 0 0.5em; }
+.mn-gallery-rows > .mn-label:first-child { padding-top: 0; }
+.mn-gallery-rowset { flex: 1; min-height: 0; display: grid; align-content: space-evenly; }
+.mn-gallery-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9em 2em; }
+.mn-gallery-meters > span { display: grid; grid-template-columns: minmax(0, 1fr) 3em; align-items: center; gap: 0.8em; }
+.mn-gallery-meters b { text-align: right; font-size: 0.86em; }
+.mn-gallery-ring-number { font-size: 1.5em; font-weight: 500; }
+.mn-gallery-fulls { display: grid; grid-template-columns: 9em minmax(0, 1fr); align-items: baseline; gap: 0.7em 1em; font-size: 0.9em; }
+.mn-gallery-empties { display: grid; gap: 0.5em; }

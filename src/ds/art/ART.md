@@ -2,12 +2,13 @@
 
 Every picture here was generated with Higgsfield and is bundled with the app; nothing is
 fetched at run time. A file not imported by the front is reference only and adds nothing to
-the bundle.
+the bundle. The two stills the gallery page shows (`src/ds/Gallery.tsx`) are imported by that
+page alone, which is a chunk of its own, loaded only when the gallery is asked for.
 
 | file | what it is | model | settings | credits | used |
 | --- | --- | --- | --- | --- | --- |
-| `lattice-still.jpg` | the centre piece: nested geodesic lattice with spines and nodes | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | reference for `src/ds/lattice.ts`, which draws it live |
-| `crystal-still.jpg` | the mark: nested memory crystal as a wireframe | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | reference for `Mark` |
+| `lattice-still.jpg` | the centre piece: nested geodesic lattice with spines and nodes | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | reference for `src/ds/lattice.ts`, which draws it live; shown beside it on the gallery page |
+| `crystal-still.jpg` | the mark: nested memory crystal as a wireframe | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | reference for `Mark`, whose shells are measured off it; shown beside it on the gallery page |
 | `thread-still.jpg` | a sphere wound from one thread | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | reference for James's presence |
 | `seed-still.jpg` | a seed head letting seeds go | `gpt_image_2_6` | 1:1, 2k, quality high (kept at 1024 px, JPEG) | 2.75 | not chosen; the motes of memory in flight follow its idea |
 
