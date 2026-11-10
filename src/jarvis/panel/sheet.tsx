@@ -6,7 +6,9 @@
 // The words are synthetic, as the sample world's are. James speaks Portuguese.
 
 import { createRoot, type Root } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import { shortcutLabel } from '../../actions/chords'
+import { fitFleet } from '../../frame/TopBar'
 import type { ParentRef } from '../parent'
 import { createJarvisStore, foldParent, foldResearch, type JarvisState, type Line, type Parent, type ResearchRun } from '../store'
 import { jamesStore } from './james'
@@ -85,7 +87,10 @@ export function placeInTopBar(): void {
   const host = bar.appendChild(document.createElement('span'))
   host.style.cssText = 'display: inline-flex; flex: none; margin-left: 0.4em'
   placed = createRoot(host)
-  placed.render(<JamesPresence />)
+  flushSync(() => placed!.render(<JamesPresence />))
+  // The bar fits its fleet to what stands beside it when it draws; this presence came after.
+  const fleet = bar.querySelector<HTMLElement>('.frame-fleet')
+  if (fleet) fitFleet(fleet)
 }
 
 /** Every state his presence has, each over a store of its own, in a strip under the top bar. */

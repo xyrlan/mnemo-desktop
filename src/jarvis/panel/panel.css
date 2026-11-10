@@ -29,6 +29,15 @@
 .mn .jv-presence-need > svg { width: 0.9em; height: 0.9em; fill: currentColor; }
 .mn .jv-presence-need > b { font-size: 1.25em; letter-spacing: 0; }
 .mn .jv-presence .mn-kbd { font-size: 1em; letter-spacing: 0; text-transform: none; }
+/* In a top bar the chord is three keys wide where the others are one: below the widest root
+   size it gives its place to the fleet and the plan windows, and stays in the title. */
+@media (max-width: 2299px) { .mn [data-top-bar] .jv-presence .mn-kbd { display: none; } }
+/* At the smallest root size the bar is full: while James is doing something the word stands
+   for him beside his orb, and his name comes back at rest. */
+@media (max-width: 1599px) {
+  .mn [data-top-bar] .jv-presence { gap: 0.6em; padding-right: 0.8em; }
+  .mn [data-top-bar] .jv-presence:not([data-james='rest']) .jv-presence-name { display: none; }
+}
 
 /* The thread orb, small. Six turns of one thread round a sphere. */
 .mn .jv-thread { flex: none; width: 2em; height: 2em; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1px; }
@@ -45,6 +54,8 @@
   position: fixed; inset: auto 1em 1em auto; z-index: 58;
   overflow: visible; background: none;
 }
+/* Over a frame that has a foot (its command line and keys), the dock stands above it. */
+body:has(.mn .frame-foot) .mn.jv-dock { bottom: 3.5em; }
 .mn.jv-dock .jv-presence { background: var(--void); box-shadow: 0 0 0 1px #000, 0 0.6em 2em #000; }
 .mn.jv-dock .jv-presence[data-alive] { box-shadow: 0 0 0 1px #000, var(--glow-soft); }
 
@@ -62,6 +73,8 @@
 }
 .mn.jv-panel[data-voice='listening'], .mn.jv-panel[data-voice='speaking'] { border-color: var(--ink-2); box-shadow: 0 0 0 1px #000, 0 1.4em 5em #000, var(--glow-soft); }
 @keyframes jv-open { from { transform: translateX(0.8em); opacity: 0; } }
+/* The frame's foot keeps its command line and keys in sight under the panel. */
+body:has(.mn .frame-foot) .mn.jv-panel { bottom: 3.5em; }
 
 /* The head: the orb, his name, who answers and what the voice is doing. */
 .mn .jv-head { display: flex; flex: none; align-items: center; gap: 0.9em; padding: 0.7em 1em 0.7em 0.7em; border-bottom: 1px solid var(--line); }
