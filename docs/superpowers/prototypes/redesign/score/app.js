@@ -663,7 +663,8 @@
   function readSight(s, t) {
     const d = s._, web = s.web || {}, out = [];
     const timed = (list) => (list || []).map((x) => Object.assign({ t: S.ms(x.at) }, x)).sort((a, b) => (a.t || 0) - (b.t || 0));
-    const link = (url, text) => h("a", { href: url, target: "_blank", rel: "noreferrer noopener", title: url }, text || url);
+    // a URL comes from the capture: only a web address becomes a link
+    const link = (url, text) => (/^https?:\/\//i.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noreferrer noopener", title: url }, text || url) : h("span", { class: "note" }, text || url || ""));
     const shots = timed(web.shots);
     if (shots.length) {
       const seenBy = shots.filter((x) => x.t <= t);
