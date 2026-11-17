@@ -79,15 +79,27 @@ function profileDirs(targetDir) {
   return [join(targetDir, 'release'), ...triples].filter(existsSync)
 }
 
-/** The CMakeCache.txt of every whisper build under a cargo target dir. */
+/**
+ * The CMakeCache.txt of every whisper build under a cargo target dir. Cargo puts a build
+ * script's output in `build/whisper-rs-sys-<hash>/out` up to Rust 1.99 and in
+ * `build/whisper-rs-sys/<hash>/out` from Rust 1.100. Both are read, so either toolchain passes.
+ */
 export function whisperCaches(targetDir) {
   const out = []
   for (const profile of profileDirs(targetDir)) {
     const build = join(profile, 'build')
     if (!existsSync(build)) continue
     for (const name of readdirSync(build).sort()) {
-      const cache = join(build, name, 'out/build/CMakeCache.txt')
-      if (name.startsWith('whisper-rs-sys-') && existsSync(cache)) out.push(cache)
+      const runs =
+        name === 'whisper-rs-sys'
+          ? readdirSync(join(build, name)).sort().map((hash) => join(build, name, hash))
+          : name.startsWith('whisper-rs-sys-')
+            ? [join(build, name)]
+            : []
+      for (const run of runs) {
+        const cache = join(run, 'out/build/CMakeCache.txt')
+        if (existsSync(cache)) out.push(cache)
+      }
     }
   }
   return out

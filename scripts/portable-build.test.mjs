@@ -205,3 +205,21 @@ test('whisper builds and executables are found with and without a target triple'
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('whisper builds are found where Rust 1.100 puts them, build/<package>/<hash>', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mnemo-portable-'))
+  try {
+    const nested = join(dir, 'release/build/whisper-rs-sys/aaaa/out/build')
+    const cross = join(dir, 'x86_64-apple-darwin/release/build/whisper-rs-sys/bbbb/out/build')
+    const other = join(dir, 'release/build/cpal/dddd/out/build')
+    for (const d of [nested, cross, other, join(dir, 'release/build/whisper-rs-sys/cccc')]) {
+      mkdirSync(d, { recursive: true })
+    }
+    writeFileSync(join(nested, 'CMakeCache.txt'), cache('OFF'))
+    writeFileSync(join(cross, 'CMakeCache.txt'), cache('ON'))
+    writeFileSync(join(other, 'CMakeCache.txt'), cache('OFF'))
+    expect(whisperCaches(dir)).toEqual([join(nested, 'CMakeCache.txt'), join(cross, 'CMakeCache.txt')])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
